@@ -3,15 +3,17 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
-from app.api.v1.router import api_router
+from app.api.v1.router import build_api_router
+from app.core.auth import enforce_declared_permission
 from app.core.config import Settings, get_settings
 from app.core.correlation import HEADER, CorrelationIdMiddleware
 from app.core.errors import register_error_handlers
 from app.core.logging import configure_logging
+from app.core.tokens import build_verifier
 from app.db.session import Database
 
 
@@ -29,12 +31,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         title="MoodyMate Financial Risk Platform API",
         version=__version__,
         lifespan=lifespan,
+        dependencies=[Depends(enforce_declared_permission)],  # fail closed (D-04)
     )
     app.state.settings = settings
     app.state.db = db
+    app.state.token_verifier = build_verifier(settings)
 
     register_error_handlers(app)
-    app.include_router(api_router)
+    app.include_router(build_api_router(settings))
 
     # Middleware order: the last added runs outermost. CORS must be outermost so that
     # the 500 envelope CorrelationIdMiddleware produces for unhandled errors still gets

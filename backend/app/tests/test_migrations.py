@@ -11,8 +11,9 @@ def _config(url: str) -> Config:
 
 
 @pytest.mark.db
-def test_round_trip_upgrade_downgrade_upgrade(database_url: str) -> None:
-    cfg = _config(database_url)
+def test_round_trip_upgrade_downgrade_upgrade(db: str) -> None:
+    # `db` removes non-seed rows first; the seed downgrade must not delete user data.
+    cfg = _config(db)
     command.upgrade(cfg, "head")
     command.downgrade(cfg, "base")
     command.upgrade(cfg, "head")

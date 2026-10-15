@@ -44,3 +44,121 @@ def settings() -> Settings:
 @pytest.fixture
 def client(settings: Settings) -> TestClient:
     return TestClient(create_app(settings))
+
+
+# --- Phase 2: migrated database, cleanup and helpers -----------------------------------
+
+from collections.abc import Iterator  # noqa: E402
+from typing import Any  # noqa: E402
+
+from alembic import command  # noqa: E402
+from alembic.config import Config  # noqa: E402
+
+from app.governance.constants import DEFAULT_TENANT_ID  # noqa: E402
+
+# Deletes everything that is not seed data (D-11), children first.
+_CLEANUP = [
+    "DELETE FROM user_role",
+    "DELETE FROM user_account",
+    "DELETE FROM role_permission WHERE seeded_by IS NULL",
+    "DELETE FROM role WHERE seeded_by IS NULL",
+    "DELETE FROM permission WHERE seeded_by IS NULL",
+    "DELETE FROM tenant WHERE seeded_by IS NULL",
+]
+
+
+def alembic_config(url: str) -> Config:
+    cfg = Config("alembic.ini")
+    cfg.set_main_option("sqlalchemy.url", url)
+    cfg.attributes["skip_logging"] = True
+    return cfg
+
+
+def sql(url: str, statement: str, *args: Any) -> list[Any]:
+    """Run one statement directly with asyncpg (outside the app) and return rows."""
+
+    async def run() -> list[Any]:
+        conn = await asyncpg.connect(url.replace("+asyncpg", ""))
+        try:
+            return list(await conn.fetch(statement, *args))
+        finally:
+            await conn.close()
+
+    return asyncio.run(run())
+
+
+def clean(url: str) -> None:
+    for statement in _CLEANUP:
+        sql(url, statement)
+
+
+@pytest.fixture(scope="session")
+def migrated_db(database_url: str) -> str:
+    cfg = alembic_config(database_url)
+    try:
+        clean(database_url)  # previous run's leftovers would block the seed downgrade
+    except asyncpg.UndefinedTableError:
+        pass
+    command.downgrade(cfg, "base")
+    command.upgrade(cfg, "head")
+    return database_url
+
+
+@pytest.fixture
+def db(migrated_db: str) -> Iterator[str]:
+    clean(migrated_db)
+    yield migrated_db
+    clean(migrated_db)
+
+
+@pytest.fixture
+def api(db: str) -> Iterator[TestClient]:
+    with TestClient(create_app(Settings(ENV="test", DATABASE_URL=db))) as c:
+        yield c
+
+
+def dev_token(client: TestClient, role: str) -> dict[str, str]:
+    r = client.post("/api/v1/dev/sessions", json={"role": role})
+    assert r.status_code == 201, r.text
+    return {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+
+def insert_user(
+    url: str,
+    issuer: str,
+    subject: str,
+    roles: tuple[str, ...] = (),
+    tenant_id: Any = DEFAULT_TENANT_ID,
+    status: str = "ACTIVE",
+) -> Any:
+    row = sql(
+        url,
+        "INSERT INTO user_account (id, tenant_id, idp_issuer, idp_subject, email, display_name,"
+        " status, created_by) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, 'test')"
+        " RETURNING id",
+        tenant_id,
+        issuer,
+        subject,
+        f"{subject}@example.test",
+        f"User {subject}",
+        status,
+    )
+    user_id = row[0]["id"]
+    for code in roles:
+        sql(
+            url,
+            "INSERT INTO user_role (user_id, role_id, created_by)"
+            " SELECT $1, id, 'test' FROM role WHERE code = $2",
+            user_id,
+            code,
+        )
+    return user_id
+
+
+def insert_tenant(url: str, slug: str) -> Any:
+    return sql(
+        url,
+        "INSERT INTO tenant (id, name, slug, status, created_by)"
+        " VALUES (gen_random_uuid(), $1, $1, 'ACTIVE', 'test') RETURNING id",
+        slug,
+    )[0]["id"]

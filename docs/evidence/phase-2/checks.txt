@@ -1,0 +1,150 @@
+# Phase 2 check output — captured 2026-10-15T13:39:42Z
+# worktree /home/user/MoodyMate-wt/ws1-phase2, branch feat/ws1-phase2 (from master 1847c3b) + uncommitted Phase 2 changes
+
+## Backend (Python 3.12.3)
+$ ruff check . && ruff format --check .
+All checks passed!
+125 files already formatted
+$ mypy app scripts
+Success: no issues found in 125 source files
+$ REQUIRE_DB=1 pytest -v  (TEST_DATABASE_URL=…/moodymate_test)
+app/tests/test_auth.py::test_valid_oidc_token_resolves_principal PASSED  [  1%]
+app/tests/test_auth.py::test_no_token_is_401_with_challenge PASSED       [  2%]
+app/tests/test_auth.py::test_expired_token_is_401 PASSED                 [  4%]
+app/tests/test_auth.py::test_wrong_issuer_is_401 PASSED                  [  5%]
+app/tests/test_auth.py::test_wrong_audience_is_401 PASSED                [  7%]
+app/tests/test_auth.py::test_wrong_signing_key_is_401 PASSED             [  8%]
+app/tests/test_auth.py::test_symmetric_and_unsigned_tokens_are_rejected_in_oidc_mode PASSED [  9%]
+app/tests/test_auth.py::test_unknown_user_is_not_provisioned_outside_local PASSED [ 11%]
+app/tests/test_auth.py::test_unknown_user_is_provisioned_without_roles_in_local PASSED [ 12%]
+app/tests/test_auth.py::test_disabled_user_is_403 PASSED                 [ 14%]
+app/tests/test_auth.py::test_dev_endpoints_absent_in_oidc_mode PASSED    [ 15%]
+app/tests/test_auth.py::test_dev_token_round_trip PASSED                 [ 16%]
+app/tests/test_auth.py::test_tampered_dev_token_is_401 PASSED            [ 18%]
+app/tests/test_auth.py::test_dev_token_is_rejected_by_oidc_mode PASSED   [ 19%]
+app/tests/test_auth.py::test_unknown_dev_role_is_422 PASSED              [ 21%]
+app/tests/test_auth.py::test_dev_sessions_unavailable_outside_local_and_test PASSED [ 22%]
+app/tests/test_auth.py::test_dev_mode_refused_in_production PASSED       [ 23%]
+app/tests/test_auth.py::test_default_dev_secret_refused_outside_local_and_test PASSED [ 25%]
+app/tests/test_auth.py::test_oidc_mode_requires_issuer_audience_client PASSED [ 26%]
+app/tests/test_config.py::test_production_with_dev_auth_is_refused PASSED [ 28%]
+app/tests/test_config.py::test_app_refuses_to_start_with_dev_auth_in_production PASSED [ 29%]
+app/tests/test_config.py::test_production_with_oidc_is_allowed PASSED    [ 30%]
+app/tests/test_config.py::test_safe_defaults PASSED                      [ 32%]
+app/tests/test_correlation.py::test_inbound_id_is_echoed PASSED          [ 33%]
+app/tests/test_correlation.py::test_id_generated_when_absent PASSED      [ 35%]
+app/tests/test_correlation.py::test_unsafe_inbound_id_is_replaced PASSED [ 36%]
+app/tests/test_correlation.py::test_each_request_gets_its_own_id PASSED  [ 38%]
+app/tests/test_errors.py::test_404_envelope PASSED                       [ 39%]
+app/tests/test_errors.py::test_422_envelope_does_not_echo_input PASSED   [ 40%]
+app/tests/test_errors.py::test_500_envelope_without_stack_trace PASSED   [ 42%]
+app/tests/test_errors.py::test_500_envelope_carries_cors_headers PASSED  [ 43%]
+app/tests/test_errors.py::test_api_error_envelope PASSED                 [ 45%]
+app/tests/test_health.py::test_health_degraded_when_db_unreachable PASSED [ 46%]
+app/tests/test_health.py::test_health_ok_with_db PASSED                  [ 47%]
+app/tests/test_health.py::test_health_needs_no_auth PASSED               [ 49%]
+app/tests/test_identity_models.py::test_create_and_read_each_identity_entity PASSED [ 50%]
+app/tests/test_identity_models.py::test_idp_identity_is_unique PASSED    [ 52%]
+app/tests/test_identity_seed.py::test_seeded_matrix_matches_plan PASSED  [ 53%]
+app/tests/test_identity_seed.py::test_seed_rows_are_tagged PASSED        [ 54%]
+app/tests/test_identity_seed.py::test_downgrade_removes_seed_and_upgrade_restores_it PASSED [ 56%]
+app/tests/test_identity_seed.py::test_seed_downgrade_refuses_to_delete_user_data PASSED [ 57%]
+app/tests/test_logging.py::test_tokens_and_secrets_never_reach_logs PASSED [ 59%]
+app/tests/test_logging.py::test_generic_key_fields_are_redacted PASSED   [ 60%]
+app/tests/test_logging.py::test_args_are_redacted PASSED                 [ 61%]
+app/tests/test_logging.py::test_record_is_json_with_correlation_field PASSED [ 63%]
+app/tests/test_me.py::test_me_and_permissions_per_role[platform_admin] PASSED [ 64%]
+app/tests/test_me.py::test_me_and_permissions_per_role[data_steward] PASSED [ 66%]
+app/tests/test_me.py::test_me_and_permissions_per_role[risk_analyst] PASSED [ 67%]
+app/tests/test_me.py::test_me_and_permissions_per_role[approver] PASSED  [ 69%]
+app/tests/test_me.py::test_me_and_permissions_per_role[auditor] PASSED   [ 70%]
+app/tests/test_me.py::test_admin_endpoints_forbidden_without_admin_read[data_steward] PASSED [ 71%]
+app/tests/test_me.py::test_admin_endpoints_forbidden_without_admin_read[risk_analyst] PASSED [ 73%]
+app/tests/test_me.py::test_admin_endpoints_forbidden_without_admin_read[approver] PASSED [ 74%]
+app/tests/test_me.py::test_admin_endpoints_forbidden_without_admin_read[auditor] PASSED [ 76%]
+app/tests/test_me.py::test_me_requires_authentication PASSED             [ 77%]
+app/tests/test_migrations.py::test_round_trip_upgrade_downgrade_upgrade PASSED [ 78%]
+app/tests/test_migrations.py::test_every_revision_has_a_downgrade PASSED [ 80%]
+app/tests/test_migrations.py::test_no_drop_in_forward_migrations PASSED  [ 81%]
+app/tests/test_openapi.py::test_exported_contract_is_valid_openapi_31 PASSED [ 83%]
+app/tests/test_openapi.py::test_committed_contract_matches_code PASSED   [ 84%]
+app/tests/test_openapi.py::test_error_envelope_is_in_contract PASSED     [ 85%]
+app/tests/test_route_registry.py::test_every_api_route_declares_a_permission PASSED [ 87%]
+app/tests/test_route_registry.py::test_registry_catches_an_unguarded_route PASSED [ 88%]
+app/tests/test_route_registry.py::test_unguarded_route_is_denied_at_runtime PASSED [ 90%]
+app/tests/test_route_registry.py::test_guarded_route_is_recognised PASSED [ 91%]
+app/tests/test_route_registry.py::test_public_paths_are_exactly_the_reviewed_set PASSED [ 92%]
+app/tests/test_scoping.py::test_cross_tenant_reads_return_nothing_even_with_crafted_id PASSED [ 94%]
+app/tests/test_scoping.py::test_own_tenant_reads_work PASSED             [ 95%]
+app/tests/test_scoping.py::test_tenant_parameters_in_the_request_are_ignored PASSED [ 97%]
+app/tests/test_scoping.py::test_repository_scope_filters_at_the_query PASSED [ 98%]
+app/tests/test_structure.py::test_every_module_has_the_standard_file_set PASSED [100%]
+============================= 71 passed in 21.28s ==============================
+$ python -m scripts.export_openapi --check
+openapi.json is up to date
+$ DATABASE_URL=…/moodymate_ws1_p2 alembic downgrade base   [DB copy still holds the E2E users]
+(expected refusal, D-11: the seed downgrade will not delete seeded roles that user data references)
+sqlalchemy.exc.IntegrityError: … ForeignKeyViolationError: update or delete on table "role" violates foreign key constraint "fk_user_role_role_id_role" on table "user_role"
+$ psql moodymate_ws1_p2: DELETE E2E test users (synthetic rows created by the browser runs)
+DELETE 6
+DELETE 6
+$ DATABASE_URL=…/moodymate_ws1_p2 alembic downgrade base && alembic upgrade head && alembic downgrade base && alembic upgrade head
+INFO  [alembic.runtime.migration] Running downgrade 0003 -> 0002, Seed identity data (BE-2.2, D-11): default tenant, roles, permissions, matrix.
+INFO  [alembic.runtime.migration] Running downgrade 0002 -> 0001, Identity and authorization tables (BE-2.1): tenant, user_account, role, permission,
+INFO  [alembic.runtime.migration] Running downgrade 0001 -> , Baseline: empty schema. Feature tables start in Phase 2.
+INFO  [alembic.runtime.migration] Running upgrade  -> 0001, Baseline: empty schema. Feature tables start in Phase 2.
+INFO  [alembic.runtime.migration] Running upgrade 0001 -> 0002, Identity and authorization tables (BE-2.1): tenant, user_account, role, permission,
+INFO  [alembic.runtime.migration] Running upgrade 0002 -> 0003, Seed identity data (BE-2.2, D-11): default tenant, roles, permissions, matrix.
+INFO  [alembic.runtime.migration] Running downgrade 0003 -> 0002, Seed identity data (BE-2.2, D-11): default tenant, roles, permissions, matrix.
+INFO  [alembic.runtime.migration] Running downgrade 0002 -> 0001, Identity and authorization tables (BE-2.1): tenant, user_account, role, permission,
+INFO  [alembic.runtime.migration] Running downgrade 0001 -> , Baseline: empty schema. Feature tables start in Phase 2.
+INFO  [alembic.runtime.migration] Running upgrade  -> 0001, Baseline: empty schema. Feature tables start in Phase 2.
+INFO  [alembic.runtime.migration] Running upgrade 0001 -> 0002, Identity and authorization tables (BE-2.1): tenant, user_account, role, permission,
+INFO  [alembic.runtime.migration] Running upgrade 0002 -> 0003, Seed identity data (BE-2.2, D-11): default tenant, roles, permissions, matrix.
+0003 (head)
+
+## Compose container (postgres:16) round trip
+ Container ws1-phase2-db-1 Healthy 
+INFO  [alembic.runtime.migration] Running upgrade  -> 0001, Baseline: empty schema. Feature tables start in Phase 2.
+INFO  [alembic.runtime.migration] Running upgrade 0001 -> 0002, Identity and authorization tables (BE-2.1): tenant, user_account, role, permission,
+INFO  [alembic.runtime.migration] Running upgrade 0002 -> 0003, Seed identity data (BE-2.2, D-11): default tenant, roles, permissions, matrix.
+INFO  [alembic.runtime.migration] Running downgrade 0003 -> 0002, Seed identity data (BE-2.2, D-11): default tenant, roles, permissions, matrix.
+INFO  [alembic.runtime.migration] Running downgrade 0002 -> 0001, Identity and authorization tables (BE-2.1): tenant, user_account, role, permission,
+INFO  [alembic.runtime.migration] Running downgrade 0001 -> , Baseline: empty schema. Feature tables start in Phase 2.
+INFO  [alembic.runtime.migration] Running upgrade  -> 0001, Baseline: empty schema. Feature tables start in Phase 2.
+INFO  [alembic.runtime.migration] Running upgrade 0001 -> 0002, Identity and authorization tables (BE-2.1): tenant, user_account, role, permission,
+INFO  [alembic.runtime.migration] Running upgrade 0002 -> 0003, Seed identity data (BE-2.2, D-11): default tenant, roles, permissions, matrix.
+0003 (head)
+$ (container) role → permissions after upgrade
+approver schema:approve,schema:read
+auditor audit:read,schema:read
+data_steward schema:propose,schema:read
+platform_admin admin:read,audit:read,schema:read
+risk_analyst schema:read
+ Network ws1-phase2_default Removed 
+
+## Frontend (node v22.22.0)
+$ npm run gen:api && compare with committed-to-be schema.d.ts
+🚀 ../backend/openapi.json → src/api/schema.d.ts [62ms]
+schema.d.ts unchanged by regeneration (62e5de92949f95a861e1230073473b05)
+$ npm run lint
+✔ No ESLint warnings or errors
+$ npm run typecheck
+tsc --noEmit: exit 0
+$ npm run build
+ ✓ Compiled successfully
+ ✓ Generating static pages (17/17)
+├ ○ /access                              2.93 kB         134 kB
+├ ○ /access/users                        3.61 kB         135 kB
+├ ○ /auth/callback                       2.21 kB         120 kB
+└ ○ /login                               6.45 kB         129 kB
+$ grep hand-written payload types (aliases of generated types are allowed)
+src/components/auth/RequirePermission.tsx:4:import { useCurrentSession, type Permission } from '@/components/auth/SessionProvider'
+src/components/auth/SessionProvider.tsx:13:export type Permission = Schemas['Permission']
+src/components/auth/SessionProvider.tsx:14:type Me = Schemas['Me']
+src/components/auth/SessionProvider.tsx:15:type AuthConfig = Schemas['AuthConfig']
+src/app/(platform)/access/users/page.tsx:15:type UserPage = Schemas['UserPage']
+src/app/(platform)/dashboard/PlatformHealth.tsx:13:type Health = Schemas['HealthResponse']
+src/app/login/SignIn.tsx:17:type AuthConfig = Schemas['AuthConfig']
+src/app/login/SignIn.tsx:18:type Persona = Schemas['DevPersona']
+src/api/client.ts:11:export type ErrorEnvelope = components['schemas']['ErrorEnvelope']

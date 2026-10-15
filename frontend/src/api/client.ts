@@ -5,6 +5,7 @@
  * `npm run gen:api`. Never hand-write a type that mirrors an API payload.
  */
 import createClient, { type Middleware } from 'openapi-fetch'
+import { useSession } from '@/lib/session'
 import type { components, paths } from './schema'
 
 export type ErrorEnvelope = components['schemas']['ErrorEnvelope']
@@ -28,8 +29,24 @@ const correlation: Middleware = {
   },
 }
 
+/** Attaches the bearer token; a 401 ends the session so the app returns to sign-in. */
+const auth: Middleware = {
+  onRequest({ request }) {
+    const { token } = useSession.getState()
+    if (token) request.headers.set('Authorization', `Bearer ${token}`)
+    return request
+  },
+  onResponse({ request, response }) {
+    if (response.status === 401 && request.headers.has('Authorization')) {
+      useSession.getState().clear()
+    }
+    return response
+  },
+}
+
 export const api = createClient<paths>({ baseUrl: API_BASE_URL })
 api.use(correlation)
+api.use(auth)
 
 /** An error from the backend, always carrying the standard envelope (D-07). */
 export class ApiError extends Error {

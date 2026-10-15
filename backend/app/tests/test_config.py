@@ -22,7 +22,13 @@ def test_app_refuses_to_start_with_dev_auth_in_production(monkeypatch: pytest.Mo
 
 
 def test_production_with_oidc_is_allowed() -> None:
-    s = Settings(ENV="production", AUTH_MODE="oidc")
+    s = Settings(
+        ENV="production",
+        AUTH_MODE="oidc",
+        OIDC_ISSUER="https://idp.example",
+        OIDC_AUDIENCE="moodymate-api",
+        OIDC_CLIENT_ID="moodymate-web",
+    )
     assert s.AUTH_MODE == "oidc"
 
 
