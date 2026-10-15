@@ -358,3 +358,86 @@ def test_registry_ignores_unrelated_mounts(tmp_path: Any) -> None:
 def test_short_dev_secret_refused() -> None:
     with pytest.raises(ValidationError, match="at least 32 characters"):
         Settings(ENV="local", AUTH_MODE="dev", AUTH_DEV_SECRET="too-short")
+
+
+# --- verifier findings on the BE-2.13 rewrite ---------------------------------------------
+
+
+def test_key_stored_between_fast_path_and_lock_is_found() -> None:
+    """Race: the fast-path lookup misses, another request's fetch then stores the key and
+    leaves the refresh interval running. The key must still be found, not 401."""
+
+    class RacyKeys(JwksKeys):
+        missed = False
+
+        def _lookup(self, kid: str | None) -> Any:
+            if not self.missed:  # simulate: fast path ran just before the other fetch landed
+                self.missed = True
+                return None
+            return super()._lookup(kid)
+
+    clock = Clock()
+    keys = RacyKeys(ISSUER, "https://idp.example/jwks", fetch=lambda _u: _jwks("k1"), clock=clock)
+    keys._keys = {"k1": KEY.public_key()}  # the other request's fetch has completed
+    keys._last_attempt = clock.now  # ...and the refresh interval is running
+    assert keys(_signed("k1")) is not None
+
+
+def test_unknown_kid_does_not_wait_when_keys_are_cached() -> None:
+    import threading
+    import time as _time
+
+    clock = Clock()
+    release = threading.Event()
+    started = threading.Event()
+    calls = {"n": 0}
+
+    def fetch(_url: str) -> dict[str, Any]:
+        calls["n"] += 1
+        if calls["n"] > 1:
+            started.set()
+            release.wait(5)
+        return _jwks("k1")
+
+    keys = JwksKeys(ISSUER, "https://idp.example/jwks", fetch=fetch, clock=clock)
+    keys(_signed("k1"))
+    clock.now += 61
+    t = threading.Thread(target=lambda: pytest.raises(InvalidToken, keys, _signed("trigger")))
+    t.start()
+    assert started.wait(5)
+    t0 = _time.monotonic()
+    with pytest.raises(InvalidToken):
+        keys(_signed("flood"))  # must not park a worker thread behind the slow fetch
+    assert _time.monotonic() - t0 < 1.0
+    release.set()
+    t.join(5)
+
+
+def test_truncated_provider_response_is_provider_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import http.client
+    import urllib.request
+
+    from app.core.tokens import _fetch_json
+
+    def broken(*_a: Any, **_k: Any) -> Any:
+        raise http.client.IncompleteRead(b"{")
+
+    monkeypatch.setattr(urllib.request, "urlopen", broken)
+    with pytest.raises(ProviderUnavailable):
+        _fetch_json("https://idp.example/jwks")
+
+
+def test_registry_segment_aware_and_catches_param_mounts_and_hosts(tmp_path: Any) -> None:
+    from fastapi import FastAPI
+    from starlette.routing import Host
+
+    app = create_app(Settings(ENV="test"))
+    app.mount("/ap", StaticFiles(directory=tmp_path), name="not-a-parent")
+    app.mount("/{tenant}", FastAPI(), name="param")
+    app.router.routes.append(Host("api.example", app=FastAPI()))
+    found = undeclared_routes(app)
+    assert "Mount /ap" not in found  # "/ap" is not a parent path segment of /api/v1
+    assert "Mount /{tenant}" in found
+    assert any(f.startswith("Host ") for f in found)

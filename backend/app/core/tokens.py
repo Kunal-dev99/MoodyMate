@@ -6,6 +6,7 @@
   startup refuses this mode (Settings validator).
 """
 
+import http.client
 import json
 import threading
 import time
@@ -110,7 +111,8 @@ def _fetch_json(url: str) -> dict[str, Any]:
     try:
         with urllib.request.urlopen(url, timeout=5) as resp:  # noqa: S310 - scheme checked by caller
             data = json.load(resp)
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, http.client.HTTPException) as exc:
+        # HTTPException covers truncated bodies (IncompleteRead) and malformed responses.
         raise ProviderUnavailable(f"fetch failed: {type(exc).__name__}") from exc
     if not isinstance(data, dict):
         raise ProviderUnavailable("unexpected response shape")
@@ -125,8 +127,9 @@ class JwksKeys:
       (a provider outage is not hammered).
     * Cached keys are read without locking; the lock only guards bookkeeping, never network
       I/O (BE-2.13). A slow provider therefore cannot stall requests whose key is cached.
-    * One request performs a fetch; concurrent misses during it wait for that fetch
-      (bounded) rather than starting their own.
+    * One request performs a fetch. Concurrent misses wait for it (bounded) only while no
+      keys are cached (cold start); otherwise an unknown kid is rejected at once, so forged
+      kids cannot park worker threads behind a slow provider.
     * URLs must be https unless `allow_http` (local/test only, D-13). A discovered
       `jwks_uri` is checked before it is remembered.
     """
@@ -197,8 +200,17 @@ class JwksKeys:
             return key
 
         with self._lock:
+            # Re-check under the lock: another request's fetch may have stored this key
+            # between the fast-path miss and here.
+            key = self._lookup(kid)
+            if key is not None:
+                return key
             inflight = self._inflight
             fetcher = False
+            if inflight is not None and self._keys:
+                # Keys are cached and a refresh is already running: this kid is unknown
+                # now. Don't park a worker thread waiting on a possibly slow provider.
+                raise InvalidToken("unknown signing key")
             if inflight is None:
                 may_fetch = (
                     self._last_attempt is None

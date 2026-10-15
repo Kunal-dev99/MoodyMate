@@ -32,3 +32,14 @@ Evidence in this folder:
 
   Either changes D-13, so it is left for the user.
 - **Runtime guard scope.** The runtime fail-closed guard still covers HTTP API routes only. Mounts and websockets are caught only by the CI registry check (BE-2.12 / BE-2.14), which is the intended gate.
+
+## Round 2: verifier findings on the BE-2.13 rewrite (fixed)
+
+Each fix has a test that **failed before and passes after** (checks.txt, "Round 2"):
+
+1. **Valid token rejected with 401 (regression).** The fast-path cache lookup could miss just before another request's fetch stored the key, and the request was then rejected without looking again. The key is now looked up again under the lock before any decision. Test: `test_key_stored_between_fast_path_and_lock_is_found`.
+2. **Worker starvation.** Unknown kids waited up to 10 s on an in-flight fetch even when keys were cached. They now wait only on a cold start (no keys yet); otherwise they get 401 at once. Test: `test_unknown_kid_does_not_wait_when_keys_are_cached` (completes in under 1 s while a refresh hangs).
+3. **Truncated provider response gave 500.** `http.client.HTTPException` (e.g. `IncompleteRead`) now maps to `ProviderUnavailable` (503). Test: `test_truncated_provider_response_is_provider_unavailable`.
+4. **Registry matched by string prefix.** It is now segment-aware: `/ap` is no longer flagged. It also reports mounts with path parameters (`/{tenant}`) and `Host` routes. Test: `test_registry_segment_aware_and_catches_param_mounts_and_hosts`.
+
+Result: 98 backend tests pass (run without `ENV`). Real OIDC re-run: 3/3 fresh-user, 0 errors.
