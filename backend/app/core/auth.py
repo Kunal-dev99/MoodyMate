@@ -18,6 +18,7 @@ from fastapi.routing import APIRoute
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
+from starlette.routing import BaseRoute, Host, Mount
 
 from app.core.errors import ApiError
 from app.core.principal import Principal
@@ -116,6 +117,19 @@ def declared_permission(route: APIRoute) -> str | None:
     return None
 
 
+def _may_serve_api(route: BaseRoute, path: str) -> bool:
+    """Could this non-APIRoute route serve requests under /api/v1 (BE-2.14)?"""
+    if isinstance(route, Host):
+        return True  # host-based routing can serve any path
+    if path.startswith("/api/v1"):
+        return True
+    if isinstance(route, Mount):
+        prefix = path.rstrip("/")
+        # A parent path segment ("", "/api") or a path parameter ("/{x}") can match /api/v1.
+        return "{" in prefix or prefix in ("", "/api")
+    return False
+
+
 def undeclared_routes(app: FastAPI) -> list[str]:
     """`/api/v1` routes that are neither public nor declare a permission.
 
@@ -125,13 +139,13 @@ def undeclared_routes(app: FastAPI) -> list[str]:
     found: list[str] = []
     for route in app.routes:
         path = getattr(route, "path", "")
-        if not path.startswith("/api/v1") or path in PUBLIC_PATHS:
+        if path in PUBLIC_PATHS:
             continue
         if isinstance(route, APIRoute):
-            if declared_permission(route) is None:
+            if path.startswith("/api/v1") and declared_permission(route) is None:
                 found.append(f"{','.join(sorted(route.methods))} {path}")
-        else:
-            found.append(f"{type(route).__name__} {path}")
+        elif _may_serve_api(route, path):
+            found.append(f"{type(route).__name__} {path or '/'}")
     return sorted(found)
 
 

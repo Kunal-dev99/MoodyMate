@@ -1,0 +1,186 @@
+# Phase 2 hardening follow-up — check output captured 2026-10-15T14:07:30Z
+# worktree /home/user/MoodyMate-wt/ws1-phase2h, branch feat/ws1-phase2-hardening-2 (from master 5501996) + uncommitted changes
+
+## Backend — run WITHOUT ENV set
+$ ruff check . && ruff format --check .
+All checks passed!
+126 files already formatted
+$ mypy app scripts
+Success: no issues found in 126 source files
+$ env -u ENV REQUIRE_DB=1 pytest -v
+app/tests/test_auth.py::test_valid_oidc_token_resolves_principal PASSED  [  1%]
+app/tests/test_auth.py::test_no_token_is_401_with_challenge PASSED       [  2%]
+app/tests/test_auth.py::test_expired_token_is_401 PASSED                 [  3%]
+app/tests/test_auth.py::test_wrong_issuer_is_401 PASSED                  [  4%]
+app/tests/test_auth.py::test_wrong_audience_is_401 PASSED                [  5%]
+app/tests/test_auth.py::test_wrong_signing_key_is_401 PASSED             [  6%]
+app/tests/test_auth.py::test_symmetric_and_unsigned_tokens_are_rejected_in_oidc_mode PASSED [  7%]
+app/tests/test_auth.py::test_unknown_user_is_not_provisioned_outside_local PASSED [  8%]
+app/tests/test_auth.py::test_unknown_user_is_provisioned_without_roles_in_local PASSED [  9%]
+app/tests/test_auth.py::test_disabled_user_is_403 PASSED                 [ 10%]
+app/tests/test_auth.py::test_dev_endpoints_absent_in_oidc_mode PASSED    [ 11%]
+app/tests/test_auth.py::test_dev_token_round_trip PASSED                 [ 12%]
+app/tests/test_auth.py::test_tampered_dev_token_is_401 PASSED            [ 13%]
+app/tests/test_auth.py::test_dev_token_is_rejected_by_oidc_mode PASSED   [ 14%]
+app/tests/test_auth.py::test_unknown_dev_role_is_422 PASSED              [ 15%]
+app/tests/test_auth.py::test_dev_mode_refused_outside_local_and_test PASSED [ 17%]
+app/tests/test_auth.py::test_dev_mode_refused_in_production PASSED       [ 18%]
+app/tests/test_auth.py::test_oidc_mode_requires_issuer_audience_client PASSED [ 19%]
+app/tests/test_config.py::test_production_with_dev_auth_is_refused PASSED [ 20%]
+app/tests/test_config.py::test_app_refuses_to_start_with_dev_auth_in_production PASSED [ 21%]
+app/tests/test_config.py::test_production_with_oidc_is_allowed PASSED    [ 22%]
+app/tests/test_config.py::test_safe_defaults PASSED                      [ 23%]
+app/tests/test_correlation.py::test_inbound_id_is_echoed PASSED          [ 24%]
+app/tests/test_correlation.py::test_id_generated_when_absent PASSED      [ 25%]
+app/tests/test_correlation.py::test_unsafe_inbound_id_is_replaced PASSED [ 26%]
+app/tests/test_correlation.py::test_each_request_gets_its_own_id PASSED  [ 27%]
+app/tests/test_errors.py::test_404_envelope PASSED                       [ 28%]
+app/tests/test_errors.py::test_422_envelope_does_not_echo_input PASSED   [ 29%]
+app/tests/test_errors.py::test_500_envelope_without_stack_trace PASSED   [ 30%]
+app/tests/test_errors.py::test_500_envelope_carries_cors_headers PASSED  [ 31%]
+app/tests/test_errors.py::test_api_error_envelope PASSED                 [ 32%]
+app/tests/test_hardening.py::test_startup_refused_without_env PASSED     [ 34%]
+app/tests/test_hardening.py::test_dev_auth_refused_outside_local_and_test[staging] PASSED [ 35%]
+app/tests/test_hardening.py::test_dev_auth_refused_outside_local_and_test[production] PASSED [ 36%]
+app/tests/test_hardening.py::test_settings_errors_do_not_echo_secrets PASSED [ 37%]
+app/tests/test_hardening.py::test_dev_auth_allowed_in_local_and_test PASSED [ 38%]
+app/tests/test_hardening.py::test_http_issuer_refused_in_staging PASSED  [ 39%]
+app/tests/test_hardening.py::test_http_jwks_url_refused_in_production PASSED [ 40%]
+app/tests/test_hardening.py::test_https_oidc_accepted_in_production PASSED [ 41%]
+app/tests/test_hardening.py::test_http_jwks_uri_from_discovery_rejected_when_insecure_not_allowed PASSED [ 42%]
+app/tests/test_hardening.py::test_audience_equal_to_client_id_refused PASSED [ 43%]
+app/tests/test_hardening.py::test_unknown_kids_trigger_at_most_one_fetch_per_interval PASSED [ 44%]
+app/tests/test_hardening.py::test_key_rotation_is_picked_up_after_the_interval PASSED [ 45%]
+app/tests/test_hardening.py::test_provider_outage_backs_off PASSED       [ 46%]
+app/tests/test_hardening.py::test_provider_unavailable_is_503_envelope PASSED [ 47%]
+app/tests/test_hardening.py::test_user_of_suspended_tenant_is_denied PASSED [ 48%]
+app/tests/test_hardening.py::test_registry_reports_mounts_and_websockets PASSED [ 50%]
+app/tests/test_hardening.py::test_concurrent_first_sign_in_provisions_once PASSED [ 51%]
+app/tests/test_hardening.py::test_cached_keys_served_while_a_refresh_is_in_flight PASSED [ 52%]
+app/tests/test_hardening.py::test_concurrent_first_requests_share_one_fetch PASSED [ 53%]
+app/tests/test_hardening.py::test_unsafe_discovered_jwks_uri_is_not_remembered PASSED [ 54%]
+app/tests/test_hardening.py::test_registry_reports_parent_path_mounts[/api] PASSED [ 55%]
+app/tests/test_hardening.py::test_registry_reports_parent_path_mounts[] PASSED [ 56%]
+app/tests/test_hardening.py::test_registry_ignores_unrelated_mounts PASSED [ 57%]
+app/tests/test_hardening.py::test_short_dev_secret_refused PASSED        [ 58%]
+app/tests/test_health.py::test_health_degraded_when_db_unreachable PASSED [ 59%]
+app/tests/test_health.py::test_health_ok_with_db PASSED                  [ 60%]
+app/tests/test_health.py::test_health_needs_no_auth PASSED               [ 61%]
+app/tests/test_identity_models.py::test_create_and_read_each_identity_entity PASSED [ 62%]
+app/tests/test_identity_models.py::test_idp_identity_is_unique PASSED    [ 63%]
+app/tests/test_identity_seed.py::test_seeded_matrix_matches_plan PASSED  [ 64%]
+app/tests/test_identity_seed.py::test_seed_rows_are_tagged PASSED        [ 65%]
+app/tests/test_identity_seed.py::test_downgrade_removes_seed_and_upgrade_restores_it PASSED [ 67%]
+app/tests/test_identity_seed.py::test_seed_downgrade_refuses_to_delete_user_data PASSED [ 68%]
+app/tests/test_logging.py::test_tokens_and_secrets_never_reach_logs PASSED [ 69%]
+app/tests/test_logging.py::test_generic_key_fields_are_redacted PASSED   [ 70%]
+app/tests/test_logging.py::test_args_are_redacted PASSED                 [ 71%]
+app/tests/test_logging.py::test_record_is_json_with_correlation_field PASSED [ 72%]
+app/tests/test_me.py::test_me_and_permissions_per_role[platform_admin] PASSED [ 73%]
+app/tests/test_me.py::test_me_and_permissions_per_role[data_steward] PASSED [ 74%]
+app/tests/test_me.py::test_me_and_permissions_per_role[risk_analyst] PASSED [ 75%]
+app/tests/test_me.py::test_me_and_permissions_per_role[approver] PASSED  [ 76%]
+app/tests/test_me.py::test_me_and_permissions_per_role[auditor] PASSED   [ 77%]
+app/tests/test_me.py::test_admin_endpoints_forbidden_without_admin_read[data_steward] PASSED [ 78%]
+app/tests/test_me.py::test_admin_endpoints_forbidden_without_admin_read[risk_analyst] PASSED [ 79%]
+app/tests/test_me.py::test_admin_endpoints_forbidden_without_admin_read[approver] PASSED [ 80%]
+app/tests/test_me.py::test_admin_endpoints_forbidden_without_admin_read[auditor] PASSED [ 81%]
+app/tests/test_me.py::test_me_requires_authentication PASSED             [ 82%]
+app/tests/test_migrations.py::test_round_trip_upgrade_downgrade_upgrade PASSED [ 84%]
+app/tests/test_migrations.py::test_every_revision_has_a_downgrade PASSED [ 85%]
+app/tests/test_migrations.py::test_no_drop_in_forward_migrations PASSED  [ 86%]
+app/tests/test_openapi.py::test_exported_contract_is_valid_openapi_31 PASSED [ 87%]
+app/tests/test_openapi.py::test_committed_contract_matches_code PASSED   [ 88%]
+app/tests/test_openapi.py::test_error_envelope_is_in_contract PASSED     [ 89%]
+app/tests/test_route_registry.py::test_every_api_route_declares_a_permission PASSED [ 90%]
+app/tests/test_route_registry.py::test_registry_catches_an_unguarded_route PASSED [ 91%]
+app/tests/test_route_registry.py::test_unguarded_route_is_denied_at_runtime PASSED [ 92%]
+app/tests/test_route_registry.py::test_guarded_route_is_recognised PASSED [ 93%]
+app/tests/test_route_registry.py::test_public_paths_are_exactly_the_reviewed_set PASSED [ 94%]
+app/tests/test_scoping.py::test_cross_tenant_reads_return_nothing_even_with_crafted_id PASSED [ 95%]
+app/tests/test_scoping.py::test_own_tenant_reads_work PASSED             [ 96%]
+app/tests/test_scoping.py::test_tenant_parameters_in_the_request_are_ignored PASSED [ 97%]
+app/tests/test_scoping.py::test_repository_scope_filters_at_the_query PASSED [ 98%]
+app/tests/test_structure.py::test_every_module_has_the_standard_file_set PASSED [100%]
+============================= 94 passed in 22.23s ==============================
+$ python -m scripts.export_openapi --check
+openapi.json is up to date
+
+## Frontend
+$ npm test
+ Test Files  2 passed (2)
+      Tests  26 passed (26)
+$ npx vitest run --reporter verbose src/lib/__tests__/redirect.test.ts
+ ✓ src/lib/__tests__/redirect.test.ts > safeRedirectPath (FE-2.3) > keeps same-origin path /access
+ ✓ src/lib/__tests__/redirect.test.ts > safeRedirectPath (FE-2.3) > keeps same-origin path /access/users?page=2
+ ✓ src/lib/__tests__/redirect.test.ts > safeRedirectPath (FE-2.3) > keeps same-origin path /schemas#top
+ ✓ src/lib/__tests__/redirect.test.ts > safeRedirectPath (FE-2.3) > rejects protocol-relative
+ ✓ src/lib/__tests__/redirect.test.ts > safeRedirectPath (FE-2.3) > rejects backslash
+ ✓ src/lib/__tests__/redirect.test.ts > safeRedirectPath (FE-2.3) > rejects encoded backslash
+ ✓ src/lib/__tests__/redirect.test.ts > safeRedirectPath (FE-2.3) > rejects encoded slash
+ ✓ src/lib/__tests__/redirect.test.ts > safeRedirectPath (FE-2.3) > rejects tab-separated
+ ✓ src/lib/__tests__/redirect.test.ts > safeRedirectPath (FE-2.3) > rejects absolute https
+ ✓ src/lib/__tests__/redirect.test.ts > safeRedirectPath (FE-2.3) > rejects javascript
+ ✓ src/lib/__tests__/redirect.test.ts > safeRedirectPath (FE-2.3) > rejects relative without slash
+ ✓ src/lib/__tests__/redirect.test.ts > safeRedirectPath (FE-2.3) > rejects empty
+ ✓ src/lib/__tests__/redirect.test.ts > safeRedirectPath (FE-2.3) > rejects null
+ ✓ src/lib/__tests__/redirect.test.ts > safeRedirectPath (FE-2.3) > rejects dot segment
+ ✓ src/lib/__tests__/redirect.test.ts > safeRedirectPath (FE-2.3) > rejects parent segment
+ ✓ src/lib/__tests__/redirect.test.ts > safeRedirectPath (FE-2.3) > rejects encoded dot segment
+ ✓ src/lib/__tests__/redirect.test.ts > safeRedirectPath (FE-2.3) > rejects encoded parent segment
+ ✓ src/lib/__tests__/redirect.test.ts > safeRedirectPath (FE-2.3) > rejects nested parent segment
+ ✓ src/lib/__tests__/redirect.test.ts > safeRedirectPath (FE-2.3) > rejects dot segment with backslash
+ ✓ src/lib/__tests__/redirect.test.ts > safeRedirectPath (FE-2.3) > never returns a value the browser resolves to another origin
+ ✓ src/lib/__tests__/redirect.test.ts > safeRedirectPath (FE-2.3) > keeps a legitimate path containing a bare percent sign
+$ npm run lint
+✔ No ESLint warnings or errors
+$ npm run typecheck
+tsc --noEmit: exit 0
+$ npm run build
+ ✓ Compiled successfully
+
+## Round 2 — verifier findings on the BE-2.13 rewrite (2026-10-15T14:12:44Z)
+$ (before fix) pytest -k "between_fast_path or does_not_wait or truncated or segment_aware"
+FAILED test_key_stored_between_fast_path_and_lock_is_found
+FAILED test_unknown_kid_does_not_wait_when_keys_are_cached
+FAILED test_truncated_provider_response_is_provider_unavailable
+FAILED test_registry_segment_aware_and_catches_param_mounts_and_hosts
+4 failed, 24 deselected
+$ (after fix) env -u ENV REQUIRE_DB=1 pytest -v app/tests/test_hardening.py
+app/tests/test_hardening.py::test_startup_refused_without_env PASSED     [  3%]
+app/tests/test_hardening.py::test_dev_auth_refused_outside_local_and_test[staging] PASSED [  7%]
+app/tests/test_hardening.py::test_dev_auth_refused_outside_local_and_test[production] PASSED [ 10%]
+app/tests/test_hardening.py::test_settings_errors_do_not_echo_secrets PASSED [ 14%]
+app/tests/test_hardening.py::test_dev_auth_allowed_in_local_and_test PASSED [ 17%]
+app/tests/test_hardening.py::test_http_issuer_refused_in_staging PASSED  [ 21%]
+app/tests/test_hardening.py::test_http_jwks_url_refused_in_production PASSED [ 25%]
+app/tests/test_hardening.py::test_https_oidc_accepted_in_production PASSED [ 28%]
+app/tests/test_hardening.py::test_http_jwks_uri_from_discovery_rejected_when_insecure_not_allowed PASSED [ 32%]
+app/tests/test_hardening.py::test_audience_equal_to_client_id_refused PASSED [ 35%]
+app/tests/test_hardening.py::test_unknown_kids_trigger_at_most_one_fetch_per_interval PASSED [ 39%]
+app/tests/test_hardening.py::test_key_rotation_is_picked_up_after_the_interval PASSED [ 42%]
+app/tests/test_hardening.py::test_provider_outage_backs_off PASSED       [ 46%]
+app/tests/test_hardening.py::test_provider_unavailable_is_503_envelope PASSED [ 50%]
+app/tests/test_hardening.py::test_user_of_suspended_tenant_is_denied PASSED [ 53%]
+app/tests/test_hardening.py::test_registry_reports_mounts_and_websockets PASSED [ 57%]
+app/tests/test_hardening.py::test_concurrent_first_sign_in_provisions_once PASSED [ 60%]
+app/tests/test_hardening.py::test_cached_keys_served_while_a_refresh_is_in_flight PASSED [ 64%]
+app/tests/test_hardening.py::test_concurrent_first_requests_share_one_fetch PASSED [ 67%]
+app/tests/test_hardening.py::test_unsafe_discovered_jwks_uri_is_not_remembered PASSED [ 71%]
+app/tests/test_hardening.py::test_registry_reports_parent_path_mounts[/api] PASSED [ 75%]
+app/tests/test_hardening.py::test_registry_reports_parent_path_mounts[] PASSED [ 78%]
+app/tests/test_hardening.py::test_registry_ignores_unrelated_mounts PASSED [ 82%]
+app/tests/test_hardening.py::test_short_dev_secret_refused PASSED        [ 85%]
+app/tests/test_hardening.py::test_key_stored_between_fast_path_and_lock_is_found PASSED [ 89%]
+app/tests/test_hardening.py::test_unknown_kid_does_not_wait_when_keys_are_cached PASSED [ 92%]
+app/tests/test_hardening.py::test_truncated_provider_response_is_provider_unavailable PASSED [ 96%]
+app/tests/test_hardening.py::test_registry_segment_aware_and_catches_param_mounts_and_hosts PASSED [100%]
+============================== 28 passed in 4.18s ==============================
+$ env -u ENV REQUIRE_DB=1 pytest -q
+98 passed in 26.42s
+$ ruff check . && mypy app scripts
+All checks passed!
+Success: no issues found in 126 source files
+$ export_openapi --check
+openapi.json is up to date
+Real OIDC (mock IdP) after the fix: 3/3 fresh-user runs, 0 backend 500s (browser-oidc-mode.json)

@@ -1,0 +1,5 @@
+# Pre-fix reproduction (redirect.ts as merged in PR #4):
+{"raw":"/.//evil.example","pre_fix_returned":"//evil.example","browser_resolves_to":"http://evil.example/"}
+{"raw":"/..//evil.example","pre_fix_returned":"//evil.example","browser_resolves_to":"http://evil.example/"}
+{"raw":"/%2e//evil.example","pre_fix_returned":"//evil.example","browser_resolves_to":"http://evil.example/"}
+{"raw":"/a/..//evil.example","pre_fix_returned":"//evil.example","browser_resolves_to":"http://evil.example/"}

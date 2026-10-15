@@ -6,6 +6,7 @@
   startup refuses this mode (Settings validator).
 """
 
+import http.client
 import json
 import threading
 import time
@@ -110,7 +111,8 @@ def _fetch_json(url: str) -> dict[str, Any]:
     try:
         with urllib.request.urlopen(url, timeout=5) as resp:  # noqa: S310 - scheme checked by caller
             data = json.load(resp)
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, http.client.HTTPException) as exc:
+        # HTTPException covers truncated bodies (IncompleteRead) and malformed responses.
         raise ProviderUnavailable(f"fetch failed: {type(exc).__name__}") from exc
     if not isinstance(data, dict):
         raise ProviderUnavailable("unexpected response shape")
@@ -123,8 +125,13 @@ class JwksKeys:
     * Network access happens at most once per `min_refresh_seconds`, whether the trigger is
       an unknown `kid` (a forged token cannot force a fetch per request) or a failed fetch
       (a provider outage is not hammered).
-    * All state is guarded by a lock, so concurrent worker threads share one fetch.
-    * URLs must be https unless `allow_http` (local/test only, D-13).
+    * Cached keys are read without locking; the lock only guards bookkeeping, never network
+      I/O (BE-2.13). A slow provider therefore cannot stall requests whose key is cached.
+    * One request performs a fetch. Concurrent misses wait for it (bounded) only while no
+      keys are cached (cold start); otherwise an unknown kid is rejected at once, so forged
+      kids cannot park worker threads behind a slow provider.
+    * URLs must be https unless `allow_http` (local/test only, D-13). A discovered
+      `jwks_uri` is checked before it is remembered.
     """
 
     def __init__(
@@ -134,6 +141,7 @@ class JwksKeys:
         *,
         allow_http: bool = False,
         min_refresh_seconds: float = 60.0,
+        wait_seconds: float = 10.0,
         fetch: JsonFetcher = _fetch_json,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -141,11 +149,13 @@ class JwksKeys:
         self._jwks_url = jwks_url
         self._allow_http = allow_http
         self._min_refresh = min_refresh_seconds
+        self._wait = wait_seconds
         self._fetch = fetch
         self._clock = clock
         self._lock = threading.Lock()
-        self._keys: dict[str | None, Any] = {}
+        self._keys: dict[str | None, Any] = {}  # replaced wholesale, never mutated
         self._last_attempt: float | None = None
+        self._inflight: threading.Event | None = None
         self.fetches = 0  # network round trips, for tests and diagnostics
 
     def _checked(self, url: str) -> str:
@@ -153,9 +163,9 @@ class JwksKeys:
             return url
         raise ProviderUnavailable("identity provider URL must use https")
 
-    def _refresh(self) -> None:
-        self._last_attempt = self._clock()
-        if self._jwks_url is None:
+    def _download(self, jwks_url: str | None) -> tuple[str, dict[str | None, Any]]:
+        """Network I/O only; called without the lock held."""
+        if jwks_url is None:
             self.fetches += 1
             doc = self._fetch(
                 self._checked(self._issuer.rstrip("/") + "/.well-known/openid-configuration")
@@ -163,43 +173,79 @@ class JwksKeys:
             uri = doc.get("jwks_uri")
             if not isinstance(uri, str):
                 raise ProviderUnavailable("discovery document has no jwks_uri")
-            self._jwks_url = uri
+            jwks_url = self._checked(uri)  # checked BEFORE it can be remembered
         self.fetches += 1
-        data = self._fetch(self._checked(self._jwks_url))
+        data = self._fetch(self._checked(jwks_url))
         try:
             jwk_set = jwt.PyJWKSet.from_dict(data)
         except jwt.PyJWTError as exc:
             raise ProviderUnavailable(f"unusable JWKS: {type(exc).__name__}") from exc
-        self._keys = {k.key_id: k.key for k in jwk_set.keys}
+        return jwks_url, {k.key_id: k.key for k in jwk_set.keys}
 
     def _lookup(self, kid: str | None) -> Any:
+        keys = self._keys
         if kid is None:
             # A token without kid is acceptable only when the provider has exactly one key.
-            return next(iter(self._keys.values())) if len(self._keys) == 1 else None
-        return self._keys.get(kid)
+            return next(iter(keys.values())) if len(keys) == 1 else None
+        return keys.get(kid)
 
     def __call__(self, token: str) -> Any:
         try:
             kid = jwt.get_unverified_header(token).get("kid")
         except jwt.PyJWTError as exc:
             raise InvalidToken(type(exc).__name__) from exc
+
+        key = self._lookup(kid)  # fast path: no lock
+        if key is not None:
+            return key
+
         with self._lock:
+            # Re-check under the lock: another request's fetch may have stored this key
+            # between the fast-path miss and here.
             key = self._lookup(kid)
             if key is not None:
                 return key
-            may_fetch = (
-                self._last_attempt is None
-                or self._clock() - self._last_attempt >= self._min_refresh
-            )
-            if not may_fetch:
-                if not self._keys:
-                    raise ProviderUnavailable("identity provider unavailable (backing off)")
+            inflight = self._inflight
+            fetcher = False
+            if inflight is not None and self._keys:
+                # Keys are cached and a refresh is already running: this kid is unknown
+                # now. Don't park a worker thread waiting on a possibly slow provider.
                 raise InvalidToken("unknown signing key")
-            self._refresh()  # ProviderUnavailable propagates
-            key = self._lookup(kid)
-            if key is None:
-                raise InvalidToken("unknown signing key")
+            if inflight is None:
+                may_fetch = (
+                    self._last_attempt is None
+                    or self._clock() - self._last_attempt >= self._min_refresh
+                )
+                if may_fetch:
+                    self._inflight = inflight = threading.Event()
+                    self._last_attempt = self._clock()
+                    fetcher = True
+                    jwks_url = self._jwks_url
+
+        if inflight is None:  # not allowed to fetch now
+            if not self._keys:
+                raise ProviderUnavailable("identity provider unavailable (backing off)")
+            raise InvalidToken("unknown signing key")
+
+        if fetcher:
+            try:
+                url, keys = self._download(jwks_url)
+                with self._lock:
+                    self._jwks_url = url
+                    self._keys = keys
+            finally:
+                with self._lock:
+                    self._inflight = None
+                inflight.set()
+        elif not inflight.wait(self._wait):
+            raise ProviderUnavailable("identity provider is slow to respond")
+
+        key = self._lookup(kid)
+        if key is not None:
             return key
+        if not self._keys:
+            raise ProviderUnavailable("identity provider keys unavailable")
+        raise InvalidToken("unknown signing key")
 
 
 class OidcTokens:
