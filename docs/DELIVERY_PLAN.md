@@ -12,10 +12,9 @@ Conventions (see proposed D-08):
 
 ## Feature 01 — WS1 Data Governance, Security & Platform Foundation
 
-Kickoff: `docs/prompts/kickoffs/01-ws1-foundation.md` · Status: **PLAN — awaiting approval**
+Kickoff: `docs/prompts/kickoffs/01-ws1-foundation.md` · Status: **APPROVED 2026-10-15 — Phase 1 in progress**
 
-Constraining decisions: D-01, D-02, D-03, D-04 (active); D-05…D-12 (proposed, need your
-call before Phase 1 starts).
+Constraining decisions: D-01…D-12 (all active).
 
 Pre-plan findings:
 - **Codebase:** no `backend/` or `frontend/` yet, so Phase 1 must create both skeletons.

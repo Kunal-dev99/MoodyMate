@@ -70,7 +70,7 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
 
 ## D-05 Endpoint naming source of truth
 
-- **Status:** proposed (Feature 01)
+- **Status:** active (approved 2026-10-15, Feature 01)
 - **Date:** 2026-10-15
 - **Decision:** The paired WS plans' endpoint names are canonical. Architecture §9 names
   are treated as illustrative. Endpoints that appear only in §9 (e.g. `GET /me`) are
@@ -81,7 +81,7 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
 
 ## D-06 Lifecycle state enums
 
-- **Status:** proposed (Feature 01)
+- **Status:** active (approved 2026-10-15, Feature 01)
 - **Date:** 2026-10-15
 - **Decision:** The Data Model §9 UPPERCASE enums are canonical. Where Architecture
   Appendix B has a state the data model lacks, it is added in UPPERCASE (e.g.
@@ -94,14 +94,14 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
 
 ## D-07 Error envelope includes `retryable`
 
-- **Status:** proposed (Feature 01)
+- **Status:** active (approved 2026-10-15, Feature 01)
 - **Date:** 2026-10-15
 - **Decision:** `{code, message, details, correlation_id, retryable}`. This is a
   superset of the WS plans' envelope (adding a field is compatible).
 
 ## D-08 Phase and task numbering
 
-- **Status:** proposed (Feature 01)
+- **Status:** active (approved 2026-10-15, Feature 01)
 - **Date:** 2026-10-15
 - **Decision:** `docs/DELIVERY_PLAN.md` phase numbers are global and sequential across
   all features (Feature 01 uses Phases 1–6; the next feature starts at 7), so
@@ -111,7 +111,7 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
 
 ## D-09 Authentication modes
 
-- **Status:** proposed (Feature 01)
+- **Status:** active (approved 2026-10-15, Feature 01)
 - **Date:** 2026-10-15
 - **Decision:** Setting `AUTH_MODE=oidc|dev`. `oidc` validates JWTs against the
   configured issuer/JWKS. `dev` validates JWTs signed by a local dev key, and is refused
@@ -121,7 +121,7 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
 
 ## D-10 Audit immutability
 
-- **Status:** proposed (Feature 01)
+- **Status:** active (approved 2026-10-15, Feature 01)
 - **Date:** 2026-10-15
 - **Decision:** `audit_event` is append-only, enforced by a DB trigger that rejects
   `UPDATE`/`DELETE` (plus no update/delete repository methods). Audit is written in the
@@ -130,7 +130,7 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
 
 ## D-11 Tenancy and provisional seed data
 
-- **Status:** proposed (Feature 01)
+- **Status:** active (approved 2026-10-15, Feature 01)
 - **Date:** 2026-10-15
 - **Decision:** Every scoped table carries `tenant_id` from day one, with one tenant
   seeded. Seed roles, permissions, classifications and synthetic schemas are inserted
@@ -142,7 +142,7 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
 
 ## D-12 Local development infrastructure
 
-- **Status:** proposed (Feature 01)
+- **Status:** active (approved 2026-10-15, Feature 01)
 - **Date:** 2026-10-15
 - **Decision:** `docker-compose.yml` provides PostgreSQL 16 for local work and CI. Each
   feature worktree uses its own database copy
