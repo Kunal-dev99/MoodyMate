@@ -111,7 +111,7 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
 
 ## D-09 Authentication modes
 
-- **Status:** active (approved 2026-10-15, Feature 01)
+- **Status:** active (approved 2026-10-15, Feature 01); **amended by D-13**
 - **Date:** 2026-10-15
 - **Decision:** Setting `AUTH_MODE=oidc|dev`. `oidc` validates JWTs against the
   configured issuer/JWKS. `dev` validates JWTs signed by a local dev key, and is refused
@@ -149,6 +149,26 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
   (`createdb -T moodymate_dev moodymate_<feature>`) per D-03. Object storage and a job
   broker are not added until a feature needs them.
 - **Reason:** hosting is undecided (Arch §18). Keep the dependency footprint minimal.
+
+## D-13 Fail-safe authentication configuration (amends D-09)
+
+- **Status:** active (approved by the user 2026-10-15, Phase 2 hardening)
+- **Date:** 2026-10-15
+- **Context:** the independent security review of PR #3 found that a deployment which
+  forgot `ENV` started as `local` with `AUTH_MODE=dev`. Anyone could then mint an admin
+  token through `POST /api/v1/dev/sessions`.
+- **Decision:**
+  1. `ENV` has no default: startup fails if it is not set. `AUTH_MODE=dev` is allowed only
+     when `ENV` is `local` or `test`. This removes D-09's allowance for dev mode in staging.
+  2. Outside local/test, OIDC requires `https://` for the issuer, a configured JWKS URL and
+     any `jwks_uri` obtained by discovery.
+  3. Startup is refused when `OIDC_AUDIENCE` equals `OIDC_CLIENT_ID`, so ID tokens issued to
+     the frontend cannot be replayed as API access tokens.
+- **Consequences:** every environment must set `ENV` (see `backend/.env.example`), and
+  staging must use a real or test OIDC provider. The backend runs as a factory
+  (`uvicorn app.main:create_app --factory`), so importing the module never builds an app
+  from implicit settings.
+- **Reversal:** restore the defaults in `app/core/config.py`. Not recommended.
 
 ---
 

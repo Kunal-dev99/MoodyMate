@@ -22,4 +22,4 @@ Set-Location $Backend
 $Python = Join-Path $Backend ".venv\Scripts\python.exe"
 if (-not (Test-Path $Python)) { Write-Error "venv missing: create it with 'python -m venv backend\.venv'"; exit 1 }
 
-& $Python -m uvicorn app.main:app --reload --host 127.0.0.1 --port $Port
+& $Python -m uvicorn app.main:create_app --factory --reload --host 127.0.0.1 --port $Port

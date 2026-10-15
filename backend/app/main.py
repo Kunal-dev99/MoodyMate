@@ -1,4 +1,8 @@
-"""Application factory."""
+"""Application factory.
+
+Run with `uvicorn app.main:create_app --factory`. There is deliberately no module-level
+`app`: importing this module must never build an app from implicit settings (D-13).
+"""
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -53,6 +57,3 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         expose_headers=[HEADER],
     )
     return app
-
-
-app = create_app()

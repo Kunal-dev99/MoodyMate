@@ -200,20 +200,16 @@ def test_unknown_dev_role_is_422(api: TestClient) -> None:
     assert r.json()["code"] == "unknown_role"
 
 
-def test_dev_sessions_unavailable_outside_local_and_test(db: str) -> None:
-    s = Settings(ENV="staging", DATABASE_URL=db, AUTH_MODE="dev", AUTH_DEV_SECRET="s" * 40)
-    with TestClient(create_app(s)) as c:
-        assert c.post("/api/v1/dev/sessions", json={"role": "auditor"}).status_code == 404
+def test_dev_mode_refused_outside_local_and_test() -> None:
+    # D-13 supersedes D-09's staging allowance: dev auth exists only in local/test.
+    for env in ("staging", "production"):
+        with pytest.raises(ValueError, match=f"AUTH_MODE=dev is not allowed when ENV={env}"):
+            Settings(ENV=env, AUTH_MODE="dev", AUTH_DEV_SECRET="s" * 40)
 
 
 def test_dev_mode_refused_in_production() -> None:
     with pytest.raises(ValueError, match="AUTH_MODE=dev is not allowed"):
         Settings(ENV="production", AUTH_MODE="dev")
-
-
-def test_default_dev_secret_refused_outside_local_and_test() -> None:
-    with pytest.raises(ValueError, match="AUTH_DEV_SECRET must be set"):
-        Settings(ENV="staging", AUTH_MODE="dev")
 
 
 def test_oidc_mode_requires_issuer_audience_client() -> None:

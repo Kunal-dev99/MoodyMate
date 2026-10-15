@@ -11,11 +11,12 @@ The only code that touches the DB session for this module.
 import uuid
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.repository import ScopedRepository
 from app.governance.constants import UserStatus
-from app.governance.models import RoleModel, UserAccount, UserRole
+from app.governance.models import RoleModel, Tenant, UserAccount, UserRole
 
 
 class IdentityRepository:
@@ -39,19 +40,34 @@ class IdentityRepository:
         display_name: str,
         actor: str,
     ) -> UserAccount:
-        user = UserAccount(
-            tenant_id=tenant_id,
-            idp_issuer=issuer,
-            idp_subject=subject,
-            email=email,
-            display_name=display_name,
-            status=UserStatus.ACTIVE,
-            created_by=actor,
+        """Create the account, or return the existing one if a concurrent request won.
+
+        A user's first page load sends several requests at once, and each may try to
+        provision the same identity. ON CONFLICT makes that race harmless.
+        """
+        await self.session.execute(
+            insert(UserAccount)
+            .values(
+                id=uuid.uuid4(),
+                tenant_id=tenant_id,
+                idp_issuer=issuer,
+                idp_subject=subject,
+                email=email,
+                display_name=display_name,
+                status=UserStatus.ACTIVE,
+                created_by=actor,
+            )
+            .on_conflict_do_nothing(index_elements=["idp_issuer", "idp_subject"])
         )
-        self.session.add(user)
-        await self.session.flush()
-        await self.session.refresh(user, ["roles"])
+        user = await self.find_user(issuer, subject)
+        assert user is not None  # inserted now or by the concurrent winner
         return user
+
+    async def tenant_status(self, tenant_id: uuid.UUID) -> str | None:
+        status: str | None = await self.session.scalar(
+            select(Tenant.status).where(Tenant.id == tenant_id)
+        )
+        return status
 
     async def list_roles(self) -> list[RoleModel]:
         result = await self.session.execute(select(RoleModel).order_by(RoleModel.code))

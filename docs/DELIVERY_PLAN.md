@@ -12,7 +12,7 @@ Conventions (see proposed D-08):
 
 ## Feature 01 — WS1 Data Governance, Security & Platform Foundation
 
-Kickoff: `docs/prompts/kickoffs/01-ws1-foundation.md` · Status: **APPROVED 2026-10-15 — Phase 1 merged (PR #2); Phase 2 built — verification pending**
+Kickoff: `docs/prompts/kickoffs/01-ws1-foundation.md` · Status: **APPROVED 2026-10-15 — Phase 1 merged (PR #2); Phase 2 merged (PR #3); Phase 2 hardening in progress (BE-2.7…2.12, FE-2.3…2.4)**
 
 Constraining decisions: D-01…D-12 (all active).
 
@@ -89,43 +89,76 @@ reverting the merge; no data exists yet. The AI flag ships `false`.
 Goal: every request has a principal; nothing is permitted unless a permission says so;
 row scope is applied in repositories.
 
-- [ ] **BE-2.1** Migration + models: `tenant`, `user_account` (IdP subject, no password),
+- [x] **BE-2.1** Migration + models: `tenant`, `user_account` (IdP subject, no password),
   `role`, `permission`, `user_role`, `role_permission`, with a tested downgrade.
   - *Done-when:* the migration round trip passes, and model tests create and read each
-    entity.
-- [ ] **BE-2.2** Seed data migration (D-11): one tenant; roles `platform_admin`,
+    entity. — ✔ verified: backend/app/db/migrations/versions/0002_identity_tables.py creates all 6 tables (:24-95) with a full downgrade (:99-110), and the upgrade has no DROP (`test_no_drop_in_forward_migrations` PASSED). The round trip passes: `test_migrations.py::test_round_trip_upgrade_downgrade_upgrade` is PASSED in checks.txt, and checks.txt:91-117 shows base↔head twice on the DB copy and on the postgres:16 compose container. `test_identity_models.py::test_create_and_read_each_identity_entity` creates all 6 entities and reads each one back, including the user→role→permission relationships (:51-62; PASSED). Models: backend/app/governance/models.py:18-95. Caveat: checks.txt was captured at 13:39:42Z on the uncommitted tree, 2 minutes before commit 9b361b8 (13:41:38Z per the worktree reflog). I had no shell, so I could not diff the two.
+- [x] **BE-2.2** Seed data migration (D-11): one tenant; roles `platform_admin`,
   `data_steward`, `risk_analyst`, `approver`, `auditor`; WS1 permissions `schema:read`,
   `schema:propose`, `schema:approve`, `audit:read`, `admin:read`. Its downgrade deletes
   only seed rows tagged by the migration (documented exception under D-01: seed data,
   not user data).
   - *Done-when:* after upgrade, the role→permission matrix query matches the table in
-    this plan; after downgrade, the tables are empty.
-- [ ] **BE-2.3** `core/auth.py` principal resolution behind `AUTH_MODE` (D-09):
+    this plan; after downgrade, the tables are empty. — ✔ verified: I compared the plan's matrix table (below) by hand against the frozen `MATRIX` in backend/app/db/migrations/versions/0003_identity_seed.py:49-55 and against `ROLE_PERMISSIONS` in backend/app/governance/constants.py:40-48. All three are identical, and `platform_admin` has no `schema:approve`. `test_identity_seed.py::test_seeded_matrix_matches_plan` runs the SQL join and compares it with `ROLE_PERMISSIONS`. `::test_downgrade_removes_seed_and_upgrade_restores_it` asserts that all 6 identity tables count 0 at revision 0002. Both are PASSED in checks.txt. The container query at checks.txt:118-123 prints the same matrix. The downgrade deletes only rows tagged `seeded_by` (0003:138-141). Its FK refusal when user data references a seeded role is tested (`::test_seed_downgrade_refuses_to_delete_user_data`) and was also seen for real at checks.txt:85-87.
+- [x] **BE-2.3** `core/auth.py` principal resolution behind `AUTH_MODE` (D-09):
   `oidc` validates a JWT against the issuer's JWKS; `dev` validates JWTs signed by a
   local dev key. No token or an invalid token returns 401. Unknown users are not
   auto-provisioned outside `ENV=local`.
   - *Done-when:* tests cover a valid token, an expired token, a wrong issuer, no token,
-    and `dev` mode being rejected in production.
-- [ ] **BE-2.4** `require_permission(...)` dependency, fail closed (D-04), plus a route
+    and `dev` mode being rejected in production. — ✔ verified: test_auth.py `test_valid_oidc_token_resolves_principal`, `test_expired_token_is_401` (`token_expired`), `test_wrong_issuer_is_401`, `test_no_token_is_401_with_challenge` (401 + `WWW-Authenticate: Bearer`) and `test_dev_mode_refused_in_production` are all PASSED in checks.txt. The app-start refusal is in test_config.py `test_app_refuses_to_start_with_dev_auth_in_production`. Impl: backend/app/core/tokens.py:56-73 (exp/iss/sub/aud required, issuer and audience checked) and :133-142 (asymmetric algorithms only; HS256 confusion and `alg=none` are tested). auth.py:49-72 maps errors to 401. Unknown users get 403 outside local (governance/service.py:47-54, `test_unknown_user_is_not_provisioned_outside_local`). Caveat: the unit tests inject `key_resolver`, so the real JWKS discovery and fetch path (tokens.py:116-129) is exercised only by browser-oidc-mode.json, where the backend accepted an RS256 token from the mock IdP. This Done-when does not cover security defects; those are reported separately in the architect's Phase 2 security review (fail-open ENV/AUTH_MODE defaults, an http issuer and an unvalidated jwks_uri, JWKS refetch on an unknown kid).
+- [x] **BE-2.4** `require_permission(...)` dependency, fail closed (D-04), plus a route
   registry test that fails if any `/api/v1` route other than `health` lacks a declared
   permission.
   - *Done-when:* the registry test fails when a deliberately unguarded test route is
-    added, and passes otherwise.
-- [ ] **BE-2.5** `ScopedRepository` base: every query is filtered by
+    added, and passes otherwise. — ✔ verified: test_route_registry.py `test_registry_catches_an_unguarded_route` adds `GET /api/v1/_unguarded` and asserts that `undeclared_routes` reports exactly that route. `test_every_api_route_declares_a_permission` asserts `[]` for the real app with the dev routes mounted. Both are PASSED in checks.txt. Runtime fail-closed: an app-level dependency (backend/app/main.py:34) runs `enforce_declared_permission` (backend/app/core/auth.py:124-135), and `test_unguarded_route_is_denied_at_runtime` (PASSED) gets 403 with no data. `require_permission` is at auth.py:78-91, and `PUBLIC_PATHS` is pinned by `test_public_paths_are_exactly_the_reviewed_set`. Limit: only `APIRoute`s are checked; mounts and websocket routes are not (see the architect's Phase 2 security review).
+- [x] **BE-2.5** `ScopedRepository` base: every query is filtered by
   `tenant_id = principal.tenant_id` (and further scopes when added); no repository
   method accepts a tenant from request input.
   - *Done-when:* a test with two tenants proves cross-tenant reads return nothing, even
-    with a crafted ID in the URL.
-- [ ] **BE-2.6** `GET /api/v1/me` and `GET /api/v1/me/permissions`.
-  - *Done-when:* tests for each seeded role return exactly that role's permissions.
-- [ ] **FE-2.1** Session handling for both `AUTH_MODE`s (an OIDC redirect flow, and a dev
+    with a crafted ID in the URL. — ✔ verified: test_scoping.py `test_cross_tenant_reads_return_nothing_even_with_crafted_id` sets up a second tenant with a user. That user is absent from `GET /users`, and `GET /users/{foreign-id}` returns 404 with the same code as a random ID. `::test_tenant_parameters_in_the_request_are_ignored` sends the tenant as a query param and in `X-Tenant-ID`. `::test_repository_scope_filters_at_the_query` tests the repository directly. All are PASSED in checks.txt. Impl: backend/app/db/repository.py:32-46 filters every query by `scope.tenant_id`; the constructor takes only a `DataScope`, which comes from `Principal.scope` (backend/app/core/principal.py:20-23); governance/service.py:95-96 wires it.
+- [x] **BE-2.6** `GET /api/v1/me` and `GET /api/v1/me/permissions`.
+  - *Done-when:* tests for each seeded role return exactly that role's permissions. — ✔ verified: `test_me.py::test_me_and_permissions_per_role[platform_admin|data_steward|risk_analyst|approver|auditor]` (5× PASSED in checks.txt) asserts that `/me` roles == [role], that tenant == the default tenant, and that `/me/permissions` equals the sorted `ROLE_PERMISSIONS[role]` exactly, which I checked against the plan matrix. Both endpoints require `authenticated()` (backend/app/governance/router.py:82-97); `test_me_requires_authentication` (PASSED) gets 401. Permissions are derived server-side from the DB (governance/service.py:20-30).
+- [x] **FE-2.1** Session handling for both `AUTH_MODE`s (an OIDC redirect flow, and a dev
   user picker shown only when the backend reports `AUTH_MODE=dev`).
   - *Done-when:* manual test notes show sign-in as each seeded role in dev mode; the
-    picker doesn't render when the mode is `oidc`.
+    picker doesn't render when the mode is `oidc`. — ✔ verified: docs/evidence/phase-2/p2-dev.mjs:8-14,30-33 signs in by clicking each of the 5 persona buttons on the real picker; it does not inject tokens. browser-dev-mode.json shows each role landing with `shown_matches_backend: true`, and screenshot 01 shows the 5 personas. In oidc mode, p2-oidc.mjs:13-16 records `dev_picker_rendered: 0`, and screenshot 06 shows only "Sign in with SSO". The full code+PKCE (S256) round trip reached /dashboard. The picker is gated on `config.mode === 'dev'` (frontend/src/app/login/SignIn.tsx:100) and the SSO button on `'oidc'` (:85). Token handling: frontend/src/lib/session.ts, src/lib/oidc.ts, src/app/auth/callback/page.tsx; 401 → sign-in at src/api/client.ts:39-43 (tampered-token run → /login?next=). The "manual test notes" are scripted Playwright runs with recorded output, which I accept as stronger than manual notes. Follow-ups are in the architect's Phase 2 security review: the `next` open-redirect bypass and token storage.
 - [ ] **FE-2.2** Permission-aware nav and actions driven by `GET /me/permissions`; a 403
   page and an access-denied inline state.
   - *Done-when:* `auditor` sees no Propose button; a direct URL to a forbidden page shows
-    the 403 state, and the backend also returns 403 (cosmetic hiding is not relied on).
+    the 403 state, and the backend also returns 403 (cosmetic hiding is not relied on). — ⚠ open: the second half is verified. Auditor → /access/users renders the 403 state (frontend/src/components/auth/Forbidden.tsx) with the backend's own 403 and correlation ID (browser-dev-mode.json `auditor_direct_url_users.backend_status_seen_by_browser: 403`, screenshot 04). The page always sends the request and renders on the server's 403 (src/app/(platform)/access/users/page.tsx:26-43). The nav hides items per permission (AppShell.tsx:19; `nav` per role in the JSON). The first half is not demonstrated. No Propose button exists anywhere in frontend/src (my grep finds `propose` only in the generated Permission enum). "Auditor sees no Propose button" is therefore true only because there is no button, and that proves nothing about action gating, which is what the criterion tests. The gating mechanism (`<RequirePermission fallback={null}>`) is shown only on the admin-only Users section. Missing: a Propose action gated on `schema:propose`, and evidence that auditor does not see it while data_steward does. Re-verify when FE-5.1 lands, or add that check to FE-5.1's Done-when.
+
+**Phase 2 hardening.** These were added 2026-10-15 after the independent security review of PR #3 and approved by the user. Governed by D-13.
+
+- [ ] **BE-2.7** Fail-safe configuration: `ENV` has no default (startup fails if unset), and
+  `AUTH_MODE=dev` is allowed only when `ENV` is `local` or `test` (D-13 §1).
+  - *Done-when:* tests prove startup is refused with `ENV` unset, and with `AUTH_MODE=dev`
+    in `staging` and in `production`.
+- [ ] **BE-2.8** OIDC transport: `https://` is required for `OIDC_ISSUER`, `OIDC_JWKS_URL` and a
+  discovered `jwks_uri` outside local/test (D-13 §2).
+  - *Done-when:* tests prove an `http://` issuer is refused in staging, and an `http://`
+    `jwks_uri` from discovery is rejected when insecure transport is not allowed.
+- [ ] **BE-2.9** Token-type confusion guard: startup is refused when
+  `OIDC_AUDIENCE == OIDC_CLIENT_ID` (D-13 §3).
+  - *Done-when:* a test proves the refusal.
+- [ ] **BE-2.10** JWKS resilience: an unknown `kid` refreshes keys at most once per interval;
+  provider or discovery failures return 503 `auth_provider_unavailable` (retryable); the
+  key loader is thread-safe.
+  - *Done-when:* a test with N tokens carrying random `kid`s shows ≤ 1 key fetch per
+    interval; a test with the provider unreachable shows 503 with the envelope.
+- [ ] **BE-2.11** Suspended tenants: users of a non-ACTIVE tenant are denied with 403
+  `tenant_suspended`.
+  - *Done-when:* a test proves an active user in a SUSPENDED tenant gets 403.
+- [ ] **BE-2.12** Guard coverage: the route registry reports any mount or websocket route under
+  `/api/v1` as undeclared.
+  - *Done-when:* a test adds a mount and a websocket route under `/api/v1` and the registry
+    lists both.
+- [ ] **FE-2.3** Same-origin redirects only: `next` (sign-in page) and the OIDC callback state
+  accept only same-origin paths.
+  - *Done-when:* unit tests reject `//x`, `/\\x`, `/%5Cx`, absolute and `javascript:` URLs;
+    a browser run with `next=/%5Cevil.example` lands on `/dashboard`.
+- [ ] **FE-2.4** A 401 clears the session only when it answers the current token.
+  - *Done-when:* a unit test proves a late 401 for an old token leaves a newer token in place,
+    and a 401 for the current token clears it.
 
 *Reversibility:* migration downgrades remove the identity tables (no user data yet).
 `AUTH_MODE` switches the identity source without code change.

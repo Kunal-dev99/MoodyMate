@@ -7,6 +7,8 @@
 """
 
 import json
+import threading
+import time
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -14,7 +16,6 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
 import jwt
-from jwt import PyJWKClient
 
 from app.core.config import Settings
 from app.governance.constants import DEV_AUDIENCE, DEV_ISSUER
@@ -98,6 +99,107 @@ class DevTokens:
 
 
 KeyResolver = Callable[[str], Any]
+JsonFetcher = Callable[[str], dict[str, Any]]
+
+
+class ProviderUnavailable(Exception):
+    """The identity provider's discovery document or signing keys cannot be obtained."""
+
+
+def _fetch_json(url: str) -> dict[str, Any]:
+    try:
+        with urllib.request.urlopen(url, timeout=5) as resp:  # noqa: S310 - scheme checked by caller
+            data = json.load(resp)
+    except (OSError, ValueError) as exc:
+        raise ProviderUnavailable(f"fetch failed: {type(exc).__name__}") from exc
+    if not isinstance(data, dict):
+        raise ProviderUnavailable("unexpected response shape")
+    return data
+
+
+class JwksKeys:
+    """Signing keys from the provider's JWKS, fetched lazily and refreshed sparingly (BE-2.10).
+
+    * Network access happens at most once per `min_refresh_seconds`, whether the trigger is
+      an unknown `kid` (a forged token cannot force a fetch per request) or a failed fetch
+      (a provider outage is not hammered).
+    * All state is guarded by a lock, so concurrent worker threads share one fetch.
+    * URLs must be https unless `allow_http` (local/test only, D-13).
+    """
+
+    def __init__(
+        self,
+        issuer: str,
+        jwks_url: str | None = None,
+        *,
+        allow_http: bool = False,
+        min_refresh_seconds: float = 60.0,
+        fetch: JsonFetcher = _fetch_json,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._issuer = issuer
+        self._jwks_url = jwks_url
+        self._allow_http = allow_http
+        self._min_refresh = min_refresh_seconds
+        self._fetch = fetch
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._keys: dict[str | None, Any] = {}
+        self._last_attempt: float | None = None
+        self.fetches = 0  # network round trips, for tests and diagnostics
+
+    def _checked(self, url: str) -> str:
+        if url.startswith("https://") or (self._allow_http and url.startswith("http://")):
+            return url
+        raise ProviderUnavailable("identity provider URL must use https")
+
+    def _refresh(self) -> None:
+        self._last_attempt = self._clock()
+        if self._jwks_url is None:
+            self.fetches += 1
+            doc = self._fetch(
+                self._checked(self._issuer.rstrip("/") + "/.well-known/openid-configuration")
+            )
+            uri = doc.get("jwks_uri")
+            if not isinstance(uri, str):
+                raise ProviderUnavailable("discovery document has no jwks_uri")
+            self._jwks_url = uri
+        self.fetches += 1
+        data = self._fetch(self._checked(self._jwks_url))
+        try:
+            jwk_set = jwt.PyJWKSet.from_dict(data)
+        except jwt.PyJWTError as exc:
+            raise ProviderUnavailable(f"unusable JWKS: {type(exc).__name__}") from exc
+        self._keys = {k.key_id: k.key for k in jwk_set.keys}
+
+    def _lookup(self, kid: str | None) -> Any:
+        if kid is None:
+            # A token without kid is acceptable only when the provider has exactly one key.
+            return next(iter(self._keys.values())) if len(self._keys) == 1 else None
+        return self._keys.get(kid)
+
+    def __call__(self, token: str) -> Any:
+        try:
+            kid = jwt.get_unverified_header(token).get("kid")
+        except jwt.PyJWTError as exc:
+            raise InvalidToken(type(exc).__name__) from exc
+        with self._lock:
+            key = self._lookup(kid)
+            if key is not None:
+                return key
+            may_fetch = (
+                self._last_attempt is None
+                or self._clock() - self._last_attempt >= self._min_refresh
+            )
+            if not may_fetch:
+                if not self._keys:
+                    raise ProviderUnavailable("identity provider unavailable (backing off)")
+                raise InvalidToken("unknown signing key")
+            self._refresh()  # ProviderUnavailable propagates
+            key = self._lookup(kid)
+            if key is None:
+                raise InvalidToken("unknown signing key")
+            return key
 
 
 class OidcTokens:
@@ -107,28 +209,13 @@ class OidcTokens:
         audience: str,
         jwks_url: str | None = None,
         key_resolver: KeyResolver | None = None,
+        allow_http: bool = False,
     ) -> None:
         self.issuer = issuer
         self.audience = audience
-        self._jwks_url = jwks_url
-        self._resolver = key_resolver
-
-    def _discover_jwks_url(self) -> str:
-        url = self.issuer.rstrip("/") + "/.well-known/openid-configuration"
-        if not url.startswith(("https://", "http://")):
-            raise InvalidToken("issuer is not an http(s) URL")
-        with urllib.request.urlopen(url, timeout=5) as resp:  # noqa: S310 - scheme checked
-            jwks_uri = json.load(resp)["jwks_uri"]
-        return str(jwks_uri)
-
-    def _key_for(self, token: str) -> Any:
-        if self._resolver is None:
-            client = PyJWKClient(self._jwks_url or self._discover_jwks_url(), cache_keys=True)
-            self._resolver = lambda t: client.get_signing_key_from_jwt(t).key
-        try:
-            return self._resolver(token)
-        except jwt.PyJWTError as exc:
-            raise InvalidToken(type(exc).__name__) from exc
+        self._resolver: KeyResolver = key_resolver or JwksKeys(
+            issuer, jwks_url, allow_http=allow_http
+        )
 
     def verify(self, token: str) -> VerifiedIdentity:
         try:
@@ -137,13 +224,17 @@ class OidcTokens:
             raise InvalidToken(type(exc).__name__) from exc
         if header.get("alg") not in ASYMMETRIC_ALGORITHMS:
             raise InvalidToken("algorithm not allowed")
-        return _decode(
-            token, self._key_for(token), ASYMMETRIC_ALGORITHMS, self.issuer, self.audience
-        )
+        key = self._resolver(token)  # InvalidToken / ProviderUnavailable propagate
+        return _decode(token, key, ASYMMETRIC_ALGORITHMS, self.issuer, self.audience)
 
 
 def build_verifier(settings: Settings) -> TokenVerifier:
     if settings.AUTH_MODE == "oidc":
         assert settings.OIDC_ISSUER and settings.OIDC_AUDIENCE  # enforced by Settings
-        return OidcTokens(settings.OIDC_ISSUER, settings.OIDC_AUDIENCE, settings.OIDC_JWKS_URL)
+        return OidcTokens(
+            settings.OIDC_ISSUER,
+            settings.OIDC_AUDIENCE,
+            settings.OIDC_JWKS_URL,
+            allow_http=settings.allow_insecure_oidc,
+        )
     return DevTokens(settings.AUTH_DEV_SECRET, settings.AUTH_DEV_TOKEN_TTL_MINUTES)

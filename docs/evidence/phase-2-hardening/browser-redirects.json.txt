@@ -1,0 +1,49 @@
+# Pre-fix reproduction (old check from PR #3):
+{"raw":"/\\evil.example","old_check_returned":"/\\evil.example","browser_resolves_to":"http://evil.example/"}
+{"raw":"/\t/evil.example","old_check_returned":"/\t/evil.example","browser_resolves_to":"http://evil.example/"}
+
+# Post-fix browser run:
+[
+  {
+    "next": "/\\evil.example",
+    "landed": "http://localhost:3000/dashboard",
+    "stayed_on_origin": true,
+    "external_requests": []
+  },
+  {
+    "next": "/\t/evil.example",
+    "landed": "http://localhost:3000/dashboard",
+    "stayed_on_origin": true,
+    "external_requests": []
+  },
+  {
+    "next": "/%5Cevil.example",
+    "landed": "http://localhost:3000/dashboard",
+    "stayed_on_origin": true,
+    "external_requests": []
+  },
+  {
+    "next": "//evil.example",
+    "landed": "http://localhost:3000/dashboard",
+    "stayed_on_origin": true,
+    "external_requests": []
+  },
+  {
+    "next": "/%2F%2Fevil.example",
+    "landed": "http://localhost:3000/dashboard",
+    "stayed_on_origin": true,
+    "external_requests": []
+  },
+  {
+    "next": "https://evil.example/",
+    "landed": "http://localhost:3000/dashboard",
+    "stayed_on_origin": true,
+    "external_requests": []
+  },
+  {
+    "next": "/access",
+    "landed": "http://localhost:3000/access",
+    "stayed_on_origin": true,
+    "external_requests": []
+  }
+]

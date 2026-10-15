@@ -11,4 +11,4 @@ if command -v lsof >/dev/null 2>&1; then
   [ -n "$pids" ] && { echo "Port $PORT held by $pids - stopping"; kill $pids || true; sleep 1; }
 fi
 
-exec .venv/bin/python -m uvicorn app.main:app --reload --host 127.0.0.1 --port "$PORT"
+exec .venv/bin/python -m uvicorn app.main:create_app --factory --reload --host 127.0.0.1 --port "$PORT"
