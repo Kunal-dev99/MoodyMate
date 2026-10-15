@@ -117,6 +117,19 @@ def declared_permission(route: APIRoute) -> str | None:
     return None
 
 
+def _template_may_match_api(path: str) -> bool:
+    """Could a route with this path template match a request under /api/v1 (BE-2.16)?"""
+    if path.startswith("/api/v1"):
+        return True
+    segments = path.strip("/").split("/")
+    for expected, seg in zip(("api", "v1"), segments, strict=False):
+        if seg.startswith("{"):
+            return True  # a parameter here can match the expected segment
+        if seg != expected:
+            return False
+    return False
+
+
 def _may_serve_api(route: BaseRoute, path: str) -> bool:
     """Could this non-APIRoute route serve requests under /api/v1 (BE-2.14)?"""
     if isinstance(route, Host):
@@ -142,7 +155,7 @@ def undeclared_routes(app: FastAPI) -> list[str]:
         if path in PUBLIC_PATHS:
             continue
         if isinstance(route, APIRoute):
-            if path.startswith("/api/v1") and declared_permission(route) is None:
+            if _template_may_match_api(path) and declared_permission(route) is None:
                 found.append(f"{','.join(sorted(route.methods))} {path}")
         elif _may_serve_api(route, path):
             found.append(f"{type(route).__name__} {path or '/'}")
@@ -153,9 +166,11 @@ async def enforce_declared_permission(request: Request) -> None:
     """App-level guard: an /api/v1 route that forgot to declare a permission is denied,
     even if it was attached to the app directly rather than through the API router."""
     route = request.scope.get("route")
+    # Decide on the REQUEST path: a catch-all template ("/{full_path:path}") can serve
+    # /api/v1/* without its own path starting with /api/v1 (BE-2.16).
     if (
         not isinstance(route, APIRoute)
-        or not route.path.startswith("/api/v1")
+        or not request.url.path.startswith("/api/v1")
         or route.path in PUBLIC_PATHS
     ):
         return

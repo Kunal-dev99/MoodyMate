@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
-import { LogOut, ShieldAlert } from 'lucide-react'
+import { LogOut, RefreshCw, ShieldAlert } from 'lucide-react'
 import { api, call, ApiError, type Schemas } from '@/api/client'
 import { EmptyState } from '@/components/common/EmptyState'
 import { LoadingBlock } from '@/components/common/LoadingBlock'
@@ -47,6 +47,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const clear = useSession((s) => s.clear)
   const [hydrated, setHydrated] = useState(false)
   const [state, setState] = useState<State>({ kind: 'loading' })
+  // Bumped by "Try again" to re-run the identity load without touching the token (FE-2.5).
+  const [attempt, setAttempt] = useState(0)
   // Read through a ref so navigating between pages does not refetch identity.
   const pathnameRef = useRef(pathname)
   pathnameRef.current = pathname
@@ -84,7 +86,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [hydrated, token, router])
+  }, [hydrated, token, router, attempt])
 
   const signOut = useCallback(async () => {
     const config = state.kind === 'ready' ? state.authConfig : null
@@ -113,13 +115,29 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       <div className="mx-auto mt-24 max-w-lg px-6">
         <EmptyState
           icon={ShieldAlert}
-          title={state.error.envelope.code === 'account_not_provisioned' ? 'Account not set up' : 'Access blocked'}
+          title={
+            state.error.envelope.code === 'account_not_provisioned'
+              ? 'Account not set up'
+              : state.error.envelope.retryable
+                ? 'Temporarily unavailable'
+                : 'Access blocked'
+          }
           description={`${state.error.envelope.message}${state.error.correlationId ? ` Correlation ID: ${state.error.correlationId}` : ''}`}
           action={
-            <Button variant="outline" onClick={() => void signOut()}>
-              <LogOut className="mr-2 h-4 w-4" />
-              Sign out
-            </Button>
+            <div className="flex gap-2">
+              {state.error.envelope.retryable && (
+                // A retryable failure (e.g. 503 during a key rotation) keeps the session;
+                // retrying reloads identity with the same token (FE-2.5).
+                <Button onClick={() => setAttempt((n) => n + 1)}>
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Try again
+                </Button>
+              )}
+              <Button variant="outline" onClick={() => void signOut()}>
+                <LogOut className="mr-2 h-4 w-4" />
+                Sign out
+              </Button>
+            </div>
           }
         />
       </div>
