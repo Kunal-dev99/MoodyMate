@@ -33,6 +33,6 @@ def test_production_with_oidc_is_allowed() -> None:
 
 
 def test_safe_defaults() -> None:
-    s = Settings()
+    s = Settings(ENV="local")
     assert s.AI_ENABLED is False
     assert s.DATA_CLASS == "synthetic"

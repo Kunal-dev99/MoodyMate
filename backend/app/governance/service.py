@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import ApiError
 from app.core.principal import Principal
 from app.core.tokens import DevTokens, VerifiedIdentity
-from app.governance.constants import DEFAULT_TENANT_ID, DEV_ISSUER, UserStatus
+from app.governance.constants import DEFAULT_TENANT_ID, DEV_ISSUER, TenantStatus, UserStatus
 from app.governance.models import RoleModel, UserAccount
 from app.governance.repository import IdentityRepository, UserRepository
 
@@ -65,6 +65,8 @@ class IdentityService:
             await self.session.commit()
         if user.status != UserStatus.ACTIVE:
             raise ApiError(403, "account_disabled", "Your account is disabled.")
+        if await self.repo.tenant_status(user.tenant_id) != TenantStatus.ACTIVE:
+            raise ApiError(403, "tenant_suspended", "Your organisation's access is suspended.")
         return _principal(user)
 
     async def dev_personas(self) -> list[RoleModel]:

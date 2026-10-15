@@ -29,24 +29,29 @@ const correlation: Middleware = {
   },
 }
 
-/** Attaches the bearer token; a 401 ends the session so the app returns to sign-in. */
-const auth: Middleware = {
+/**
+ * Attaches the bearer token. A 401 ends the session so the app returns to sign-in, but
+ * only when it answers the token that is still current (FE-2.4): a slow request sent
+ * with an old token must not sign out a session the user has just renewed.
+ */
+export const authMiddleware: Middleware = {
   onRequest({ request }) {
     const { token } = useSession.getState()
     if (token) request.headers.set('Authorization', `Bearer ${token}`)
     return request
   },
   onResponse({ request, response }) {
-    if (response.status === 401 && request.headers.has('Authorization')) {
-      useSession.getState().clear()
-    }
+    if (response.status !== 401) return response
+    const sent = request.headers.get('Authorization')
+    const { token, clear } = useSession.getState()
+    if (token && sent === `Bearer ${token}`) clear()
     return response
   },
 }
 
 export const api = createClient<paths>({ baseUrl: API_BASE_URL })
 api.use(correlation)
-api.use(auth)
+api.use(authMiddleware)
 
 /** An error from the backend, always carrying the standard envelope (D-07). */
 export class ApiError extends Error {

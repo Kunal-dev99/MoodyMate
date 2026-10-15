@@ -12,19 +12,17 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { oidcManager, type SignInState } from '@/lib/oidc'
+import { safeRedirectPath } from '@/lib/redirect'
 import { useSession } from '@/lib/session'
 
 type AuthConfig = Schemas['AuthConfig']
 type Persona = Schemas['DevPersona']
 
-/** Only same-app relative paths are accepted as a post-sign-in target. */
-function safeNext(raw: string | null): string {
-  return raw && raw.startsWith('/') && !raw.startsWith('//') ? raw : '/dashboard'
-}
-
 export function SignIn() {
   const router = useRouter()
-  const next = safeNext(useSearchParams().get('next'))
+  const rawNext = useSearchParams().get('next')
+  // Resolved when used (client only): needs window.location.origin.
+  const next = () => safeRedirectPath(rawNext, window.location.origin)
   const setToken = useSession((s) => s.setToken)
   const [config, setConfig] = useState<AuthConfig | null>(null)
   const [personas, setPersonas] = useState<Persona[]>([])
@@ -47,7 +45,7 @@ export function SignIn() {
     try {
       const session = await call(() => api.POST('/api/v1/dev/sessions', { body: { role } }))
       setToken(session.access_token, 'dev')
-      router.replace(next)
+      router.replace(next())
     } catch (err) {
       toastApiError(err, 'Sign-in failed')
       setBusy(null)
@@ -57,7 +55,7 @@ export function SignIn() {
   const signInWithSso = async () => {
     if (!config?.oidc) return
     setBusy('sso')
-    const state: SignInState = { next }
+    const state: SignInState = { next: next() }
     await oidcManager(config.oidc).signinRedirect({ state })
   }
 

@@ -7,6 +7,7 @@ import { api, call } from '@/api/client'
 import { EmptyState } from '@/components/common/EmptyState'
 import { LoadingBlock } from '@/components/common/LoadingBlock'
 import { oidcManager, type SignInState } from '@/lib/oidc'
+import { safeRedirectPath } from '@/lib/redirect'
 import { useSession } from '@/lib/session'
 
 /** Completes the OIDC redirect (FE-2.1): exchanges the code, stores the access token. */
@@ -25,7 +26,8 @@ export default function AuthCallbackPage() {
       const user = await oidcManager(config.oidc).signinRedirectCallback()
       setToken(user.access_token, 'oidc')
       const state = user.state as SignInState | undefined
-      router.replace(state?.next ?? '/dashboard')
+      // Re-checked here: the state round-trips through the browser and the provider.
+      router.replace(safeRedirectPath(state?.next, window.location.origin))
     })().catch((err: unknown) => setFailed(err instanceof Error ? err.message : 'Sign-in failed.'))
   }, [router, setToken])
 

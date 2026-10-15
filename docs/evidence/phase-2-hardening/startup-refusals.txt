@@ -1,0 +1,11 @@
+$ (no ENV) uvicorn app.main:create_app --factory   # expect refusal
+pydantic_core._pydantic_core.ValidationError: 1 validation error for Settings
+ENV
+$ ENV=staging AUTH_MODE=dev AUTH_DEV_SECRET=do-not-print-this-secret-0123456789 uvicorn …   # expect refusal, secret not printed
+  Value error, AUTH_MODE=dev is not allowed when ENV=staging [type=value_error]
+secret not present in output
+$ ENV=staging AUTH_MODE=oidc OIDC_ISSUER=http://idp.example … uvicorn …   # expect refusal
+  Value error, OIDC_ISSUER must use https:// when ENV=staging [type=value_error]
+    For further information visit https://errors.pydantic.dev/2.14/v/value_error
+$ ENV=local AUTH_MODE=oidc OIDC_AUDIENCE=OIDC_CLIENT_ID=moodymate-web … uvicorn …   # expect refusal
+  Value error, OIDC_AUDIENCE must be the API audience, not OIDC_CLIENT_ID [type=value_error]
