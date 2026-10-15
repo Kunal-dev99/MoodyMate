@@ -245,3 +245,116 @@ def test_concurrent_first_sign_in_provisions_once(db: str) -> None:
     assert len({p.user_id for p in principals}) == 1
     count = sql(db, "SELECT count(*) AS n FROM user_account WHERE idp_subject = 'racer'")
     assert count[0]["n"] == 1
+
+
+# --- BE-2.13 JWKS: no network I/O under the lock; discovered URL checked before caching ----
+
+
+def test_cached_keys_served_while_a_refresh_is_in_flight() -> None:
+    import threading
+
+    clock = Clock()
+    release = threading.Event()
+    started = threading.Event()
+    calls = {"n": 0}
+
+    def fetch(_url: str) -> dict[str, Any]:
+        calls["n"] += 1
+        if calls["n"] > 1:  # the refresh triggered by the forged kid hangs
+            started.set()
+            release.wait(5)
+        return _jwks("k1")
+
+    keys = JwksKeys(ISSUER, "https://idp.example/jwks", fetch=fetch, clock=clock)
+    keys(_signed("k1"))  # warm the cache
+    clock.now += 61
+
+    errors: list[Exception] = []
+
+    def forged() -> None:
+        try:
+            keys(_signed("forged"))
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    t = threading.Thread(target=forged)
+    t.start()
+    assert started.wait(5)
+    # While that fetch hangs, a request with a cached kid completes immediately.
+    done = threading.Event()
+
+    def cached() -> None:
+        keys(_signed("k1"))
+        done.set()
+
+    threading.Thread(target=cached).start()
+    assert done.wait(1), "cached-key lookup blocked behind the in-flight refresh"
+    release.set()
+    t.join(5)
+    assert isinstance(errors[0], InvalidToken)
+
+
+def test_concurrent_first_requests_share_one_fetch() -> None:
+    import threading
+
+    gate = threading.Event()
+
+    def slow(_url: str) -> dict[str, Any]:
+        gate.wait(5)
+        return _jwks("k1")
+
+    keys = JwksKeys(ISSUER, "https://idp.example/jwks", fetch=slow)
+    results: list[Any] = []
+    threads = [
+        threading.Thread(target=lambda: results.append(keys(_signed("k1")))) for _ in range(6)
+    ]
+    for t in threads:
+        t.start()
+    gate.set()
+    for t in threads:
+        t.join(5)
+    assert len(results) == 6 and all(r is not None for r in results)
+    assert keys.fetches == 1
+
+
+def test_unsafe_discovered_jwks_uri_is_not_remembered() -> None:
+    clock = Clock()
+    published = {"jwks_uri": "http://idp.example/jwks"}
+
+    def fetch(url: str) -> dict[str, Any]:
+        if url.endswith("openid-configuration"):
+            return dict(published)
+        return _jwks("k1")
+
+    keys = JwksKeys("https://idp.example", fetch=fetch, clock=clock)
+    with pytest.raises(ProviderUnavailable):
+        keys(_signed("k1"))
+    published["jwks_uri"] = "https://idp.example/jwks"  # provider fixes its config
+    clock.now += 61
+    assert keys(_signed("k1")) is not None  # recovers without a restart
+
+
+# --- BE-2.14 registry: parent-path mounts ----------------------------------------------------
+
+
+@pytest.mark.parametrize("prefix", ["/api", ""])
+def test_registry_reports_parent_path_mounts(prefix: str, tmp_path: Any) -> None:
+    from fastapi import FastAPI
+
+    app = create_app(Settings(ENV="test"))
+    app.mount(prefix, FastAPI(), name="legacy")
+    assert f"Mount {prefix or '/'}" in undeclared_routes(app)
+
+
+def test_registry_ignores_unrelated_mounts(tmp_path: Any) -> None:
+    app = create_app(Settings(ENV="test"))
+    app.mount("/static", StaticFiles(directory=tmp_path), name="static")
+    assert undeclared_routes(app) == []
+
+
+# --- restored coverage ------------------------------------------------------------------------
+
+
+def test_short_dev_secret_refused() -> None:
+    with pytest.raises(ValidationError, match="at least 32 characters"):
+        Settings(ENV="local", AUTH_MODE="dev", AUTH_DEV_SECRET="too-short")

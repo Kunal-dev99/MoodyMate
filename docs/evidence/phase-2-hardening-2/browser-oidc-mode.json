@@ -1,0 +1,51 @@
+{
+  "dev_picker_rendered": 0,
+  "authorize_request": {
+    "response_type": "code",
+    "client_id": "moodymate-web",
+    "code_challenge_method": "S256",
+    "has_code_challenge": true,
+    "redirect_uri": "http://localhost:3000/auth/callback"
+  },
+  "landed_on": "http://localhost:3000/dashboard",
+  "session_source": "oidc",
+  "access_token": {
+    "alg": "RS256",
+    "iss": "http://localhost:8080/default",
+    "aud": "moodymate-api",
+    "sub": "olivia"
+  },
+  "nav_no_roles": [
+    "Overview",
+    "Ingestion Workbench",
+    "Financial Domain",
+    "Calculations",
+    "Reconciliation & Scenarios",
+    "Reports",
+    "AI Assistant",
+    "Access & Roles"
+  ],
+  "access_no_roles": "Access & Roles\nAccess & Roles\n\nYour identity and what the platform lets you do.\n\nIdentity\nName\nolivia\nEmail\n—\nSign-in mode\noidc\nTenant\n00000000-0000-4000-8000-000000000001\nRoles\nNo roles assigned. Ask a platform administrator.\nEffective permissions\n\nEnforced by the server on every request.\n\nNone.",
+  "grant": "INSERT 0 1",
+  "permissions_after_grant": [
+    "schema:propose",
+    "schema:read"
+  ],
+  "nav_after_grant": [
+    "Overview",
+    "Source & Schemas",
+    "Ingestion Workbench",
+    "Financial Domain",
+    "Calculations",
+    "Reconciliation & Scenarios",
+    "Reports",
+    "AI Assistant",
+    "Access & Roles"
+  ],
+  "idp_requests": [
+    "GET http://localhost:8080/default/.well-known/openid-configuration",
+    "GET http://localhost:8080/default/authorize",
+    "POST http://localhost:8080/default/authorize",
+    "POST http://localhost:8080/default/token"
+  ]
+}

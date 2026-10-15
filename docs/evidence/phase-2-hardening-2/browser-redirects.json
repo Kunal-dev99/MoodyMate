@@ -1,0 +1,68 @@
+[
+  {
+    "next": "/.//evil.example",
+    "landed": "http://localhost:3000/dashboard",
+    "stayed_on_origin": true,
+    "external_requests": []
+  },
+  {
+    "next": "/..//evil.example",
+    "landed": "http://localhost:3000/dashboard",
+    "stayed_on_origin": true,
+    "external_requests": []
+  },
+  {
+    "next": "/%2e//evil.example",
+    "landed": "http://localhost:3000/dashboard",
+    "stayed_on_origin": true,
+    "external_requests": []
+  },
+  {
+    "next": "/a/..//evil.example",
+    "landed": "http://localhost:3000/dashboard",
+    "stayed_on_origin": true,
+    "external_requests": []
+  },
+  {
+    "next": "/\\evil.example",
+    "landed": "http://localhost:3000/dashboard",
+    "stayed_on_origin": true,
+    "external_requests": []
+  },
+  {
+    "next": "/\t/evil.example",
+    "landed": "http://localhost:3000/dashboard",
+    "stayed_on_origin": true,
+    "external_requests": []
+  },
+  {
+    "next": "/%5Cevil.example",
+    "landed": "http://localhost:3000/dashboard",
+    "stayed_on_origin": true,
+    "external_requests": []
+  },
+  {
+    "next": "//evil.example",
+    "landed": "http://localhost:3000/dashboard",
+    "stayed_on_origin": true,
+    "external_requests": []
+  },
+  {
+    "next": "/%2F%2Fevil.example",
+    "landed": "http://localhost:3000/dashboard",
+    "stayed_on_origin": true,
+    "external_requests": []
+  },
+  {
+    "next": "https://evil.example/",
+    "landed": "http://localhost:3000/dashboard",
+    "stayed_on_origin": true,
+    "external_requests": []
+  },
+  {
+    "next": "/access",
+    "landed": "http://localhost:3000/access",
+    "stayed_on_origin": true,
+    "external_requests": []
+  }
+]

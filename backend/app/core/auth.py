@@ -18,6 +18,7 @@ from fastapi.routing import APIRoute
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
+from starlette.routing import Mount
 
 from app.core.errors import ApiError
 from app.core.principal import Principal
@@ -125,13 +126,17 @@ def undeclared_routes(app: FastAPI) -> list[str]:
     found: list[str] = []
     for route in app.routes:
         path = getattr(route, "path", "")
-        if not path.startswith("/api/v1") or path in PUBLIC_PATHS:
+        if path in PUBLIC_PATHS:
             continue
         if isinstance(route, APIRoute):
-            if declared_permission(route) is None:
+            if path.startswith("/api/v1") and declared_permission(route) is None:
                 found.append(f"{','.join(sorted(route.methods))} {path}")
-        else:
-            found.append(f"{type(route).__name__} {path}")
+        elif path.startswith("/api/v1") or (
+            isinstance(route, Mount) and "/api/v1".startswith(path.rstrip("/"))
+        ):
+            # Inside /api/v1, or a mount at a parent path ("/api", "/") that would serve
+            # /api/v1/* without the guard (BE-2.14).
+            found.append(f"{type(route).__name__} {path or '/'}")
     return sorted(found)
 
 
