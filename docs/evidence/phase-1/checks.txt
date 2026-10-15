@@ -1,0 +1,124 @@
+# Phase 1 check output — captured 2026-10-15T13:09:26Z in worktree /home/user/MoodyMate-wt/ws1-phase1 (branch feat/ws1-phase1)
+
+## Design bundle verbatim check (diff vs fp_design_system_template/)
+identical  tailwind.config.ts
+identical  postcss.config.js
+identical  components.json
+identical  src/app/globals.css
+identical  src/lib/utils.ts
+identical  src/lib/theme.ts
+identical  src/components/layout/header.tsx
+identical  src/components/layout/sidebar.tsx
+identical  src/components/layout/ThemeToggle.tsx
+identical  src/components/common/PageSection.tsx
+identical  src/components/ui/* (29 files)
+identical  public/brand/logo.png
+allowed edits (INSTRUCTIONS.md steps 3 and 6):
+20,21c20,21
+<   title: 'My App',
+<   description: 'Built with the FP Redwood Professional design system',
+---
+>   title: 'MoodyMate — Financial Risk Platform',
+>   description: 'Governed ingestion, deterministic liquidity calculations and auditable risk operations.',
+23a24
+> // Labels for this platform's routes (see src/config/navigation.ts).
+25c26,31
+<   dashboard: 'Dashboard',
+---
+>   dashboard: 'Overview',
+>   schemas: 'Source & Schemas',
+>   ingestion: 'Ingestion Workbench',
+>   domain: 'Financial Domain',
+>   calculations: 'Calculation Operations',
+>   scenarios: 'Reconciliation & Scenarios',
+27,42c33,35
+<   requirements: 'Requirements',
+<   matching: 'Matching Engine',
+<   'sql-builder': 'SQL Builder',
+<   catalogue: 'Catalogue',
+<   security: 'Security',
+<   configurations: 'Configurations',
+<   users: 'Users',
+<   settings: 'Settings',
+<   profile: 'Profile',
+<   standard: 'Standard',
+<   fp: 'FP',
+<   customer: 'Customer',
+<   unified: 'Unified',
+<   new: 'New',
+<   run: 'Run',
+<   testing: 'Testing',
+---
+>   assistant: 'AI Assistant',
+>   audit: 'Audit',
+>   access: 'Access & Roles',
+
+## Backend (backend/.venv, Python 3.12.3)
+$ ruff check . && ruff format --check .
+All checks passed!
+115 files already formatted
+$ mypy app scripts
+Success: no issues found in 115 source files
+$ REQUIRE_DB=1 pytest -v  (TEST_DATABASE_URL=…/moodymate_test)
+app/tests/test_config.py::test_production_with_dev_auth_is_refused PASSED [  4%]
+app/tests/test_config.py::test_app_refuses_to_start_with_dev_auth_in_production PASSED [  8%]
+app/tests/test_config.py::test_production_with_oidc_is_allowed PASSED    [ 12%]
+app/tests/test_config.py::test_safe_defaults PASSED                      [ 16%]
+app/tests/test_correlation.py::test_inbound_id_is_echoed PASSED          [ 20%]
+app/tests/test_correlation.py::test_id_generated_when_absent PASSED      [ 24%]
+app/tests/test_correlation.py::test_unsafe_inbound_id_is_replaced PASSED [ 28%]
+app/tests/test_correlation.py::test_each_request_gets_its_own_id PASSED  [ 32%]
+app/tests/test_errors.py::test_404_envelope PASSED                       [ 36%]
+app/tests/test_errors.py::test_422_envelope_does_not_echo_input PASSED   [ 40%]
+app/tests/test_errors.py::test_500_envelope_without_stack_trace PASSED   [ 44%]
+app/tests/test_errors.py::test_api_error_envelope PASSED                 [ 48%]
+app/tests/test_health.py::test_health_degraded_when_db_unreachable PASSED [ 52%]
+app/tests/test_health.py::test_health_ok_with_db PASSED                  [ 56%]
+app/tests/test_health.py::test_health_needs_no_auth PASSED               [ 60%]
+app/tests/test_logging.py::test_tokens_and_secrets_never_reach_logs PASSED [ 64%]
+app/tests/test_logging.py::test_args_are_redacted PASSED                 [ 68%]
+app/tests/test_logging.py::test_record_is_json_with_correlation_field PASSED [ 72%]
+app/tests/test_migrations.py::test_round_trip_upgrade_downgrade_upgrade PASSED [ 76%]
+app/tests/test_migrations.py::test_every_revision_has_a_downgrade PASSED [ 80%]
+app/tests/test_migrations.py::test_no_drop_in_forward_migrations PASSED  [ 84%]
+app/tests/test_openapi.py::test_exported_contract_is_valid_openapi_31 PASSED [ 88%]
+app/tests/test_openapi.py::test_committed_contract_matches_code PASSED   [ 92%]
+app/tests/test_openapi.py::test_error_envelope_is_in_contract PASSED     [ 96%]
+app/tests/test_structure.py::test_every_module_has_the_standard_file_set PASSED [100%]
+============================== 25 passed in 0.66s ==============================
+$ DATABASE_URL=…/moodymate_ws1_p1 alembic upgrade head && alembic downgrade base && alembic upgrade head
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running downgrade 0001 -> , Baseline: empty schema. Feature tables start in Phase 2.
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade  -> 0001, Baseline: empty schema. Feature tables start in Phase 2.
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+0001 (head)
+$ python -m scripts.export_openapi --check
+openapi.json is up to date
+$ openapi version
+3.1.0
+
+## Frontend (node v22.22.0)
+$ npm run gen:api && git diff --exit-code src/api/schema.d.ts
+🚀 ../backend/openapi.json → src/api/schema.d.ts [41.3ms]
+(schema.d.ts regenerated; compared at commit time)
+$ npm run lint
+✔ No ESLint warnings or errors
+$ npm run typecheck
+tsc --noEmit: 0 errors
+$ npm run build
+ ✓ Compiled successfully
+ ✓ Generating static pages (14/14)
+Route (app)                              Size     First Load JS
+├ ● /[workspace]                         4.47 kB         108 kB
+└ ○ /dashboard                           9.51 kB         113 kB
+$ grep fp_reporting route labels in src
+none
+$ grep hand-written payload types (aliases of generated types are allowed)
+src/app/(platform)/dashboard/PlatformHealth.tsx:13:type Health = Schemas['HealthResponse']
+src/api/client.ts:10:export type ErrorEnvelope = components['schemas']['ErrorEnvelope']
