@@ -1,0 +1,1511 @@
+################################################################
+# SOURCE: docs/MVP_Developement_plan/Risk_Platform_Five_Workstream_Document_Index.pdf
+################################################################
+                                    FINANCIAL RISK PLATFORM
+                                             Five Synchronized Frontend / Backend Workstreams
+
+
+ The project is organized into five paired workstreams. Each pair has a frontend implementation plan and a backend service/API plan. This
+ index defines the common architecture and delivery sequence.
+   The intended MVP is broad in platform coverage but lightweight in initial data volumes, integrations, UI/UX depth and
+   domain-model completeness. It should demonstrate the architecture and a few representative end-to-end capabilities without
+   pretending every financial module is production validated.
+
+ Shared four-layer architecture
+   Layer                                           Responsibility
+
+   1. Universal Platform Foundation                Data ingestion, canonical schema and metadata, data quality, identity/access, audit, versioning
+                                                   and change governance.
+
+   2. Configurable Financial Domain                Instrument definitions, mappings, rule registry, assumptions, configuration lifecycle and
+                                                   calculation-module contracts.
+
+   3. Financial Calculation Modules                Liquidity/LCR/HQLA, cash-flow modelling, maturity ladder, and extension points for ALM/IRRBB,
+                                                   collateral and capital.
+
+   4. Intelligence and Experience                  Natural-language proposals, assistant, scenarios, lineage, explainability, agentic workflows and
+                                                   evaluation.
+
+
+
+
+ Five paired workstreams
+   Pair            Scope                                              Why it exists
+
+   WS1             Data Governance, Security & Platform               Establish a trustworthy, secure, versioned foundation across all financial
+                   Foundation                                         modules.
+
+   WS2             Data Ingestion, Mapping & Data Quality             Accept uncertain source shapes safely through configurable contracts,
+                                                                      mappings and validation rather than hardcoding one client file format.
+
+   WS3             Financial Domain Model & Calculation Services      Provide reusable financial-domain abstractions and a pluggable calculation
+                                                                      service layer, then demonstrate breadth through bounded prototype modules.
+
+   WS4             Risk Operations, Scenarios, Reconciliation &       Turn calculation services into a governed operational workflow with scenario
+                   Reporting                                          comparison, traceability and evidence.
+
+   WS5             AI/GenAI, Automation & Innovation Layer            Add differentiated intelligence while keeping data access, financial calculations
+                                                                      and consequential actions governed.
+
+
+
+
+ Recommended delivery order
+ • Foundation controls are cross-cutting and begin first: agree canonical data principles, data classification, permissions, audit, schema
+ versioning and change control.
+
+ • Build the ingestion/mapping workbench against provisional synthetic source profiles because the client's real source shapes and attributes
+ are not yet confirmed.
+
+ • Implement the configurable financial framework and one bounded liquidity vertical slice; show other financial modules as registered
+ extension points until requirements and benchmark cases are available.
+
+ • Build run orchestration, scenarios, lineage and reconciliation as reusable services, not features hardcoded inside a single calculation.
+
+ • Add AI/GenAI with bounded tasks, evidence grounding, permissions, evaluation and human approval; external APIs are optional, not a hard
+ dependency.
+
+ • Before production, complete client-specific data discovery, domain-expert validation, security testing, performance/resilience, migration and
+ regulatory sign-off.
+
+
+
+ Shared synchronization contract
+ • Phase IDs P0–P6 and workstream IDs WS1–WS5 remain consistent across paired documents.
+
+ • Feature IDs are paired across FE and BE and used in tickets, tests and release notes.
+
+
+
+
+Financial Risk Platform | Workstream Index                                                                                                                Page 1
+ • All proposed endpoint names must be confirmed in one OpenAPI specification before coding against them.
+
+ • Unknown source attributes are a requirements uncertainty, not a reason to hardcode a guessed client schema. Use versioned mappings,
+ configurable extensions, profiling and review.
+
+ • Data security and governance are architecture-wide requirements, not an optional workstream that can be deferred.
+
+ • Every financial result is reproducible from pinned data and configuration versions; no AI-generated result is authoritative.
+
+
+
+
+Financial Risk Platform | Workstream Index                                                                                          Page 2
+################################################################
+# SOURCE: docs/MVP_Developement_plan/Risk_Platform_WS1_Backend_Development_Plan.pdf
+################################################################
+                             FINANCIAL RISK PLATFORM
+                                                   WS1 | Backend Development Plan
+                                         Data Governance, Security & Platform Foundation
+
+
+
+
+ Workstream objective: Establish a trustworthy, secure, versioned foundation across all financial modules.
+
+ Product intent: A broad, lightweight, extensible platform foundation. Initial data volumes and module depth are limited deliberately;
+ architecture, control points and expansion interfaces are not treated as throwaway demo code.
+   Synchronization rule: This document is paired with the opposite-side document for the same workstream. Feature IDs, phase IDs,
+   endpoint contracts, statuses and acceptance criteria must remain aligned.
+
+ Shared architecture: Layer 1 Universal Platform Foundation → Layer 2 Configurable Financial Domain → Layer 3 Financial Calculation
+ Modules → Layer 4 Intelligence and Experience. Data governance and security cross-cut all layers.
+
+
+
+
+WS1 | Backend Plan                                                                                                                       Page 1
+ 1. Scope and Feature Coverage
+  Feature ID         Feature                              Scope / implementation intent
+
+  DG-01              Canonical schema and metadata        Define schema registry, version, owner, effective date, compatibility and lifecycle.
+
+  DG-02              Identity and authorization           Enforce server-side roles/permissions and least privilege.
+
+  DG-03              Data classification and protection   Classify fields, mask sensitive values, protect secrets and prevent sensitive logging.
+
+  DG-04              Audit and provenance                 Record critical access/actions, actor, timestamp, resource and correlation ID.
+
+  DG-05              Controlled model change              Review schema/mapping changes, assess downstream impact, test and approve before
+                                                          release.
+
+  DG-06              Environment and retention controls   Separate synthetic/test data from production; define retention, deletion and backup
+                                                          assumptions.
+
+
+
+
+ 2. Phase-Wise Delivery
+ P0 | Foundation contract
+ Agree data/security assumptions, roles, classifications and architecture boundaries.
+
+ P1 | Schema and metadata registry
+ Versioned schemas, ownership, lifecycle and compatibility metadata.
+
+ P2 | Security and audit controls
+ Authentication integration, server-side authorization, audit records, masking and safe logging.
+
+ P3 | Change governance
+ Schema diff, compatibility checks, impact map, approval status and rollback/recovery plan.
+
+ P4 | Cross-platform enforcement
+ Connect other workstreams to shared identity, schema, audit and version services.
+
+ P5 | Verification
+ Test forbidden access, breaking schema changes, audit completeness and recovery paths.
+
+
+
+
+WS1 | Backend Plan                                                                                                                                 Page 2
+ 3. Implementation Responsibilities
+ Backend responsibilities
+ • Define schema registry and immutable version records with lifecycle/status metadata.
+
+ • Implement authorization middleware and permission checks on every protected endpoint.
+
+ • Define field classification and masking policy; avoid sensitive payloads in logs.
+
+ • Write append-oriented audit events for schema changes, approvals, exports and sensitive operations as required.
+
+ • Implement schema diff, compatibility classification and dependency impact service.
+
+ • Require approval for breaking changes and preserve a recovery path; never silently reinterpret historic records.
+
+ 4. Paired API / Feature Contract Matrix
+ Endpoint names are proposed contracts for alignment, not a claim that the APIs already exist. Confirm payload schemas in the shared
+ OpenAPI contract before implementation.
+
+  Shared feature pair            Capability                     Proposed API contract
+
+  FE-DG-01 / BE-DG-01            Schema catalogue/version       GET /api/v1/schemas; GET /api/v1/schemas/{schema_id}/versions; GET
+                                 compare                        /api/v1/schemas/{schema_id}/diff
+
+  FE-DG-02 / BE-DG-02            Permissions                    GET /api/v1/me/permissions; authorization enforced on protected APIs
+
+  FE-DG-03 / BE-DG-03            Audit timeline                 GET /api/v1/audit-events?resource_id={id}
+
+  FE-DG-04 / BE-DG-04            Change review                  POST /api/v1/schema-change-proposals; GET /api/v1/schema-change-proposals/{id};
+                                                                POST /api/v1/schema-change-proposals/{id}/impact-analysis; POST
+                                                                /api/v1/schema-change-proposals/{id}/approval
+
+
+
+
+ 5. Cross-Cutting Rules
+ • The canonical model and source mapping are versioned separately. Unknown source attributes are preserved or quarantined by explicit
+ policy, not silently discarded.
+
+ • Every calculation run must bind dataset snapshot, schema/mapping version, rule-set version and calculation-engine version.
+
+ • Server-side authorization is authoritative. The frontend may hide unavailable actions but does not enforce security.
+
+ • No AI-generated code is executed. AI output is validated against schemas and policy, and consequential actions require authorized approval.
+
+ • All errors use a structured response with code, message, details and correlation_id. Sensitive payloads and secrets must not be logged.
+
+ • Prototype financial modules use synthetic/approved data, documented assumptions and test fixtures; do not claim regulatory certification or
+ Moody's parity.
+
+ • The platform is designed for breadth, but production-grade depth is not implied for every financial domain. ALM/IRRBB, collateral, capital, live
+ market data and regulatory feeds require their own specifications and validation.
+
+ 6. Definition of Done
+ • Every feature ID in this document has a matching feature ID in its paired frontend/backend document and in the shared feature register.
+
+ • Each endpoint has request/response schemas, status enums, authorization expectations and error examples in OpenAPI.
+
+ • Frontend components use actual API responses or clearly labelled mocks matching the contract.
+
+ • Backend tests cover validation, permissions, version binding and domain logic appropriate to this workstream.
+
+ • The cross-workstream integration test passes for the features included in the release.
+
+
+   Change-control rule: Any change to endpoint, field name, enum, versioning behaviour or acceptance criteria must be reflected in
+   both paired documents and the shared contract in the same change.
+
+
+
+
+WS1 | Backend Plan                                                                                                                                Page 3
+################################################################
+# SOURCE: docs/MVP_Developement_plan/Risk_Platform_WS1_Frontend_Development_Plan.pdf
+################################################################
+                             FINANCIAL RISK PLATFORM
+                                                   WS1 | Frontend Development Plan
+                                         Data Governance, Security & Platform Foundation
+
+
+
+
+ Workstream objective: Establish a trustworthy, secure, versioned foundation across all financial modules.
+
+ Product intent: A broad, lightweight, extensible platform foundation. Initial data volumes and module depth are limited deliberately;
+ architecture, control points and expansion interfaces are not treated as throwaway demo code.
+   Synchronization rule: This document is paired with the opposite-side document for the same workstream. Feature IDs, phase IDs,
+   endpoint contracts, statuses and acceptance criteria must remain aligned.
+
+ Shared architecture: Layer 1 Universal Platform Foundation → Layer 2 Configurable Financial Domain → Layer 3 Financial Calculation
+ Modules → Layer 4 Intelligence and Experience. Data governance and security cross-cut all layers.
+
+
+
+
+WS1 | Frontend Plan                                                                                                                      Page 1
+ 1. Scope and Feature Coverage
+  Feature ID          Feature                              Scope / implementation intent
+
+  DG-01               Canonical schema and metadata        Define schema registry, version, owner, effective date, compatibility and lifecycle.
+
+  DG-02               Identity and authorization           Enforce server-side roles/permissions and least privilege.
+
+  DG-03               Data classification and protection   Classify fields, mask sensitive values, protect secrets and prevent sensitive logging.
+
+  DG-04               Audit and provenance                 Record critical access/actions, actor, timestamp, resource and correlation ID.
+
+  DG-05               Controlled model change              Review schema/mapping changes, assess downstream impact, test and approve before
+                                                           release.
+
+  DG-06               Environment and retention controls   Separate synthetic/test data from production; define retention, deletion and backup
+                                                           assumptions.
+
+
+
+
+ 2. Phase-Wise Delivery
+ P0 | Foundation contract
+ Agree data/security assumptions, roles, classifications and architecture boundaries.
+
+ P1 | Schema and metadata registry
+ Versioned schemas, ownership, lifecycle and compatibility metadata.
+
+ P2 | Security and audit controls
+ Authentication integration, server-side authorization, audit records, masking and safe logging.
+
+ P3 | Change governance
+ Schema diff, compatibility checks, impact map, approval status and rollback/recovery plan.
+
+ P4 | Cross-platform enforcement
+ Connect other workstreams to shared identity, schema, audit and version services.
+
+ P5 | Verification
+ Test forbidden access, breaking schema changes, audit completeness and recovery paths.
+
+
+
+
+WS1 | Frontend Plan                                                                                                                                 Page 2
+ 3. Implementation Responsibilities
+ Frontend responsibilities
+ • Build schema catalogue, schema detail and version comparison screens.
+
+ • Show owner, status, effective version, compatibility and dependent modules.
+
+ • Provide access-denied, masked-data and approval states; UI visibility is not the security boundary.
+
+ • Show audit timeline and schema-change proposal/review workflow.
+
+ • Display impact-analysis results before a schema change can be submitted for approval.
+
+ 4. Paired API / Feature Contract Matrix
+ Endpoint names are proposed contracts for alignment, not a claim that the APIs already exist. Confirm payload schemas in the shared
+ OpenAPI contract before implementation.
+
+  Shared feature pair           Capability                     Proposed API contract
+
+  FE-DG-01 / BE-DG-01           Schema catalogue/version       GET /api/v1/schemas; GET /api/v1/schemas/{schema_id}/versions; GET
+                                compare                        /api/v1/schemas/{schema_id}/diff
+
+  FE-DG-02 / BE-DG-02           Permissions                    GET /api/v1/me/permissions; authorization enforced on protected APIs
+
+  FE-DG-03 / BE-DG-03           Audit timeline                 GET /api/v1/audit-events?resource_id={id}
+
+  FE-DG-04 / BE-DG-04           Change review                  POST /api/v1/schema-change-proposals; GET /api/v1/schema-change-proposals/{id};
+                                                               POST /api/v1/schema-change-proposals/{id}/impact-analysis; POST
+                                                               /api/v1/schema-change-proposals/{id}/approval
+
+
+
+
+ 5. Cross-Cutting Rules
+ • The canonical model and source mapping are versioned separately. Unknown source attributes are preserved or quarantined by explicit
+ policy, not silently discarded.
+
+ • Every calculation run must bind dataset snapshot, schema/mapping version, rule-set version and calculation-engine version.
+
+ • Server-side authorization is authoritative. The frontend may hide unavailable actions but does not enforce security.
+
+ • No AI-generated code is executed. AI output is validated against schemas and policy, and consequential actions require authorized approval.
+
+ • All errors use a structured response with code, message, details and correlation_id. Sensitive payloads and secrets must not be logged.
+
+ • Prototype financial modules use synthetic/approved data, documented assumptions and test fixtures; do not claim regulatory certification or
+ Moody's parity.
+
+ • The platform is designed for breadth, but production-grade depth is not implied for every financial domain. ALM/IRRBB, collateral, capital, live
+ market data and regulatory feeds require their own specifications and validation.
+
+ 6. Definition of Done
+ • Every feature ID in this document has a matching feature ID in its paired frontend/backend document and in the shared feature register.
+
+ • Each endpoint has request/response schemas, status enums, authorization expectations and error examples in OpenAPI.
+
+ • Frontend components use actual API responses or clearly labelled mocks matching the contract.
+
+ • Backend tests cover validation, permissions, version binding and domain logic appropriate to this workstream.
+
+ • The cross-workstream integration test passes for the features included in the release.
+
+
+   Change-control rule: Any change to endpoint, field name, enum, versioning behaviour or acceptance criteria must be reflected in
+   both paired documents and the shared contract in the same change.
+
+
+
+
+WS1 | Frontend Plan                                                                                                                              Page 3
+################################################################
+# SOURCE: docs/MVP_Developement_plan/Risk_Platform_WS2_Backend_Development_Plan.pdf
+################################################################
+                             FINANCIAL RISK PLATFORM
+                                                   WS2 | Backend Development Plan
+                                                Data Ingestion, Mapping & Data Quality
+
+
+
+
+ Workstream objective: Accept uncertain source shapes safely through configurable contracts, mappings and validation rather than
+ hardcoding one client file format.
+
+ Product intent: A broad, lightweight, extensible platform foundation. Initial data volumes and module depth are limited deliberately;
+ architecture, control points and expansion interfaces are not treated as throwaway demo code.
+   Synchronization rule: This document is paired with the opposite-side document for the same workstream. Feature IDs, phase IDs,
+   endpoint contracts, statuses and acceptance criteria must remain aligned.
+
+ Shared architecture: Layer 1 Universal Platform Foundation → Layer 2 Configurable Financial Domain → Layer 3 Financial Calculation
+ Modules → Layer 4 Intelligence and Experience. Data governance and security cross-cut all layers.
+
+
+
+
+WS2 | Backend Plan                                                                                                                       Page 1
+ 1. Scope and Feature Coverage
+  Feature ID          Feature                            Scope / implementation intent
+
+  DI-01               Source registration                Register file/feed/source type, owner, cadence and expected contract when known.
+
+  DI-02               Flexible ingestion                 Accept bounded CSV/XLSX/JSON samples initially; adapter interfaces allow future
+                                                         warehouse/API/batch feeds.
+
+  DI-03               Source-to-canonical mapping        Versioned mappings from unknown source attributes to canonical fields.
+
+  DI-04               Validation and quarantine          Field-level validation, rejected rows, warnings and quarantine/retry outcomes.
+
+  DI-05               Reconciliation                     Record counts, totals and source-to-target comparison where applicable.
+
+  DI-06               Data profiling and drift           Infer candidate types and flag shape/distribution drift without silently changing the model.
+
+
+
+
+ 2. Phase-Wise Delivery
+ P0 | Sample contracts and uncertainty policy
+ Create synthetic sample shapes and mark assumptions as provisional.
+
+ P1 | Source and import jobs
+ Register source profiles, create import jobs, track status and file metadata.
+
+ P2 | Mapping workbench
+ Map source fields to canonical fields; version and validate mapping configurations.
+
+ P3 | Quality, quarantine and reconciliation
+ Return actionable issues, rejected-row references, counts and reconciliation outcomes.
+
+ P4 | Profiling and drift detection
+ Suggest field types and detect changed columns/value patterns; suggestions require review.
+
+ P5 | Adapter readiness
+ Document and test adapter contract for future warehouse/API/event source integrations.
+
+
+
+
+WS2 | Backend Plan                                                                                                                                      Page 2
+ 3. Implementation Responsibilities
+ Backend responsibilities
+ • Create import-job service with safe file limits, checksum/metadata, status and stable job ID.
+
+ • Implement adapter interface independent of the first file formats; use CSV/XLSX/JSON as initial demo adapters.
+
+ • Persist versioned source profiles and source-to-canonical mapping definitions.
+
+ • Validate types, required fields, dates, currencies, precision, duplicates, references and configurable rules.
+
+ • Quarantine or reject invalid data according to policy; never silently drop rows.
+
+ • Provide profiling/drift suggestions and reconciliation results without automatically altering canonical schema.
+
+ 4. Paired API / Feature Contract Matrix
+ Endpoint names are proposed contracts for alignment, not a claim that the APIs already exist. Confirm payload schemas in the shared
+ OpenAPI contract before implementation.
+
+  Shared feature pair            Capability                     Proposed API contract
+
+  FE-DI-01 / BE-DI-01            Source/import wizard           POST /api/v1/sources; POST /api/v1/imports; GET /api/v1/imports/{import_id}
+
+  FE-DI-02 / BE-DI-02            Field profiling                GET /api/v1/imports/{import_id}/profile
+
+  FE-DI-03 / BE-DI-03            Mapping workbench              GET /api/v1/mappings; POST /api/v1/imports/{import_id}/mappings/validate; POST
+                                                                /api/v1/mappings
+
+  FE-DI-04 / BE-DI-04            Quality/quarantine             POST /api/v1/imports/{import_id}/validate; GET /api/v1/imports/{import_id}/issues; GET
+                                                                /api/v1/quarantine/{batch_id}
+
+  FE-DI-05 / BE-DI-05            Reconciliation/drift           GET /api/v1/imports/{import_id}/reconciliation; GET /api/v1/imports/{import_id}/drift
+
+
+
+
+ 5. Cross-Cutting Rules
+ • The canonical model and source mapping are versioned separately. Unknown source attributes are preserved or quarantined by explicit
+ policy, not silently discarded.
+
+ • Every calculation run must bind dataset snapshot, schema/mapping version, rule-set version and calculation-engine version.
+
+ • Server-side authorization is authoritative. The frontend may hide unavailable actions but does not enforce security.
+
+ • No AI-generated code is executed. AI output is validated against schemas and policy, and consequential actions require authorized approval.
+
+ • All errors use a structured response with code, message, details and correlation_id. Sensitive payloads and secrets must not be logged.
+
+ • Prototype financial modules use synthetic/approved data, documented assumptions and test fixtures; do not claim regulatory certification or
+ Moody's parity.
+
+ • The platform is designed for breadth, but production-grade depth is not implied for every financial domain. ALM/IRRBB, collateral, capital, live
+ market data and regulatory feeds require their own specifications and validation.
+
+ 6. Definition of Done
+ • Every feature ID in this document has a matching feature ID in its paired frontend/backend document and in the shared feature register.
+
+ • Each endpoint has request/response schemas, status enums, authorization expectations and error examples in OpenAPI.
+
+ • Frontend components use actual API responses or clearly labelled mocks matching the contract.
+
+ • Backend tests cover validation, permissions, version binding and domain logic appropriate to this workstream.
+
+ • The cross-workstream integration test passes for the features included in the release.
+
+
+   Change-control rule: Any change to endpoint, field name, enum, versioning behaviour or acceptance criteria must be reflected in
+   both paired documents and the shared contract in the same change.
+
+
+
+
+WS2 | Backend Plan                                                                                                                                       Page 3
+################################################################
+# SOURCE: docs/MVP_Developement_plan/Risk_Platform_WS2_Frontend_Development_Plan.pdf
+################################################################
+                             FINANCIAL RISK PLATFORM
+                                                   WS2 | Frontend Development Plan
+                                                Data Ingestion, Mapping & Data Quality
+
+
+
+
+ Workstream objective: Accept uncertain source shapes safely through configurable contracts, mappings and validation rather than
+ hardcoding one client file format.
+
+ Product intent: A broad, lightweight, extensible platform foundation. Initial data volumes and module depth are limited deliberately;
+ architecture, control points and expansion interfaces are not treated as throwaway demo code.
+   Synchronization rule: This document is paired with the opposite-side document for the same workstream. Feature IDs, phase IDs,
+   endpoint contracts, statuses and acceptance criteria must remain aligned.
+
+ Shared architecture: Layer 1 Universal Platform Foundation → Layer 2 Configurable Financial Domain → Layer 3 Financial Calculation
+ Modules → Layer 4 Intelligence and Experience. Data governance and security cross-cut all layers.
+
+
+
+
+WS2 | Frontend Plan                                                                                                                      Page 1
+ 1. Scope and Feature Coverage
+  Feature ID          Feature                            Scope / implementation intent
+
+  DI-01               Source registration                Register file/feed/source type, owner, cadence and expected contract when known.
+
+  DI-02               Flexible ingestion                 Accept bounded CSV/XLSX/JSON samples initially; adapter interfaces allow future
+                                                         warehouse/API/batch feeds.
+
+  DI-03               Source-to-canonical mapping        Versioned mappings from unknown source attributes to canonical fields.
+
+  DI-04               Validation and quarantine          Field-level validation, rejected rows, warnings and quarantine/retry outcomes.
+
+  DI-05               Reconciliation                     Record counts, totals and source-to-target comparison where applicable.
+
+  DI-06               Data profiling and drift           Infer candidate types and flag shape/distribution drift without silently changing the model.
+
+
+
+
+ 2. Phase-Wise Delivery
+ P0 | Sample contracts and uncertainty policy
+ Create synthetic sample shapes and mark assumptions as provisional.
+
+ P1 | Source and import jobs
+ Register source profiles, create import jobs, track status and file metadata.
+
+ P2 | Mapping workbench
+ Map source fields to canonical fields; version and validate mapping configurations.
+
+ P3 | Quality, quarantine and reconciliation
+ Return actionable issues, rejected-row references, counts and reconciliation outcomes.
+
+ P4 | Profiling and drift detection
+ Suggest field types and detect changed columns/value patterns; suggestions require review.
+
+ P5 | Adapter readiness
+ Document and test adapter contract for future warehouse/API/event source integrations.
+
+
+
+
+WS2 | Frontend Plan                                                                                                                                     Page 2
+ 3. Implementation Responsibilities
+ Frontend responsibilities
+ • Build source/import wizard with file upload, source profile and import status.
+
+ • Display inferred fields and types as suggestions, not as approved schema changes.
+
+ • Provide mapping table with source field, target field, transformation, required flag and mapping version.
+
+ • Show validation dashboard with accepted/rejected rows, warnings, field-level details and quarantine status.
+
+ • Show reconciliation totals and data-drift alerts with review actions.
+
+ 4. Paired API / Feature Contract Matrix
+ Endpoint names are proposed contracts for alignment, not a claim that the APIs already exist. Confirm payload schemas in the shared
+ OpenAPI contract before implementation.
+
+  Shared feature pair            Capability                      Proposed API contract
+
+  FE-DI-01 / BE-DI-01            Source/import wizard            POST /api/v1/sources; POST /api/v1/imports; GET /api/v1/imports/{import_id}
+
+  FE-DI-02 / BE-DI-02            Field profiling                 GET /api/v1/imports/{import_id}/profile
+
+  FE-DI-03 / BE-DI-03            Mapping workbench               GET /api/v1/mappings; POST /api/v1/imports/{import_id}/mappings/validate; POST
+                                                                 /api/v1/mappings
+
+  FE-DI-04 / BE-DI-04            Quality/quarantine              POST /api/v1/imports/{import_id}/validate; GET /api/v1/imports/{import_id}/issues; GET
+                                                                 /api/v1/quarantine/{batch_id}
+
+  FE-DI-05 / BE-DI-05            Reconciliation/drift            GET /api/v1/imports/{import_id}/reconciliation; GET /api/v1/imports/{import_id}/drift
+
+
+
+
+ 5. Cross-Cutting Rules
+ • The canonical model and source mapping are versioned separately. Unknown source attributes are preserved or quarantined by explicit
+ policy, not silently discarded.
+
+ • Every calculation run must bind dataset snapshot, schema/mapping version, rule-set version and calculation-engine version.
+
+ • Server-side authorization is authoritative. The frontend may hide unavailable actions but does not enforce security.
+
+ • No AI-generated code is executed. AI output is validated against schemas and policy, and consequential actions require authorized approval.
+
+ • All errors use a structured response with code, message, details and correlation_id. Sensitive payloads and secrets must not be logged.
+
+ • Prototype financial modules use synthetic/approved data, documented assumptions and test fixtures; do not claim regulatory certification or
+ Moody's parity.
+
+ • The platform is designed for breadth, but production-grade depth is not implied for every financial domain. ALM/IRRBB, collateral, capital, live
+ market data and regulatory feeds require their own specifications and validation.
+
+ 6. Definition of Done
+ • Every feature ID in this document has a matching feature ID in its paired frontend/backend document and in the shared feature register.
+
+ • Each endpoint has request/response schemas, status enums, authorization expectations and error examples in OpenAPI.
+
+ • Frontend components use actual API responses or clearly labelled mocks matching the contract.
+
+ • Backend tests cover validation, permissions, version binding and domain logic appropriate to this workstream.
+
+ • The cross-workstream integration test passes for the features included in the release.
+
+
+   Change-control rule: Any change to endpoint, field name, enum, versioning behaviour or acceptance criteria must be reflected in
+   both paired documents and the shared contract in the same change.
+
+
+
+
+WS2 | Frontend Plan                                                                                                                                       Page 3
+################################################################
+# SOURCE: docs/MVP_Developement_plan/Risk_Platform_WS3_Backend_Development_Plan.pdf
+################################################################
+                             FINANCIAL RISK PLATFORM
+                                                   WS3 | Backend Development Plan
+                                           Financial Domain Model & Calculation Services
+
+
+
+
+ Workstream objective: Provide reusable financial-domain abstractions and a pluggable calculation service layer, then demonstrate breadth
+ through bounded prototype modules.
+
+ Product intent: A broad, lightweight, extensible platform foundation. Initial data volumes and module depth are limited deliberately;
+ architecture, control points and expansion interfaces are not treated as throwaway demo code.
+   Synchronization rule: This document is paired with the opposite-side document for the same workstream. Feature IDs, phase IDs,
+   endpoint contracts, statuses and acceptance criteria must remain aligned.
+
+ Shared architecture: Layer 1 Universal Platform Foundation → Layer 2 Configurable Financial Domain → Layer 3 Financial Calculation
+ Modules → Layer 4 Intelligence and Experience. Data governance and security cross-cut all layers.
+
+
+
+
+WS3 | Backend Plan                                                                                                                       Page 1
+ 1. Scope and Feature Coverage
+  Feature ID         Feature                              Scope / implementation intent
+
+  FC-01              Canonical instrument model           Common identifiers, balances, currencies, dates, counterparties, cash-flow and classification
+                                                          fields with extensible attributes.
+
+  FC-02              Instrument and cash-flow modelling   Instrument-specific terms, schedules, repricing/maturity dates and projected cash flows.
+
+  FC-03              Liquidity and LCR/HQLA               Prototype liquidity classification, eligibility, haircuts, outflow/inflow assumptions and metric
+                                                          components.
+
+  FC-04              Maturity ladder and liquidity gaps   Time buckets, inflows/outflows and gap summaries.
+
+  FC-05              ALM/IRRBB extension points           Rate scenarios, repricing and sensitivity interfaces; full validated model is later work.
+
+  FC-06              Collateral and capital extension     Collateral attributes/haircuts and capital categories/interfaces; production calculations require
+                     points                               specialist specifications.
+
+  FC-07              Rule and module registry             Versioned rules, input/output contracts, engine versions and module capability metadata.
+
+  FC-08              Market-data and assumption           Versioned assumptions and market-data inputs, with source/provenance; no external feed
+                     interfaces                           required for MVP.
+
+
+
+
+ 2. Phase-Wise Delivery
+ P0 | Domain discovery and assumptions
+ Document known entities and provisional assumptions; mark unresolved client fields explicitly.
+
+ P1 | Canonical domain model
+ Define stable core entities plus extension attributes and source mapping boundaries.
+
+ P2 | Rule/module registry
+ Versioned rules, parameter bounds, module registry and input/output contracts.
+
+ P3 | Deterministic calculation framework
+ Common run lifecycle, version binding, intermediate values, warnings and reproducibility.
+
+ P4 | Initial module family
+ Implement bounded LCR/HQLA and maturity-ladder demonstration with synthetic data.
+
+ P5 | Expansion interfaces
+ Specify contracts for ALM/IRRBB, collateral and capital modules without claiming they are fully implemented.
+
+ P6 | Domain validation
+ Golden cases, expert review, edge-case tests and documented calculation limitations.
+
+
+
+
+WS3 | Backend Plan                                                                                                                                            Page 2
+ 3. Implementation Responsibilities
+ Backend responsibilities
+ • Define canonical financial entities with stable IDs, precision, currency/date semantics and extensible attributes.
+
+ • Define instrument/cash-flow interfaces and avoid assuming all sources have the same attributes.
+
+ • Implement versioned rule/module registry with strict parameter schemas and declared input/output contracts.
+
+ • Implement deterministic calculation-run service binding exact dataset, schema, mapping, rule and engine versions.
+
+ • Implement simplified, documented LCR/HQLA and maturity-ladder modules with unit tests and benchmark fixtures.
+
+ • Provide extension contracts for ALM/IRRBB, collateral and capital; implement those modules only after requirements and reference cases are
+ available.
+
+ 4. Paired API / Feature Contract Matrix
+ Endpoint names are proposed contracts for alignment, not a claim that the APIs already exist. Confirm payload schemas in the shared
+ OpenAPI contract before implementation.
+
+  Shared feature pair           Capability                      Proposed API contract
+
+  FE-FC-01 / BE-FC-01           Instrument catalogue/detail     GET /api/v1/instruments; GET /api/v1/instruments/{instrument_id}
+
+  FE-FC-02 / BE-FC-02           Module/rule registry            GET /api/v1/calculation-modules; GET /api/v1/rules; GET /api/v1/rules/{rule_id}
+
+  FE-FC-03 / BE-FC-03           Calculation run                 POST /api/v1/calculation-runs; GET /api/v1/calculation-runs/{run_id}; GET
+                                                                /api/v1/calculation-runs/{run_id}/results
+
+  FE-FC-04 / BE-FC-04           Liquidity/maturity outputs      GET /api/v1/calculation-runs/{run_id}/liquidity; GET
+                                                                /api/v1/calculation-runs/{run_id}/maturity-ladder
+
+  FE-FC-05 / BE-FC-05           Assumptions/market-data         GET /api/v1/assumption-sets; GET /api/v1/assumption-sets/{id}
+                                versions
+
+
+
+
+ 5. Cross-Cutting Rules
+ • The canonical model and source mapping are versioned separately. Unknown source attributes are preserved or quarantined by explicit
+ policy, not silently discarded.
+
+ • Every calculation run must bind dataset snapshot, schema/mapping version, rule-set version and calculation-engine version.
+
+ • Server-side authorization is authoritative. The frontend may hide unavailable actions but does not enforce security.
+
+ • No AI-generated code is executed. AI output is validated against schemas and policy, and consequential actions require authorized approval.
+
+ • All errors use a structured response with code, message, details and correlation_id. Sensitive payloads and secrets must not be logged.
+
+ • Prototype financial modules use synthetic/approved data, documented assumptions and test fixtures; do not claim regulatory certification or
+ Moody's parity.
+
+ • The platform is designed for breadth, but production-grade depth is not implied for every financial domain. ALM/IRRBB, collateral, capital, live
+ market data and regulatory feeds require their own specifications and validation.
+
+ 6. Definition of Done
+ • Every feature ID in this document has a matching feature ID in its paired frontend/backend document and in the shared feature register.
+
+ • Each endpoint has request/response schemas, status enums, authorization expectations and error examples in OpenAPI.
+
+ • Frontend components use actual API responses or clearly labelled mocks matching the contract.
+
+ • Backend tests cover validation, permissions, version binding and domain logic appropriate to this workstream.
+
+ • The cross-workstream integration test passes for the features included in the release.
+
+
+   Change-control rule: Any change to endpoint, field name, enum, versioning behaviour or acceptance criteria must be reflected in
+   both paired documents and the shared contract in the same change.
+
+
+
+
+WS3 | Backend Plan                                                                                                                                Page 3
+################################################################
+# SOURCE: docs/MVP_Developement_plan/Risk_Platform_WS3_Frontend_Development_Plan.pdf
+################################################################
+                             FINANCIAL RISK PLATFORM
+                                                   WS3 | Frontend Development Plan
+                                           Financial Domain Model & Calculation Services
+
+
+
+
+ Workstream objective: Provide reusable financial-domain abstractions and a pluggable calculation service layer, then demonstrate breadth
+ through bounded prototype modules.
+
+ Product intent: A broad, lightweight, extensible platform foundation. Initial data volumes and module depth are limited deliberately;
+ architecture, control points and expansion interfaces are not treated as throwaway demo code.
+   Synchronization rule: This document is paired with the opposite-side document for the same workstream. Feature IDs, phase IDs,
+   endpoint contracts, statuses and acceptance criteria must remain aligned.
+
+ Shared architecture: Layer 1 Universal Platform Foundation → Layer 2 Configurable Financial Domain → Layer 3 Financial Calculation
+ Modules → Layer 4 Intelligence and Experience. Data governance and security cross-cut all layers.
+
+
+
+
+WS3 | Frontend Plan                                                                                                                      Page 1
+ 1. Scope and Feature Coverage
+  Feature ID          Feature                              Scope / implementation intent
+
+  FC-01               Canonical instrument model           Common identifiers, balances, currencies, dates, counterparties, cash-flow and classification
+                                                           fields with extensible attributes.
+
+  FC-02               Instrument and cash-flow modelling   Instrument-specific terms, schedules, repricing/maturity dates and projected cash flows.
+
+  FC-03               Liquidity and LCR/HQLA               Prototype liquidity classification, eligibility, haircuts, outflow/inflow assumptions and metric
+                                                           components.
+
+  FC-04               Maturity ladder and liquidity gaps   Time buckets, inflows/outflows and gap summaries.
+
+  FC-05               ALM/IRRBB extension points           Rate scenarios, repricing and sensitivity interfaces; full validated model is later work.
+
+  FC-06               Collateral and capital extension     Collateral attributes/haircuts and capital categories/interfaces; production calculations require
+                      points                               specialist specifications.
+
+  FC-07               Rule and module registry             Versioned rules, input/output contracts, engine versions and module capability metadata.
+
+  FC-08               Market-data and assumption           Versioned assumptions and market-data inputs, with source/provenance; no external feed
+                      interfaces                           required for MVP.
+
+
+
+
+ 2. Phase-Wise Delivery
+ P0 | Domain discovery and assumptions
+ Document known entities and provisional assumptions; mark unresolved client fields explicitly.
+
+ P1 | Canonical domain model
+ Define stable core entities plus extension attributes and source mapping boundaries.
+
+ P2 | Rule/module registry
+ Versioned rules, parameter bounds, module registry and input/output contracts.
+
+ P3 | Deterministic calculation framework
+ Common run lifecycle, version binding, intermediate values, warnings and reproducibility.
+
+ P4 | Initial module family
+ Implement bounded LCR/HQLA and maturity-ladder demonstration with synthetic data.
+
+ P5 | Expansion interfaces
+ Specify contracts for ALM/IRRBB, collateral and capital modules without claiming they are fully implemented.
+
+ P6 | Domain validation
+ Golden cases, expert review, edge-case tests and documented calculation limitations.
+
+
+
+
+WS3 | Frontend Plan                                                                                                                                            Page 2
+ 3. Implementation Responsibilities
+ Frontend responsibilities
+ • Build instrument catalogue and record detail views from backend-provided metadata.
+
+ • Display schema/module/rule versions selected for each calculation run.
+
+ • Provide calculation launch panel and structured results for LCR/HQLA and maturity buckets.
+
+ • Show intermediate values, assumptions, warnings and instrument contributions.
+
+ • Show available modules versus planned/extension-point modules distinctly; never imply unimplemented models are production-ready.
+
+ 4. Paired API / Feature Contract Matrix
+ Endpoint names are proposed contracts for alignment, not a claim that the APIs already exist. Confirm payload schemas in the shared
+ OpenAPI contract before implementation.
+
+  Shared feature pair           Capability                     Proposed API contract
+
+  FE-FC-01 / BE-FC-01           Instrument catalogue/detail    GET /api/v1/instruments; GET /api/v1/instruments/{instrument_id}
+
+  FE-FC-02 / BE-FC-02           Module/rule registry           GET /api/v1/calculation-modules; GET /api/v1/rules; GET /api/v1/rules/{rule_id}
+
+  FE-FC-03 / BE-FC-03           Calculation run                POST /api/v1/calculation-runs; GET /api/v1/calculation-runs/{run_id}; GET
+                                                               /api/v1/calculation-runs/{run_id}/results
+
+  FE-FC-04 / BE-FC-04           Liquidity/maturity outputs     GET /api/v1/calculation-runs/{run_id}/liquidity; GET
+                                                               /api/v1/calculation-runs/{run_id}/maturity-ladder
+
+  FE-FC-05 / BE-FC-05           Assumptions/market-data        GET /api/v1/assumption-sets; GET /api/v1/assumption-sets/{id}
+                                versions
+
+
+
+
+ 5. Cross-Cutting Rules
+ • The canonical model and source mapping are versioned separately. Unknown source attributes are preserved or quarantined by explicit
+ policy, not silently discarded.
+
+ • Every calculation run must bind dataset snapshot, schema/mapping version, rule-set version and calculation-engine version.
+
+ • Server-side authorization is authoritative. The frontend may hide unavailable actions but does not enforce security.
+
+ • No AI-generated code is executed. AI output is validated against schemas and policy, and consequential actions require authorized approval.
+
+ • All errors use a structured response with code, message, details and correlation_id. Sensitive payloads and secrets must not be logged.
+
+ • Prototype financial modules use synthetic/approved data, documented assumptions and test fixtures; do not claim regulatory certification or
+ Moody's parity.
+
+ • The platform is designed for breadth, but production-grade depth is not implied for every financial domain. ALM/IRRBB, collateral, capital, live
+ market data and regulatory feeds require their own specifications and validation.
+
+ 6. Definition of Done
+ • Every feature ID in this document has a matching feature ID in its paired frontend/backend document and in the shared feature register.
+
+ • Each endpoint has request/response schemas, status enums, authorization expectations and error examples in OpenAPI.
+
+ • Frontend components use actual API responses or clearly labelled mocks matching the contract.
+
+ • Backend tests cover validation, permissions, version binding and domain logic appropriate to this workstream.
+
+ • The cross-workstream integration test passes for the features included in the release.
+
+
+   Change-control rule: Any change to endpoint, field name, enum, versioning behaviour or acceptance criteria must be reflected in
+   both paired documents and the shared contract in the same change.
+
+
+
+
+WS3 | Frontend Plan                                                                                                                              Page 3
+################################################################
+# SOURCE: docs/MVP_Developement_plan/Risk_Platform_WS4_Backend_Development_Plan.pdf
+################################################################
+                             FINANCIAL RISK PLATFORM
+                                                   WS4 | Backend Development Plan
+                                      Risk Operations, Scenarios, Reconciliation & Reporting
+
+
+
+
+ Workstream objective: Turn calculation services into a governed operational workflow with scenario comparison, traceability and evidence.
+
+ Product intent: A broad, lightweight, extensible platform foundation. Initial data volumes and module depth are limited deliberately;
+ architecture, control points and expansion interfaces are not treated as throwaway demo code.
+   Synchronization rule: This document is paired with the opposite-side document for the same workstream. Feature IDs, phase IDs,
+   endpoint contracts, statuses and acceptance criteria must remain aligned.
+
+ Shared architecture: Layer 1 Universal Platform Foundation → Layer 2 Configurable Financial Domain → Layer 3 Financial Calculation
+ Modules → Layer 4 Intelligence and Experience. Data governance and security cross-cut all layers.
+
+
+
+
+WS4 | Backend Plan                                                                                                                       Page 1
+ 1. Scope and Feature Coverage
+  Feature ID         Feature                             Scope / implementation intent
+
+  RO-01              Workflow orchestration              Create, run, monitor and review calculation jobs.
+
+  RO-02              Scenario management                 Baseline and proposed scenario overlays without mutating approved configuration.
+
+  RO-03              Calculation lineage                 Trace metrics to inputs, transformations, rules and engine versions.
+
+  RO-04              Benchmark and reconciliation        Compare output against approved reference values and tolerances.
+
+  RO-05              Reports and exports                 Generate run summaries, variance reports and controlled exports.
+
+  RO-06              Exception and approval handling     Queue failures, assign review state and require approval for consequential actions.
+
+  RO-07              Run history and reproducibility     Re-run with pinned versions or explain why a run cannot be reproduced.
+
+
+
+
+ 2. Phase-Wise Delivery
+ P0 | Operational lifecycle
+ Define job/run/scenario states, owners, error states and approval points.
+
+ P1 | Run orchestration
+ Create jobs, status endpoints, retry boundaries and run history.
+
+ P2 | Scenario comparison
+ Run baseline/proposed scenarios against identical input snapshots and compare deltas.
+
+ P3 | Lineage and evidence
+ Persist lineage links, input/rule versions, warnings and test evidence.
+
+ P4 | Reconciliation and reporting
+ Compare with reference values and export a reviewable report.
+
+ P5 | Operational controls
+ Approval queues, exception review, permissions and reproducibility checks.
+
+
+
+
+WS4 | Backend Plan                                                                                                                             Page 2
+ 3. Implementation Responsibilities
+ Backend responsibilities
+ • Implement job/run state machine with idempotency where practical, correlation IDs and defined failure/retry behaviour.
+
+ • Create isolated scenario overlays and preserve immutable baseline configurations.
+
+ • Persist calculation lineage and version references for all results.
+
+ • Implement benchmark comparison with configured tolerances and explicit reference-data provenance.
+
+ • Generate export/report payloads from stored run results; apply authorization and audit export events.
+
+ • Implement approval/review state transitions and reproducibility checks.
+
+ 4. Paired API / Feature Contract Matrix
+ Endpoint names are proposed contracts for alignment, not a claim that the APIs already exist. Confirm payload schemas in the shared
+ OpenAPI contract before implementation.
+
+  Shared feature pair            Capability                      Proposed API contract
+
+  FE-RO-01 / BE-RO-01            Run centre                      POST /api/v1/jobs; GET /api/v1/jobs/{job_id}; GET /api/v1/runs
+
+  FE-RO-02 / BE-RO-02            Scenario compare                POST /api/v1/scenarios; POST /api/v1/scenarios/{scenario_id}/run; GET
+                                                                 /api/v1/scenarios/{scenario_id}/comparison
+
+  FE-RO-03 / BE-RO-03            Lineage                         GET /api/v1/calculation-runs/{run_id}/lineage
+
+  FE-RO-04 / BE-RO-04            Benchmark/reconciliation        POST /api/v1/reconciliations; GET /api/v1/reconciliations/{id}
+
+  FE-RO-05 / BE-RO-05            Reports/review                  POST /api/v1/reports; GET /api/v1/reports/{report_id}; POST
+                                                                 /api/v1/reviews/{id}/decision
+
+
+
+
+ 5. Cross-Cutting Rules
+ • The canonical model and source mapping are versioned separately. Unknown source attributes are preserved or quarantined by explicit
+ policy, not silently discarded.
+
+ • Every calculation run must bind dataset snapshot, schema/mapping version, rule-set version and calculation-engine version.
+
+ • Server-side authorization is authoritative. The frontend may hide unavailable actions but does not enforce security.
+
+ • No AI-generated code is executed. AI output is validated against schemas and policy, and consequential actions require authorized approval.
+
+ • All errors use a structured response with code, message, details and correlation_id. Sensitive payloads and secrets must not be logged.
+
+ • Prototype financial modules use synthetic/approved data, documented assumptions and test fixtures; do not claim regulatory certification or
+ Moody's parity.
+
+ • The platform is designed for breadth, but production-grade depth is not implied for every financial domain. ALM/IRRBB, collateral, capital, live
+ market data and regulatory feeds require their own specifications and validation.
+
+ 6. Definition of Done
+ • Every feature ID in this document has a matching feature ID in its paired frontend/backend document and in the shared feature register.
+
+ • Each endpoint has request/response schemas, status enums, authorization expectations and error examples in OpenAPI.
+
+ • Frontend components use actual API responses or clearly labelled mocks matching the contract.
+
+ • Backend tests cover validation, permissions, version binding and domain logic appropriate to this workstream.
+
+ • The cross-workstream integration test passes for the features included in the release.
+
+
+   Change-control rule: Any change to endpoint, field name, enum, versioning behaviour or acceptance criteria must be reflected in
+   both paired documents and the shared contract in the same change.
+
+
+
+
+WS4 | Backend Plan                                                                                                                            Page 3
+################################################################
+# SOURCE: docs/MVP_Developement_plan/Risk_Platform_WS4_Frontend_Development_Plan.pdf
+################################################################
+                             FINANCIAL RISK PLATFORM
+                                                   WS4 | Frontend Development Plan
+                                      Risk Operations, Scenarios, Reconciliation & Reporting
+
+
+
+
+ Workstream objective: Turn calculation services into a governed operational workflow with scenario comparison, traceability and evidence.
+
+ Product intent: A broad, lightweight, extensible platform foundation. Initial data volumes and module depth are limited deliberately;
+ architecture, control points and expansion interfaces are not treated as throwaway demo code.
+   Synchronization rule: This document is paired with the opposite-side document for the same workstream. Feature IDs, phase IDs,
+   endpoint contracts, statuses and acceptance criteria must remain aligned.
+
+ Shared architecture: Layer 1 Universal Platform Foundation → Layer 2 Configurable Financial Domain → Layer 3 Financial Calculation
+ Modules → Layer 4 Intelligence and Experience. Data governance and security cross-cut all layers.
+
+
+
+
+WS4 | Frontend Plan                                                                                                                      Page 1
+ 1. Scope and Feature Coverage
+  Feature ID          Feature                            Scope / implementation intent
+
+  RO-01               Workflow orchestration             Create, run, monitor and review calculation jobs.
+
+  RO-02               Scenario management                Baseline and proposed scenario overlays without mutating approved configuration.
+
+  RO-03               Calculation lineage                Trace metrics to inputs, transformations, rules and engine versions.
+
+  RO-04               Benchmark and reconciliation       Compare output against approved reference values and tolerances.
+
+  RO-05               Reports and exports                Generate run summaries, variance reports and controlled exports.
+
+  RO-06               Exception and approval handling    Queue failures, assign review state and require approval for consequential actions.
+
+  RO-07               Run history and reproducibility    Re-run with pinned versions or explain why a run cannot be reproduced.
+
+
+
+
+ 2. Phase-Wise Delivery
+ P0 | Operational lifecycle
+ Define job/run/scenario states, owners, error states and approval points.
+
+ P1 | Run orchestration
+ Create jobs, status endpoints, retry boundaries and run history.
+
+ P2 | Scenario comparison
+ Run baseline/proposed scenarios against identical input snapshots and compare deltas.
+
+ P3 | Lineage and evidence
+ Persist lineage links, input/rule versions, warnings and test evidence.
+
+ P4 | Reconciliation and reporting
+ Compare with reference values and export a reviewable report.
+
+ P5 | Operational controls
+ Approval queues, exception review, permissions and reproducibility checks.
+
+
+
+
+WS4 | Frontend Plan                                                                                                                            Page 2
+ 3. Implementation Responsibilities
+ Frontend responsibilities
+ • Build run centre with queued/running/succeeded/failed/blocked states.
+
+ • Build baseline-versus-scenario comparison and show absolute/percentage differences.
+
+ • Provide drill-down lineage from metric to category, rule, transformation and source record.
+
+ • Show reconciliation against reference values, tolerance and variance status.
+
+ • Provide review queue, run history and controlled report export.
+
+ 4. Paired API / Feature Contract Matrix
+ Endpoint names are proposed contracts for alignment, not a claim that the APIs already exist. Confirm payload schemas in the shared
+ OpenAPI contract before implementation.
+
+  Shared feature pair           Capability                     Proposed API contract
+
+  FE-RO-01 / BE-RO-01           Run centre                     POST /api/v1/jobs; GET /api/v1/jobs/{job_id}; GET /api/v1/runs
+
+  FE-RO-02 / BE-RO-02           Scenario compare               POST /api/v1/scenarios; POST /api/v1/scenarios/{scenario_id}/run; GET
+                                                               /api/v1/scenarios/{scenario_id}/comparison
+
+  FE-RO-03 / BE-RO-03           Lineage                        GET /api/v1/calculation-runs/{run_id}/lineage
+
+  FE-RO-04 / BE-RO-04           Benchmark/reconciliation       POST /api/v1/reconciliations; GET /api/v1/reconciliations/{id}
+
+  FE-RO-05 / BE-RO-05           Reports/review                 POST /api/v1/reports; GET /api/v1/reports/{report_id}; POST
+                                                               /api/v1/reviews/{id}/decision
+
+
+
+
+ 5. Cross-Cutting Rules
+ • The canonical model and source mapping are versioned separately. Unknown source attributes are preserved or quarantined by explicit
+ policy, not silently discarded.
+
+ • Every calculation run must bind dataset snapshot, schema/mapping version, rule-set version and calculation-engine version.
+
+ • Server-side authorization is authoritative. The frontend may hide unavailable actions but does not enforce security.
+
+ • No AI-generated code is executed. AI output is validated against schemas and policy, and consequential actions require authorized approval.
+
+ • All errors use a structured response with code, message, details and correlation_id. Sensitive payloads and secrets must not be logged.
+
+ • Prototype financial modules use synthetic/approved data, documented assumptions and test fixtures; do not claim regulatory certification or
+ Moody's parity.
+
+ • The platform is designed for breadth, but production-grade depth is not implied for every financial domain. ALM/IRRBB, collateral, capital, live
+ market data and regulatory feeds require their own specifications and validation.
+
+ 6. Definition of Done
+ • Every feature ID in this document has a matching feature ID in its paired frontend/backend document and in the shared feature register.
+
+ • Each endpoint has request/response schemas, status enums, authorization expectations and error examples in OpenAPI.
+
+ • Frontend components use actual API responses or clearly labelled mocks matching the contract.
+
+ • Backend tests cover validation, permissions, version binding and domain logic appropriate to this workstream.
+
+ • The cross-workstream integration test passes for the features included in the release.
+
+
+   Change-control rule: Any change to endpoint, field name, enum, versioning behaviour or acceptance criteria must be reflected in
+   both paired documents and the shared contract in the same change.
+
+
+
+
+WS4 | Frontend Plan                                                                                                                           Page 3
+################################################################
+# SOURCE: docs/MVP_Developement_plan/Risk_Platform_WS5_Backend_Development_Plan.pdf
+################################################################
+                             FINANCIAL RISK PLATFORM
+                                                   WS5 | Backend Development Plan
+                                              AI/GenAI, Automation & Innovation Layer
+
+
+
+
+ Workstream objective: Add differentiated intelligence while keeping data access, financial calculations and consequential actions governed.
+
+ Product intent: A broad, lightweight, extensible platform foundation. Initial data volumes and module depth are limited deliberately;
+ architecture, control points and expansion interfaces are not treated as throwaway demo code.
+   Synchronization rule: This document is paired with the opposite-side document for the same workstream. Feature IDs, phase IDs,
+   endpoint contracts, statuses and acceptance criteria must remain aligned.
+
+ Shared architecture: Layer 1 Universal Platform Foundation → Layer 2 Configurable Financial Domain → Layer 3 Financial Calculation
+ Modules → Layer 4 Intelligence and Experience. Data governance and security cross-cut all layers.
+
+
+
+
+WS5 | Backend Plan                                                                                                                       Page 1
+ 1. Scope and Feature Coverage
+  Feature ID          Feature                            Scope / implementation intent
+
+  AI-01               Natural-language rule proposals    Convert supported requests into structured, reviewable proposals, never arbitrary executable
+                                                         code.
+
+  AI-02               Research and analyst assistant     Retrieve from approved internal documentation, schemas, rule definitions and run evidence.
+
+  AI-03               Explainability assistant           Explain calculation differences using actual outputs, lineage and versioned rules.
+
+  AI-04               Agentic workflow orchestration     Invoke allowlisted APIs through scoped permissions, approval gates and logged tool calls.
+
+  AI-05               Document intelligence              Extract candidate fields from approved sample documents and route uncertain fields for
+                                                         review.
+
+  AI-06               Anomaly and drift intelligence     Suggest data anomalies or distribution changes, with confidence/evidence and human review.
+
+  AI-07               Regulatory/change knowledge        Track manually supplied or approved regulatory-change records; live feeds are optional future
+                                                         integration.
+
+  AI-08               AI governance and model controls   Prompt/data boundaries, model/version logging, evaluation, redaction and human oversight.
+
+
+
+
+ 2. Phase-Wise Delivery
+ P0 | AI use-case and data boundary
+ Define permitted data, supported tasks, non-goals and human approval points.
+
+ P1 | Grounded assistant foundation
+ Retrieval over approved internal artefacts and metadata; show sources/evidence.
+
+ P2 | Structured proposals
+ Constrained rule proposals, schema/mapping suggestions and explicit review states.
+
+ P3 | Explainability and anomaly suggestions
+ Generate explanations from stored calculation evidence; anomaly suggestions require validation.
+
+ P4 | Controlled orchestration
+ Allowlisted service calls, scoped permissions, tool-call logs and approval before consequential actions.
+
+ P5 | Evaluation and governance
+ Test hallucination resistance, retrieval grounding, sensitive-data leakage and safe failure.
+
+ P6 | Optional integrations
+ Add document/OCR, external feeds or hosted models only when requirements, costs and security are approved.
+
+
+
+
+WS5 | Backend Plan                                                                                                                                       Page 2
+ 3. Implementation Responsibilities
+ Backend responsibilities
+ • Implement a provider-neutral AI service interface; local/template mode must work without external APIs.
+
+ • Ground responses in approved retrieved artefacts and actual calculation/lineage data; return citations/evidence references where possible.
+
+ • Validate model output against strict schemas and allowlisted rules; never execute generated code.
+
+ • Enforce user permissions and data scope for retrieval and tool calls; redact or exclude sensitive data as policy requires.
+
+ • Log model/version, prompt template version, retrieval references, tool calls and approval decisions without leaking secrets.
+
+ • Build evaluation fixtures for groundedness, unsupported requests, data leakage and regression; treat live regulatory feeds and external
+ screening as future integrations.
+
+ 4. Paired API / Feature Contract Matrix
+ Endpoint names are proposed contracts for alignment, not a claim that the APIs already exist. Confirm payload schemas in the shared
+ OpenAPI contract before implementation.
+
+  Shared feature pair           Capability                     Proposed API contract
+
+  FE-AI-01 / BE-AI-01           Assistant request              POST /api/v1/ai/assist; GET /api/v1/ai/requests/{request_id}
+
+  FE-AI-02 / BE-AI-02           Rule proposal                  POST /api/v1/rule-proposals; GET /api/v1/rule-proposals/{proposal_id}
+
+  FE-AI-03 / BE-AI-03           Explain run                    POST /api/v1/ai/explanations; GET /api/v1/ai/explanations/{id}
+
+  FE-AI-04 / BE-AI-04           Controlled workflow            POST /api/v1/workflows; GET /api/v1/workflows/{workflow_id}; POST
+                                                               /api/v1/workflows/{id}/approval
+
+  FE-AI-05 / BE-AI-05           AI evaluation                  POST /api/v1/ai/evaluations; GET /api/v1/ai/evaluations/{id}
+
+
+
+
+ 5. Cross-Cutting Rules
+ • The canonical model and source mapping are versioned separately. Unknown source attributes are preserved or quarantined by explicit
+ policy, not silently discarded.
+
+ • Every calculation run must bind dataset snapshot, schema/mapping version, rule-set version and calculation-engine version.
+
+ • Server-side authorization is authoritative. The frontend may hide unavailable actions but does not enforce security.
+
+ • No AI-generated code is executed. AI output is validated against schemas and policy, and consequential actions require authorized approval.
+
+ • All errors use a structured response with code, message, details and correlation_id. Sensitive payloads and secrets must not be logged.
+
+ • Prototype financial modules use synthetic/approved data, documented assumptions and test fixtures; do not claim regulatory certification or
+ Moody's parity.
+
+ • The platform is designed for breadth, but production-grade depth is not implied for every financial domain. ALM/IRRBB, collateral, capital, live
+ market data and regulatory feeds require their own specifications and validation.
+
+ 6. Definition of Done
+ • Every feature ID in this document has a matching feature ID in its paired frontend/backend document and in the shared feature register.
+
+ • Each endpoint has request/response schemas, status enums, authorization expectations and error examples in OpenAPI.
+
+ • Frontend components use actual API responses or clearly labelled mocks matching the contract.
+
+ • Backend tests cover validation, permissions, version binding and domain logic appropriate to this workstream.
+
+ • The cross-workstream integration test passes for the features included in the release.
+
+
+   Change-control rule: Any change to endpoint, field name, enum, versioning behaviour or acceptance criteria must be reflected in
+   both paired documents and the shared contract in the same change.
+
+
+
+
+WS5 | Backend Plan                                                                                                                            Page 3
+################################################################
+# SOURCE: docs/MVP_Developement_plan/Risk_Platform_WS5_Frontend_Development_Plan.pdf
+################################################################
+                             FINANCIAL RISK PLATFORM
+                                                   WS5 | Frontend Development Plan
+                                              AI/GenAI, Automation & Innovation Layer
+
+
+
+
+ Workstream objective: Add differentiated intelligence while keeping data access, financial calculations and consequential actions governed.
+
+ Product intent: A broad, lightweight, extensible platform foundation. Initial data volumes and module depth are limited deliberately;
+ architecture, control points and expansion interfaces are not treated as throwaway demo code.
+   Synchronization rule: This document is paired with the opposite-side document for the same workstream. Feature IDs, phase IDs,
+   endpoint contracts, statuses and acceptance criteria must remain aligned.
+
+ Shared architecture: Layer 1 Universal Platform Foundation → Layer 2 Configurable Financial Domain → Layer 3 Financial Calculation
+ Modules → Layer 4 Intelligence and Experience. Data governance and security cross-cut all layers.
+
+
+
+
+WS5 | Frontend Plan                                                                                                                      Page 1
+ 1. Scope and Feature Coverage
+  Feature ID          Feature                            Scope / implementation intent
+
+  AI-01               Natural-language rule proposals    Convert supported requests into structured, reviewable proposals, never arbitrary executable
+                                                         code.
+
+  AI-02               Research and analyst assistant     Retrieve from approved internal documentation, schemas, rule definitions and run evidence.
+
+  AI-03               Explainability assistant           Explain calculation differences using actual outputs, lineage and versioned rules.
+
+  AI-04               Agentic workflow orchestration     Invoke allowlisted APIs through scoped permissions, approval gates and logged tool calls.
+
+  AI-05               Document intelligence              Extract candidate fields from approved sample documents and route uncertain fields for
+                                                         review.
+
+  AI-06               Anomaly and drift intelligence     Suggest data anomalies or distribution changes, with confidence/evidence and human review.
+
+  AI-07               Regulatory/change knowledge        Track manually supplied or approved regulatory-change records; live feeds are optional future
+                                                         integration.
+
+  AI-08               AI governance and model controls   Prompt/data boundaries, model/version logging, evaluation, redaction and human oversight.
+
+
+
+
+ 2. Phase-Wise Delivery
+ P0 | AI use-case and data boundary
+ Define permitted data, supported tasks, non-goals and human approval points.
+
+ P1 | Grounded assistant foundation
+ Retrieval over approved internal artefacts and metadata; show sources/evidence.
+
+ P2 | Structured proposals
+ Constrained rule proposals, schema/mapping suggestions and explicit review states.
+
+ P3 | Explainability and anomaly suggestions
+ Generate explanations from stored calculation evidence; anomaly suggestions require validation.
+
+ P4 | Controlled orchestration
+ Allowlisted service calls, scoped permissions, tool-call logs and approval before consequential actions.
+
+ P5 | Evaluation and governance
+ Test hallucination resistance, retrieval grounding, sensitive-data leakage and safe failure.
+
+ P6 | Optional integrations
+ Add document/OCR, external feeds or hosted models only when requirements, costs and security are approved.
+
+
+
+
+WS5 | Frontend Plan                                                                                                                                      Page 2
+ 3. Implementation Responsibilities
+ Frontend responsibilities
+ • Build assistant workspace with task modes: explain a run, propose a rule change, suggest a mapping, profile a dataset.
+
+ • Show sources, structured outputs, confidence/uncertainty and explicit unsupported-request messages.
+
+ • Provide review-and-approve screens for generated proposals and mapping suggestions.
+
+ • Show agent workflow steps and API actions taken, with approval gates and audit trail.
+
+ • Expose AI evaluation and governance status to authorized administrators.
+
+ 4. Paired API / Feature Contract Matrix
+ Endpoint names are proposed contracts for alignment, not a claim that the APIs already exist. Confirm payload schemas in the shared
+ OpenAPI contract before implementation.
+
+  Shared feature pair           Capability                     Proposed API contract
+
+  FE-AI-01 / BE-AI-01           Assistant request              POST /api/v1/ai/assist; GET /api/v1/ai/requests/{request_id}
+
+  FE-AI-02 / BE-AI-02           Rule proposal                  POST /api/v1/rule-proposals; GET /api/v1/rule-proposals/{proposal_id}
+
+  FE-AI-03 / BE-AI-03           Explain run                    POST /api/v1/ai/explanations; GET /api/v1/ai/explanations/{id}
+
+  FE-AI-04 / BE-AI-04           Controlled workflow            POST /api/v1/workflows; GET /api/v1/workflows/{workflow_id}; POST
+                                                               /api/v1/workflows/{id}/approval
+
+  FE-AI-05 / BE-AI-05           AI evaluation                  POST /api/v1/ai/evaluations; GET /api/v1/ai/evaluations/{id}
+
+
+
+
+ 5. Cross-Cutting Rules
+ • The canonical model and source mapping are versioned separately. Unknown source attributes are preserved or quarantined by explicit
+ policy, not silently discarded.
+
+ • Every calculation run must bind dataset snapshot, schema/mapping version, rule-set version and calculation-engine version.
+
+ • Server-side authorization is authoritative. The frontend may hide unavailable actions but does not enforce security.
+
+ • No AI-generated code is executed. AI output is validated against schemas and policy, and consequential actions require authorized approval.
+
+ • All errors use a structured response with code, message, details and correlation_id. Sensitive payloads and secrets must not be logged.
+
+ • Prototype financial modules use synthetic/approved data, documented assumptions and test fixtures; do not claim regulatory certification or
+ Moody's parity.
+
+ • The platform is designed for breadth, but production-grade depth is not implied for every financial domain. ALM/IRRBB, collateral, capital, live
+ market data and regulatory feeds require their own specifications and validation.
+
+ 6. Definition of Done
+ • Every feature ID in this document has a matching feature ID in its paired frontend/backend document and in the shared feature register.
+
+ • Each endpoint has request/response schemas, status enums, authorization expectations and error examples in OpenAPI.
+
+ • Frontend components use actual API responses or clearly labelled mocks matching the contract.
+
+ • Backend tests cover validation, permissions, version binding and domain logic appropriate to this workstream.
+
+ • The cross-workstream integration test passes for the features included in the release.
+
+
+   Change-control rule: Any change to endpoint, field name, enum, versioning behaviour or acceptance criteria must be reflected in
+   both paired documents and the shared contract in the same change.
+
+
+
+
+WS5 | Frontend Plan                                                                                                                           Page 3
+

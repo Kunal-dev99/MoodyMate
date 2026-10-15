@@ -1,0 +1,1258 @@
+################################################################
+# SOURCE: docs/System Design And Architecture/Financial_Risk_Platform_Architecture_and_System_Design.pdf
+################################################################
+                      FINANCIAL RISK PLATFORM
+                                  Architecture & System Design
+Working Draft v0.1 | 15 October 2026
+
+
+
+
+Proposed target architecture, component responsibilities, runtime flows, API boundaries, security controls, deployment topology and
+release gates.
+
+
+
+
+                               Financial Risk Platform | Architecture & System Design | Working Draft v0.1 • Page 1
+1. Purpose and status
+This document defines the proposed target architecture and system design for a configurable financial-risk platform intended to
+replace selected Moody’s calculation and balance-sheet risk capabilities. It complements the Detailed Data Model and the
+synchronized frontend/backend workstream plans.
+
+Status: working design baseline, not a production-approved architecture. Client infrastructure, exact Moody’s modules in scope,
+source feed contracts, regulatory jurisdictions, non-functional targets, hosting constraints and security policies require confirmation.
+  MVP principle: broad platform architecture, deliberately bounded initial implementation. Build durable control points and
+  extension contracts; limit initial volumes, integrations, instrument coverage and calculation depth until validated
+  requirements and benchmark data are available.
+
+
+2. Design objectives and principles
+ • Replace the calculation capability that the client actually uses, not reproduce proprietary internals or assume every Moody’s module is
+   licensed.
+
+ • Separate source payloads, canonical financial data, configurable rules and deterministic calculation services.
+
+ • Treat financial data quality, lineage, security, auditability and controlled change as first-class platform capabilities.
+
+ • Accept uncertain source shapes through registered contracts, profiling and versioned mappings. Never silently drop or reinterpret
+   unknown fields.
+
+ • Make each calculation reproducible from pinned input snapshots and exact versions of schema, mappings, instruments, rules,
+   assumptions and engine.
+
+ • Keep AI outside the authoritative calculation path. AI may explain, retrieve, propose or orchestrate approved actions, with permissions
+   and human approval.
+
+ • Use modular boundaries and versioned APIs so ALM/IRRBB, collateral and capital modules can be added without rewriting ingestion
+   or orchestration.
+
+
+3. Scope and assumptions
+ Area                            Proposed baseline                                             Confirmation required
+ Initial vertical slice          Configurable ingestion → mapping → quality                    Formula, jurisdiction, benchmark cases, tolerances
+                                 checks → canonical records → cash flows/maturity
+                                 ladder → one client-approved liquidity/LCR
+                                 calculation → reconciliation/report
+
+ Source inputs                   CSV/XLSX/JSON samples and provisional                         Actual warehouse schemas, ownership, cadence,
+                                 synthetic contracts; adapter interfaces for                   transport
+                                 warehouse/API/batch sources
+
+ Financial modules               Liquidity/LCR/HQLA and supporting                             Licensed modules and business priority
+                                 cash-flow/maturity functions first; ALM/IRRBB,
+                                 collateral and capital as extension points
+
+ Deployment                      Environment-neutral reference design;                         Cloud/on-prem, network, database, IAM, key
+                                 containerized services are a proposed default                 management
+
+ AI                              Optional, governed assistance; no dependency for              Approved model/provider, data residency, retention
+                                 core calculations
+
+ Scale                           Small initial datasets with production-minded                 Expected volumes, SLAs, batch windows,
+                                 interfaces and controls                                       concurrency
+
+
+Do not treat any example formula, threshold, product attribute or regulatory interpretation in this design as approved policy. Financial
+experts must approve the rule definitions and golden test cases.
+
+
+4. Logical architecture
+■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+■ EXPERIENCE & ACCESS                                                 ■
+■ Web UI • Data Workbench • Risk Operations • Reports • Admin • AI UI ■
+■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+                              ■ HTTPS / OIDC session
+■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■▼■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+■ API EDGE / APPLICATION SERVICES                                     ■
+■ API gateway • authZ • request validation • rate limits • correlation■
+■ Source & schema API • Import API • Mapping/Quality API              ■
+
+
+
+
+                                 Financial Risk Platform | Architecture & System Design | Working Draft v0.1 • Page 2
+■ Domain/Rule API • Calculation API • Scenario/Report API • AI API   ■
+■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+               ■                           ■
+■■■■■■■■■■■■■■■▼■■■■■■■■■■■■■■■■■ ■■■■■■■■■▼■■■■■■■■■■■■■■■■■■■■■■■■■■■
+■ LAYER 1: UNIVERSAL FOUNDATION ■ ■ LAYER 2: CONFIGURABLE DOMAIN     ■
+■ Ingestion • metadata • DQ     ■ ■ Canonical instruments • mappings ■
+■ identity • audit • versioning ■ ■ rule registry • assumptions      ■
+■ schema change governance      ■ ■ configuration lifecycle          ■
+■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■ ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+               ■                           ■
+               ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+                              ▼
+■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+■ LAYER 3: DETERMINISTIC FINANCIAL CALCULATION                       ■
+■ Cash-flow engine • maturity ladder • liquidity/LCR/HQLA            ■
+■ Extension contracts: ALM/IRRBB • collateral • capital              ■
+■ Run orchestrator • immutable run manifest • results & warnings     ■
+■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+                               ▼
+■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+■ LAYER 4: INTELLIGENCE & EXPERIENCE                                 ■
+■ Scenarios • lineage • explainability • reporting • governed AI     ■
+■ AI proposals / agents call allowlisted APIs; no direct DB writes   ■
+■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+
+CROSS-CUTTING: tenant/data scope • encryption • secrets • audit • observability
+change approvals • retention • backup/restore • model/rule governance
+
+The four layers are logical boundaries, not a mandate to deploy four separate applications. Start as a modular application with clear
+service/module boundaries; split into independently deployed services only where scaling, isolation, ownership or operational needs
+justify it.
+
+
+5. Recommended deployment topology
+Users / Analysts / Administrators
+           ■
+     WAF / TLS ingress
+           ■
+    Web frontend (static/PWA optional)
+           ■
+     API gateway / BFF
+           ■
+   Modular backend application ■■■■■■■■■ Identity Provider (OIDC/OAuth2)
+   ■■ Governance & Schema
+   ■■ Ingestion & Mapping
+   ■■ Financial Domain & Rules
+   ■■ Calculation Orchestrator
+   ■■ Results / Reconciliation / Reporting
+   ■■ AI Governance Gateway (optional)
+           ■
+   ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+   ▼       ▼          ▼                ▼
+Relational DB   Object storage    Job queue       Logs/metrics/traces
+(metadata,      (raw files,       (async imports, (redacted structured
+canonical,      artifacts,        long calculations) operational telemetry)
+runs/results)   reports)
+           ■
+     Backup / restore / retention
+           ■
+ Optional source adapters: warehouse, file drop, REST APIs, approved feeds
+
+ • Reference implementation: React/TypeScript frontend and a typed backend API (FastAPI is a reasonable Python-oriented option for
+   data and calculation workloads); final framework must match the team and client environment.
+
+ • Use a relational database for configuration, identity references, metadata, canonical entities, run manifests and results. Use object
+   storage for source files, large artifacts and generated reports.
+
+ • Use an asynchronous job mechanism for imports, profiling, large calculations and report generation. A lightweight database-backed job
+   queue may be sufficient for the MVP; preserve an adapter boundary for a dedicated broker later.
+
+ • Keep the deployment cloud-neutral until client hosting and security requirements are confirmed. Avoid committing to a specific vendor
+   from this draft alone.
+
+
+6. Core runtime flows
+6.1 Ingestion and schema-change flow
+ 1. Register source system/profile and a provisional or approved source contract.
+
+ 2. Upload or receive a file/feed; create an import job and immutable artifact reference, hash, timestamps and uploader/source identity.
+
+ 3. Profile columns, types, null rates, distinct values and value distributions. Unknown fields are retained in the raw artifact and surfaced
+   as candidates.
+
+ 4. Apply an explicit, versioned source-to-canonical mapping. Mapping validation checks required fields, conversions, units, date
+   semantics and key uniqueness.
+
+ 5. Run data-quality rules. Accepted records enter a versioned canonical dataset snapshot; invalid records are rejected or quarantined
+   with actionable issue codes.
+
+ 6. Run source-to-target reconciliation where totals/counts are meaningful. Record all warnings and approvals.
+
+ 7. If drift is detected, create a review/change proposal. Do not auto-promote schema, mapping or rule changes into production.
+
+
+                                Financial Risk Platform | Architecture & System Design | Working Draft v0.1 • Page 3
+6.2 Calculation and result flow
+ 1. User selects dataset snapshot, calculation module/version, reporting date, rule-set version, assumption set and scenario.
+
+ 2. API authorizes access and validates that required inputs and approved configuration versions exist.
+
+ 3. Orchestrator creates a run record and immutable run manifest; the job moves through queued, running, validation, completed/failed
+   states.
+
+ 4. Calculation service executes deterministic, unit-tested logic against a stable input snapshot. It records intermediate values, warnings
+   and lineage references.
+
+ 5. Post-run checks validate invariants, totals, expected row counts and reconciliation tolerances. A failed control marks the run as failed
+   or requiring review, never silently successful.
+
+ 6. Persist results and manifest; present metrics, warnings, source-to-result lineage and comparison to benchmark/baseline.
+
+ 7. Any rerun after changing input or configuration creates a new run. Do not overwrite historic results.
+
+6.3 Governed AI workflow
+ 1. User asks for an explanation, impact assessment or a proposed configuration change.
+
+ 2. AI gateway checks identity, scope, data classification, approved model route and permitted tools.
+
+ 3. Retrieval is limited to authorized records/documents; references are stored with the AI request.
+
+ 4. AI returns a grounded explanation or a structured proposal, with uncertainty and evidence links.
+
+ 5. Proposal is validated by deterministic services and routed for human approval where consequential.
+
+ 6. Only approved actions are executed through allowlisted APIs. Tool calls, inputs/outputs metadata, approvals and evaluation results
+   are audited.
+
+
+7. Component responsibilities
+Component                       Responsibilities                                              Must not do
+API edge / BFF                  Authentication handoff, request validation, rate              Contain business formulas or bypass service
+                                limits, correlation IDs, consistent errors                    authorization
+
+Schema & contract registry      Schema versions, fields, source profiles, change              Silently mutate approved contracts
+                                proposals, compatibility checks
+
+Ingestion adapters              Parse source formats, preserve raw artifact, emit             Assume all sources share one shape
+                                normalized records and provenance
+
+Mapping & quality               Versioned transformations, type/unit conversions,             Drop unknown fields without trace
+                                validation issues, quarantine, profiling and drift
+
+Canonical domain                Instrument, position, counterparty, contractual               Make client-specific assumptions invisible
+                                terms, market/reference data and stable identifiers
+
+Rule/configuration registry     Versioned rules, assumptions, effective dates,                Edit a version already used by completed runs
+                                approval state and module compatibility
+
+Calculation modules             Pure/deterministic financial calculations where               Call LLMs to produce authoritative numbers
+                                possible; intermediate outputs and warnings
+
+Run orchestrator                Pin versions, schedule jobs, retries, idempotency,            Allow duplicate side effects on retry
+                                state transitions and lineage manifest
+
+Reconciliation & reporting      Compare source, canonical and calculated totals;              Hide material breaks or warnings
+                                reports with run/version context
+
+AI governance gateway           Authorized retrieval, tool allowlist,                         Write directly to database or approve its own
+                                proposal/evaluation/audit                                     changes
+
+Audit/observability             Immutable audit trail, metrics, traces, alerts and            Log secrets or unnecessary raw financial data
+                                redaction
+
+
+
+8. Canonical financial domain and data boundaries
+ • Raw zone: original source artifacts and immutable metadata. Restrict access; apply retention and encryption policies.
+
+
+
+
+                                Financial Risk Platform | Architecture & System Design | Working Draft v0.1 • Page 4
+ • Staging zone: parsed source rows with source record identifiers, import batch, raw-field map and parsing status.
+
+ • Canonical zone: normalized entities with internal stable IDs, source identifiers, validity/effective dates, version and provenance.
+
+ • Configuration zone: schema/mapping/rule/assumption/module versions and approval history.
+
+ • Calculation zone: run manifests, input references, intermediate values, result records, warnings and lineage edges.
+
+ • Presentation zone: report instances and views derived from authorized results; reports carry run ID and configuration versions.
+
+ • AI evidence zone: request metadata, retrieval references, tool-call metadata, proposals, approvals and evaluation outcomes. Avoid
+   duplicating raw sensitive content unless explicitly approved.
+
+For financial values, use fixed-precision decimal types and explicit currency/unit fields. Preserve source precision and define rounding
+points per approved calculation specification. Store dates, timestamps, time zones, business dates and effective dates distinctly.
+
+
+9. API design and contracts
+Proposed REST contract prefix: /api/v1. Endpoint names below are illustrative and must be reconciled with the synchronized
+workstream plans and finalized in OpenAPI before implementation.
+
+ Domain                         Representative endpoints                                      Notes
+ Identity/context               GET /api/v1/me; GET /api/v1/me/permissions                    Identity provider is authoritative; server enforces
+                                                                                              every request
+
+ Schemas                        GET /api/v1/schemas; GET                                      Immutable published versions; changes reviewed
+                                /api/v1/schemas/{id}/versions; POST
+                                /api/v1/schema-change-proposals
+
+ Imports                        POST /api/v1/datasets/imports; GET                            Large file upload may use pre-signed object
+                                /api/v1/imports/{id}; POST                                    storage URL if approved
+                                /api/v1/imports/{id}/validate
+
+ Mappings                       GET /api/v1/mappings; POST                                    Versioned mappings and explicit promotion
+                                /api/v1/imports/{id}/mappings/validate; POST
+                                /api/v1/mappings/{id}/versions
+
+ Quality                        GET /api/v1/imports/{id}/issues; GET                          Paginated issue details; raw values masked by
+                                /api/v1/imports/{id}/profile; POST                            policy
+                                /api/v1/reconciliations
+
+ Rules/modules                  GET /api/v1/rules; GET                                        Rule promotion requires validation/approval
+                                /api/v1/calculation-modules; POST
+                                /api/v1/rule-proposals
+
+ Runs/results                   POST /api/v1/calculation-runs; GET                            Run creation idempotency key; async status and
+                                /api/v1/calculation-runs/{id}; GET                            result references
+                                /api/v1/calculation-runs/{id}/results
+
+ Lineage                        GET /api/v1/calculation-runs/{id}/lineage                     Source-to-result provenance
+
+ Scenarios                      POST /api/v1/scenarios; POST                                  Scenario is versioned and references baseline
+                                /api/v1/scenarios/{id}/run; GET
+                                /api/v1/scenarios/{id}
+
+ Audit/reports                  GET /api/v1/audit-events; POST /api/v1/reports;               Permission-filtered; audit access itself is audited
+                                GET /api/v1/reports/{id}
+
+ AI                             POST /api/v1/ai/requests; GET                                 AI endpoints can be disabled without disabling core
+                                /api/v1/ai/requests/{id}; POST                                calculations
+                                /api/v1/ai/proposals/{id}/approve
+
+
+ • Use a consistent error envelope: code, message, details, correlation_id and retryable.
+
+ • Use pagination, filtering, request size limits, timeouts and schema validation.
+
+ • Use idempotency keys for run/import creation and safe retry semantics for asynchronous jobs.
+
+ • Expose OpenAPI as the source of truth for API contracts; contract tests must run in CI.
+
+ • Never rely on frontend-only checks for authorization or validation.
+
+
+10. Security, privacy and governance
+
+                                Financial Risk Platform | Architecture & System Design | Working Draft v0.1 • Page 5
+ • Authentication: enterprise identity provider using OIDC/OAuth2 where available; do not invent a parallel identity store unless required.
+
+ • Authorization: RBAC with data-scope constraints; enforce tenant/entity/dataset permissions on the server and at query boundaries.
+
+ • Least privilege: separate roles for platform admin, data steward, risk analyst, approver, auditor and service identity; final role model
+   requires client approval.
+
+ • Encryption: TLS in transit; database, object storage, backups and secrets encrypted at rest using approved key management.
+
+ • Secrets: managed secret store or equivalent; no credentials in source control, frontend bundles, logs or documents.
+
+ • Audit: record actor/service, action, object, timestamp, correlation ID, outcome, approval reference and version identifiers. Protect audit
+   records against ordinary modification.
+
+ • Data minimization: mask or redact raw values in logs and UI where unnecessary; restrict raw artifacts and quarantined records.
+
+ • Change governance: maker-checker approval for production schema, mapping, rule, assumption and module configuration changes
+   where required.
+
+ • AI controls: approved model routing, prompt/data classification, retrieval access checks, tool allowlist, prompt-injection defenses,
+   output validation, human approval and retention controls.
+
+ • Operational security: dependency scanning, static analysis, secret scanning, vulnerability remediation, penetration testing and incident
+   response.
+
+No jurisdiction-specific compliance claim is made here. Data residency, retention, privacy, encryption key ownership,
+segregation-of-duties and regulatory evidence requirements must be confirmed with the client.
+
+
+11. Reliability, performance and operations
+ Concern                         MVP design                                                   Production gate
+ Async work                      Durable job state, retry count, failure reason,              Load tests, queue recovery, concurrency limits
+                                 dead-letter/review state
+
+ Idempotency                     Idempotency key for run/import creation; duplicate           Prove retries cannot double-publish or corrupt
+                                 detection                                                    results
+
+ Transactions                    Atomic state changes for config promotion and run            Concurrency and isolation review
+                                 manifest creation
+
+ Observability                   Structured logs, metrics, traces, correlation IDs;           Dashboards, alerts, SLOs and on-call runbooks
+                                 redact sensitive payloads
+
+ Backup/restore                  Automated DB/object backups and documented                   Demonstrated restore and recovery objectives
+                                 restore procedure
+
+ Performance                     Bounded datasets; measure import, validation and             Client-approved volumes, batch windows and
+                                 calculation time                                             p95/p99 targets
+
+ Availability                    Graceful failure and resumable jobs where practical HA, disaster recovery and failover exercises
+
+ Retention                       Configurable retention policy by artifact/result class       Legal/business approval and deletion evidence
+
+
+Do not invent numeric SLAs before discovery. Record the target, test dataset size, environment and measurement method when the
+client agrees service-level objectives.
+
+
+12. Calculation correctness and reproducibility
+ • Every run has a unique ID and immutable manifest including reporting date, source dataset snapshot, schema version, mapping
+   version, instrument model/version, rule-set version, assumptions, scenario, module version, engine build, calculation parameters and
+   user/service identity.
+
+ • Store explicit references to input records and source artifacts; maintain lineage from result to intermediate value to canonical input to
+   source record.
+
+ • Use deterministic calculation code with fixed-precision arithmetic, explicit rounding rules, stable ordering where relevant and controlled
+   random seeds for any approved stochastic method.
+
+ • Maintain golden datasets and independently approved expected outputs for each financial module and supported instrument type.
+
+ • Run unit tests, property/invariant tests, regression tests, reconciliation tests and parallel comparisons against the incumbent system
+   where permitted.
+
+ • Define tolerances per metric and explain whether a comparison is exact, rounded, or tolerance-based.
+
+
+
+
+                                Financial Risk Platform | Architecture & System Design | Working Draft v0.1 • Page 6
+ • Never label a module production-ready until domain experts approve formulas, coverage, edge cases, regulatory interpretation and
+   reconciliation evidence.
+
+
+13. AI and agentic design guardrails
+ • AI is an optional application layer, not a dependency of the deterministic financial calculation path.
+
+ • Use retrieval augmented with authorized source documents, rule definitions, model documentation and run evidence; cite the evidence
+   in explanations.
+
+ • Agent tools are explicit allowlisted APIs with typed inputs, scoped permissions, timeouts and auditable outputs.
+
+ • AI-generated mappings, rules or assumptions are proposals. They require validation and approval before promotion.
+
+ • Do not let an agent execute arbitrary SQL, modify historical run results, change permissions, or approve its own proposal.
+
+ • Evaluate AI for groundedness, correctness, leakage, refusal/permission behavior, tool safety and regression; store evaluation version
+   and outcomes.
+
+ • External model APIs are optional and must be approved for data residency, contractual terms, privacy and retention. The core product
+   must function when AI is disabled.
+
+
+14. Frontend system design
+ Workspace                       Primary screens                                               Core interaction
+ Platform administration         Users/roles, access scopes, audit, environment                Manage access and inspect audited actions
+                                 settings
+
+ Source & schema registry        Sources, contracts, schema versions, drift/change             Review unknown fields and promote approved
+                                 proposals                                                     versions
+
+ Ingestion workbench             Upload/import status, mapping grid, profile,                  Map fields, test conversions, correct/retry rejected
+                                 validation issues, quarantine                                 records
+
+ Financial domain                Instrument types, instrument records, assumptions,            Inspect effective versions and approval status
+                                 rule registry
+
+ Calculation operations          Module selection, reporting date, dataset/version             Submit run, monitor status, inspect warnings and
+                                 selection, run history                                        results
+
+ Reconciliation & scenarios      Baseline/scenario comparison, break summary,                  Investigate deltas and record review outcomes
+                                 lineage drilldown
+
+ Reports                         Run-linked reports, exports, filters                          Generate and retrieve authorized artifacts
+
+ AI assistant (optional)         Evidence-backed explanations, impact analysis,                Review citations, accept/reject proposals, see
+                                 proposed changes                                              tool-call audit
+
+
+UI state must reflect backend lifecycle states. Do not show a calculation as successful until the backend run state and post-run
+controls confirm completion. Every result view should display the run ID, reporting date and configuration version context.
+
+
+15. Proposed repository and code organization
+/frontend
+  /src
+    /app              routes, layouts, auth/session
+    /features         schemas, imports, mappings, domain, runs, reports, AI
+    /components       shared UI components
+    /api              generated/typed API client
+    /types            shared API types
+/backend
+  /app
+    /api/v1           route handlers and request/response schemas
+    /core              config, authZ, errors, correlation, logging
+    /governance        schema registry, approvals, audit
+    /ingestion         parsers, source adapters, import jobs
+    /mapping           transformations, validation, profiling
+    /domain            instruments, positions, cashflows, reference data
+    /rules             rule registry, assumptions, promotion
+    /calculations      engine interface and module implementations
+    /orchestration     run lifecycle, idempotency, job dispatch
+    /reconciliation    comparisons, tolerances, break management
+    /lineage            lineage graph and query services
+    /reporting          report definitions and renderers
+    /ai                 retrieval, tools, proposals, evaluation
+    /db                 models, repositories, migrations
+    /tests              unit, contract, integration, regression
+/infra
+  /local               local development composition
+  /deployment          environment templates and manifests
+
+
+
+
+                                 Financial Risk Platform | Architecture & System Design | Working Draft v0.1 • Page 7
+/docs
+  architecture, ADRs, OpenAPI, data dictionary, runbooks, threat model
+
+Treat this as a suggested structure, not a requirement to create a large microservice repository on day one. Keep domain modules
+independently testable and dependency direction explicit.
+
+
+16. Delivery phases and workstream synchronization
+ Phase                           Primary outcome                                               Workstreams
+ P0                              Confirm assumptions, source samples, security                 All; WS1 coordinates
+                                 classifications, first calculation slice, golden-test
+                                 plan
+
+ P1                              Identity/access, audit, schema registry, versioning,          WS1; paired FE/BE contracts
+                                 API skeleton and observability baseline
+
+ P2                              Import artifacts, source profiles, mappings,                  WS2
+                                 validation, quarantine, profiling and drift review
+
+ P3                              Canonical instrument/domain model,                            WS3
+                                 rule/assumption registry, module interface and
+                                 cash-flow foundations
+
+ P4                              Run orchestration, first bounded liquidity                    WS3 + WS4
+                                 calculation, reconciliation and result manifest
+
+ P5                              Scenarios, lineage UI, reporting, governed AI                 WS4 + WS5
+                                 proposals and evaluation
+
+ P6                              Regression, security, performance, restore tests, All
+                                 documentation and second-module extension proof
+
+
+ • Maintain five synchronized pairs: WS1 Data Governance, Security & Platform Foundation; WS2 Data Ingestion, Mapping & Data
+   Quality; WS3 Financial Domain Model & Calculation Services; WS4 Risk Operations, Scenarios, Reconciliation & Reporting; WS5
+   AI/GenAI, Automation & Innovation.
+
+ • Feature IDs, phase IDs, endpoint contracts, state names and acceptance criteria must stay aligned between each frontend and
+   backend plan.
+
+ • Use a contract-first workflow: agree API/schema → update OpenAPI and data model → implement backend → implement frontend
+   against contract → run contract/integration/regression tests.
+
+ • Changes to canonical schema, API contract, calculation rules or lifecycle states require an impact assessment across paired
+   workstreams.
+
+
+17. Testing strategy and release gates
+ • Unit: parser edge cases, mapping conversions, financial functions, rounding, rule evaluation and state transitions.
+
+ • Contract: OpenAPI request/response schemas, error envelopes, pagination and idempotency.
+
+ • Integration: source artifact through canonical data, calculation, result persistence, lineage and report.
+
+ • Security: authorization matrix, data-scope isolation, permission revocation, audit integrity, upload limits and injection defenses.
+
+ • Data quality: nulls, duplicates, invalid dates, unit/currency mismatch, missing references, outliers and unknown columns.
+
+ • Financial regression: approved golden cases, boundary cases, negative/zero values, maturity cutoffs, day-count conventions and
+   supported instrument types.
+
+ • Reconciliation: source-to-canonical counts/totals and incumbent-vs-new results with metric-specific tolerances.
+
+ • AI evaluation: grounded citations, unauthorized retrieval attempts, unsafe tool requests, proposal validation and regression.
+
+ • Operational: retry, restart, partial failure, backup/restore, load and concurrency tests.
+
+Release gates: no production calculation sign-off without named financial owner, approved calculation specification, golden dataset,
+tolerance policy, defect disposition, lineage evidence and documented rollback.
+
+
+18. Architecture decisions to resolve
+
+
+
+                                 Financial Risk Platform | Architecture & System Design | Working Draft v0.1 • Page 8
+Decision                       Current recommendation                                        Owner / evidence needed
+Hosting topology               Cloud-neutral reference; containerized modular                Client infrastructure/security team
+                               backend
+
+Backend framework              Typed REST backend; FastAPI is a viable                       Engineering team and existing platform constraints
+                               candidate
+
+Database                       Relational store for                                          DBA, volume, reporting and HA needs
+                               metadata/configuration/canonical entities/results
+
+Object storage                 Use for immutable source artifacts and reports                Client storage/security policy
+
+Job execution                  Async workers; start lightweight, retain broker               Expected workload and batch windows
+                               adapter boundary
+
+Identity provider              Integrate with enterprise OIDC/OAuth2 where                   IAM team
+                               available
+
+Source integration             Start with file-based adapter, then warehouse/API             Data owners and actual feed samples
+                               adapters after discovery
+
+Regulatory scope               Confirm jurisdiction, reporting definitions and               Risk/regulatory product owner
+                               licensed module inventory
+
+AI provider                    Optional and approval-gated; no core dependency               Security, legal, procurement, data residency
+
+Retention and RPO/RTO          Do not set numeric values until agreed                        Business continuity and compliance owners
+
+
+
+19. Risks and mitigations
+Risk                                   Mitigation
+Unknown or changing source             Raw preservation, profiling, versioned contracts/mappings, drift review and quarantine
+schemas
+
+Incorrect financial outputs            Domain owner, approved formulas, golden datasets, parallel runs and explicit tolerances
+
+Untraceable results                    Immutable run manifest, record-level lineage and version-pinned configuration
+
+Scope expansion to all modules at      Platform-wide architecture; staged vertical slices and explicit module readiness gates
+once
+
+AI fabricates or changes financial     Deterministic calculation authority; proposal-only AI; allowlisted tools and approval
+logic
+
+Sensitive data leaks through           Classification, redaction, access controls, approved model route and retention controls
+logs/AI
+
+Frontend/backend drift                 Shared feature IDs, OpenAPI contract-first workflow and CI contract tests
+
+Overengineering early                  Modular monolith first, deployable boundaries later, measured scaling decisions
+
+
+
+20. Definition of done for the first end-to-end slice
+• A user with the correct role can register a source, import a sample dataset and inspect a data profile.
+
+• Unknown columns are retained in the source artifact and visibly flagged for review.
+
+• A versioned mapping can be validated and used to create canonical records; invalid rows are quarantined with clear issue codes.
+
+• Approved configuration versions are pinned to a calculation run manifest.
+
+• The chosen calculation slice executes deterministically and emits outputs, intermediate values, warnings and lineage.
+
+• Reconciliation checks and approved golden tests pass within agreed tolerances.
+
+• Results are searchable by run ID and show reporting date, dataset snapshot, rules, assumptions, engine version and status.
+
+• All privileged actions and configuration changes are audited; server-side access checks are tested.
+
+• AI features can be disabled without breaking ingestion or financial calculations.
+
+
+
+
+                               Financial Risk Platform | Architecture & System Design | Working Draft v0.1 • Page 9
+ • Frontend/backend paired contracts and test evidence are published alongside the release.
+
+
+Appendix A. Key entities and relationship summary
+ • SourceSystem → SourceProfile → SourceContract → SchemaVersion / FieldMappingVersion.
+
+ • ImportJob → ImportArtifact → ImportBatch → SourceRecord → CanonicalRecord; ValidationIssue and QuarantineItem reference
+    relevant records/batches.
+
+ • CanonicalRecord links to domain entities such as Instrument, Position, Counterparty, ContractualTerm, CashflowEvent,
+   CollateralAsset and MarketObservation.
+
+ • RuleSetVersion + AssumptionSet + CalculationModuleVersion + DatasetSnapshot + ScenarioVersion → CalculationRun.
+
+ • CalculationRun → CalculationInputRef, IntermediateValue, CalculationWarning, domain result tables, ReconciliationRun and
+   ReportInstance.
+
+ • CalculationRun → LineageNode/LineageEdge → source/canonical inputs and output metrics.
+
+ • AIRequest → RetrievalReference / ToolCall / Proposal / EvaluationRun; approved proposals create ordinary governed change records.
+
+
+Appendix B. Standard lifecycle states (proposed)
+ Object                                Candidate states
+ Import job                            created, uploaded, profiling, mapping_required, validating, quarantined, ready, failed, cancelled
+
+ Schema/mapping/rule version           draft, in_review, approved, active, deprecated, rejected
+
+ Calculation run                       queued, validating, running, post_check, completed, completed_with_warnings, failed, cancelled
+
+ Change proposal                       draft, submitted, in_review, approved, rejected, applied, superseded
+
+ Review task                           open, assigned, approved, rejected, deferred, closed
+
+ Report instance                       queued, generating, completed, failed, expired
+
+
+Use one canonical spelling and transition table per object in implementation. Every transition must define authorized actor,
+preconditions, side effects and audit event.
+
+
+Appendix C. Glossary
+ Term                                  Meaning
+ Canonical model                       Normalized internal representation of financial entities and attributes
+
+ Source contract                       Versioned description of expected source shape and semantics
+
+ Golden dataset                        Expert-approved input set with expected outputs used for regression
+
+ Run manifest                          Immutable list of data/configuration/code versions and parameters for one calculation
+
+ Lineage                               Trace from result to intermediate calculation and source inputs
+
+ Maker-checker                         Separation between the person proposing a consequential change and the approver
+
+ Modular monolith                      One deployable application with explicit internal modules and boundaries
+
+
+
+
+                               Financial Risk Platform | Architecture & System Design | Working Draft v0.1 • Page 10
+################################################################
+# SOURCE: docs/System Design And Architecture/Financial_Risk_Platform_Detailed_Data_Model.pdf
+################################################################
+                                                                              FINANCIAL RISK PLATFORM
+                                                                                                Detailed Data Model
+                                                                          Logical entities, relationships, versioning, lineage, security and extensibility
+
+
+
+
+Purpose. Define a platform-wide logical data model for the lightweight but extensible financial-risk platform across five synchronized workstreams and four architectural layers.
+
+Status. Working draft v0.1. This is a proposed logical model, not a confirmed client physical schema. Source attributes, jurisdiction, regulatory rules, product coverage and integrations remain subject to discovery.
+ Design principle. Preserve source provenance; map into versioned canonical contracts; keep historical calculation inputs immutable; trace each result to data, schema, mapping, assumptions, rules
+ and engine versions.
+
+ Model area                            Primary purpose                                                                            Workstream
+
+ Governance and security               Tenant scope, identity, permissions, classification and audit                              WS1
+
+ Schema and contracts                  Versioned schemas, source profiles, mappings and change proposals                          WS1/WS2
+
+ Ingestion and quality                 Imports, records, validation, quarantine, profiling and reconciliation                     WS2/WS4
+
+ Financial domain                      Parties, accounts, instruments, positions, cash flows, collateral, market/reference data   WS3
+
+ Rules and calculations                Rules, modules, runs, outputs, intermediate values and warnings                            WS3/WS4
+
+ Operations and lineage                Scenarios, benchmarks, reports, workflow and audit                                         WS1/WS4
+
+ AI governance                         AI requests, retrieval evidence, tool calls, proposals and evaluation                      WS5
+
+
+
+
+Financial Risk Platform | Detailed Data Model | Working Draft v0.1                                                                                                                                                        Page 1
+1. Architecture and modelling principles
+• Use a modular relational core (e.g. PostgreSQL) for metadata, entities, configurations, job states and results; use object storage for original files and large artifacts.
+
+• Keep source payloads and canonical records distinct. A source file is evidence of what arrived; canonical records represent interpretation under a schema and mapping version.
+
+• Use immutable versions for schemas, mappings, instrument terms, rules, assumption sets, module versions and report definitions.
+
+• Every calculation run pins the exact dataset snapshot and all configuration/model versions. Historic run inputs are never updated in place.
+
+• Use stable internal UUIDs plus source-scoped external IDs. Do not assume client identifiers are globally unique or immutable.
+
+• Use fixed-precision decimal for authoritative financial values, not binary floating point. Store currency/unit and as-of/effective dates explicitly.
+
+• Use typed columns for stable, frequently queried fields and governed extension attributes for genuinely variable source-specific fields.
+
+• Separate calculation definitions/configuration from results; preserve evidence for independent reconciliation and explanation.
+
+• Security, masking, retention, access control and audit are cross-cutting model requirements, not UI-only features.
+
+2. High-level relationship map
+source_system → source_profile/source_contract → import_job/import_artifact → source_record → field_mapping/mapping_version → canonical_record/instrument_version/position_version → calculation_run (pinned
+inputs + rule_set + assumption_set + module_version) → intermediate_value and domain result tables → benchmark_result/report_instance. lineage_node/lineage_edge and audit_event preserve provenance and
+governance.
+
+• One logical schema has many immutable versions; each import and run references a specific version.
+
+• One mapping definition has many versions; each import records the exact mapping version applied.
+
+• One instrument has many immutable term versions and many positions over time.
+
+• One rule definition has many versions; a rule set contains explicit rule versions and precedence.
+
+• One calculation run has many input references, outputs, intermediate values, warnings and lineage edges.
+
+• One scenario references a baseline and stores proposed changes separately; it never mutates baseline configuration.
+
+• AI proposals are separate from approved rules/configuration. Approval and activation are explicit state transitions.
+
+3. Data dictionary and entity catalogue
+All entities normally include created_at, updated_at, created_by and tenant_id where applicable. Immutable/versioned records also include status, version/effective dates and a content hash as appropriate. Physical
+columns should be finalized after client data samples and domain conventions are confirmed.
+
+1. Governance, identity and security
+ Entity                         Key field(s)                         Logical key       Purpose / modelling notes
+
+ tenant                         tenant_id                            UUID PK           Organisation/security boundary; retain even if first demo is single-tenant.
+
+ user_account                   user_id                              UUID PK           Application identity mapped to an identity-provider subject; do not store passwords.
+
+ role                           role_id                              UUID PK           Viewer, analyst, approver, administrator or client-approved role.
+
+ permission                     permission_id                        UUID PK           Action/resource permission enforced server-side.
+
+ user_role                      user_id + role_id                    Composite PK/FK   User-to-role assignment, tenant-scoped where applicable.
+
+
+
+
+Financial Risk Platform | Detailed Data Model | Working Draft v0.1                                                                                                                                                 Page 2
+ Entity                         Key field(s)                         Logical key            Purpose / modelling notes
+
+ role_permission                role_id + permission_id              Composite PK/FK        Role-to-permission assignment.
+
+ data_classification            classification_id                    UUID PK                Client-approved labels such as internal, confidential, restricted.
+
+ access_policy                  policy_id                            UUID PK                Policy for resource, action, scope, masking and allowed use.
+
+ audit_event                    audit_event_id                       UUID PK                Actor, action, resource, timestamp, outcome, correlation ID and safe metadata.
+
+
+
+2. Schema registry and source contracts
+ Entity                         Key field(s)                         Logical key            Purpose / modelling notes
+
+ schema_definition              schema_id                            UUID PK                Logical contract such as instrument, position, cash flow or market observation.
+
+ schema_version                 schema_version_id                    UUID PK                Immutable schema version, contract payload, status, effective date and compatibility level.
+
+ schema_field                   schema_field_id                      UUID PK                Field name/type, requiredness, unit, scale, sensitivity, validation profile and extension eligibility.
+
+ schema_change_proposal         schema_change_id                     UUID PK                Schema diff, impact analysis, regression evidence, approval and rollback reference.
+
+ schema_dependency              schema_id + dependent ref            Composite/logical FK   Links schemas to mappings, rules, modules, reports and integrations.
+
+ source_system                  source_system_id                     UUID PK                Warehouse, file drop, internal application or future feed/API.
+
+ source_profile                 source_profile_id                    UUID PK                Format, encoding, delimiter, sheet/table, cadence, owner and provisional/approved state.
+
+ source_contract                source_contract_id                   UUID PK                Expected incoming shape and version; can remain provisional until client samples arrive.
+
+ field_mapping                  mapping_id                           UUID PK                Logical source-to-canonical mapping definition.
+
+ mapping_version                mapping_version_id                   UUID PK                Immutable mapping version used by an import/run.
+
+ mapping_rule                   mapping_rule_id                      UUID PK                Source selector, target field, transform, parameters, null/default policy and validation.
+
+
+
+3. Ingestion, validation and data quality
+ Entity                         Key field(s)                         Logical key            Purpose / modelling notes
+
+ import_job                     import_id                            UUID PK                One ingestion attempt with source profile, status, schema/mapping refs, actor, timestamps and
+                                                                                            correlation ID.
+
+ import_artifact                artifact_id                          UUID PK                Original file/object reference, MIME type, size, checksum, classification and retention state.
+
+ import_batch                   batch_id                             UUID PK                Logical batch/partition and source batch identifier with row counts.
+
+ source_record                  source_record_id                     UUID PK                Stable identity for a row/object, with source locator and safe provenance metadata.
+
+ canonical_record               canonical_record_id                  UUID PK                Normalized record under a specific canonical schema version.
+
+ record_lineage                 lineage_id                           UUID PK                Links canonical records to source records, mapping version and transformation/run.
+
+ validation_profile             validation_profile_id                UUID PK                Versioned checks by schema, source or module.
+
+ validation_issue               issue_id                             UUID PK                Issue code, severity, field/record ref, message, disposition and status; avoid sensitive values in
+                                                                                            messages.
+
+ quarantine_item                quarantine_id                        UUID PK                Rejected/held record reference, reason, owner, status and retry/disposition history.
+
+ reconciliation_run             reconciliation_id                    UUID PK                Counts/totals/keys comparison, tolerance policy and outcome.
+
+
+
+Financial Risk Platform | Detailed Data Model | Working Draft v0.1                                                                                                                                   Page 3
+ Entity                           Key field(s)                       Logical key       Purpose / modelling notes
+
+ reconciliation_item              reconciliation_item_id             UUID PK           Individual check/record variance, tolerance and resolution.
+
+ data_profile_snapshot            profile_id                         UUID PK           Observed types, null rates, uniqueness, ranges and distribution summaries.
+
+ data_drift_event                 drift_event_id                     UUID PK           Observed shape/distribution change; creates a review event, not automatic schema mutation.
+
+
+
+4. Financial domain and canonical model
+ Entity                           Key field(s)                       Logical key       Purpose / modelling notes
+
+ legal_entity                     legal_entity_id                    UUID PK           Bank/business legal entity; jurisdiction and reporting scope require confirmation.
+
+ counterparty                     counterparty_id                    UUID PK           Counterparty reference with source-scoped external IDs and classification.
+
+ account                          account_id                         UUID PK           Account/ledger reference, owning legal entity and currency.
+
+ instrument_type                  instrument_type_id                 UUID PK           Versioned instrument class/template such as deposit, loan, bond, security or derivative.
+
+ instrument                       instrument_id                      UUID PK           Stable canonical identity, type, issuer/counterparty, currency and product family.
+
+ instrument_version               instrument_version_id              UUID PK           Immutable effective-dated contractual terms snapshot.
+
+ instrument_attribute_definitio   attribute_id                       UUID PK           Typed, governed extension attribute scoped to instrument type/schema version.
+ n
+
+ instrument_attribute_value       instrument_version_id +            Composite PK/FK   Typed extension value; do not use for frequently queried core fields.
+                                  attribute_id
+
+ position                         position_id                        UUID PK           Holding/exposure at a point in time, instrument, account, quantity, balances, currency and valuation
+                                                                                       date.
+
+ position_version                 position_version_id                UUID PK           Immutable position snapshot for reproducible calculations.
+
+ contractual_term                 term_id                            UUID PK           Principal, rate type, margin, reset frequency, day-count, amortisation and schedule reference.
+
+ cashflow_schedule                schedule_id                        UUID PK           Versioned schedule definition, frequency, calendar and convention.
+
+ cashflow_event                   cashflow_id                        UUID PK           Cash-flow event with due date, amount, currency, type and contractual/behavioural origin.
+
+ cashflow_component               cashflow_component_id              UUID PK           Principal, interest, fee, repayment or other component with derivation lineage.
+
+ collateral_asset                 collateral_id                      UUID PK           Collateral asset, owner, type, valuation, currency, eligibility and encumbrance attributes.
+
+ collateral_link                  collateral_link_id                 UUID PK           Collateral-to-exposure allocation, amount, effective period and allocation constraints.
+
+ market_observation               market_observation_id              UUID PK           Price/rate/curve/FX/spread value, unit, observed_at, source, quality and version.
+
+ reference_data_item              reference_item_id                  UUID PK           Currencies, calendars, rating categories, instrument codes or controlled vocabularies.
+
+ assumption_set                   assumption_set_id                  UUID PK           Versioned assumptions with provenance, owner, effective dates and approval state.
+
+
+
+5. Rules, calculation engine and results
+ Entity                           Key field(s)                       Logical key       Purpose / modelling notes
+
+ rule_definition                  rule_id                            UUID PK           Stable rule identity, category, target metric, parameter schema and owner.
+
+ rule_version                     rule_version_id                    UUID PK           Immutable rule parameters/formula reference, effective dates, status and approval.
+
+
+
+
+Financial Risk Platform | Detailed Data Model | Working Draft v0.1                                                                                                                            Page 4
+ Entity                         Key field(s)                         Logical key            Purpose / modelling notes
+
+ rule_set                       rule_set_id                          UUID PK                Package of rule versions for module, product, jurisdiction or reporting context.
+
+ rule_set_member                rule_set_id + rule_version_id        Composite PK/FK        Explicit rule membership and precedence.
+
+ calculation_module             module_id                            UUID PK                Module identity: cash flow, maturity ladder, LCR/HQLA, ALM/IRRBB, capital or collateral.
+
+ module_version                 module_version_id                    UUID PK                Engine/module version and supported input/output schema versions.
+
+ calculation_run                run_id                               UUID PK                Immutable execution pinned to dataset snapshot, schema/mapping, rules, assumptions and
+                                                                                            module/engine versions.
+
+ calculation_input_ref          run_id + input ref                   Composite/logical FK   Exact input snapshots/configurations consumed by a run.
+
+ cashflow_result                cashflow_result_id                   UUID PK                Run-specific generated cash flow, distinct from source/contractual cash flow.
+
+ maturity_bucket_definition     bucket_definition_id                 UUID PK                Versioned bucket boundaries and names; domain expert must approve boundaries.
+
+ liquidity_gap_result           liquidity_gap_result_id              UUID PK                Run/bucket inflows, outflows, net gap and cumulative position.
+
+ hqla_asset_result              hqla_result_id                       UUID PK                Eligibility, value, haircut, cap/restriction and inclusion/exclusion reason for the run.
+
+ lcr_result                     lcr_result_id                        UUID PK                HQLA, net outflows, ratio, currency/scope and rule version.
+
+ capital_result                 capital_result_id                    UUID PK                Capital components, exposure/RWA references and ratios; scope requires regulatory confirmation.
+
+ collateral_result              collateral_result_id                 UUID PK                Run-specific valuation, allocation, eligibility and encumbrance treatment.
+
+ intermediate_value             intermediate_value_id                UUID PK                Named calculation intermediate, value/unit/dimensions, formula/rule ref and lineage.
+
+ calculation_warning            warning_id                           UUID PK                Warning/exception by run/entity/metric, severity, code and resolution status.
+
+
+
+6. Operations, scenarios, lineage and reporting
+ Entity                         Key field(s)                         Logical key            Purpose / modelling notes
+
+ scenario                       scenario_id                          UUID PK                Scenario overlay over baseline configuration; never mutates approved baseline.
+
+ scenario_change                scenario_change_id                   UUID PK                Proposed rule/assumption/input change, old/new refs, rationale and approval state.
+
+ scenario_run                   scenario_run_id                      UUID PK                Baseline and proposed run references for comparison on the same input snapshot.
+
+ lineage_node                   lineage_node_id                      UUID PK                Source, canonical record, transformation, rule, intermediate or output node.
+
+ lineage_edge                   lineage_edge_id                      UUID PK                Directed provenance relationship between lineage nodes.
+
+ benchmark_case                 benchmark_case_id                    UUID PK                Approved expected case, source, owner, tolerance policy and validity.
+
+ benchmark_result               benchmark_result_id                  UUID PK                Actual-versus-expected comparison at instrument/component/bucket/metric level.
+
+ report_definition              report_definition_id                 UUID PK                Versioned report layout, fields, aggregation and access policy.
+
+ report_instance                report_instance_id                   UUID PK                Generated report bound to run and report-definition version.
+
+ workflow_job                   job_id                               UUID PK                Long-running import/calculation/reconciliation/report/AI job with state and retries.
+
+ review_task                    review_task_id                       UUID PK                Approval/exception item assigned to user/role with decision and reason.
+
+ event_outbox                   event_id                             UUID PK                Reliable internal event record for job status, approvals and change events.
+
+
+
+
+Financial Risk Platform | Detailed Data Model | Working Draft v0.1                                                                                                                            Page 5
+7. AI/GenAI and model governance
+ Entity                         Key field(s)                         Logical key   Purpose / modelling notes
+
+ ai_request                     ai_request_id                        UUID PK       Task, requester, permitted data scope, status, model/provider/version and prompt-template version.
+
+ ai_retrieval_reference         retrieval_ref_id                     UUID PK       Document/schema/run/lineage source reference with access check and source version.
+
+ ai_tool_call                   tool_call_id                         UUID PK       Allowlisted tool/API call, redacted arguments or hash, authorization result and outcome.
+
+ ai_proposal                    proposal_id                          UUID PK       Structured mapping/rule/scenario proposal, validation result, reviewer and approval state.
+
+ ai_evaluation_run              evaluation_run_id                    UUID PK       Evaluation dataset/test suite, model/prompt version, scores, failure cases and disposition.
+
+ ai_feedback                    feedback_id                          UUID PK       Feedback reason and linked request; avoid unnecessary sensitive free text.
+
+
+
+
+Financial Risk Platform | Detailed Data Model | Working Draft v0.1                                                                                                                      Page 6
+4. Candidate canonical financial attributes
+Candidate fields only. A source mapping may leave fields unavailable, derive them through an approved transform, or route a record to review. Do not fabricate missing financial terms.
+
+ Entity                Candidate attribute                      Type                        Meaning                 Rule/caveat
+
+ Instrument            instrument_id                            UUID                        Internal stable ID      Generated internally
+
+ Instrument            source_system_id +                       UUID/string                 External identity       External key is scoped by source system
+                       source_instrument_id
+
+ Instrument            instrument_type_id                       UUID                        Controlled type         Must resolve to an approved type/template
+
+ Instrument            legal_entity_id / counterparty_id        UUID nullable               Relationships           Nullable only if domain rules allow
+
+ Instrument            currency_code                            String                      Currency                Validate against controlled reference data
+
+ Instrument            contractual_start_date / maturity_date   Date nullable               Contract dates          Semantics depend on instrument type
+
+ Instrument            rate_type / reference_rate / spread      Enum/string/decimal         Rate terms              Applicability depends on instrument type
+                                                                nullable
+
+ Instrument            day_count_convention /                   Enum/string nullable        Conventions             Controlled values and effective versions
+                       payment_frequency
+
+ Position              position_id / instrument_id              UUID                        Identity/relationship   Position is a holding snapshot, not instrument master
+
+ Position              as_of_date / valuation_date              Date                        Temporal scope          Required according to source and calculation
+
+ Position              nominal_amount / carrying_value /        Decimal nullable            Amounts                 Keep as distinct concepts; never overload one balance field
+                       market_value
+
+ Position              currency_code / quantity                 String / Decimal nullable   Units                   Currency and unit explicit
+
+ Cash flow             cashflow_id / instrument_version_id      UUID                        Lineage                 Contractual and behavioural origins must be distinguished
+
+ Cash flow             due_date / amount / currency_code        Date / Decimal / string     Value/timing            Record generation method/version when generated
+
+ Market observation    observation_type / value / unit          Enum/string / Decimal /     Observation             Include source, observed_at, quality and staleness
+                                                                string
+
+ Collateral            collateral_id / secured_exposure_id      UUID                        Relationship            Use a link/allocation entity for many-to-many relations
+
+ Versioned records     valid_from / valid_to / status           Timestamp/date / enum       Effective dating        Prevent ambiguous overlapping active versions
+
+ Source-derived        source_record_id / import_id /           UUID                        Provenance              Preserve source locator and transformation lineage
+ records               mapping_version_id
+
+
+5. Flexible source shape strategy
+• Source adapters normalize transport/file details into import jobs and source records without assuming a fixed client schema.
+
+• Until client samples arrive, use provisional source contracts and synthetic fixtures clearly labelled illustrative.
+
+• Profile column names, observed types, null rates, uniqueness, ranges, date formats, currency patterns and distribution summaries.
+
+• Mapping suggestions require human review and versioning before calculation use.
+
+• Unknown fields are retained in protected artifact references or governed extension structures subject to classification and retention policy; never silently discard them.
+
+• Schema drift creates a review event and impact report, not an automatic schema or financial-interpretation change.
+
+
+
+Financial Risk Platform | Detailed Data Model | Working Draft v0.1                                                                                                                        Page 7
+• Define an adapter contract so warehouse/API/feed connectors can be added without changing the core domain model.
+
+6. Data lifecycle and change governance
+ Step                            Required behaviour
+
+ 1. Register                     Create source profile and provisional/approved source contract; assign owner and classification.
+
+ 2. Receive                      Create import job, artifact metadata, checksum, batch and correlation ID; enforce file/security controls.
+
+ 3. Profile                      Inspect structure and quality; produce suggestions only, not schema mutations.
+
+ 4. Map                          Choose canonical schema and mapping versions; validate transforms and required fields.
+
+ 5. Validate                     Run schema/domain checks; create field-level issues/quarantine references; reconcile counts/totals.
+
+ 6. Canonicalize                 Create normalized records with source lineage and exact schema/mapping references.
+
+ 7. Configure                    Select approved assumptions, rule set and module version; isolate scenario changes from baseline.
+
+ 8. Calculate                    Create immutable run pinned to exact inputs/configuration; persist outputs, intermediate values and warnings.
+
+ 9. Verify                       Compare against approved benchmark cases at instrument/component/bucket/final metric levels.
+
+ 10. Review/publish              Apply authorization/approval policy; generate reports and audit consequential actions.
+
+ 11. Change                      Propose schema/mapping/rule change; assess dependencies, test, approve, activate and retain rollback reference.
+
+
+7. Calculation reproducibility and lineage
+• Each calculation_run references dataset_snapshot_id (or immutable input manifest), schema_version_id, mapping_version_id(s), rule_set/version, assumption_set_id, module_version_id and engine build/version.
+
+• Persist start/end time, status, warnings, request/correlation ID and content hashes for important input/configuration manifests.
+
+• Outputs carry metric code, value, unit/currency, dimensions, as-of date, run ID and lineage references.
+
+• Trace final metric → component/bucket → intermediate values/rules → canonical records → source records/import artifact.
+
+• Numerical tolerances are defined per metric by domain experts; no global tolerance is assumed.
+
+• AI explanations read stored outputs and lineage; they never generate authoritative financial metrics.
+
+8. Security and privacy controls
+• Classify fields/artifacts and apply least privilege and tenant/portfolio/legal-entity scope where required.
+
+• Keep identity-provider secrets and encryption keys outside application data; store only key references.
+
+• Apply masking/redaction to logs, errors, AI retrieval, exports and UI according to approved policy.
+
+• Audit schema/mapping/rule changes, approvals, calculation runs, exports and AI tool calls.
+
+• Define retention/deletion for raw artifacts, derived records, AI requests and logs.
+
+• Use synthetic data for demos unless client data use is explicitly approved; separate test and production environments.
+
+• Enforce authorization server-side for data, lineage, reports and AI retrieval/tool calls.
+
+
+
+
+Financial Risk Platform | Detailed Data Model | Working Draft v0.1                                                                                                                                            Page 8
+9. Suggested status enums
+    Field                                         Proposed values
+
+    schema_version.status                         DRAFT, IN_REVIEW, APPROVED, ACTIVE, DEPRECATED, RETIRED
+
+    source_contract.status                        PROVISIONAL, IN_REVIEW, APPROVED, SUPERSEDED
+
+    import_job.status                             CREATED, RECEIVED, PROFILING, MAPPING_REQUIRED, VALIDATING, COMPLETED, COMPLETED_WITH_WARNINGS, FAILED,
+                                                  CANCELLED
+
+    validation_issue.severity                     INFO, WARNING, ERROR, BLOCKER
+
+    quarantine_item.status                        OPEN, UNDER_REVIEW, REJECTED, CORRECTED, RETRY_READY, RESOLVED
+
+    rule_version.status                           DRAFT, IN_REVIEW, APPROVED, ACTIVE, SUPERSEDED, RETIRED
+
+    calculation_run.status                        QUEUED, RUNNING, SUCCEEDED, SUCCEEDED_WITH_WARNINGS, FAILED, CANCELLED, BLOCKED
+
+    scenario.status                               DRAFT, IN_REVIEW, APPROVED_FOR_TEST, RUNNING, TESTED, REJECTED, CLOSED
+
+    review_task.decision                          PENDING, APPROVED, REJECTED, NEEDS_CHANGES, ESCALATED
+
+    ai_proposal.status                            DRAFT, VALIDATED, IN_REVIEW, APPROVED_FOR_SCENARIO, REJECTED, EXPIRED
+
+
+
+10. Example import and calculation manifest
+Illustrative JSON only. Final field names and schemas must be aligned in OpenAPI; no real client schema is implied.
+{
+     "import_id": "imp_...",
+     "source_profile_id": "src_profile_...",
+     "source_contract_version": "provisional-0.1",
+     "schema_version_id": "schema_ver_...",
+     "mapping_version_id": "mapping_ver_...",
+     "artifact": {
+        "sha256": "...",
+        "storage_ref": "protected-object-reference",
+        "classification": "confidential"
+     },
+     "quality": {
+        "accepted_records": 980,
+        "rejected_records": 20,
+        "warnings": 7,
+        "reconciliation_status": "REVIEW_REQUIRED"
+     },
+     "calculation_manifest": {
+        "dataset_snapshot_id": "snapshot_...",
+        "rule_set_version_id": "rule_set_ver_...",
+        "assumption_set_id": "assumptions_...",
+        "module_version_id": "module_ver_...",
+        "engine_version": "build_...",
+        "run_id": "run_..."
+     }
+}
+
+
+11. Deliberately unresolved decisions
+• Actual source files, feed protocols, attributes, source-of-truth precedence and ownership.
+
+• Legal entities, jurisdiction, regulatory framework/effective dates, required reports and calculation conventions.
+
+
+Financial Risk Platform | Detailed Data Model | Working Draft v0.1                                                                                          Page 9
+• Instrument coverage, behavioural models, market data/rating providers and licensing.
+
+• Physical table naming, partitioning, retention, data volumes, performance targets, deployment and recovery objectives.
+
+• Exact LCR/HQLA, ALM/IRRBB, capital and collateral rules and numerical tolerances.
+
+• Whether stress testing, FTP, impairment, investment management or other modules are in scope.
+
+12. Acceptance checklist
+• Every entity has purpose, stable key, ownership, sensitivity classification and lifecycle.
+
+• Source schema, canonical schema and mappings are separate, versioned objects.
+
+• Unknown source fields can be profiled/reviewed without silently mutating the canonical schema.
+
+• Historic instrument terms, rules, mappings and assumptions used by a run remain immutable and referenceable.
+
+• Calculation output traces to source records and exact transformation/rule/engine versions.
+
+• Authorization and audit are enforced server-side across data, calculations, reports and AI.
+
+• Schema/rule changes have impact analysis, compatibility checks, regression evidence, approval and recovery path.
+
+• Domain experts approve canonical fields, calculation specifications, benchmark cases and tolerance policy before results are represented as validated.
+
+
+ Document control: Financial Risk Platform | Detailed Data Model | Working Draft v0.1 | Review with client data owners, security lead, financial-domain expert and solution architect before physical
+ implementation.
+
+
+
+
+Financial Risk Platform | Detailed Data Model | Working Draft v0.1                                                                                                                                      Page 10
+
