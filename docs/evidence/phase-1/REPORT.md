@@ -50,6 +50,8 @@ The solution-architect review (recorded in DELIVERY_PLAN.md) found these defects
 | 5 | Browser output not kept; gen:api drift "compared at commit time" | **Fixed.** JSON outputs saved; checks.txt now runs `git diff --exit-code` on `schema.d.ts` (exit 0). |
 | 6 | Health docstring says "exposes no data" but returns `env` | **Fixed** the docstring. `env` stays because FE-6.1 needs it. |
 | 7 | CI Node 20 vs local Node 22 | **Fixed.** CI uses Node 22. |
+| 8 | (second review) The #2 fix regressed: `private_key_pem` and `aws_access_key_id` were no longer redacted, and `monkey` was over-redacted | **Fixed.** "key" is now matched as a word anywhere in the name, plus common unseparated forms. `test_generic_key_fields_are_redacted` now covers both regression cases and asserts that `monkey` and `keyboard_layout` stay visible. |
+| 9 | (second review) CORS preflight responses no longer carry `X-Correlation-ID` | **Accepted.** Preflights are answered by CORS before any app code runs, so there is nothing to correlate. Every non-preflight response, including errors, still carries the header. |
 
 ## Not done / deferred inside Phase 1
 - The CI green run (BE-1.8) waits on a PR.

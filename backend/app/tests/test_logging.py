@@ -59,15 +59,19 @@ def test_generic_key_fields_are_redacted() -> None:
             "signing_key": "K-2",
             "encryption-key": "K-3",
             "apikey": "K-4",
-            "key_count": 3,
-            "monkey": "ok",
+            "private_key_pem": "K-5",
+            "aws_access_key_id": "K-6",
+            "monkey": "visible",
+            "keyboard_layout": "visible",
         },
     )
     out = buf.getvalue()
-    for leaked in ("K-1", "K-2", "K-3", "K-4"):
+    for leaked in ("K-1", "K-2", "K-3", "K-4", "K-5", "K-6"):
         assert leaked not in out, leaked
     record = json.loads(out)
-    assert record["extra"]["key_count"] == 3  # not a credential
+    # Words that merely contain "key" are not credentials.
+    assert record["extra"]["monkey"] == "visible"
+    assert record["extra"]["keyboard_layout"] == "visible"
 
 
 def test_args_are_redacted() -> None:

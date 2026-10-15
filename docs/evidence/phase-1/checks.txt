@@ -117,3 +117,16 @@ none
 $ grep hand-written payload types (aliases of generated types are allowed)
 src/app/(platform)/dashboard/PlatformHealth.tsx:13:type Health = Schemas['HealthResponse']
 src/api/client.ts:10:export type ErrorEnvelope = components['schemas']['ErrorEnvelope']
+
+## Follow-up after second review (2026-10-15T13:20:36Z): key-redaction regex regression fix
+$ ruff check . && mypy app scripts
+All checks passed!
+Success: no issues found in 115 source files
+$ REQUIRE_DB=1 pytest -v app/tests/test_logging.py
+app/tests/test_logging.py::test_tokens_and_secrets_never_reach_logs PASSED [ 25%]
+app/tests/test_logging.py::test_generic_key_fields_are_redacted PASSED   [ 50%]
+app/tests/test_logging.py::test_args_are_redacted PASSED                 [ 75%]
+app/tests/test_logging.py::test_record_is_json_with_correlation_field PASSED [100%]
+============================== 4 passed in 0.02s ===============================
+$ REQUIRE_DB=1 pytest -q
+27 passed in 0.70s

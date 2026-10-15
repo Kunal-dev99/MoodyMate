@@ -12,7 +12,7 @@ Conventions (see proposed D-08):
 
 ## Feature 01 — WS1 Data Governance, Security & Platform Foundation
 
-Kickoff: `docs/prompts/kickoffs/01-ws1-foundation.md` · Status: **APPROVED 2026-10-15 — Phase 1 in progress**
+Kickoff: `docs/prompts/kickoffs/01-ws1-foundation.md` · Status: **APPROVED 2026-10-15 — Phase 1 verified (12/12) — awaiting merge; Phase 2 not started**
 
 Constraining decisions: D-01…D-12 (all active).
 
@@ -28,58 +28,58 @@ Pre-plan findings:
 Goal: a running, empty, tested backend and frontend with every cross-cutting rule wired
 in before any feature table exists.
 
-- [ ] **BE-1.1** Backend project: `backend/` with `pyproject.toml` (FastAPI, SQLAlchemy 2.0
+- [x] **BE-1.1** Backend project: `backend/` with `pyproject.toml` (FastAPI, SQLAlchemy 2.0
   async, asyncpg, Alembic, pydantic-settings, pytest, ruff, mypy), app factory
   `app/main.py`, and the module layout from `docs/ARCHITECTURE.md` (empty modules carrying
   the standard 7-file set).
-  - *Done-when:* `ruff check`, `mypy app` and `pytest` all pass on the empty skeleton.
-- [ ] **BE-1.2** `core/config.py` settings: `ENV` (`local|test|staging|production`),
+  - *Done-when:* `ruff check`, `mypy app` and `pytest` all pass on the empty skeleton. — ✔ verified: checks.txt (ruff "All checks passed!", `mypy app scripts` "no issues found", pytest "25 passed"; 25 PASSED lines match the 25 test functions in backend/app/tests; still holds after the review fixes: the re-run checks.txt shows ruff/mypy clean and "27 passed"); deps in backend/pyproject.toml:6-24; module layout matches docs/ARCHITECTURE.md:35-42 and is enforced by `test_structure.py::test_every_module_has_the_standard_file_set` (PASSED).
+- [x] **BE-1.2** `core/config.py` settings: `ENV` (`local|test|staging|production`),
   `DATABASE_URL`, `AUTH_MODE`, `AI_ENABLED=false`, `DATA_CLASS=synthetic`.
   - *Done-when:* a test proves the app refuses to start if `ENV=production` and
-    `AUTH_MODE=dev`.
-- [ ] **BE-1.3** `core/errors.py`: error envelope `{code, message, details, correlation_id,
+    `AUTH_MODE=dev`. — ✔ verified: `test_config.py::test_app_refuses_to_start_with_dev_auth_in_production` (env vars set, `create_app()` raises ValidationError; PASSED in checks.txt), guard at backend/app/core/config.py:29-34, factory reads settings at backend/app/main.py:19.
+- [x] **BE-1.3** `core/errors.py`: error envelope `{code, message, details, correlation_id,
   retryable}` (D-07) for HTTP, validation and unhandled errors.
   - *Done-when:* tests assert the envelope shape for a 404, a 422 and a forced 500, and
-    that no stack trace leaks in the body.
-- [ ] **BE-1.4** `core/correlation.py` middleware: accepts or generates `X-Correlation-ID`,
+    that no stack trace leaks in the body. — ✔ verified: `test_errors.py::test_404_envelope`, `::test_422_envelope_does_not_echo_input`, `::test_500_envelope_without_stack_trace` (each asserts the exact 5-key set; the 500 test asserts no "Traceback"/"RuntimeError"/exception text); all PASSED in checks.txt. Impl: backend/app/core/errors.py:20-114, backend/app/core/correlation.py:61-70.
+- [x] **BE-1.4** `core/correlation.py` middleware: accepts or generates `X-Correlation-ID`,
   echoes it in the response, binds it to logs.
   - *Done-when:* a test sends an ID and gets the same ID back in the header and the error
-    body.
-- [ ] **BE-1.5** `core/logging.py`: structured JSON logs with a redaction filter
+    body. — ✔ verified: `test_correlation.py::test_inbound_id_is_echoed` asserts header and error-body `correlation_id` both equal the sent ID (PASSED in checks.txt); middleware backend/app/core/correlation.py:41-72; log binding backend/app/core/logging.py:78.
+- [x] **BE-1.5** `core/logging.py`: structured JSON logs with a redaction filter
   (Authorization headers, tokens, `password|secret|key` fields, values tagged sensitive).
   - *Done-when:* a test logs a payload containing a bearer token and a secret field, and
-    the captured log contains neither.
-- [ ] **BE-1.6** `db/`: async engine/session, declarative base with the common columns
+    the captured log contains neither. — ✔ verified: `test_logging.py::test_tokens_and_secrets_never_reach_logs` (bearer token in message and header, `client_secret`, `password`, nested `api_key`, JWT and `Sensitive(...)` all asserted absent; PASSED in checks.txt). Impl: backend/app/core/logging.py:22-85. Re-checked after the key-regex change (logging.py:22-26): the test is unchanged and still PASSED in the re-run checks.txt, and the new `test_generic_key_fields_are_redacted` also PASSED.
+- [x] **BE-1.6** `db/`: async engine/session, declarative base with the common columns
   (`id` UUID, `tenant_id`, `created_at`, `updated_at`, `created_by`), Alembic env (async),
   an empty baseline revision, and `docker-compose.yml` with Postgres 16 (D-12).
   - *Done-when:* `alembic upgrade head && alembic downgrade base && alembic upgrade head`
-    succeeds against the compose DB.
-- [ ] **BE-1.7** `GET /api/v1/health` (no auth; returns version and DB reachability) and
+    succeeds against the compose DB. — ✔ verified: docs/evidence/phase-1/compose-roundtrip.txt shows `docker compose config -q` valid, `up -d --wait db` reaching postgres:16 (healthy), then upgrade → downgrade → upgrade log lines, `0001 (head)`, `alembic_version` = `0001` read inside the container, and `down -v`. It is backed by `test_migrations.py::test_round_trip_upgrade_downgrade_upgrade` (PASSED, checks.txt). Deliverables: backend/app/db/session.py, base.py (common columns as `AuditColumns` + `TenantScoped` mixins), migrations/env.py (async), versions/0001_baseline.py, docker-compose.yml.
+- [x] **BE-1.7** `GET /api/v1/health` (no auth; returns version and DB reachability) and
   `scripts/export_openapi.py` writing `backend/openapi.json`.
   - *Done-when:* the health test passes, and the exported `openapi.json` validates as
-    OpenAPI 3.1.
-- [ ] **BE-1.8** CI workflow `.github/workflows/ci.yml`: backend lint, type check, tests,
+    OpenAPI 3.1. — ✔ verified: `test_health.py::test_health_degraded_when_db_unreachable`, `::test_health_ok_with_db`, `::test_health_needs_no_auth` and `test_openapi.py::test_exported_contract_is_valid_openapi_31` (openapi-spec-validator `validate`) plus `::test_committed_contract_matches_code`, all PASSED in checks.txt; backend/openapi.json:101 `"openapi": "3.1.0"`; drift check "up to date". Impl: backend/app/api/v1/health.py:18-36, backend/scripts/export_openapi.py (the script sits under `backend/scripts/`).
+- [x] **BE-1.8** CI workflow `.github/workflows/ci.yml`: backend lint, type check, tests,
   migration round trip on a Postgres service container, OpenAPI drift check; frontend
   lint, type check, build.
-  - *Done-when:* the workflow runs green on the Phase 1 PR.
-- [ ] **FE-1.1** `frontend/`: Next.js 14 App Router + TS + Tailwind 3 under `src/`,
+  - *Done-when:* the workflow runs green on the Phase 1 PR. — ✔ verified: docs/evidence/phase-1/ci-run.md records PR https://github.com/Kunal-dev99/MoodyMate/pull/2 (head 54f0320), workflow run https://github.com/Kunal-dev99/MoodyMate/actions/runs/38741589741, and both jobs `backend` and `frontend` completed with conclusion **success**. .github/workflows/ci.yml has every step the task lists: lint/format :44-45, mypy :46-47, round trip on a postgres:16 service :22-31 and :48-49, pytest with REQUIRE_DB=1 :36 and :50-51, OpenAPI drift :52-53; frontend gen:api diff, lint, typecheck and build :69-76. The local git ref `feat/ws1-phase1` = 54f0320a, which is the "Phase 1 review fixes" commit on top of 5c63ee3, so the run covers the code verified above. Caveat: ci-run.md is a transcription of the GitHub API result. I could not open the run links under my Read/Grep/Glob/Edit-only constraints, so the "green" status rests on that record, corroborated by the matching SHA and commit timing (commit 13:18:11Z, jobs started 13:18:36Z).
+- [x] **FE-1.1** `frontend/`: Next.js 14 App Router + TS + Tailwind 3 under `src/`,
   `@/*` alias, with `fp_design_system_template/` applied verbatim per its INSTRUCTIONS.md
   (Option A logo; `api/logo` route removed).
   - *Done-when:* `npm run build` and `tsc --noEmit` pass, and the bundle's "Verify the
-    install" checklist is confirmed with screenshots attached to the report.
-- [ ] **FE-1.2** App shell: Sidebar and Header with this platform's nav (Admin, Schemas,
+    install" checklist is confirmed with screenshots attached to the report. — ✔ verified: `npm run build` "Compiled successfully" and `tsc --noEmit` exit 0 in the re-run checks.txt; the bundle copy is verbatim apart from the two allowed edits (checks.txt); Option A logo at public/brand/logo.png and no `src/app/api/` route. All six checklist items are measured in docs/evidence/phase-1/browser-verify.json (canvas, primary button, no-flash dark, 3px navy rail, low-opacity pill, dark logo plate in both themes), with screenshots 01–03. Judgement call on the Button item: it measures navy `rgb(27, 62, 105)` with a subtle shadow but a **4px** radius, not the checklist's literal 6px. That 4px comes from the bundle's own verbatim `rounded-md` = `calc(var(--radius) - 2px)` (frontend/tailwind.config.ts:82, button.tsx:7), and the `--radius` token itself is 6px (`0.375rem`). The install therefore matches the bundle, which INSTRUCTIONS.md names as the source of truth, and I accept it. The canvas (`rgb(250,250,249)` vs the documented `#FAFAF7`) is the same kind of token-vs-docs gap. Caveat: the button was measured on an injected element carrying button.tsx's default classes, not on a rendered `<Button>`. (Correction to my earlier note: `reports: 'Reports'` is an unchanged line of the bundle's own PageHeader.tsx:26, so the checks.txt diff was not stale.)
+- [x] **FE-1.2** App shell: Sidebar and Header with this platform's nav (Admin, Schemas,
   Audit; later workspaces shown as disabled "planned" items), and `ROUTE_LABELS` replaced.
   - *Done-when:* breadcrumbs render the platform labels, and no `fp_reporting` route label
-    remains (grep proves it).
-- [ ] **FE-1.3** Generated API client: `openapi-typescript` + a thin fetch wrapper in
+    remains (grep proves it). — ✔ verified: ROUTE_LABELS replaced at frontend/src/components/common/PageHeader.tsx:25-36; screenshots 01-dashboard-light.png (breadcrumb "Overview") and 03-planned-workspace.png ("Source & Schemas"); my own grep of frontend/src for the fp_reporting labels (Requirements, Matching Engine, SQL Builder, Catalogue, Configurations, …) finds none outside verbatim bundle comments/CSS (header.tsx:10, sidebar.tsx:14, globals.css:238,262). Nav: frontend/src/config/navigation.ts.
+- [x] **FE-1.3** Generated API client: `openapi-typescript` + a thin fetch wrapper in
   `src/api/` that sends `X-Correlation-ID` and parses the error envelope. Includes an
   `npm run gen:api` script.
   - *Done-when:* the health page renders backend health through the generated types, and
-    no hand-written payload types exist in `src/` (grep).
-- [ ] **FE-1.4** Shared error and state components: error-envelope toast showing the
+    no hand-written payload types exist in `src/` (grep). — ✔ verified: frontend/src/app/(platform)/dashboard/PlatformHealth.tsx:13,34 uses `Schemas['HealthResponse']` from generated frontend/src/api/schema.d.ts:55; 01-dashboard-light.png shows Operational / Reachable / local / 0.1.0 from the unmocked backend (browser-verify.mjs step 1); `gen:api` at frontend/package.json:11; correlation header sent at frontend/src/api/client.ts:22-32 and envelope parsed at :65-78. My grep of type/interface declarations in src finds only aliases of generated types (client.ts:10-11, PlatformHealth.tsx:13) plus UI prop types.
+- [x] **FE-1.4** Shared error and state components: error-envelope toast showing the
   correlation ID, empty state, loading skeleton.
   - *Done-when:* a forced backend 500 shows a toast with the correlation ID from the
-    response.
+    response. — ✔ verified: docs/evidence/phase-1/failing_backend.py runs the real `create_app()` with a raising DB ping, so `/api/v1/health` fails as an unhandled exception through the full middleware stack. verify-real-500.mjs only passes requests through (`route.continue()`). browser-real-500.json shows a backend 500 with `x-correlation-id: b3b4a065-29f1-4404-a6aa-3b8d9b1bec7e`, and the toast text carries the same ID (`toast_cid_matches_backend_header: true`). 05-real-500-toast.png shows the full ID and 06-real-500-page.png the page. Because the toast reads the ID from the response body, this also proves the CORS fix in the browser: CORS is now outermost (backend/app/main.py:39-50), with regression test `test_errors.py::test_500_envelope_carries_cors_headers` (PASSED, checks.txt). Components: frontend/src/components/common/api-error-toast.ts, EmptyState.tsx, LoadingBlock.tsx.
 
 *Reversibility:* additive new folders and an empty baseline migration. Rollback is
 reverting the merge; no data exists yet. The AI flag ships `false`.

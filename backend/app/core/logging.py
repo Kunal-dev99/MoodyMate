@@ -21,7 +21,9 @@ REDACTED = "[REDACTED]"
 
 _SENSITIVE_KEY = re.compile(
     r"(authorization|passw(or)?d|secret|token|credential|cookie|session[_-]?id"
-    r"|(^|[_-])key$|[a-z]key$)",  # key, api_key, signing-key, apikey, …
+    # "key" as a word anywhere in the name (key, signing_key, private_key_pem,
+    # aws_access_key_id) plus common unseparated forms (apikey, privatekey).
+    r"|(^|[_.-])key([_.-]|$)|(api|private|access|signing|encryption|secret)key)",
     re.IGNORECASE,
 )
 _BEARER = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+")
