@@ -1,4 +1,8 @@
-"""Health endpoint (BE-1.7). Deliberately unauthenticated; exposes no data."""
+"""Health endpoint (BE-1.7). Deliberately unauthenticated.
+
+Returns only liveness, API version, environment name and DB reachability; no business
+or user data.
+"""
 
 import asyncio
 from typing import Literal

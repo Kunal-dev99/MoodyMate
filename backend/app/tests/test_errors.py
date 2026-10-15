@@ -60,6 +60,17 @@ def test_500_envelope_without_stack_trace(settings: Settings) -> None:
         assert leak not in r.text
 
 
+def test_500_envelope_carries_cors_headers(settings: Settings) -> None:
+    # A browser must be able to read the 500 envelope cross-origin, or the frontend
+    # shows a network error and the correlation ID is lost.
+    c = TestClient(_app_with_test_routes(settings), raise_server_exceptions=False)
+    r = c.get("/_test/boom", headers={"Origin": "http://localhost:3000"})
+    assert r.status_code == 500
+    assert r.headers["access-control-allow-origin"] == "http://localhost:3000"
+    assert "x-correlation-id" in r.headers["access-control-expose-headers"].lower()
+    assert r.json()["correlation_id"] == r.headers["X-Correlation-ID"]
+
+
 def test_api_error_envelope(settings: Settings) -> None:
     c = TestClient(_app_with_test_routes(settings))
     r = c.get("/_test/conflict")

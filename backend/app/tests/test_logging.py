@@ -50,6 +50,26 @@ def test_tokens_and_secrets_never_reach_logs() -> None:
     assert record["extra"]["payload"]["client_secret"] == REDACTED
 
 
+def test_generic_key_fields_are_redacted() -> None:
+    logger, buf = _capture()
+    logger.info(
+        "keys",
+        extra={
+            "key": "K-1",
+            "signing_key": "K-2",
+            "encryption-key": "K-3",
+            "apikey": "K-4",
+            "key_count": 3,
+            "monkey": "ok",
+        },
+    )
+    out = buf.getvalue()
+    for leaked in ("K-1", "K-2", "K-3", "K-4"):
+        assert leaked not in out, leaked
+    record = json.loads(out)
+    assert record["extra"]["key_count"] == 3  # not a credential
+
+
 def test_args_are_redacted() -> None:
     logger, buf = _capture()
     logger.info("token is %s", f"Bearer {JWT}")

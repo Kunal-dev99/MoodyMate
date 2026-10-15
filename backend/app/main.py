@@ -36,8 +36,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     register_error_handlers(app)
     app.include_router(api_router)
 
-    # Middleware order: last added runs first. Correlation must wrap everything so that
-    # every response, including CORS preflight and unhandled errors, carries the header.
+    # Middleware order: the last added runs outermost. CORS must be outermost so that
+    # the 500 envelope CorrelationIdMiddleware produces for unhandled errors still gets
+    # CORS headers; otherwise a browser on another origin blocks it and loses the
+    # correlation ID.
+    app.add_middleware(CorrelationIdMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.CORS_ORIGINS,
@@ -45,7 +48,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["*"],
         expose_headers=[HEADER],
     )
-    app.add_middleware(CorrelationIdMiddleware)
     return app
 
 

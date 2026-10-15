@@ -20,8 +20,8 @@ from app.core.correlation import get_correlation_id
 REDACTED = "[REDACTED]"
 
 _SENSITIVE_KEY = re.compile(
-    r"(authorization|passw(or)?d|secret|token|api[_-]?key|private[_-]?key|access[_-]?key"
-    r"|credential|cookie|session[_-]?id)",
+    r"(authorization|passw(or)?d|secret|token|credential|cookie|session[_-]?id"
+    r"|(^|[_-])key$|[a-z]key$)",  # key, api_key, signing-key, apikey, …
     re.IGNORECASE,
 )
 _BEARER = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+")

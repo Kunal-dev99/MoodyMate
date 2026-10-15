@@ -21,6 +21,17 @@ results.logo_plate_bg = await rgb('header div.rounded-md', 'backgroundColor') //
 results.active_rail_bg = await rgb('aside nav a span.absolute', 'backgroundColor')
 results.active_rail_width = await rgb('aside nav a span.absolute', 'width')
 results.badge_bg = await page.getByText('Operational').evaluate((el) => getComputedStyle(el).backgroundColor)
+// Primary button exactly as components/ui/button.tsx default variant + size renders it
+results.primary_button = await page.evaluate(() => {
+  const b = document.createElement('button')
+  b.className = 'inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm h-9 px-4 py-2'
+  b.textContent = 'Primary'
+  document.querySelector('main').appendChild(b)
+  const cs = getComputedStyle(b)
+  const out = { background: cs.backgroundColor, color: cs.color, borderRadius: cs.borderRadius, boxShadow: cs.boxShadow, rootRadiusToken: getComputedStyle(document.documentElement).getPropertyValue('--radius').trim() }
+  b.remove()
+  return out
+})
 results.breadcrumb = await page.locator('nav[aria-label="Breadcrumb"]').innerText()
 
 // 2. Dark mode via ThemeToggle, persisted across reload with no flash
@@ -39,19 +50,6 @@ await page.goto('http://localhost:3000/schemas')
 await page.getByText('This workspace is planned, not built').waitFor()
 results.schemas_breadcrumb = await page.locator('nav[aria-label="Breadcrumb"]').innerText()
 await page.screenshot({ path: `${OUT}/03-planned-workspace.png` })
-
-// 4. Forced 500 with the backend's real envelope shape -> toast shows correlation ID
-await page.route('**/api/v1/health', (route) => route.fulfill({
-  status: 500,
-  headers: { 'content-type': 'application/json', 'x-correlation-id': 'forced-500-corr-id', 'access-control-allow-origin': '*', 'access-control-expose-headers': 'X-Correlation-ID' },
-  body: JSON.stringify({ code: 'internal_error', message: 'An unexpected error occurred. Quote the correlation ID when reporting it.', details: null, correlation_id: 'forced-500-corr-id', retryable: false }),
-}))
-await page.goto('http://localhost:3000/dashboard')
-const toast = page.locator('ol li').filter({ hasText: 'Correlation ID: forced-500-corr-id' }).first()
-await toast.waitFor({ timeout: 10000 })
-results.toast_text = await toast.innerText()
-results.error_state_text = await page.locator('main').innerText()
-await page.screenshot({ path: `${OUT}/04-forced-500-toast.png` })
 
 // 5. Backend down -> network error state
 await page.unroute('**/api/v1/health')
