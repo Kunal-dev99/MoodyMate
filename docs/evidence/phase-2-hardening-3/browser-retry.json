@@ -1,0 +1,12 @@
+{
+  "token_before": "eyJhbGciOiJI",
+  "unavailable_screen": "Temporarily unavailable\n\nSign-in is temporarily unavailable. Try again shortly. Correlation ID: rotation-503\nTry again\nSign out",
+  "token_after_503": "eyJhbGciOiJI",
+  "session_kept": true,
+  "after_retry_url": "http://localhost:3000/access",
+  "after_retry_permissions": [
+    "audit:read",
+    "schema:read"
+  ],
+  "me_requests": 2
+}

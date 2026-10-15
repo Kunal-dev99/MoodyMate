@@ -128,8 +128,11 @@ class JwksKeys:
     * Cached keys are read without locking; the lock only guards bookkeeping, never network
       I/O (BE-2.13). A slow provider therefore cannot stall requests whose key is cached.
     * One request performs a fetch. Concurrent misses wait for it (bounded) only while no
-      keys are cached (cold start); otherwise an unknown kid is rejected at once, so forged
-      kids cannot park worker threads behind a slow provider.
+      keys are cached (cold start); otherwise they get a retryable `ProviderUnavailable` at
+      once, so forged kids cannot park worker threads behind a slow provider.
+    * `InvalidToken` ("unknown signing key") only after a refresh has actually run and the
+      kid is still absent. "Cannot check yet" is never a 401, so a key rotation does not
+      sign users out (BE-2.15).
     * URLs must be https unless `allow_http` (local/test only, D-13). A discovered
       `jwks_uri` is checked before it is remembered.
     """
@@ -208,9 +211,11 @@ class JwksKeys:
             inflight = self._inflight
             fetcher = False
             if inflight is not None and self._keys:
-                # Keys are cached and a refresh is already running: this kid is unknown
-                # now. Don't park a worker thread waiting on a possibly slow provider.
-                raise InvalidToken("unknown signing key")
+                # Keys are cached and a refresh is already running. Don't park a worker
+                # thread on a possibly slow provider, but don't call the token invalid
+                # either: it may carry a just-rotated key that this refresh will bring
+                # (BE-2.15). Retryable 503, so the client keeps its session.
+                raise ProviderUnavailable("signing key not yet available")
             if inflight is None:
                 may_fetch = (
                     self._last_attempt is None
@@ -222,10 +227,10 @@ class JwksKeys:
                     fetcher = True
                     jwks_url = self._jwks_url
 
-        if inflight is None:  # not allowed to fetch now
-            if not self._keys:
-                raise ProviderUnavailable("identity provider unavailable (backing off)")
-            raise InvalidToken("unknown signing key")
+        if inflight is None:  # not allowed to fetch now (refresh interval running)
+            # Without a fresh look at the provider we cannot tell a rotated key from a
+            # forged one: retryable, not 401 (BE-2.15). A forged kid gains nothing.
+            raise ProviderUnavailable("signing key not yet available")
 
         if fetcher:
             try:

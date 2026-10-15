@@ -131,7 +131,7 @@ def test_unknown_kids_trigger_at_most_one_fetch_per_interval() -> None:
     assert keys(_signed("k1")) is not None
     assert keys.fetches == 1
     for i in range(50):  # forged tokens with random kids
-        with pytest.raises(InvalidToken, match="unknown signing key"):
+        with pytest.raises(ProviderUnavailable):  # BE-2.15: retryable, never a fetch
             keys(_signed(f"forged-{i}"))
     assert keys.fetches == 1  # none of the 50 reached the network
     clock.now += 61
@@ -406,7 +406,7 @@ def test_unknown_kid_does_not_wait_when_keys_are_cached() -> None:
     t.start()
     assert started.wait(5)
     t0 = _time.monotonic()
-    with pytest.raises(InvalidToken):
+    with pytest.raises(ProviderUnavailable):  # BE-2.15: retryable, returned at once
         keys(_signed("flood"))  # must not park a worker thread behind the slow fetch
     assert _time.monotonic() - t0 < 1.0
     release.set()
@@ -441,3 +441,82 @@ def test_registry_segment_aware_and_catches_param_mounts_and_hosts(tmp_path: Any
     assert "Mount /ap" not in found  # "/ap" is not a parent path segment of /api/v1
     assert "Mount /{tenant}" in found
     assert any(f.startswith("Host ") for f in found)
+
+
+# --- BE-2.15 key rotation must not sign users out ---------------------------------------------
+
+
+def test_rotated_key_during_inflight_refresh_is_retryable_not_401() -> None:
+    import threading
+
+    clock = Clock()
+    release = threading.Event()
+    started = threading.Event()
+    published = {"kids": ["k1"]}
+
+    def fetch(_url: str) -> dict[str, Any]:
+        if published["kids"] == ["k1", "k2"]:
+            started.set()
+            release.wait(5)
+        return {"keys": [_jwks(k)["keys"][0] for k in published["kids"]]}
+
+    keys = JwksKeys(ISSUER, "https://idp.example/jwks", fetch=fetch, clock=clock)
+    keys(_signed("k1"))  # cache holds the old key
+    published["kids"] = ["k1", "k2"]  # provider rotates in k2
+    clock.now += 61
+
+    first: list[Any] = []
+    t = threading.Thread(target=lambda: first.append(keys(_signed("k2"))))  # starts the refresh
+    t.start()
+    assert started.wait(5)
+    # A parallel request (the page's second API call) while the refresh is in flight:
+    with pytest.raises(ProviderUnavailable):  # retryable 503 — the session survives
+        keys(_signed("k2"))
+    release.set()
+    t.join(5)
+    assert first and first[0] is not None
+    assert keys(_signed("k2")) is not None  # and the retry succeeds
+
+
+def test_unknown_kid_within_refresh_interval_is_retryable() -> None:
+    clock = Clock()
+    keys = JwksKeys(ISSUER, "https://idp.example/jwks", fetch=lambda _u: _jwks("k1"), clock=clock)
+    keys(_signed("k1"))
+    with pytest.raises(ProviderUnavailable):  # can't check yet: don't end the session
+        keys(_signed("new-kid"))
+
+
+def test_unknown_kid_after_a_completed_refresh_is_401() -> None:
+    clock = Clock()
+    keys = JwksKeys(ISSUER, "https://idp.example/jwks", fetch=lambda _u: _jwks("k1"), clock=clock)
+    keys(_signed("k1"))
+    clock.now += 61
+    with pytest.raises(InvalidToken, match="unknown signing key"):
+        keys(_signed("forged"))  # refresh ran, kid still unknown: definitive
+
+
+# --- BE-2.16 catch-all routes -------------------------------------------------------------------
+
+
+def test_registry_reports_unguarded_catch_all_route() -> None:
+    app = create_app(Settings(ENV="test"))
+
+    @app.get("/{full_path:path}")
+    async def spa(full_path: str) -> dict[str, str]:
+        return {"path": full_path}
+
+    assert "GET /{full_path:path}" in undeclared_routes(app)
+
+
+def test_catch_all_route_cannot_serve_api_paths_unguarded() -> None:
+    app = create_app(Settings(ENV="test"))
+
+    @app.get("/{full_path:path}")
+    async def spa(full_path: str) -> dict[str, str]:
+        return {"secret": full_path}
+
+    c = TestClient(app)
+    r = c.get("/api/v1/does-not-exist-anywhere")
+    assert r.status_code == 403
+    assert r.json()["code"] == "permission_not_declared"
+    assert c.get("/some/frontend/page").status_code == 200  # non-API paths unaffected

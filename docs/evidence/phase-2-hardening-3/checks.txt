@@ -1,0 +1,63 @@
+# Rotation follow-up (BE-2.15, BE-2.16, FE-2.5) — captured 2026-10-15T14:19:58Z
+
+## Before the fix (tests written first, run against master 5bae7e3 code)
+FAILED test_unknown_kids_trigger_at_most_one_fetch_per_interval   (expectation updated: within interval -> retryable)
+FAILED test_unknown_kid_does_not_wait_when_keys_are_cached          (expectation updated: retryable, still immediate)
+FAILED test_rotated_key_during_inflight_refresh_is_retryable_not_401
+FAILED test_unknown_kid_within_refresh_interval_is_retryable
+FAILED test_registry_reports_unguarded_catch_all_route
+FAILED test_catch_all_route_cannot_serve_api_paths_unguarded
+6 failed, 27 passed   (test_unknown_kid_after_a_completed_refresh_is_401 passes on both: control)
+
+## After the fix — backend, run WITHOUT ENV
+$ ruff check . && ruff format --check . && mypy app scripts
+All checks passed!
+126 files already formatted
+Success: no issues found in 126 source files
+$ env -u ENV REQUIRE_DB=1 pytest -v app/tests/test_hardening.py
+app/tests/test_hardening.py::test_startup_refused_without_env PASSED     [  3%]
+app/tests/test_hardening.py::test_dev_auth_refused_outside_local_and_test[staging] PASSED [  6%]
+app/tests/test_hardening.py::test_dev_auth_refused_outside_local_and_test[production] PASSED [  9%]
+app/tests/test_hardening.py::test_settings_errors_do_not_echo_secrets PASSED [ 12%]
+app/tests/test_hardening.py::test_dev_auth_allowed_in_local_and_test PASSED [ 15%]
+app/tests/test_hardening.py::test_http_issuer_refused_in_staging PASSED  [ 18%]
+app/tests/test_hardening.py::test_http_jwks_url_refused_in_production PASSED [ 21%]
+app/tests/test_hardening.py::test_https_oidc_accepted_in_production PASSED [ 24%]
+app/tests/test_hardening.py::test_http_jwks_uri_from_discovery_rejected_when_insecure_not_allowed PASSED [ 27%]
+app/tests/test_hardening.py::test_audience_equal_to_client_id_refused PASSED [ 30%]
+app/tests/test_hardening.py::test_unknown_kids_trigger_at_most_one_fetch_per_interval PASSED [ 33%]
+app/tests/test_hardening.py::test_key_rotation_is_picked_up_after_the_interval PASSED [ 36%]
+app/tests/test_hardening.py::test_provider_outage_backs_off PASSED       [ 39%]
+app/tests/test_hardening.py::test_provider_unavailable_is_503_envelope PASSED [ 42%]
+app/tests/test_hardening.py::test_user_of_suspended_tenant_is_denied PASSED [ 45%]
+app/tests/test_hardening.py::test_registry_reports_mounts_and_websockets PASSED [ 48%]
+app/tests/test_hardening.py::test_concurrent_first_sign_in_provisions_once PASSED [ 51%]
+app/tests/test_hardening.py::test_cached_keys_served_while_a_refresh_is_in_flight PASSED [ 54%]
+app/tests/test_hardening.py::test_concurrent_first_requests_share_one_fetch PASSED [ 57%]
+app/tests/test_hardening.py::test_unsafe_discovered_jwks_uri_is_not_remembered PASSED [ 60%]
+app/tests/test_hardening.py::test_registry_reports_parent_path_mounts[/api] PASSED [ 63%]
+app/tests/test_hardening.py::test_registry_reports_parent_path_mounts[] PASSED [ 66%]
+app/tests/test_hardening.py::test_registry_ignores_unrelated_mounts PASSED [ 69%]
+app/tests/test_hardening.py::test_short_dev_secret_refused PASSED        [ 72%]
+app/tests/test_hardening.py::test_key_stored_between_fast_path_and_lock_is_found PASSED [ 75%]
+app/tests/test_hardening.py::test_unknown_kid_does_not_wait_when_keys_are_cached PASSED [ 78%]
+app/tests/test_hardening.py::test_truncated_provider_response_is_provider_unavailable PASSED [ 81%]
+app/tests/test_hardening.py::test_registry_segment_aware_and_catches_param_mounts_and_hosts PASSED [ 84%]
+app/tests/test_hardening.py::test_rotated_key_during_inflight_refresh_is_retryable_not_401 PASSED [ 87%]
+app/tests/test_hardening.py::test_unknown_kid_within_refresh_interval_is_retryable PASSED [ 90%]
+app/tests/test_hardening.py::test_unknown_kid_after_a_completed_refresh_is_401 PASSED [ 93%]
+app/tests/test_hardening.py::test_registry_reports_unguarded_catch_all_route PASSED [ 96%]
+app/tests/test_hardening.py::test_catch_all_route_cannot_serve_api_paths_unguarded PASSED [100%]
+============================== 33 passed in 2.28s ==============================
+$ env -u ENV REQUIRE_DB=1 pytest -q
+103 passed in 20.98s
+$ export_openapi --check
+openapi.json is up to date
+
+## Frontend
+$ npm test
+      Tests  26 passed (26)
+$ lint / typecheck / build
+✔ No ESLint warnings or errors
+tsc: exit 0
+ ✓ Compiled successfully
