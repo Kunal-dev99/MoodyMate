@@ -1,0 +1,273 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ----------------------------------------------------------------------
+ * Redwood Professional design tokens
+ *
+ * Light is the default theme (matches Oracle Fusion / Workday / Stripe).
+ * Dark mode is enabled by adding `class="dark"` on <html>.
+ * The pre-hydration script in <head> sets this from localStorage before
+ * paint, so there's no FOUC.
+ * ---------------------------------------------------------------------- */
+
+@layer base {
+  :root {
+    /* Surface elevations (0 = canvas, 3 = topmost) */
+    --surface-0: 60 11% 98%;          /* #FAFAF7 — warm off-white canvas */
+    --surface-1: 0 0% 100%;           /* #FFFFFF — cards, sidebar */
+    --surface-2: 39 17% 94%;          /* #F3F1EC — hover/secondary */
+    --surface-3: 39 16% 89%;          /* #EAE7DF — pressed/raised */
+
+    --background: var(--surface-0);
+    --foreground: 0 0% 10%;           /* #1A1A1A — ink */
+
+    --card: var(--surface-1);
+    --card-foreground: var(--foreground);
+    --popover: var(--surface-1);
+    --popover-foreground: var(--foreground);
+
+    /* Action colors — navy primary, Oracle red as restrained accent */
+    --primary: 213 59% 26%;           /* #1B3A6B — deep navy */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 39 17% 94%;          /* same as surface-2 */
+    --secondary-foreground: var(--foreground);
+    --accent: 8 60% 49%;              /* #C74634 — Oracle red, used sparingly */
+    --accent-foreground: 0 0% 100%;
+
+    /* Semantic */
+    --info: 213 59% 36%;
+    --info-foreground: 0 0% 100%;
+    --success: 124 46% 33%;           /* #2E7D32 — forest green */
+    --success-foreground: 0 0% 100%;
+    --warning: 36 100% 35%;           /* #B26A00 — amber-bronze */
+    --warning-foreground: 0 0% 100%;
+    --danger: 8 60% 49%;
+    --danger-foreground: 0 0% 100%;
+    --destructive: 8 60% 49%;         /* Oracle red */
+    --destructive-foreground: 0 0% 100%;
+
+    /* Neutrals */
+    --muted: var(--surface-2);
+    --muted-foreground: 0 0% 42%;     /* #6B6B6B */
+    --border: 41 13% 83%;             /* #D9D6CE */
+    --input: 41 13% 83%;
+    --ring: 213 59% 36%;              /* navy at slightly higher lightness for visibility */
+
+    /* Radius — tighter than default, more enterprise */
+    --radius: 0.375rem;               /* 6px */
+
+    /* Shadow tokens (used by tailwind boxShadow scale) */
+    --shadow-color: 213 30% 15%;
+    --shadow-strength-sm: 0.04;
+    --shadow-strength-md: 0.08;
+    --shadow-strength-lg: 0.12;
+  }
+
+  .dark {
+    --surface-0: 220 12% 9%;          /* #15171A */
+    --surface-1: 220 9% 12%;          /* #1B1E22 */
+    --surface-2: 220 8% 16%;          /* #23272D */
+    --surface-3: 220 8% 19%;          /* #2C3036 */
+
+    --background: var(--surface-0);
+    --foreground: 40 16% 91%;         /* #ECEAE4 */
+
+    --card: var(--surface-1);
+    --card-foreground: var(--foreground);
+    --popover: var(--surface-2);
+    --popover-foreground: var(--foreground);
+
+    --primary: 213 41% 55%;           /* #5B83BD — lighter navy for dark surfaces */
+    --primary-foreground: 220 12% 9%;
+    --secondary: var(--surface-2);
+    --secondary-foreground: var(--foreground);
+    --accent: 8 70% 62%;              /* #E5675A — softer Oracle red */
+    --accent-foreground: 220 12% 9%;
+
+    --info: 213 41% 60%;
+    --info-foreground: 220 12% 9%;
+    --success: 124 38% 62%;           /* #7CC082 */
+    --success-foreground: 220 12% 9%;
+    --warning: 32 70% 60%;            /* #E2A04D */
+    --warning-foreground: 220 12% 9%;
+    --danger: 8 70% 62%;
+    --danger-foreground: 220 12% 9%;
+    --destructive: 8 70% 62%;
+    --destructive-foreground: 220 12% 9%;
+
+    --muted: var(--surface-2);
+    --muted-foreground: 220 5% 60%;   /* #9A9A95-ish */
+    --border: 220 7% 23%;             /* #34383E */
+    --input: 220 7% 23%;
+    --ring: 213 41% 60%;
+
+    --shadow-color: 0 0% 0%;
+    --shadow-strength-sm: 0.3;
+    --shadow-strength-md: 0.4;
+    --shadow-strength-lg: 0.5;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html {
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1, "cv11" 1;
+  }
+  /* Accessible focus rings on interactive elements */
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-semibold tracking-tight;
+  }
+  /* Tabular numerals for any element that asks for them via .num */
+  .num, td.num, th.num {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+}
+
+@layer components {
+  /* Typography scale */
+  .text-page-title {
+    @apply text-2xl font-semibold tracking-tight;
+  }
+  .text-section-title {
+    @apply text-base font-medium tracking-tight;
+  }
+  .text-helper {
+    @apply text-sm text-muted-foreground;
+  }
+  .text-label {
+    @apply text-xs font-medium uppercase tracking-wider text-muted-foreground;
+  }
+
+  /* Card surfaces */
+  .card-elevated {
+    @apply bg-card border border-border rounded-md shadow-sm;
+  }
+  .card-interactive {
+    @apply card-elevated transition-colors duration-150;
+  }
+  .card-interactive:hover {
+    @apply shadow-md border-foreground/15;
+  }
+
+  /* SQL editor typography */
+  .sql-editor {
+    font-family: var(--font-mono), ui-monospace, SFMono-Regular, monospace;
+    tab-size: 2;
+  }
+
+  /* Status badges — solid filled with low opacity, colored border + text.
+     Uses semantic tokens so light/dark inherit automatically. */
+  .status-draft {
+    @apply bg-muted text-muted-foreground border-border;
+  }
+  .status-building {
+    @apply border;
+    background-color: hsl(var(--info) / 0.1);
+    color: hsl(var(--info));
+    border-color: hsl(var(--info) / 0.3);
+  }
+  .status-testing {
+    @apply border;
+    background-color: hsl(var(--warning) / 0.1);
+    color: hsl(var(--warning));
+    border-color: hsl(var(--warning) / 0.3);
+  }
+  .status-published {
+    @apply border;
+    background-color: hsl(var(--success) / 0.1);
+    color: hsl(var(--success));
+    border-color: hsl(var(--success) / 0.3);
+  }
+  .status-failed {
+    @apply border;
+    background-color: hsl(var(--destructive) / 0.1);
+    color: hsl(var(--destructive));
+    border-color: hsl(var(--destructive) / 0.3);
+  }
+
+  /* Pulsing dot — for "needs attention" markers */
+  .pulse-dot {
+    position: relative;
+  }
+  .pulse-dot::before {
+    content: "";
+    position: absolute;
+    inset: -4px;
+    border-radius: 9999px;
+    background: currentColor;
+    opacity: 0.35;
+    animation: pulse-ring 2s ease-in-out infinite;
+  }
+  @keyframes pulse-ring {
+    0%, 100% { transform: scale(1); opacity: 0.35; }
+    50% { transform: scale(1.4); opacity: 0; }
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 8px;
+  border: 2px solid hsl(var(--background));
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.5);
+}
+
+/* SQL Builder tab content */
+[data-radix-tabs-content] {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.tab-transition {
+  animation: fadeSlideIn 200ms ease-out;
+}
+
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* History drawer responsive sizing */
+@media (max-width: 768px) {
+  .history-drawer { width: 100vw !important; }
+}
+@media (min-width: 769px) {
+  .history-drawer { max-width: 360px; }
+}
+
+.sql-builder-main {
+  height: calc(100vh - 140px);
+}
+
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

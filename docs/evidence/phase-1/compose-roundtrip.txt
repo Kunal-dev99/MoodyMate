@@ -1,0 +1,17 @@
+$ docker compose config -q && echo valid
+valid
+$ docker compose up -d --wait db
+ Container ws1-phase1-db-1 Started 
+ Container ws1-phase1-db-1 Waiting 
+ Container ws1-phase1-db-1 Healthy 
+$ docker compose ps
+db postgres:16 Up 5 seconds (healthy)
+$ (backend) alembic upgrade head && alembic downgrade base && alembic upgrade head   [DATABASE_URL=compose db moodymate_dev]
+INFO  [alembic.runtime.migration] Running upgrade  -> 0001, Baseline: empty schema. Feature tables start in Phase 2.
+INFO  [alembic.runtime.migration] Running downgrade 0001 -> , Baseline: empty schema. Feature tables start in Phase 2.
+INFO  [alembic.runtime.migration] Running upgrade  -> 0001, Baseline: empty schema. Feature tables start in Phase 2.
+0001 (head)
+$ docker compose exec db psql -U moodymate -d moodymate_dev -tAc "select version_num from alembic_version"
+0001
+$ docker compose down -v
+ Volume ws1-phase1_pgdata Removed 

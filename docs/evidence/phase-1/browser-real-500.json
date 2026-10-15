@@ -1,0 +1,10 @@
+{
+  "request_passed_through_unmodified": true,
+  "backend_response": {
+    "status": 500,
+    "header": "b3b4a065-29f1-4404-a6aa-3b8d9b1bec7e"
+  },
+  "toast_text": "Could not load platform health\nAn unexpected error occurred. Quote the correlation ID when reporting it. Correlation ID: b3b4a065-29f1-4404-a6aa-3b8d9b1bec7e",
+  "toast_cid": "b3b4a065-29f1-4404-a6aa-3b8d9b1bec7e",
+  "toast_cid_matches_backend_header": true
+}
