@@ -5,13 +5,26 @@ import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
 import { EmptyState } from '@/components/common/EmptyState'
 import { Badge } from '@/components/ui/badge'
+import { Forbidden } from '@/components/auth/Forbidden'
+import { useCurrentSession } from '@/components/auth/SessionProvider'
 import { findWorkspace } from '@/config/navigation'
 
 /** Honest placeholder for a workspace that a later delivery-plan phase builds. */
 export function PlannedWorkspace({ slug }: { slug: string }) {
   // Looked up client-side: icon components cannot cross the server/client boundary.
   const workspace = findWorkspace(slug)
+  const { has } = useCurrentSession()
   if (!workspace?.planned) return null
+  if (workspace.permission && !has(workspace.permission)) {
+    return (
+      <>
+        <PageHeader title={workspace.label} />
+        <div className="px-6 pb-6">
+          <Forbidden permission={workspace.permission} />
+        </div>
+      </>
+    )
+  }
   return (
     <>
       <PageHeader

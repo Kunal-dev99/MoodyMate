@@ -3,8 +3,8 @@
 * `Base` carries a constraint naming convention so Alembic autogenerate produces stable,
   reversible names (D-02).
 * `AuditColumns` gives every table its id and created/updated metadata.
-* `TenantScoped` adds `tenant_id` for row scoping (D-04, D-11). The foreign key to
-  `tenant` is added by each model once the tenant table exists (Phase 2).
+* `TenantScoped` adds `tenant_id` for row scoping (D-04, D-11).
+* `ScopedModel` is the combination that `ScopedRepository` works with.
 """
 
 import uuid
@@ -42,3 +42,7 @@ class AuditColumns:
 
 class TenantScoped:
     tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True, nullable=False)
+
+
+class ScopedModel(AuditColumns, TenantScoped):
+    """Mixin for tenant-scoped entities read through `ScopedRepository`."""

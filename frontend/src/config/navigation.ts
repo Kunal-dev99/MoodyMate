@@ -11,6 +11,7 @@ import {
   ShieldCheck,
   type LucideIcon,
 } from 'lucide-react'
+import type { Schemas } from '@/api/client'
 import type { NavItem } from '@/components/layout/sidebar'
 
 /**
@@ -22,6 +23,8 @@ export interface Workspace extends NavItem {
   icon: LucideIcon
   slug: string
   description: string
+  /** Hidden from the nav, and shown as 403, without this permission (cosmetic; D-04). */
+  permission?: Schemas['Permission']
   planned?: { phase: string; workstream: string }
 }
 
@@ -39,6 +42,7 @@ export const mainWorkspaces: Workspace[] = [
     label: 'Source & Schemas',
     icon: FileStack,
     description: 'Schema catalogue, versions, compare and change proposals.',
+    permission: 'schema:read',
     planned: { phase: 'Phases 4–5', workstream: 'WS1 DG-01, DG-05' },
   },
   {
@@ -98,6 +102,7 @@ export const adminWorkspaces: Workspace[] = [
     label: 'Audit',
     icon: ScrollText,
     description: 'Immutable audit timeline of privileged actions.',
+    permission: 'audit:read',
     planned: { phase: 'Phase 3', workstream: 'WS1 DG-04' },
   },
   {
@@ -105,8 +110,7 @@ export const adminWorkspaces: Workspace[] = [
     href: '/access',
     label: 'Access & Roles',
     icon: ShieldCheck,
-    description: 'Your identity, roles and effective permissions.',
-    planned: { phase: 'Phase 2', workstream: 'WS1 DG-02' },
+    description: 'Your identity, roles and effective permissions; users for administrators.',
   },
 ]
 

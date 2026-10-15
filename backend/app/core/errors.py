@@ -35,6 +35,7 @@ class ApiError(Exception):
         message: str,
         details: list[dict[str, Any]] | dict[str, Any] | None = None,
         retryable: bool = False,
+        headers: dict[str, str] | None = None,
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
@@ -42,6 +43,7 @@ class ApiError(Exception):
         self.message = message
         self.details = details
         self.retryable = retryable
+        self.headers = headers
 
 
 # Retrying these can succeed without the client changing the request.
@@ -85,7 +87,10 @@ def internal_error_response(correlation_id: str) -> JSONResponse:
 
 async def _api_error_handler(_: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, ApiError)
-    return _envelope(exc.status_code, exc.code, exc.message, exc.details, exc.retryable)
+    response = _envelope(exc.status_code, exc.code, exc.message, exc.details, exc.retryable)
+    if exc.headers:
+        response.headers.update(exc.headers)
+    return response
 
 
 async def _http_error_handler(_: Request, exc: Exception) -> JSONResponse:

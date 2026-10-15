@@ -33,6 +33,7 @@ const ROUTE_LABELS: Record<string, string> = {
   assistant: 'AI Assistant',
   audit: 'Audit',
   access: 'Access & Roles',
+  users: 'Users',
 }
 
 function autoBreadcrumbs(pathname: string): Breadcrumb[] {

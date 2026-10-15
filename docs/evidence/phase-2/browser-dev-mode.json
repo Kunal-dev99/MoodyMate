@@ -1,0 +1,139 @@
+{
+  "roles": {
+    "platform_admin": {
+      "nav": [
+        "Overview",
+        "Source & Schemas",
+        "Ingestion Workbench",
+        "Financial Domain",
+        "Calculations",
+        "Reconciliation & Scenarios",
+        "Reports",
+        "AI Assistant",
+        "Audit",
+        "Access & Roles"
+      ],
+      "permissions_shown": [
+        "admin:read",
+        "audit:read",
+        "schema:read"
+      ],
+      "permissions_backend": [
+        "admin:read",
+        "audit:read",
+        "schema:read"
+      ],
+      "shown_matches_backend": true,
+      "users_section_visible": true,
+      "backend_GET_users_status": 200
+    },
+    "data_steward": {
+      "nav": [
+        "Overview",
+        "Source & Schemas",
+        "Ingestion Workbench",
+        "Financial Domain",
+        "Calculations",
+        "Reconciliation & Scenarios",
+        "Reports",
+        "AI Assistant",
+        "Access & Roles"
+      ],
+      "permissions_shown": [
+        "schema:propose",
+        "schema:read"
+      ],
+      "permissions_backend": [
+        "schema:propose",
+        "schema:read"
+      ],
+      "shown_matches_backend": true,
+      "users_section_visible": false,
+      "backend_GET_users_status": 403
+    },
+    "risk_analyst": {
+      "nav": [
+        "Overview",
+        "Source & Schemas",
+        "Ingestion Workbench",
+        "Financial Domain",
+        "Calculations",
+        "Reconciliation & Scenarios",
+        "Reports",
+        "AI Assistant",
+        "Access & Roles"
+      ],
+      "permissions_shown": [
+        "schema:read"
+      ],
+      "permissions_backend": [
+        "schema:read"
+      ],
+      "shown_matches_backend": true,
+      "users_section_visible": false,
+      "backend_GET_users_status": 403
+    },
+    "approver": {
+      "nav": [
+        "Overview",
+        "Source & Schemas",
+        "Ingestion Workbench",
+        "Financial Domain",
+        "Calculations",
+        "Reconciliation & Scenarios",
+        "Reports",
+        "AI Assistant",
+        "Access & Roles"
+      ],
+      "permissions_shown": [
+        "schema:approve",
+        "schema:read"
+      ],
+      "permissions_backend": [
+        "schema:approve",
+        "schema:read"
+      ],
+      "shown_matches_backend": true,
+      "users_section_visible": false,
+      "backend_GET_users_status": 403
+    },
+    "auditor": {
+      "nav": [
+        "Overview",
+        "Source & Schemas",
+        "Ingestion Workbench",
+        "Financial Domain",
+        "Calculations",
+        "Reconciliation & Scenarios",
+        "Reports",
+        "AI Assistant",
+        "Audit",
+        "Access & Roles"
+      ],
+      "permissions_shown": [
+        "audit:read",
+        "schema:read"
+      ],
+      "permissions_backend": [
+        "audit:read",
+        "schema:read"
+      ],
+      "shown_matches_backend": true,
+      "users_section_visible": false,
+      "backend_GET_users_status": 403
+    }
+  },
+  "unauthenticated_redirect": "http://localhost:3000/login?next=%2Faccess",
+  "picker_personas": 5,
+  "admin_users_rows": 3,
+  "risk_analyst_direct_url_audit": "Audit\nAudit\n\nYou don't have access to this\n\nThis needs the audit:read permission. Ask a platform administrator if you need it.",
+  "sign_out": {
+    "url": "http://localhost:3000/login",
+    "token_after": null
+  },
+  "auditor_direct_url_users": {
+    "ui": "Access & Roles\nUsers\nUsers\n\nUsers in your tenant and their roles. Read-only.\n\nYou don't have access to this\n\nThis needs the admin:read permission. Ask a platform administrator if you need it. Correlation ID: b6a5edc5-a70a-48ad-8f42-ea7d08daee8f",
+    "backend_status_seen_by_browser": 403
+  },
+  "tampered_token_redirect": "http://localhost:3000/login?next=%2Faccess"
+}
