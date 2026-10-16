@@ -103,7 +103,6 @@ export const adminWorkspaces: Workspace[] = [
     icon: ScrollText,
     description: 'Immutable audit timeline of privileged actions.',
     permission: 'audit:read',
-    planned: { phase: 'Phase 3', workstream: 'WS1 DG-04' },
   },
   {
     slug: 'access',

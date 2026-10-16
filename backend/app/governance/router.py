@@ -5,6 +5,7 @@ declares its permission (D-04); public ones are listed in app.core.auth.PUBLIC_P
 """
 
 import uuid
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -16,6 +17,8 @@ from app.db.session import get_session
 from app.governance.constants import Permission
 from app.governance.models import UserAccount
 from app.governance.schemas import (
+    AuditEventOut,
+    AuditEventPage,
     AuthConfig,
     DevPersona,
     DevSessionRequest,
@@ -26,7 +29,7 @@ from app.governance.schemas import (
     UserPage,
     UserSummary,
 )
-from app.governance.service import IdentityService, UserService
+from app.governance.service import AuditFilters, AuditQueryService, IdentityService, UserService
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
@@ -126,3 +129,50 @@ async def get_user(
     session: SessionDep,
 ) -> UserSummary:
     return _summary(await UserService(session, principal).get_user(user_id))
+
+
+@router.get("/audit-events", response_model=AuditEventPage, operation_id="listAuditEvents")
+async def list_audit_events(
+    principal: Annotated[Principal, Depends(require_permission(Permission.AUDIT_READ))],
+    session: SessionDep,
+    resource_type: str | None = None,
+    resource_id: str | None = None,
+    actor: str | None = None,
+    action: str | None = None,
+    outcome: str | None = None,
+    occurred_from: Annotated[datetime | None, Query(alias="from")] = None,
+    occurred_to: Annotated[datetime | None, Query(alias="to")] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> AuditEventPage:
+    filters = AuditFilters(
+        resource_type=resource_type,
+        resource_id=resource_id,
+        actor=actor,
+        action=action,
+        outcome=outcome,
+        occurred_from=occurred_from,
+        occurred_to=occurred_to,
+    )
+    rows, total = await AuditQueryService(session, principal).page(filters, limit, offset)
+    return AuditEventPage(
+        items=[
+            AuditEventOut(
+                id=e.id,
+                occurred_at=e.occurred_at,
+                actor=e.actor,
+                actor_user_id=e.actor_user_id,
+                action=e.action,
+                resource_type=e.resource_type,
+                resource_id=e.resource_id,
+                outcome=e.outcome,
+                correlation_id=e.correlation_id,
+                approval_ref=e.approval_ref,
+                details=details,
+            )
+            for e, details in rows
+        ],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )

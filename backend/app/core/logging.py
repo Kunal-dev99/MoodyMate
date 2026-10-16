@@ -6,6 +6,7 @@ Redaction is applied by the formatter to the message, the args and every `extra`
 * keys that name credentials (authorization, password, secret, token, *key, cookie …)
 * bearer tokens and JWT-shaped strings anywhere in a string value
 * any value wrapped in `Sensitive(...)`
+* a `Classified(value, code)` whose code is not in `LOG_CLEAR` (BE-3.5)
 """
 
 import json
@@ -15,6 +16,7 @@ import sys
 from datetime import UTC, datetime
 from typing import Any
 
+from app.core.classification import LOG_CLEAR, Classified
 from app.core.correlation import get_correlation_id
 
 REDACTED = "[REDACTED]"
@@ -53,6 +55,9 @@ class Sensitive:
 def redact(value: Any, key: str | None = None) -> Any:
     if isinstance(value, Sensitive):
         return REDACTED
+    if isinstance(value, Classified):
+        # Same classification codes as API masking (BE-3.5); unknown codes are redacted.
+        return redact(value.value, key) if value.code in LOG_CLEAR else REDACTED
     if key is not None and _SENSITIVE_KEY.search(key):
         return REDACTED
     if isinstance(value, str):

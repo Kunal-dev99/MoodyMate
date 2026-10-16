@@ -24,7 +24,8 @@ from app.core.errors import ApiError
 from app.core.principal import Principal
 from app.core.tokens import InvalidToken, ProviderUnavailable, TokenExpired
 from app.db.session import get_session
-from app.governance.service import IdentityService
+from app.governance.constants import AuditOutcome
+from app.governance.service import IdentityService, audit_by
 
 # Deliberately unauthenticated endpoints. Adding to this set is a security decision.
 PUBLIC_PATHS = frozenset(
@@ -73,8 +74,11 @@ async def get_principal(
         raise _unauthorized(
             "invalid_token", "The access token is not valid.", "invalid_token"
         ) from exc
+    settings = request.app.state.settings
     principal = await IdentityService(session).resolve_principal(
-        identity, can_self_provision=request.app.state.settings.can_self_provision
+        identity,
+        can_self_provision=settings.can_self_provision,
+        masking_enabled=settings.MASKING_ENABLED,
     )
     request.state.principal = principal
     return principal
@@ -84,8 +88,25 @@ PrincipalDependency = Callable[..., Awaitable[Principal]]
 
 
 def require_permission(permission: str) -> PrincipalDependency:
-    async def dependency(principal: Annotated[Principal, Depends(get_principal)]) -> Principal:
+    async def dependency(
+        request: Request,
+        principal: Annotated[Principal, Depends(get_principal)],
+        session: Annotated[AsyncSession, Depends(get_session)],
+    ) -> Principal:
         if permission != AUTHENTICATED and permission not in principal.permissions:
+            # BE-3.2: denied requests are audited (own transaction: the action never ran).
+            route = request.scope.get("route")
+            endpoint = getattr(route, "path", request.url.path)
+            audit_by(
+                session,
+                principal,
+                f"{request.method} {endpoint}",
+                "endpoint",
+                outcome=AuditOutcome.DENIED,
+                resource_id=endpoint,
+                details={"required_permission": permission},
+            )
+            await session.commit()
             raise ApiError(
                 403,
                 "forbidden",

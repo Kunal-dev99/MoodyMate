@@ -12,7 +12,7 @@ Conventions (see proposed D-08):
 
 ## Feature 01 — WS1 Data Governance, Security & Platform Foundation
 
-Kickoff: `docs/prompts/kickoffs/01-ws1-foundation.md` · Status: **APPROVED 2026-10-15 — Phase 1 merged (PR #2); Phase 2 merged (PR #3); Phase 2 hardening merged (PR #4); PR #5 merged; rotation follow-up in progress (BE-2.15, BE-2.16, FE-2.5)**
+Kickoff: `docs/prompts/kickoffs/01-ws1-foundation.md` · Status: **APPROVED 2026-10-15 — Phase 1 merged (PR #2); Phase 2 merged (PR #3); Phase 2 hardening merged (PR #4); PR #6 merged (Phase 2 hardening complete); Phase 3 built — verification pending**
 
 Constraining decisions: D-01…D-12 (all active).
 

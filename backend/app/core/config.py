@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     AI_ENABLED: bool = False
     DATA_CLASS: DataClass = "synthetic"
     LOG_LEVEL: str = "INFO"
+    # BE-3.5: mask classified values the caller may not see. Off only in ENV=local.
+    MASKING_ENABLED: bool = True
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
 
     # D-09 dev mode: HS256 tokens signed with this local secret (local/test only).
@@ -49,6 +51,8 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _guard_auth(self) -> "Settings":
         local = self.ENV in LOCAL_ENVS
+        if not self.MASKING_ENABLED and self.ENV != "local":
+            raise ValueError(f"MASKING_ENABLED=false is not allowed when ENV={self.ENV}")
         if self.AUTH_MODE == "dev":
             # D-09/D-13: the dev token issuer exists only on developer machines and CI.
             if not local:
