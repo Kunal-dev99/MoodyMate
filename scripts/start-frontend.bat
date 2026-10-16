@@ -11,8 +11,10 @@ rem                          or too old (CI uses Node 22)
 rem    2. Packages         - npm ci; re-runs when package-lock.json changes
 rem    3. frontend\.env.local - copied from .env.example on first run
 rem                          (points the app at http://localhost:8000)
-rem    4. Backend check    - warns if the API is not reachable yet
-rem                          (start scripts\start-backend.bat in another window)
+rem    4. Backend          - if the API is not answering, offers to start
+rem                          scripts\start-backend.bat in a new window. That script
+rem                          installs Python 3.12 and the database (Docker Desktop or
+rem                          PostgreSQL 16) when they are missing.
 rem    5. Starts the Next.js dev server on http://localhost:<port>
 rem ===========================================================================
 setlocal EnableExtensions EnableDelayedExpansion
@@ -40,17 +42,14 @@ if errorlevel 1 (
   echo Node.js 20 or newer was not found.
   where winget >nul 2>&1
   if errorlevel 1 (
-    echo winget is not available. Install Node.js 22 LTS from https://nodejs.org/
-    echo then run this script again.
+    echo winget is not available. Install "App Installer" from the Microsoft Store, or
+    echo install Node.js 22 LTS from https://nodejs.org/ - then run this script again.
     goto :fail
   )
   choice /C YN /M "Install Node.js LTS now with winget"
   if errorlevel 2 goto :fail
   winget install -e --id OpenJS.NodeJS.LTS --accept-package-agreements --accept-source-agreements
-  if errorlevel 1 (
-    echo [error] winget could not install Node.js.
-    goto :fail
-  )
+  if errorlevel 1 echo winget reported a problem - checking whether Node.js is usable anyway.
   rem This window does not see the new PATH yet: add the default install folder.
   set "PATH=%ProgramFiles%\nodejs;%PATH%"
   call :node_ok
@@ -105,14 +104,33 @@ rem ---------------------------------------------------------------------------
 echo.
 echo [4/5] Backend
 rem ---------------------------------------------------------------------------
-node -e "require('http').get('http://localhost:8000/api/v1/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))" >nul 2>&1
-if errorlevel 1 (
-  echo The backend is not answering on http://localhost:8000 yet.
-  echo Start it in another window with scripts\start-backend.bat - the sign-in page needs it.
-) else (
+call :backend_up
+if not errorlevel 1 (
   echo Backend is up.
+  goto :start
 )
+echo The backend is not answering on http://localhost:8000 - the sign-in page needs it.
+choice /C YN /M "Start the backend now in a new window"
+if errorlevel 2 (
+  echo Start it later with scripts\start-backend.bat. Continuing with the frontend.
+  goto :start
+)
+start "MoodyMate backend" "%ROOT%\scripts\start-backend.bat"
+echo Started scripts\start-backend.bat in a new window. Answer its questions there; a first
+echo run installs Python packages and the database, which takes several minutes.
+echo Waiting up to 10 minutes for the backend ...
+for /l %%N in (1,1,200) do (
+  call :backend_up
+  if not errorlevel 1 (
+    echo Backend is up.
+    goto :start
+  )
+  timeout /t 3 /nobreak >nul
+)
+echo The backend is not up yet - check its window. Starting the frontend anyway; it
+echo connects as soon as the backend is ready.
 
+:start
 rem ---------------------------------------------------------------------------
 echo.
 echo [5/5] Starting the frontend
@@ -139,6 +157,11 @@ rem ===========================================================================
 rem errorlevel 0 when node is on PATH and its major version is 20 or newer.
 where node >nul 2>&1 || exit /b 1
 node -e "process.exit(+process.versions.node.split('.')[0] >= 20 ? 0 : 1)" >nul 2>&1
+exit /b %errorlevel%
+
+:backend_up
+rem errorlevel 0 when the backend health endpoint answers 200.
+node -e "require('http').get('http://localhost:8000/api/v1/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))" >nul 2>&1
 exit /b %errorlevel%
 
 :fail
