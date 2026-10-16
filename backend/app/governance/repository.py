@@ -209,6 +209,46 @@ class SchemaRepository(ScopedRepository[SchemaDefinition]):
         result = await self.session.execute(self.scoped().order_by(SchemaDefinition.code))
         return list(result.scalars())
 
+    async def lock(self, schema_id: uuid.UUID) -> SchemaDefinition | None:
+        """The schema, locked for this transaction, with fresh versions: serialises a
+        mapping activation (BE-10.5) with a schema change approval, which locks it too."""
+        result = await self.session.execute(
+            self.scoped()
+            .where(SchemaDefinition.id == schema_id)
+            .with_for_update(of=SchemaDefinition)
+            .execution_options(populate_existing=True)
+        )
+        schema = result.scalar_one_or_none()
+        if schema is not None:
+            await self.session.refresh(schema, ["versions"])
+        return schema
+
+    async def add_dependency(
+        self,
+        schema_id: uuid.UUID,
+        dependent_type: str,
+        dependent_ref: str,
+        description: str | None,
+        actor: str,
+    ) -> bool:
+        """Insert a dependent unless it is already registered; True when inserted. The
+        caller has reached `schema_id` through this scope."""
+        result = await self.session.execute(
+            insert(SchemaDependency)
+            .values(
+                id=uuid.uuid4(),
+                schema_id=schema_id,
+                dependent_type=dependent_type,
+                dependent_ref=dependent_ref,
+                description=description,
+                provisional=False,
+                created_by=actor,
+            )
+            .on_conflict_do_nothing(index_elements=["schema_id", "dependent_type", "dependent_ref"])
+            .returning(SchemaDependency.id)
+        )
+        return result.scalar_one_or_none() is not None
+
 
 class ProposalRepository(ScopedRepository[SchemaChangeProposal]):
     """Schema change proposals and the registry writes they make (BE-5.x), tenant-scoped."""
