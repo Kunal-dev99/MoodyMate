@@ -33,8 +33,11 @@ test('FE-7.1: data_steward sees the live workbench and the Register button', asy
   await expect(page.getByTestId('register-source')).toBeVisible()
   // The seeded illustrative source (BE-7.5) is listed as provisional.
   await expect(page.getByTestId('source-row').filter({ hasText: 'core_banking' })).toContainText('Provisional')
+  // Phase 8 replaced the "planned" Imports tab with the live list (FE-8.2): it shows
+  // imports, or its empty state on a fresh database, never the Phase 7 placeholder.
   await page.getByRole('tab', { name: 'Imports' }).click()
-  await expect(page.getByText('No imports yet')).toBeVisible()
+  await expect(page.getByTestId('import-row').first().or(page.getByText('No imports yet'))).toBeVisible()
+  await expect(page.getByRole('tabpanel').getByText('Planned', { exact: true })).toHaveCount(0)
 })
 
 test('FE-7.1: auditor has no Register button, gets the 403 state and a backend 403', async ({ page }) => {
