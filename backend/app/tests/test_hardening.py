@@ -70,7 +70,11 @@ def test_http_jwks_url_refused_in_production() -> None:
 
 def test_https_oidc_accepted_in_production() -> None:
     s = Settings(
-        ENV="production", DATA_CLASS="client", OIDC_ISSUER="https://idp.example/realm", **OIDC
+        ENV="production",
+        DATA_CLASS="client",
+        OIDC_ISSUER="https://idp.example/realm",
+        ARTIFACT_STORE_DIR="/var/lib/moodymate/artifacts",  # required outside local/test (D-15)
+        **OIDC,
     )
     assert not s.allow_insecure_oidc
 
