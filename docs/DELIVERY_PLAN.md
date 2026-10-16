@@ -466,7 +466,7 @@ Goal: a data steward can register a source system, its profile and a PROVISIONAL
 contract that names the target canonical schema. Synthetic samples exist for every later
 phase, and the Ingestion Workbench goes live, read-only for everyone else.
 
-- [ ] **BE-7.1** Migration plus models in `ingestion`:
+- [x] **BE-7.1** Migration plus models in `ingestion`:
   - `source_system`, with `kind` per D-23.
   - `source_profile`, with format, encoding, delimiter, sheet name, cadence, owner,
     `default_classification` (FK to `data_classification`) and `provisional`.
@@ -480,26 +480,78 @@ phase, and the Ingestion Workbench goes live, read-only for everyone else.
   rows exist.
   - *Done-when:* the round trip passes, and tests prove the trigger rejects an
     UPDATE/DELETE/TRUNCATE on an APPROVED contract, that a bad enum value is refused by the
-    CHECK, and that the downgrade refuses while a user-created source exists.
-- [ ] **BE-7.2** Seed migration adding the nine WS2 permissions and the matrix above
+    CHECK, and that the downgrade refuses while a user-created source exists. — ✔ verified
+    (checks at 8bdb0cd; 2026-10-16 Phase 7 verification, docs/evidence/phase-7/REPORT.md).
+    Migration 0009 has CHECKs on kind, format, encoding, delimiter and status, and a
+    `source_contract_guard` trigger for UPDATE/DELETE plus a statement-level TRUNCATE trigger.
+    No session-settable bypass exists. `test_sources.py::test_approved_contract_rejects_update_and_delete`
+    covers 9 statements, plus `::test_approved_contract_rejects_truncate`,
+    `::test_enum_columns_are_checked` (9 cases), `::test_downgrade_refuses_while_a_user_source_exists`
+    and `::test_source_migrations_round_trip_without_user_sources`. The round trip
+    0011→0008→0011 is in checks.txt:28-33, and 352 passed (checks.txt:8). ⚠ follow-ups (REPORT
+    D1, D5, D6, D11): a PROVISIONAL contract's content is still editable in the DB, and Phase 8
+    pins `source_contract_id` (needs a user decision). `source_system.tenant_id` and
+    `source_profile.source_system_id` are updatable. The guard does not freeze
+    `created_by`/`created_at` or enforce the transition table. The downgrade-refusal test cannot
+    tell a re-seed from "nothing removed".
+- [x] **BE-7.2** Seed migration adding the nine WS2 permissions and the matrix above
   (tagged, D-11). `governance/constants.py` `Permission` and `ROLE_PERMISSIONS` are
   extended to match.
   - *Done-when:* `test_identity_seed.py::test_seeded_matrix_matches_plan` passes against the
     extended matrix, `test_me.py` per-role permission tests pass with the new sets, and a
-    test proves the downgrade removes only rows tagged by this migration.
-- [ ] **BE-7.3** Setting `INGESTION_ENABLED` (default `true`). When it is off, every WS2
+    test proves the downgrade removes only rows tagged by this migration. — ✔ verified
+    (checks at 8bdb0cd). Migration 0010's MATRIX, `governance/constants.py`
+    `WS2_ROLE_PERMISSIONS` and the plan table agree cell by cell.
+    `test_identity_seed.py::test_seeded_matrix_matches_plan` asserts DB = constants, and also
+    states the plan's holders explicitly (writes only data_steward, `mapping:approve` only
+    approver, `quarantine:read` = steward/approver/auditor). `test_me.py::test_ws2_permissions_per_role`
+    writes the matrix out from the plan, not from the constants.
+    `test_identity_seed.py::test_ws2_permission_downgrade_removes_only_its_rows` adds an
+    untagged `custom:read` grant, downgrades to 0009 and asserts WS1 ∪ {custom:read} remains
+    with zero tagged rows. All of these are in the 352 passed (checks.txt:8).
+- [x] **BE-7.3** Setting `INGESTION_ENABLED` (default `true`). When it is off, every WS2
   write route returns 409 `ingestion_disabled` (audited DENIED) and reads still work.
   - *Done-when:* a test with the setting off gets 409 plus one DENIED audit event on
-    `POST /sources`, and 200 on `GET /sources`.
-- [ ] **BE-7.4** `POST /sources` creates the system, the profile and contract v1 in one
+    `POST /sources`, and 200 on `GET /sources`. — ✔ verified (checks at 8bdb0cd).
+    `ingestion/router.py:46-70` is a dependency declared after the permission dependency on
+    both write routes. Its refusal goes through `record_denial`, which rolls back and audits
+    in its own session, matching the Phase 5 `SCHEMA_CHANGE_ENABLED` pattern.
+    `test_sources.py::test_switch_off_refuses_writes_with_one_audit_event_and_reads_work`
+    asserts 409 `ingestion_disabled` with exactly one DENIED event for `POST /api/v1/sources`
+    (by correlation ID), 200 on the list and on get-by-id, 409 on `POST …/contracts`, a plain
+    403 `forbidden` for risk_analyst (the switch reveals nothing) and no rows written.
+    ⚠ follow-up (REPORT D4): no structural test makes future WS2 write routes (Phases 8–13)
+    carry the switch.
+- [x] **BE-7.4** `POST /sources` creates the system, the profile and contract v1 in one
   transaction (audited `source.create`). It also adds `GET /sources` (paginated),
   `GET /sources/{source_id}` and `POST /sources/{source_id}/contracts`, which creates the
   next version and marks the previous one SUPERSEDED. The target schema must exist in the
   tenant and have an ACTIVE version. Permissions and tenant scope come from the table above.
   - *Done-when:* tests cover create/list/get; a cross-tenant `GET` returns the same 404 as a
     random ID; `risk_analyst` `POST` returns 403 with a DENIED audit event; and after
-    contract v2 is created, v1 is SUPERSEDED with an unchanged `content_sha256`.
-- [ ] **BE-7.5** Synthetic samples (WS2-P0):
+    contract v2 is created, v1 is SUPERSEDED with an unchanged `content_sha256`. — ✔ verified
+    (checks at 8bdb0cd). The tests:
+    - `test_sources.py::test_create_list_and_get`: one `source.create` event, `X-Data-Class`,
+      and pagination ordered by code.
+    - `::test_cross_tenant_get_is_the_same_404_as_a_random_id`: identical envelopes apart from
+      the correlation ID, an empty list, and 404 on writes by id.
+    - `::test_post_without_source_manage_is_403_and_audited`: risk_analyst, auditor, approver
+      and platform_admin each get 403 with one DENIED event.
+    - `::test_new_contract_version_supersedes_the_previous_unchanged`: the v1 row is identical
+      except status and `updated_at`, and the create and supersede events are present.
+    - `::test_target_schema_must_exist_here_and_be_active` and `::test_seed_hash_matches_the_service`.
+
+    Contract versioning is serialised by `SELECT … FOR UPDATE` on the source
+    (`ingestion/repository.py:45-53`), backed by `uq_source_contract_current` and
+    `UNIQUE(source_profile_id, version)`. The WS1 matrix and the audit-completeness tests
+    include both write routes (checks.txt:10-21). ⚠ follow-ups (REPORT D2, D3, D8, D9, D12):
+    - the registrant can send `profile.provisional=false`;
+    - business-rule refusals (`duplicate_code`, `no_active_version`, `unsupported_source_kind`,
+      `no_change`) are not audited, although the Feature 02 constraint reads "every refusal is
+      audited";
+    - control characters and whitespace-only text are accepted, and NUL probably causes a 500;
+    - no concurrency test exists for two simultaneous new versions.
+- [x] **BE-7.5** Synthetic samples (WS2-P0):
   - `backend/scripts/make_synthetic_samples.py` uses a fixed seed and writes ILLUSTRATIVE
     files for `instrument` (CSV), `position` (XLSX) and `cashflow_event` (JSON). It also
     writes deliberately bad variants: missing required column, bad date, over-scale decimal,
@@ -509,20 +561,62 @@ phase, and the Ingestion Workbench goes live, read-only for everyone else.
   - *Done-when:* a test runs the generator twice and gets identical SHA-256s for every
     file, every file carries an "ILLUSTRATIVE / SYNTHETIC" marker (header comment, sheet
     name or top-level key per format), and `GET /sources` lists the seeded source with
-    `provisional: true`.
-- [ ] **FE-7.1** The Ingestion Workbench goes live:
+    `provisional: true`. — ✔ verified (checks at 8bdb0cd). The tests:
+    - `test_synthetic_samples.py::test_two_runs_give_identical_files` runs the script twice as
+      a subprocess and compares SHA-256 per file and against `SHA256SUMS`.
+    - `::test_every_file_carries_the_marker` (parametrised over every file): a CSV `# …` first
+      line, a JSON top-level `marker`, and for XLSX the sheet name "ILLUSTRATIVE SYNTHETIC" plus
+      the full marker in `docProps/core.xml`.
+    - `::test_bad_variants_carry_their_defect` checks all 7 variants.
+    - `::test_committed_samples_are_current`, and "synthetic samples are up to date" in
+      checks.txt:25-26.
+    - `test_sources.py::test_seeded_source_is_listed_as_provisional`: 3 tagged rows, and the
+      contract columns equal the sample header.
+
+    ⚠ before Phase 8 (REPORT deviations 1–3, user decision): the JSON samples are a
+    `{"marker","records"}` object, but D-16 says a top-level array. The CSV marker line has to
+    be skipped by the BE-8.3 adapter. The XLSX is hand-written (stdlib zip), not with openpyxl
+    (D-17). The seed uses random IDs (REPORT D7).
+- [x] **FE-7.1** The Ingestion Workbench goes live:
   - `navigation.ts` drops `planned` for `ingestion` and requires `source:read`.
   - The `/ingestion` landing page has Sources and Imports tabs. Imports shows an empty state
     until Phase 8.
   - "Register source" is wrapped in `RequirePermission('source:manage')`.
   - *Done-when:* a browser run shows `data_steward` with the Register button and `auditor`
     without it; `auditor` on `/ingestion/sources/new` sees the 403 state and the backend
-    `POST /sources` also returns 403.
-- [ ] **FE-7.2** Source registration form and source detail page (profile, contract versions
+    `POST /sources` also returns 403. — ✔ verified (checks at 8bdb0cd).
+    - `navigation.ts:47-54` has `permission: 'source:read'` and no `planned`.
+    - The landing page `ingestion/page.tsx` has Sources and Imports tabs (the Imports tab is an
+      empty state). Its Register button is in `RequirePermission('source:manage')` with a null
+      fallback, and `sources/new/page.tsx:205` wraps the form in `RequirePermission`.
+    - `IngestionGate` restores the placeholder when the nav entry is planned again
+      (`gate.test.ts`, D-02).
+    - The two `e2e/ingestion.spec.ts` FE-7.1 tests cover steward vs auditor, the auditor's 403
+      state on `/ingestion/sources/new`, and a backend 403 `forbidden` on `POST /sources` with
+      the auditor's token. Playwright passed 11/11 (checks.txt:46-56).
+
+    ⚠ evidence gap (REPORT D13): checks.txt is missing the per-test lines 1–2. The total
+    proves they passed; re-capture the full list.
+- [x] **FE-7.2** Source registration form and source detail page (profile, contract versions
   with status pills, a resource-scoped `AuditTimeline`).
   - *Done-when:* a browser run registers a source as `data_steward` and sees it in the list.
     After a second contract version is added, the detail page shows v1 Superseded and v2
-    Provisional, and the timeline shows both events with correlation IDs.
+    Provisional, and the timeline shows both events with correlation IDs. — ✔ verified (checks
+    at 8bdb0cd). `e2e/ingestion.spec.ts:70-135` covers:
+    - the steward registers a source through the form and sees it in the list as v1;
+    - contract v2 is added from v1 and the detail page shows v1 `SUPERSEDED`/"Superseded" and
+      v2 `PROVISIONAL`/"Provisional";
+    - the steward sees the `audit-unavailable` note;
+    - the auditor, on the same detail URL, sees exactly 3 events (`source.create`,
+      `source_contract.create`, `source_contract.supersede`), each SUCCESS with a correlation ID.
+
+    The detail fetch and the schema-field copy are cancelled with `AbortController`
+    (`[sourceId]/page.tsx:122-140`, `ContractEditor.tsx:48-82`), and the pills are tested
+    against the OpenAPI enums (`sources.test.ts:82-90`). ⚠ follow-ups:
+    - the steward cannot see the timeline because data_steward lacks `audit:read`
+      (deviation 7, user decision);
+    - the page stays in a stuck loading state after a non-API load failure (REPORT D10);
+    - the classification codes are hard-coded (deviation 8).
 
 *Reversibility:* additive tables and seed migrations. The downgrades refuse while user rows
 exist and remove only tagged seed rows. Turning off `INGESTION_ENABLED` makes WS2

@@ -1,0 +1,61 @@
+# Phase 7 checks — 2026-10-16T12:08:27Z — 8bdb0cd
+$ ruff check . && ruff format --check .
+All checks passed!
+141 files already formatted
+$ mypy app scripts
+Success: no issues found in 141 source files
+$ pytest -q -m "not ws1"
+352 passed, 8 deselected, 2 warnings in 163.00s (0:02:42)
+$ pytest -m ws1 -v (matrix)
+app/tests/test_ws1_verification.py::test_seeded_roles_are_the_roles_tested PASSED [ 12%]
+app/tests/test_ws1_verification.py::test_route_by_role_authorization_matrix PASSED [ 25%]
+app/tests/test_ws1_verification.py::test_matrix_covers_every_route_without_a_token PASSED [ 37%]
+app/tests/test_ws1_verification.py::test_another_tenant_sees_and_changes_nothing_here PASSED [ 50%]
+app/tests/test_ws1_verification.py::test_breaking_change_needs_analysis_and_a_second_person PASSED [ 62%]
+app/tests/test_ws1_verification.py::test_every_mutating_route_is_listed PASSED [ 75%]
+app/tests/test_ws1_verification.py::test_every_mutating_route_emits_an_audit_event PASSED [ 87%]
+app/tests/test_ws1_verification.py::test_migration_round_trip_base_to_head PASSED [100%]
+GET /api/v1/sources                                                 source:read                200            200            200            200            200
+POST /api/v1/sources                                                source:manage              403            422            403            403            403
+GET /api/v1/sources/{source_id}                                     source:read                200            200            200            200            200
+POST /api/v1/sources/{source_id}/contracts                          source:manage              403            422            403            403            403
+================ 8 passed, 352 deselected, 1 warning in 11.93s =================
+$ openapi --check
+openapi.json is up to date
+$ synthetic samples --check
+synthetic samples are up to date
+NOTICE:  database "moodymate_ws2_p7_rt" does not exist, skipping
+$ alembic round trip (copy of moodymate_ws2_p7)
+0011 (head)
+3
+0008
+3
+0011 (head)
+$ npm run typecheck
+exit=0
+$ npm run lint
+✔ No ESLint warnings or errors
+$ npm test
+ Test Files  9 passed (9)
+      Tests  66 passed (66)
+$ npm run build
+ ✓ Compiled successfully
+├ ○ /ingestion                           6.05 kB         148 kB
+├ ƒ /ingestion/sources/[sourceId]        4.93 kB         165 kB
+├ ○ /ingestion/sources/new               4.16 kB         140 kB
+  ✓   3 [chromium] › e2e/ingestion.spec.ts:70:5 › FE-7.2: register a source, add contract v2, see the versions and the timeline (3.1s)
+  ✓   4 [chromium] › e2e/smoke.spec.ts:16:7 › sign-in as Platform administrator (654ms)
+  ✓   5 [chromium] › e2e/smoke.spec.ts:16:7 › sign-in as Data steward (707ms)
+  ✓   6 [chromium] › e2e/smoke.spec.ts:16:7 › sign-in as Risk analyst (659ms)
+  ✓   7 [chromium] › e2e/smoke.spec.ts:16:7 › sign-in as Approver (680ms)
+  ✓   8 [chromium] › e2e/smoke.spec.ts:16:7 › sign-in as Auditor (637ms)
+  ✓   9 [chromium] › e2e/smoke.spec.ts:24:5 › a page the role may not use shows the 403 state (1.0s)
+  ✓  10 [chromium] › e2e/smoke.spec.ts:32:5 › schema compare shows every change with its badge (960ms)
+  ✓  11 [chromium] › e2e/smoke.spec.ts:53:5 › proposal flow: steward proposes, approver approves (2.7s)
+
+  11 passed (17.5s)
+
+To open last HTML report run:
+[36m[39m
+[36m  npx playwright show-report[39m
+[36m[39m

@@ -414,6 +414,35 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
 - **Consequences:** the enums appear in OpenAPI, and the FE status pills are tested against
   the generated enum sets.
 
+## D-24 In-file synthetic markers, frozen source contracts and audited business refusals
+
+- **Status:** active (decided by the user 2026-10-16, Phase 7 review)
+- **Date:** 2026-10-16
+- **Context:** the Phase 7 review (`docs/evidence/phase-7/REPORT.md`) found the plan in
+  conflict with itself. BE-7.5 asks for the "ILLUSTRATIVE / SYNTHETIC" marker inside each
+  sample file, but D-16 accepts only a top-level JSON array. The review also found that
+  PROVISIONAL contracts stayed editable (D1) and that business-rule refusals were not
+  audited (D3).
+- **Decision:**
+  1. **JSON uploads** are either a top-level array of flat objects or exactly
+     `{"marker": "<starts with ILLUSTRATIVE / SYNTHETIC>", "records": [flat objects]}`, with
+     no other keys. Anything else is refused. Amends D-16 §4.
+  2. **CSV uploads** skip line 1 only when it starts with exactly
+     `# ILLUSTRATIVE / SYNTHETIC`, and the import records that the marker was present.
+     There is no general rule that skips `#` lines (D-20: no row is silently dropped).
+     XLSX marks the data in the sheet name and the workbook title.
+  3. **Source contract content is frozen from creation, in every status.** Only `status` and
+     `updated_at` may change, along the transition table. Changes are always a new version.
+     Amends BE-7.1's "immutable once not PROVISIONAL".
+  4. **Every refused WS2 write is audited** with its reason code: authorization, policy,
+     the switch, and business-rule refusals (for example `duplicate_code`, `no_change`,
+     `unsupported_source_kind`). Malformed request bodies (422 `validation_error`) are not.
+  5. **data_steward keeps no `audit:read`.** Source history stays with auditors
+     (segregation of duties).
+- **Consequences:** the Phase 8 CSV and JSON adapters implement points 1–2. Phase 7 gets
+  follow-up migration 0012 for point 3, and a shared refusal-audit helper for point 4.
+- **Reversal:** a new decision. Points 3 and 4 only ever tighten controls.
+
 ---
 
 <!-- Never renumber existing IDs. New decisions are appended as D-05, D-06, … -->
