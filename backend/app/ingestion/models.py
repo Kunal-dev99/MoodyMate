@@ -215,6 +215,12 @@ class ImportJob(ScopedModel, Base):
     # {column: decimal string}, declared by the uploader for reconciliation (Phase 12).
     control_totals: Mapped[dict[str, str] | None] = mapped_column(JSONB)
     row_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    # D-18 §5 (migration 0014, a nullable column, D-01): the mapping version the import is
+    # validated with. Written once (NULL -> a version, then frozen) by a DB trigger, which
+    # also checks that the version maps this import's contract and schema version.
+    mapping_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("mapping_version.id")
+    )
 
     artifact: Mapped["ImportArtifact"] = relationship(lazy="selectin", uselist=False)
     batches: Mapped[list["ImportBatch"]] = relationship(
