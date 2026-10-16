@@ -10,11 +10,13 @@ rem    1. Python 3.12   - offers to install it with winget if it is missing
 rem    2. backend\.venv - creates the virtual environment
 rem    3. Packages      - pip install -e ".[dev]"; re-runs when pyproject.toml changes
 rem    4. backend\.env  - copied from .env.example on first run (ENV=local, dev sign-in)
-rem    5. PostgreSQL    - signs in with DATABASE_URL from backend\.env. Starts the docker
-rem                       compose "db" service if nothing listens on its port. If another
-rem                       database holds the port, offers to move MoodyMate's to a free
-rem                       port; if MoodyMate's own container has stale credentials,
-rem                       offers to reset it (local development data only)
+rem    5. PostgreSQL    - signs in with DATABASE_URL from backend\.env. If nothing runs on
+rem                       its port: starts Docker Desktop and the compose "db" service, or
+rem                       offers to install Docker Desktop or PostgreSQL 16 with winget
+rem                       (and then creates MoodyMate's user and database). If another
+rem                       database holds the port: offers to create MoodyMate's user and
+rem                       database in it, or to use a free port. If MoodyMate's own
+rem                       container has stale credentials: offers to reset it.
 rem    6. Migrations    - alembic upgrade head (tables and seed data)
 rem    7. Starts uvicorn with auto-reload on http://127.0.0.1:<port>
 rem ===========================================================================
@@ -146,27 +148,103 @@ if not defined DBPORT (
 :db_check
 call :db_login
 if "%DBCODE%"=="0" goto :migrate
-if "%DBCODE%"=="1" goto :db_start
+if "%DBCODE%"=="1" goto :db_none
 if "%DBCODE%"=="2" goto :db_conflict
 if "%DBCODE%"=="3" goto :db_conflict
 echo [error] Unexpected database error - see the message above.
 goto :fail
 
-:db_start
-rem Nothing listens on the port: start MoodyMate's own database container there.
+:db_none
+rem Nothing listens on the port. Docker is preferred: start it if it is installed.
+call :docker_ready
+if not errorlevel 1 goto :db_start
+echo.
+echo No database is running on port %DBPORT% and Docker is not ready.
+echo Choose how to get PostgreSQL 16 for MoodyMate:
+echo   [D] Docker Desktop ^(recommended^). Installs Docker Desktop with winget if it is missing,
+echo       starts it and runs MoodyMate's database in a container. Needs admin rights;
+echo       Windows may need a restart after the first install.
+echo   [P] PostgreSQL 16 for Windows. Installs PostgreSQL 16 with winget on port %DBPORT%,
+echo       then creates MoodyMate's user and database in it. Needs admin rights.
+echo   [N] Stop.
+choice /C DPN /M "Your choice"
+if errorlevel 3 goto :db_manual
+if errorlevel 2 goto :install_pg
+goto :install_docker
+
+:install_docker
 where docker >nul 2>&1
+if not errorlevel 1 goto :docker_launch
+call :need_winget || goto :fail
+echo.
+echo Installing Docker Desktop - it downloads about 600 MB, so this takes a while ...
+winget install -e --id Docker.DockerDesktop --accept-package-agreements --accept-source-agreements
+if errorlevel 1 echo winget reported a problem - checking whether Docker Desktop is usable anyway.
+rem This window does not see the new PATH yet: add Docker's default install folder.
+set "PATH=%ProgramFiles%\Docker\Docker\resources\bin;%PATH%"
+:docker_launch
+call :docker_ready
 if errorlevel 1 (
-  echo [error] No database is running on port %DBPORT% and Docker is not installed.
-  echo Either install Docker Desktop ^(https://www.docker.com/products/docker-desktop/^)
-  echo or run PostgreSQL 16 yourself with user/password moodymate and database moodymate_dev.
+  echo [error] Docker Desktop is not ready. If Windows asked for a restart, restart now.
+  echo Then open Docker Desktop once, accept its terms, wait until it says it is running,
+  echo and run this script again.
   goto :fail
 )
+goto :db_start
+
+:install_pg
+call :need_winget || goto :fail
+set "MM_PGPASS="
+pushd "%BACKEND%"
+for /f "delims=" %%W in ('.venv\Scripts\python.exe -m scripts.db_check --new-password') do set "MM_PGPASS=%%W"
+popd
+if not defined MM_PGPASS (
+  echo [error] Could not generate a password - see the message above.
+  goto :fail
+)
+echo.
+echo Installing PostgreSQL 16 on port %DBPORT% - Windows asks for admin rights; this takes
+echo a few minutes ...
+winget install -e --id PostgreSQL.PostgreSQL.16 --accept-package-agreements --accept-source-agreements --override "--mode unattended --unattendedmodeui minimal --superpassword %MM_PGPASS% --serverport %DBPORT% --disable-components stackbuilder"
+if errorlevel 1 (
+  echo [error] winget could not install PostgreSQL 16. If it is already installed, it may be
+  echo stopped or on another port: start it from the Services app, or set the port in
+  echo DATABASE_URL in backend\.env, then run this script again.
+  goto :fail
+)
+rem Keep the superuser password outside the repository so it can never be committed.
+if not exist "%LOCALAPPDATA%\MoodyMate\" mkdir "%LOCALAPPDATA%\MoodyMate"
+>"%LOCALAPPDATA%\MoodyMate\postgres-superuser.txt" echo PostgreSQL 16 on port %DBPORT%: superuser postgres, password %MM_PGPASS%
+echo.
+echo PostgreSQL 16 is installed. Its superuser is "postgres" with password %MM_PGPASS%
+echo The password is saved in %LOCALAPPDATA%\MoodyMate\postgres-superuser.txt
+echo Waiting for PostgreSQL to start ...
+for /l %%N in (1,1,60) do (
+  call :db_login quiet
+  if not "!DBCODE!"=="1" goto :pg_started
+  timeout /t 2 /nobreak >nul
+)
+echo [error] PostgreSQL 16 did not start within 2 minutes. Check the Services app for
+echo "postgresql-x64-16" and start it, then run this script again.
+goto :fail
+:pg_started
+set "PGADMINUSER=postgres"
+set "PGADMINPASSWORD=%MM_PGPASS%"
+call :db_setup
+set "PGADMINPASSWORD="
+set "MM_PGPASS="
+if not "%SETUPCODE%"=="0" (
+  echo [error] Could not create MoodyMate's user and database - see the message above.
+  goto :fail
+)
+goto :db_check
+
+:db_start
+rem Start MoodyMate's own database container on the port.
+where docker >nul 2>&1
+if errorlevel 1 goto :db_none
 docker info >nul 2>&1
-if errorlevel 1 (
-  echo [error] Docker is installed but not running. Start Docker Desktop, wait until it is ready,
-  echo then run this script again.
-  goto :fail
-)
+if errorlevel 1 goto :db_none
 echo Starting MoodyMate's database container on port %DBPORT% ^(docker compose up -d db^) ...
 set "MOODYMATE_DB_PORT=%DBPORT%"
 pushd "%ROOT%"
@@ -218,12 +296,26 @@ popd
 goto :db_start
 
 :db_other
-echo Port %DBPORT% is used by another database ^(%OWNER%, PID %OWNERPID%^),
-echo not MoodyMate's. It does not accept the user and password in backend\.env.
-echo MoodyMate can run its own database in Docker on a free port instead. This only
-echo changes the port in DATABASE_URL in backend\.env; the other database is not touched.
-choice /C YN /M "Run MoodyMate's database on a free port"
-if errorlevel 2 goto :db_manual
+echo Port %DBPORT% is used by another database ^(%OWNER%, PID %OWNERPID%^), not MoodyMate's.
+echo It does not accept the user and password in backend\.env. Choose a fix:
+echo   [C] Create MoodyMate's user and database in that PostgreSQL. You type the password
+echo       of its "postgres" superuser ^(chosen when it was installed^). Only the user and
+echo       database named in backend\.env are created or updated; nothing else changes.
+echo   [F] Run MoodyMate's own database on a free port instead ^(Docker, or a new
+echo       PostgreSQL 16^). Only the port in backend\.env changes.
+echo   [N] Stop.
+choice /C CFN /M "Your choice"
+if errorlevel 3 goto :db_manual
+if errorlevel 2 goto :db_move
+set "PGADMINUSER=postgres"
+set "PGADMINPASSWORD="
+call :db_setup
+if "%SETUPCODE%"=="0" goto :db_check
+echo Could not create MoodyMate's user and database - see the message above.
+echo.
+goto :db_other
+
+:db_move
 set "NEWPORT="
 pushd "%BACKEND%"
 for /f "delims=" %%P in ('.venv\Scripts\python.exe -m scripts.db_check --move-port') do set "NEWPORT=%%P"
@@ -308,6 +400,35 @@ pushd "%ROOT%"
 for /f %%C in ('docker compose ps --status running -q db 2^>nul') do set "OURS=%%C"
 popd
 exit /b 0
+
+:db_setup
+rem Creates or updates the DATABASE_URL user and database, signed in as PGADMINUSER.
+rem Prompts for the superuser password when PGADMINPASSWORD is empty. Sets SETUPCODE.
+pushd "%BACKEND%"
+"%VPY%" -m scripts.db_check --setup
+set "SETUPCODE=%errorlevel%"
+popd
+exit /b 0
+
+:docker_ready
+rem errorlevel 0 when docker answers, starting Docker Desktop first if it is installed.
+where docker >nul 2>&1 || exit /b 1
+docker info >nul 2>&1 && exit /b 0
+set "DD=%ProgramFiles%\Docker\Docker\Docker Desktop.exe"
+if not exist "%DD%" exit /b 1
+echo Starting Docker Desktop - the first start can take a few minutes ...
+start "" "%DD%"
+for /l %%N in (1,1,60) do (
+  timeout /t 3 /nobreak >nul
+  docker info >nul 2>&1 && exit /b 0
+)
+exit /b 1
+
+:need_winget
+where winget >nul 2>&1 && exit /b 0
+echo [error] winget is not available. Install "App Installer" from the Microsoft Store,
+echo or install Docker Desktop or PostgreSQL 16 yourself, then run this script again.
+exit /b 1
 
 :pip_failed
 echo [error] Package installation failed. Check your internet connection and the messages above.

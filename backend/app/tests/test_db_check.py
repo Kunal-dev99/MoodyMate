@@ -2,9 +2,11 @@
 
 import asyncio
 import socket
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+import asyncpg
 import pytest
 from sqlalchemy.engine import make_url
 
@@ -17,6 +19,7 @@ from scripts.db_check import (
     free_port,
     main,
     set_env_port,
+    setup,
 )
 
 
@@ -91,3 +94,64 @@ def test_port_option_prints_the_port_the_app_will_use(
     monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://u:p@localhost:6543/x")
     assert main(["--port"]) == OK
     assert capsys.readouterr().out.strip() == "6543"
+
+
+def _admin(database_url: str) -> tuple[str, str]:
+    url = make_url(database_url)
+    return url.username or "", url.password or ""
+
+
+async def _drop(database_url: str, role: str, database: str) -> None:
+    user, password = _admin(database_url)
+    url = make_url(database_url)
+    conn = await asyncpg.connect(
+        host=url.host, port=url.port, user=user, password=password, database=url.database
+    )
+    try:
+        await conn.execute(f'DROP DATABASE IF EXISTS "{database}"')
+        await conn.execute(f'DROP ROLE IF EXISTS "{role}"')
+    finally:
+        await conn.close()
+
+
+@pytest.fixture
+def new_app_url(database_url: str) -> Iterator[str]:
+    role, database = "mm_setup_role_test", "mm_setup_db_test"
+    asyncio.run(_drop(database_url, role, database))
+    yield _with(database_url, username=role, password="s3t'up pw", database=database)
+    asyncio.run(_drop(database_url, role, database))
+
+
+def test_setup_creates_the_app_role_and_database(database_url: str, new_app_url: str) -> None:
+    assert asyncio.run(check(new_app_url))[0] == BAD_LOGIN
+    code, _ = asyncio.run(setup(new_app_url, *_admin(database_url)))
+    assert code == OK
+    assert asyncio.run(check(new_app_url))[0] == OK
+
+
+def test_setup_is_repeatable_and_resets_the_role_password(
+    database_url: str, new_app_url: str
+) -> None:
+    assert asyncio.run(setup(new_app_url, *_admin(database_url)))[0] == OK
+    changed = _with(new_app_url, password="another password")
+    assert asyncio.run(setup(changed, *_admin(database_url)))[0] == OK
+    assert asyncio.run(check(changed))[0] == OK
+    assert asyncio.run(check(new_app_url))[0] == BAD_LOGIN
+
+
+def test_setup_with_a_wrong_admin_password_is_a_rejected_login(
+    database_url: str, new_app_url: str
+) -> None:
+    user, _ = _admin(database_url)
+    code, message = asyncio.run(setup(new_app_url, user, "wrong-admin-password"))
+    assert code == BAD_LOGIN
+    assert "wrong-admin-password" not in message
+
+
+def test_new_password_is_safe_for_the_windows_installer_command_line(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main(["--new-password"]) == OK
+    password = capsys.readouterr().out.strip()
+    assert len(password) >= 20
+    assert password.isalnum()
