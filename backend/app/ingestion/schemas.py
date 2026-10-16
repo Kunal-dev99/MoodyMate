@@ -228,6 +228,11 @@ class ImportSummary(BaseModel):
     schema_version_id: uuid.UUID = Field(description="The ACTIVE schema version at upload.")
     schema_code: str | None
     schema_version: int | None
+    mapping_version_id: uuid.UUID | None = Field(
+        default=None,
+        description="The mapping version the import is validated with (D-18 §5); empty "
+        "until validation (Phase 11).",
+    )
     artifact: ArtifactOut
     retry_of_import_id: uuid.UUID | None
     correlation_id: str | None
@@ -329,6 +334,7 @@ class ImportProfile(BaseModel):
     source_contract_id: uuid.UUID
     contract_version: int
     schema_version_id: uuid.UUID = Field(description="The schema version the import pins.")
+    schema_id: uuid.UUID = Field(description="The target schema (the contract's).")
     schema_code: str
     schema_version: int
     summary: ProfileSummary

@@ -15,12 +15,13 @@ import { PageSection } from '@/components/common/PageSection'
 import { toastApiError } from '@/components/common/api-error-toast'
 import { ContractStatusPill } from '@/components/ingestion/ContractStatusPill'
 import { ImportsPlanned, ImportsTab } from '@/components/ingestion/ImportsTab'
+import { MappingsTab } from '@/components/ingestion/MappingsTab'
 import { SOURCE_KINDS } from '@/components/ingestion/sources'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { IMPORTS_UI_ENABLED } from '@/config/features'
+import { IMPORTS_UI_ENABLED, MAPPING_UI_ENABLED } from '@/config/features'
 
 const PAGE_SIZE = 50
 
@@ -143,7 +144,8 @@ function SourcesTab() {
   )
 }
 
-const TABS = ['sources', 'imports'] as const
+// 'mappings' (FE-10.1) only while MAPPING_UI_ENABLED; off, the tab and its route value are gone (D-02).
+const TABS = MAPPING_UI_ENABLED ? (['sources', 'imports', 'mappings'] as const) : (['sources', 'imports'] as const)
 type Tab = (typeof TABS)[number]
 
 /** The tabs, with the open one in `?tab=` so links (e.g. a breadcrumb) can open Imports. */
@@ -158,6 +160,11 @@ function WorkbenchTabs() {
       <TabsList>
         <TabsTrigger value="sources">Sources</TabsTrigger>
         <TabsTrigger value="imports">Imports</TabsTrigger>
+        {MAPPING_UI_ENABLED && (
+          <TabsTrigger value="mappings" data-testid="tab-mappings">
+            Mappings
+          </TabsTrigger>
+        )}
       </TabsList>
       <TabsContent value="sources" className="mt-4">
         <SourcesTab />
@@ -165,6 +172,11 @@ function WorkbenchTabs() {
       <TabsContent value="imports" className="mt-4">
         {IMPORTS_UI_ENABLED ? <ImportsTab /> : <ImportsPlanned />}
       </TabsContent>
+      {MAPPING_UI_ENABLED && (
+        <TabsContent value="mappings" className="mt-4">
+          <MappingsTab />
+        </TabsContent>
+      )}
     </Tabs>
   )
 }

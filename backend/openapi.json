@@ -1,6 +1,32 @@
 {
   "components": {
     "schemas": {
+      "ApprovalIn": {
+        "properties": {
+          "comment": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Required to REJECT.",
+            "title": "Comment"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/ProposalDecision"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "ApprovalIn",
+        "type": "object"
+      },
       "ArtifactOut": {
         "properties": {
           "classification": {
@@ -254,6 +280,15 @@
         "title": "BatchOut",
         "type": "object"
       },
+      "ColumnPolicy": {
+        "description": "D-23 `mapping_rule.column_policy`: a source column is mapped to a target field, or\npreserved as it is (never dropped).",
+        "enum": [
+          "MAP",
+          "PRESERVE"
+        ],
+        "title": "ColumnPolicy",
+        "type": "string"
+      },
       "ColumnProfile": {
         "description": "Observations of one source column. `min`, `max` and top values are data, masked by\n`classification`; everything else is metadata. `in_contract`, `suggested_target_field`\nand the candidate types are suggestions (`suggestion: true`): nothing is changed.",
         "properties": {
@@ -479,6 +514,24 @@
         "title": "Compatibility",
         "type": "string"
       },
+      "ConstantTransform": {
+        "properties": {
+          "code": {
+            "const": "CONSTANT",
+            "title": "Code",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/components/schemas/ValueParams"
+          }
+        },
+        "required": [
+          "code",
+          "params"
+        ],
+        "title": "ConstantTransform",
+        "type": "object"
+      },
       "ContractColumn": {
         "properties": {
           "name": {
@@ -674,6 +727,23 @@
         "title": "ContractStatus",
         "type": "string"
       },
+      "CopyTransform": {
+        "properties": {
+          "code": {
+            "const": "COPY",
+            "title": "Code",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/components/schemas/NoParams"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "title": "CopyTransform",
+        "type": "object"
+      },
       "CsvDelimiter": {
         "description": "D-16: the delimiters a CSV source profile may name.",
         "enum": [
@@ -693,6 +763,38 @@
         ],
         "title": "DataClass",
         "type": "string"
+      },
+      "DateFormat": {
+        "description": "PARSE_DATE formats: fixed layouts, parsed by position (no regex, no strptime).",
+        "enum": [
+          "YYYY-MM-DD",
+          "YYYY/MM/DD",
+          "DD/MM/YYYY",
+          "MM/DD/YYYY",
+          "DD.MM.YYYY",
+          "DD-MM-YYYY",
+          "YYYYMMDD"
+        ],
+        "title": "DateFormat",
+        "type": "string"
+      },
+      "DefaultTransform": {
+        "properties": {
+          "code": {
+            "const": "DEFAULT",
+            "title": "Code",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/components/schemas/ValueParams"
+          }
+        },
+        "required": [
+          "code",
+          "params"
+        ],
+        "title": "DefaultTransform",
+        "type": "object"
       },
       "DependentType": {
         "enum": [
@@ -1113,6 +1215,19 @@
             "title": "Id",
             "type": "string"
           },
+          "mapping_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The mapping version the import is validated with (D-18 \u00a75); empty until validation (Phase 11).",
+            "title": "Mapping Version Id"
+          },
           "retry_of_import_id": {
             "anyOf": [
               {
@@ -1297,6 +1412,12 @@
             "title": "Schema Code",
             "type": "string"
           },
+          "schema_id": {
+            "description": "The target schema (the contract's).",
+            "format": "uuid",
+            "title": "Schema Id",
+            "type": "string"
+          },
           "schema_version": {
             "title": "Schema Version",
             "type": "integer"
@@ -1333,6 +1454,7 @@
           "source_contract_id",
           "contract_version",
           "schema_version_id",
+          "schema_id",
           "schema_code",
           "schema_version",
           "summary",
@@ -1439,6 +1561,19 @@
             "title": "Id",
             "type": "string"
           },
+          "mapping_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The mapping version the import is validated with (D-18 \u00a75); empty until validation (Phase 11).",
+            "title": "Mapping Version Id"
+          },
           "retry_of_import_id": {
             "anyOf": [
               {
@@ -1543,6 +1678,724 @@
         "title": "ImportSummary",
         "type": "object"
       },
+      "IssueCode": {
+        "description": "Dry-run issue codes. An issue names rules, fields and columns, never a value.",
+        "enum": [
+          "required_field_unmapped",
+          "unknown_target_field",
+          "source_column_missing",
+          "transform_target_incompatible",
+          "profile_type_mismatch",
+          "transform_failed",
+          "column_without_policy",
+          "duplicate_business_key",
+          "missing_business_key"
+        ],
+        "title": "IssueCode",
+        "type": "string"
+      },
+      "IssueSeverity": {
+        "enum": [
+          "BLOCKER",
+          "ERROR",
+          "WARNING"
+        ],
+        "title": "IssueSeverity",
+        "type": "string"
+      },
+      "LowerTransform": {
+        "properties": {
+          "code": {
+            "const": "LOWER",
+            "title": "Code",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/components/schemas/NoParams"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "title": "LowerTransform",
+        "type": "object"
+      },
+      "MapValuesParams": {
+        "additionalProperties": false,
+        "properties": {
+          "on_missing": {
+            "$ref": "#/components/schemas/OnMissing",
+            "default": "ERROR"
+          },
+          "table": {
+            "additionalProperties": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            "description": "Exact source text -> target text (case- and space-sensitive).",
+            "maxProperties": 500,
+            "minProperties": 1,
+            "propertyNames": {
+              "maxLength": 200
+            },
+            "title": "Table",
+            "type": "object"
+          }
+        },
+        "required": [
+          "table"
+        ],
+        "title": "MapValuesParams",
+        "type": "object"
+      },
+      "MapValuesTransform": {
+        "properties": {
+          "code": {
+            "const": "MAP_VALUES",
+            "title": "Code",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/components/schemas/MapValuesParams"
+          }
+        },
+        "required": [
+          "code",
+          "params"
+        ],
+        "title": "MapValuesTransform",
+        "type": "object"
+      },
+      "MappingCreate": {
+        "description": "A mapping for one source contract, with DRAFT version 1.",
+        "properties": {
+          "change_summary": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Summary"
+          },
+          "code": {
+            "description": "Unique in your tenant; lower_snake_case.",
+            "pattern": "^[a-z][a-z0-9_]{0,99}$",
+            "title": "Code",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "rules": {
+            "items": {
+              "$ref": "#/components/schemas/RuleIn"
+            },
+            "maxItems": 500,
+            "title": "Rules",
+            "type": "array"
+          },
+          "schema_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Must be the contract's target schema; defaults to it.",
+            "title": "Schema Id"
+          },
+          "source_contract_id": {
+            "description": "The (current) contract it maps.",
+            "format": "uuid",
+            "title": "Source Contract Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "source_contract_id"
+        ],
+        "title": "MappingCreate",
+        "type": "object"
+      },
+      "MappingDetail": {
+        "properties": {
+          "active_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The ACTIVE version's number, if any.",
+            "title": "Active Version"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "contract_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contract Version"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "latest_version": {
+            "title": "Latest Version",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "schema_code": {
+            "title": "Schema Code",
+            "type": "string"
+          },
+          "schema_id": {
+            "format": "uuid",
+            "title": "Schema Id",
+            "type": "string"
+          },
+          "source_code": {
+            "title": "Source Code",
+            "type": "string"
+          },
+          "source_contract_id": {
+            "format": "uuid",
+            "title": "Source Contract Id",
+            "type": "string"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          },
+          "version_count": {
+            "title": "Version Count",
+            "type": "integer"
+          },
+          "versions": {
+            "description": "Oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/MappingVersionOut"
+            },
+            "title": "Versions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "name",
+          "description",
+          "source_id",
+          "source_code",
+          "source_contract_id",
+          "contract_version",
+          "schema_id",
+          "schema_code",
+          "active_version",
+          "latest_version",
+          "version_count",
+          "created_by",
+          "created_at",
+          "versions"
+        ],
+        "title": "MappingDetail",
+        "type": "object"
+      },
+      "MappingPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MappingSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "MappingPage",
+        "type": "object"
+      },
+      "MappingSummary": {
+        "properties": {
+          "active_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The ACTIVE version's number, if any.",
+            "title": "Active Version"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "contract_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contract Version"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "latest_version": {
+            "title": "Latest Version",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "schema_code": {
+            "title": "Schema Code",
+            "type": "string"
+          },
+          "schema_id": {
+            "format": "uuid",
+            "title": "Schema Id",
+            "type": "string"
+          },
+          "source_code": {
+            "title": "Source Code",
+            "type": "string"
+          },
+          "source_contract_id": {
+            "format": "uuid",
+            "title": "Source Contract Id",
+            "type": "string"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          },
+          "version_count": {
+            "title": "Version Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "name",
+          "description",
+          "source_id",
+          "source_code",
+          "source_contract_id",
+          "contract_version",
+          "schema_id",
+          "schema_code",
+          "active_version",
+          "latest_version",
+          "version_count",
+          "created_by",
+          "created_at"
+        ],
+        "title": "MappingSummary",
+        "type": "object"
+      },
+      "MappingValidationOut": {
+        "properties": {
+          "blocker_count": {
+            "title": "Blocker Count",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "error_count": {
+            "title": "Error Count",
+            "type": "integer"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "import_id": {
+            "format": "uuid",
+            "title": "Import Id",
+            "type": "string"
+          },
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationIssue"
+            },
+            "title": "Issues",
+            "type": "array"
+          },
+          "mapping_id": {
+            "format": "uuid",
+            "title": "Mapping Id",
+            "type": "string"
+          },
+          "mapping_sha256": {
+            "title": "Mapping Sha256",
+            "type": "string"
+          },
+          "mapping_version_id": {
+            "format": "uuid",
+            "title": "Mapping Version Id",
+            "type": "string"
+          },
+          "ok": {
+            "description": "OK or WARNINGS: the version may be submitted.",
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/ValidationOutcome"
+          },
+          "row_count": {
+            "title": "Row Count",
+            "type": "integer"
+          },
+          "rule_results": {
+            "items": {
+              "$ref": "#/components/schemas/RuleResult"
+            },
+            "title": "Rule Results",
+            "type": "array"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          },
+          "warning_count": {
+            "title": "Warning Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "mapping_id",
+          "mapping_version_id",
+          "version",
+          "import_id",
+          "mapping_sha256",
+          "outcome",
+          "ok",
+          "row_count",
+          "blocker_count",
+          "error_count",
+          "warning_count",
+          "issues",
+          "rule_results",
+          "created_by",
+          "created_at"
+        ],
+        "title": "MappingValidationOut",
+        "type": "object"
+      },
+      "MappingVersionIn": {
+        "description": "The next DRAFT version: its rules, pinned to the target's ACTIVE schema version.",
+        "properties": {
+          "change_summary": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Summary"
+          },
+          "rules": {
+            "items": {
+              "$ref": "#/components/schemas/RuleIn"
+            },
+            "maxItems": 500,
+            "title": "Rules",
+            "type": "array"
+          }
+        },
+        "title": "MappingVersionIn",
+        "type": "object"
+      },
+      "MappingVersionOut": {
+        "properties": {
+          "author": {
+            "title": "Author",
+            "type": "string"
+          },
+          "author_user_id": {
+            "format": "uuid",
+            "title": "Author User Id",
+            "type": "string"
+          },
+          "change_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Summary"
+          },
+          "content_sha256": {
+            "title": "Content Sha256",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "decided_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided By"
+          },
+          "decision_comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Comment"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_validation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ValidationRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "mapping_id": {
+            "format": "uuid",
+            "title": "Mapping Id",
+            "type": "string"
+          },
+          "rules": {
+            "items": {
+              "$ref": "#/components/schemas/RuleOut"
+            },
+            "title": "Rules",
+            "type": "array"
+          },
+          "schema_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The pinned schema version's number.",
+            "title": "Schema Version"
+          },
+          "schema_version_id": {
+            "format": "uuid",
+            "title": "Schema Version Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/MappingVersionStatus"
+          },
+          "submitted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Submitted At"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "mapping_id",
+          "version",
+          "status",
+          "schema_version_id",
+          "schema_version",
+          "content_sha256",
+          "author",
+          "author_user_id",
+          "change_summary",
+          "submitted_at",
+          "decided_by",
+          "decided_at",
+          "decision_comment",
+          "last_validation",
+          "rules",
+          "created_at"
+        ],
+        "title": "MappingVersionOut",
+        "type": "object"
+      },
+      "MappingVersionStatus": {
+        "description": "D-06/D-23: `mapping_version.status` is the `schema_version` set.",
+        "enum": [
+          "DRAFT",
+          "IN_REVIEW",
+          "APPROVED",
+          "ACTIVE",
+          "DEPRECATED",
+          "RETIRED",
+          "REJECTED"
+        ],
+        "title": "MappingVersionStatus",
+        "type": "string"
+      },
       "MaskedValue": {
         "description": "Stands in for a value the caller may not see (FE renders it as 'masked by policy').",
         "properties": {
@@ -1625,6 +2478,23 @@
         "title": "MyPermissions",
         "type": "object"
       },
+      "NoParams": {
+        "additionalProperties": false,
+        "description": "COPY, TRIM, UPPER and LOWER take no parameters.",
+        "properties": {},
+        "title": "NoParams",
+        "type": "object"
+      },
+      "NullPolicy": {
+        "description": "What a rule does with an empty source value (missing cell, JSON null, only spaces).",
+        "enum": [
+          "ALLOW_NULL",
+          "REJECT_NULL",
+          "USE_DEFAULT"
+        ],
+        "title": "NullPolicy",
+        "type": "string"
+      },
       "OidcClientConfig": {
         "properties": {
           "client_id": {
@@ -1646,6 +2516,144 @@
           "scopes"
         ],
         "title": "OidcClientConfig",
+        "type": "object"
+      },
+      "OnMissing": {
+        "enum": [
+          "ERROR",
+          "NULL",
+          "KEEP"
+        ],
+        "title": "OnMissing",
+        "type": "string"
+      },
+      "ParseBooleanParams": {
+        "additionalProperties": false,
+        "properties": {
+          "false_values": {
+            "items": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "False Values",
+            "type": "array"
+          },
+          "true_values": {
+            "items": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "True Values",
+            "type": "array"
+          }
+        },
+        "required": [
+          "true_values",
+          "false_values"
+        ],
+        "title": "ParseBooleanParams",
+        "type": "object"
+      },
+      "ParseBooleanTransform": {
+        "properties": {
+          "code": {
+            "const": "PARSE_BOOLEAN",
+            "title": "Code",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/components/schemas/ParseBooleanParams"
+          }
+        },
+        "required": [
+          "code",
+          "params"
+        ],
+        "title": "ParseBooleanTransform",
+        "type": "object"
+      },
+      "ParseDateParams": {
+        "additionalProperties": false,
+        "properties": {
+          "format": {
+            "$ref": "#/components/schemas/DateFormat"
+          }
+        },
+        "required": [
+          "format"
+        ],
+        "title": "ParseDateParams",
+        "type": "object"
+      },
+      "ParseDateTransform": {
+        "properties": {
+          "code": {
+            "const": "PARSE_DATE",
+            "title": "Code",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/components/schemas/ParseDateParams"
+          }
+        },
+        "required": [
+          "code",
+          "params"
+        ],
+        "title": "ParseDateTransform",
+        "type": "object"
+      },
+      "ParseDecimalParams": {
+        "additionalProperties": false,
+        "properties": {
+          "decimal_sep": {
+            "default": ".",
+            "description": "Decimal separator.",
+            "enum": [
+              ".",
+              ","
+            ],
+            "title": "Decimal Sep",
+            "type": "string"
+          },
+          "thousands_sep": {
+            "default": "",
+            "description": "Digit-group separator; groups of three digits only.",
+            "enum": [
+              "",
+              ",",
+              ".",
+              " ",
+              "'"
+            ],
+            "title": "Thousands Sep",
+            "type": "string"
+          }
+        },
+        "title": "ParseDecimalParams",
+        "type": "object"
+      },
+      "ParseDecimalTransform": {
+        "properties": {
+          "code": {
+            "const": "PARSE_DECIMAL",
+            "title": "Code",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/components/schemas/ParseDecimalParams"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "title": "ParseDecimalTransform",
         "type": "object"
       },
       "Permission": {
@@ -2169,6 +3177,301 @@
         ],
         "title": "Role",
         "type": "string"
+      },
+      "RuleIn": {
+        "description": "One rule. MAP: `source_column` (none for CONSTANT) \u2192 `target_field` through\n`transform`. PRESERVE: `source_column` is kept as it is, with no target and COPY.",
+        "properties": {
+          "column_policy": {
+            "$ref": "#/components/schemas/ColumnPolicy",
+            "default": "MAP"
+          },
+          "default_value": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Required with USE_DEFAULT (and only then).",
+            "title": "Default Value"
+          },
+          "null_policy": {
+            "$ref": "#/components/schemas/NullPolicy",
+            "default": "ALLOW_NULL"
+          },
+          "source_column": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Exactly as in the file header; absent only for CONSTANT.",
+            "title": "Source Column"
+          },
+          "target_field": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A field of the pinned schema version; absent for PRESERVE.",
+            "title": "Target Field"
+          },
+          "transform": {
+            "discriminator": {
+              "mapping": {
+                "CONSTANT": "#/components/schemas/ConstantTransform",
+                "COPY": "#/components/schemas/CopyTransform",
+                "DEFAULT": "#/components/schemas/DefaultTransform",
+                "LOWER": "#/components/schemas/LowerTransform",
+                "MAP_VALUES": "#/components/schemas/MapValuesTransform",
+                "PARSE_BOOLEAN": "#/components/schemas/ParseBooleanTransform",
+                "PARSE_DATE": "#/components/schemas/ParseDateTransform",
+                "PARSE_DECIMAL": "#/components/schemas/ParseDecimalTransform",
+                "SCALE": "#/components/schemas/ScaleTransform",
+                "TRIM": "#/components/schemas/TrimTransform",
+                "UPPER": "#/components/schemas/UpperTransform"
+              },
+              "propertyName": "code"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CopyTransform"
+              },
+              {
+                "$ref": "#/components/schemas/TrimTransform"
+              },
+              {
+                "$ref": "#/components/schemas/UpperTransform"
+              },
+              {
+                "$ref": "#/components/schemas/LowerTransform"
+              },
+              {
+                "$ref": "#/components/schemas/ParseDecimalTransform"
+              },
+              {
+                "$ref": "#/components/schemas/ScaleTransform"
+              },
+              {
+                "$ref": "#/components/schemas/ParseDateTransform"
+              },
+              {
+                "$ref": "#/components/schemas/ParseBooleanTransform"
+              },
+              {
+                "$ref": "#/components/schemas/MapValuesTransform"
+              },
+              {
+                "$ref": "#/components/schemas/DefaultTransform"
+              },
+              {
+                "$ref": "#/components/schemas/ConstantTransform"
+              }
+            ],
+            "title": "Transform"
+          }
+        },
+        "title": "RuleIn",
+        "type": "object"
+      },
+      "RuleOut": {
+        "properties": {
+          "column_policy": {
+            "$ref": "#/components/schemas/ColumnPolicy"
+          },
+          "default_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Value"
+          },
+          "null_policy": {
+            "$ref": "#/components/schemas/NullPolicy"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "source_column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Column"
+          },
+          "target_field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Field"
+          },
+          "transform": {
+            "$ref": "#/components/schemas/TransformOut"
+          }
+        },
+        "required": [
+          "position",
+          "source_column",
+          "target_field",
+          "column_policy",
+          "transform",
+          "null_policy",
+          "default_value"
+        ],
+        "title": "RuleOut",
+        "type": "object"
+      },
+      "RuleResult": {
+        "description": "One rule over every row: counts only.",
+        "properties": {
+          "column_policy": {
+            "$ref": "#/components/schemas/ColumnPolicy"
+          },
+          "empty": {
+            "description": "Rows left empty (allowed by the null policy).",
+            "title": "Empty",
+            "type": "integer"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "failures": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Failure reason code -> rows.",
+            "title": "Failures",
+            "type": "object"
+          },
+          "mapped": {
+            "description": "Rows with a value for the target.",
+            "title": "Mapped",
+            "type": "integer"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "rows": {
+            "title": "Rows",
+            "type": "integer"
+          },
+          "source_column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Column"
+          },
+          "target_field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Field"
+          },
+          "target_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FieldType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "transform": {
+            "$ref": "#/components/schemas/TransformCode"
+          }
+        },
+        "required": [
+          "position",
+          "source_column",
+          "target_field",
+          "target_type",
+          "column_policy",
+          "transform",
+          "rows",
+          "mapped",
+          "empty",
+          "failed",
+          "failures"
+        ],
+        "title": "RuleResult",
+        "type": "object"
+      },
+      "ScaleParams": {
+        "additionalProperties": false,
+        "properties": {
+          "power_of_ten": {
+            "description": "The plain decimal is multiplied by 10^power_of_ten, exactly.",
+            "maximum": 18.0,
+            "minimum": -18.0,
+            "title": "Power Of Ten",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "power_of_ten"
+        ],
+        "title": "ScaleParams",
+        "type": "object"
+      },
+      "ScaleTransform": {
+        "properties": {
+          "code": {
+            "const": "SCALE",
+            "title": "Code",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/components/schemas/ScaleParams"
+          }
+        },
+        "required": [
+          "code",
+          "params"
+        ],
+        "title": "ScaleTransform",
+        "type": "object"
       },
       "SchemaDependent": {
         "properties": {
@@ -3008,6 +4311,25 @@
         "title": "SourceSummary",
         "type": "object"
       },
+      "SubmitIn": {
+        "properties": {
+          "comment": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          }
+        },
+        "title": "SubmitIn",
+        "type": "object"
+      },
       "TopValue": {
         "properties": {
           "count": {
@@ -3039,6 +4361,76 @@
           "truncated"
         ],
         "title": "TopValue",
+        "type": "object"
+      },
+      "TransformCode": {
+        "description": "D-19: the closed allowlist. Adding one needs code, tests and an appended decision.",
+        "enum": [
+          "COPY",
+          "TRIM",
+          "UPPER",
+          "LOWER",
+          "PARSE_DECIMAL",
+          "SCALE",
+          "PARSE_DATE",
+          "PARSE_BOOLEAN",
+          "MAP_VALUES",
+          "DEFAULT",
+          "CONSTANT"
+        ],
+        "title": "TransformCode",
+        "type": "string"
+      },
+      "TransformOut": {
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/TransformCode"
+          },
+          "params": {
+            "additionalProperties": true,
+            "title": "Params",
+            "type": "object"
+          }
+        },
+        "required": [
+          "code",
+          "params"
+        ],
+        "title": "TransformOut",
+        "type": "object"
+      },
+      "TrimTransform": {
+        "properties": {
+          "code": {
+            "const": "TRIM",
+            "title": "Code",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/components/schemas/NoParams"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "title": "TrimTransform",
+        "type": "object"
+      },
+      "UpperTransform": {
+        "properties": {
+          "code": {
+            "const": "UPPER",
+            "title": "Code",
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/components/schemas/NoParams"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "title": "UpperTransform",
         "type": "object"
       },
       "UserPage": {
@@ -3123,6 +4515,169 @@
           "created_at"
         ],
         "title": "UserSummary",
+        "type": "object"
+      },
+      "ValidateIn": {
+        "properties": {
+          "mapping_version_id": {
+            "format": "uuid",
+            "title": "Mapping Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mapping_version_id"
+        ],
+        "title": "ValidateIn",
+        "type": "object"
+      },
+      "ValidationIssue": {
+        "description": "What is wrong, where (rule, field, column) and how often. Never a source value.",
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/IssueCode"
+          },
+          "count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Rows affected, for row-level issues.",
+            "title": "Count"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "reasons": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Failure reason code -> rows, for transform_failed.",
+            "title": "Reasons"
+          },
+          "rule_position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rule Position"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/IssueSeverity"
+          },
+          "source_column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Column"
+          },
+          "target_field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Field"
+          }
+        },
+        "required": [
+          "severity",
+          "code",
+          "message"
+        ],
+        "title": "ValidationIssue",
+        "type": "object"
+      },
+      "ValidationOutcome": {
+        "description": "A dry-run validation's result. OK and WARNINGS are `ok` (the version may be\nsubmitted); FAILED has at least one BLOCKER or ERROR.",
+        "enum": [
+          "OK",
+          "WARNINGS",
+          "FAILED"
+        ],
+        "title": "ValidationOutcome",
+        "type": "string"
+      },
+      "ValidationRef": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "import_id": {
+            "format": "uuid",
+            "title": "Import Id",
+            "type": "string"
+          },
+          "mapping_sha256": {
+            "title": "Mapping Sha256",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/ValidationOutcome"
+          }
+        },
+        "required": [
+          "id",
+          "import_id",
+          "outcome",
+          "ok",
+          "mapping_sha256",
+          "created_at"
+        ],
+        "title": "ValidationRef",
+        "type": "object"
+      },
+      "ValueParams": {
+        "additionalProperties": false,
+        "description": "DEFAULT(value) and CONSTANT(value).",
+        "properties": {
+          "value": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "title": "ValueParams",
         "type": "object"
       }
     },
@@ -3800,6 +5355,75 @@
         ]
       }
     },
+    "/api/v1/imports/{import_id}/mappings/validate": {
+      "post": {
+        "description": "Dry run: apply a mapping version to every row of this import and report counts per\nrule and issues (never values). Stores the result; writes no canonical rows.",
+        "operationId": "validateImportMapping",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "import_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Import Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MappingValidationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Validate Import Mapping",
+        "tags": [
+          "mapping"
+        ]
+      }
+    },
     "/api/v1/imports/{import_id}/profile": {
       "get": {
         "description": "The import's field profile (DI-06): per-column observations and read-only\nsuggestions. Values are masked by each column's classification; nothing is changed.",
@@ -3856,6 +5480,455 @@
         "summary": "Get Import Profile",
         "tags": [
           "ingestion"
+        ]
+      }
+    },
+    "/api/v1/mappings": {
+      "get": {
+        "description": "Mappings by code; filter by source and target schema.",
+        "operationId": "listMappings",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "schema_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Schema Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MappingPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Mappings",
+        "tags": [
+          "mapping"
+        ]
+      },
+      "post": {
+        "description": "A mapping for a source contract with DRAFT version 1, pinned to the target schema's\nACTIVE version (D-18).",
+        "operationId": "createMapping",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MappingCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MappingDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Mapping",
+        "tags": [
+          "mapping"
+        ]
+      }
+    },
+    "/api/v1/mappings/{mapping_id}": {
+      "get": {
+        "description": "The mapping with every version and its rules.",
+        "operationId": "getMapping",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "mapping_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Mapping Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MappingDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Mapping",
+        "tags": [
+          "mapping"
+        ]
+      }
+    },
+    "/api/v1/mappings/{mapping_id}/versions": {
+      "post": {
+        "description": "The next DRAFT version, pinned to the target schema's ACTIVE version now. Earlier\nversions are never edited.",
+        "operationId": "createMappingVersion",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "mapping_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Mapping Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MappingVersionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MappingVersionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Mapping Version",
+        "tags": [
+          "mapping"
+        ]
+      }
+    },
+    "/api/v1/mappings/{mapping_id}/versions/{version}/approval": {
+      "post": {
+        "description": "APPROVE activates the version and deprecates the previous ACTIVE one; REJECT ends\nit (a comment is required). The author cannot decide (403 self_approval).",
+        "operationId": "decideMappingVersion",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "mapping_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Mapping Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "maximum": 1000000,
+              "minimum": 1,
+              "title": "Version",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MappingVersionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Decide Mapping Version",
+        "tags": [
+          "mapping"
+        ]
+      }
+    },
+    "/api/v1/mappings/{mapping_id}/versions/{version}/submit": {
+      "post": {
+        "description": "DRAFT -> IN_REVIEW. The author only; needs an ok dry run of this version (409\nmapping_validation_required otherwise).",
+        "operationId": "submitMappingVersion",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "mapping_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Mapping Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "maximum": 1000000,
+              "minimum": 1,
+              "title": "Version",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MappingVersionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Submit Mapping Version",
+        "tags": [
+          "mapping"
         ]
       }
     },

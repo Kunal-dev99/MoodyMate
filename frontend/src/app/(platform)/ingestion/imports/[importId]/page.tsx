@@ -18,11 +18,12 @@ import { startLoad, type LoadFailure } from '@/components/common/load'
 import { ImportProfileTab } from '@/components/ingestion/ImportProfileTab'
 import { ImportStatusPill } from '@/components/ingestion/ImportStatusPill'
 import { ImportsPlanned } from '@/components/ingestion/ImportsTab'
+import { MapImportLink } from '@/components/ingestion/MapImportLink'
 import { formatBytes, type ImportDetail } from '@/components/ingestion/imports'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { IMPORT_PROFILE_UI_ENABLED, IMPORTS_UI_ENABLED } from '@/config/features'
+import { IMPORT_PROFILE_UI_ENABLED, IMPORTS_UI_ENABLED, MAPPING_UI_ENABLED } from '@/config/features'
 
 type State = { kind: 'loading' } | { kind: 'ready'; job: ImportDetail } | LoadFailure
 
@@ -204,6 +205,11 @@ function ImportView({ importId }: { importId: string }) {
             <span className="font-mono">{job.schema_code ? `${job.schema_code} v${job.schema_version}` : '—'}</span>{' '}
             <span className="font-mono text-xs text-muted-foreground">{job.schema_version_id}</span>
           </Field>
+          {MAPPING_UI_ENABLED && (
+            <Field label="Mapping version" testId="import-mapping-version">
+              <span className="font-mono text-xs">{job.mapping_version_id ?? 'none yet (set when the import is validated)'}</span>
+            </Field>
+          )}
         </dl>
       </PageSection>
 
@@ -265,6 +271,9 @@ function ImportView({ importId }: { importId: string }) {
         breadcrumbs={[...CRUMBS, { label: job.id.slice(0, 8) }]}
         actions={
           <div className="flex items-center gap-2">
+            {MAPPING_UI_ENABLED && job.status === 'MAPPING_REQUIRED' && (
+              <MapImportLink importId={job.id} sourceId={job.source_id} contractId={job.source_contract_id} />
+            )}
             {job.data_class === 'synthetic' && <Badge variant="warning">Synthetic data</Badge>}
             <ImportStatusPill status={job.status} />
           </div>
