@@ -500,7 +500,7 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
      stay as history.
 - **Consequences:** a full backend run takes about 50 s instead of about 9.5 min. Detailed
   edge cases are no longer guarded by tests. The removed areas are listed in the commit
-  `Cut the backend suite to 33 essential tests`, and can be re-added one at a time if a
+  `Trim the backend test suite to 33 essential tests` (3cc448c), and can be re-added one at a time if a
   regression shows up.
 - **Reversal:** a new decision.
 
