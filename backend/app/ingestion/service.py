@@ -568,10 +568,16 @@ class ImportService:
         fingerprint = request_sha256(spec, file_sha)
         replay = await self._replay(spec.idempotency_key, fingerprint)
         if replay is not None:
-            if policy.profiling and replay.status == ImportStatus.RECEIVED:
+            replay_id = replay.id  # profile() may roll back, which expires `replay`
+            if (
+                policy.profiling
+                and replay.status == ImportStatus.RECEIVED
+                and await self.repo.snapshot(replay_id) is None
+            ):
                 # A profiling run that failed earlier is retried by replaying the upload.
-                await self.profile(replay.id)
-                return await self.get(replay.id), False
+                # (A profiled import is also RECEIVED once a usable mapping exists.)
+                await self.profile(replay_id)
+                return await self.get(replay_id), False
             return replay, False
 
         try:

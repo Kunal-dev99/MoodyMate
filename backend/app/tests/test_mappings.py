@@ -26,7 +26,7 @@ from httpx import Response
 
 from app.core.config import Settings
 from app.core.tokens import DevTokens
-from app.governance.constants import DEFAULT_TENANT_ID, DEV_ISSUER
+from app.governance.constants import DEFAULT_TENANT_ID, DEV_ISSUER, FieldType
 from app.main import create_app
 from app.mapping import transforms as transforms_package
 from app.mapping.constants import MAPPING_VERSION_TRANSITIONS, TransformCode
@@ -375,7 +375,7 @@ def test_transform_allowlist(mapi: TestClient, mdb: str) -> None:
             compile_transform(code, params)(value)
         assert caught.value.reason == reason and value not in str(caught.value)
     # Fitting to a NUMERIC(20,2) field: never rounded, never a float.
-    notional = engine.TargetField("notional", engine.FieldType.DECIMAL, True, 20, 2)
+    notional = engine.TargetField("notional", FieldType.DECIMAL, True, 20, 2)
     parse = compile_transform("PARSE_DECIMAL", {})
     assert engine.apply(parse, "1.50", "ALLOW_NULL", None, notional).text == "1.50"
     assert engine.apply(parse, "1.505", "ALLOW_NULL", None, notional).reason == "scale_exceeded"
@@ -531,14 +531,17 @@ def test_create_list_get_and_versions(mapi: TestClient, mdb: str) -> None:
     foreign = mapi.get(f"{MAPPINGS}/{created['id']}", headers=outsider)
     random = mapi.get(f"{MAPPINGS}/{uuid.uuid4()}", headers=outsider)
     assert foreign.status_code == random.status_code == 404
-    strip = lambda b: {k: v for k, v in b.items() if k != "correlation_id"}  # noqa: E731
-    assert strip(foreign.json()) == strip(random.json())
+    foreign_body, random_body = foreign.json(), random.json()
+    foreign_body.pop("correlation_id")
+    random_body.pop("correlation_id")
+    assert foreign_body == random_body
     assert mapi.get(MAPPINGS, headers=outsider).json()["total"] == 0
-    for path, body in (
+    writes: list[tuple[str, dict[str, Any]]] = [
         (f"{MAPPINGS}/{created['id']}/versions", {"rules": FULL_RULES[:1]}),
         (f"{MAPPINGS}/{created['id']}/versions/1/submit", {}),
         (f"{MAPPINGS}/{created['id']}/versions/1/approval", {"decision": "APPROVE"}),
-    ):
+    ]
+    for path, body in writes:
         assert mapi.post(path, json=body, headers=outsider).status_code == 404, path
     r = mapi.post(
         MAPPINGS,
