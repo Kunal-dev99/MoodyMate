@@ -478,7 +478,12 @@ async def create_import(
             expected_row_count=form.expected_row_count,
             control_totals=form.control_totals,
         ),
-        ImportPolicy(settings.data_class, limits, request.app.state.artifact_store),
+        ImportPolicy(
+            settings.data_class,
+            limits,
+            request.app.state.artifact_store,
+            settings.IMPORT_PROFILING_ENABLED,
+        ),
     )
     if not created:
         response.status_code = 200

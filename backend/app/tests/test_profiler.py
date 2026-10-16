@@ -452,3 +452,49 @@ def test_a_failed_profile_leaves_the_import_received_without_a_profile(
         assert sql(db, "SELECT count(*) AS n FROM data_profile_snapshot")[0]["n"] == 0
         got = api.get(f"/api/v1/imports/{job['id']}/profile", headers=steward)
         assert (got.status_code, got.json()["code"]) == (404, "profile_not_found")
+
+
+def test_profiling_can_be_switched_off(db: str, tmp_path: Path) -> None:
+    """D-02 (review P9-1): IMPORT_PROFILING_ENABLED=false gives the Phase 8 behaviour back:
+    the upload ends RECEIVED, with no profile and no import.profile audit event."""
+    settings = Settings(
+        ENV="test",
+        DATABASE_URL=db,
+        ARTIFACT_STORE_DIR=tmp_path / "a",
+        IMPORT_PROFILING_ENABLED=False,
+    )
+    with TestClient(create_app(settings)) as api:
+        steward = dev_token(api, "data_steward")
+        r = upload(api, steward, seeded_source_id(db), b"instrument_id\nA\n")
+        assert r.status_code == 201 and r.json()["status"] == "RECEIVED"
+        assert sql(db, "SELECT count(*) AS n FROM data_profile_snapshot")[0]["n"] == 0
+        profiled = sql(
+            db,
+            "SELECT count(*) AS n FROM audit_event"
+            f" WHERE action = 'import.profile' AND resource_id = '{r.json()['id']}'",
+        )
+        assert profiled[0]["n"] == 0
+        got = api.get(f"/api/v1/imports/{r.json()['id']}/profile", headers=steward)
+        assert (got.status_code, got.json()["code"]) == (404, "profile_not_found")
+
+
+def test_a_replay_profiles_an_import_whose_profiling_failed(
+    db: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review P9-2: a failed profiling run is retried by replaying the same upload."""
+    original = Profiler.add
+
+    def boom(self: Any, values: Any, extras: Any, flags: Any) -> None:
+        raise RuntimeError("profiler failure")
+
+    settings = Settings(ENV="test", DATABASE_URL=db, ARTIFACT_STORE_DIR=tmp_path / "a")
+    with TestClient(create_app(settings), raise_server_exceptions=False) as api:
+        steward = dev_token(api, "data_steward")
+        monkeypatch.setattr(Profiler, "add", boom)
+        first = upload(api, steward, seeded_source_id(db), b"instrument_id\nA\n", key="retry-1")
+        assert first.status_code == 500
+        monkeypatch.setattr(Profiler, "add", original)
+        again = upload(api, steward, seeded_source_id(db), b"instrument_id\nA\n", key="retry-1")
+        assert again.status_code == 200 and again.json()["status"] == "MAPPING_REQUIRED"
+        assert sql(db, "SELECT count(*) AS n FROM data_profile_snapshot")[0]["n"] == 1
+        assert sql(db, "SELECT count(*) AS n FROM import_job")[0]["n"] == 1

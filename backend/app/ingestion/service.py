@@ -440,6 +440,7 @@ class ImportPolicy:
     data_class: str
     limits: Limits
     store: ArtifactStore
+    profiling: bool = True  # IMPORT_PROFILING_ENABLED (D-02)
 
 
 def request_sha256(spec: UploadSpec, file_sha256: str) -> str:
@@ -553,6 +554,10 @@ class ImportService:
         fingerprint = request_sha256(spec, file_sha)
         replay = await self._replay(spec.idempotency_key, fingerprint)
         if replay is not None:
+            if policy.profiling and replay.status == ImportStatus.RECEIVED:
+                # A profiling run that failed earlier is retried by replaying the upload.
+                await self.profile(replay.id)
+                return await self.get(replay.id), False
             return replay, False
 
         try:
@@ -697,8 +702,10 @@ class ImportService:
         )
         await self.session.commit()
         # D-21: profiling runs synchronously after receipt, as its own step (and its own
-        # transaction): if it fails, the upload stands as RECEIVED without a profile.
-        await self.profile(job.id)
+        # transaction): if it fails, the upload stands as RECEIVED without a profile, and a
+        # replay of the same upload retries it.
+        if policy.profiling:
+            await self.profile(job.id)
         return await self.get(job.id), True
 
     # --- profiling (BE-9.2, D-21) ------------------------------------------------------------
