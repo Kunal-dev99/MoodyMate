@@ -182,6 +182,212 @@
         "title": "Compatibility",
         "type": "string"
       },
+      "ContractColumn": {
+        "properties": {
+          "name": {
+            "description": "Column name exactly as in the file header.",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "required": {
+            "description": "Explicit: an omitted value is never assumed.",
+            "title": "Required",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "required"
+        ],
+        "title": "ContractColumn",
+        "type": "object"
+      },
+      "ContractIn": {
+        "description": "A source contract version: the expected shape of the files, and the canonical\nschema they feed. Becomes PROVISIONAL until the client confirms it.",
+        "properties": {
+          "business_key_columns": {
+            "description": "Columns that identify a row; all expected.",
+            "items": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Business Key Columns",
+            "type": "array"
+          },
+          "change_summary": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Summary"
+          },
+          "control_total_columns": {
+            "description": "Columns summed for reconciliation.",
+            "items": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Control Total Columns",
+            "type": "array"
+          },
+          "expected_columns": {
+            "items": {
+              "$ref": "#/components/schemas/ContractColumn"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Expected Columns",
+            "type": "array"
+          },
+          "schema_id": {
+            "description": "Target canonical schema; must exist in your tenant with an ACTIVE version.",
+            "format": "uuid",
+            "title": "Schema Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_id",
+          "expected_columns",
+          "business_key_columns"
+        ],
+        "title": "ContractIn",
+        "type": "object"
+      },
+      "ContractOut": {
+        "properties": {
+          "business_key_columns": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Business Key Columns",
+            "type": "array"
+          },
+          "change_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Summary"
+          },
+          "content_sha256": {
+            "title": "Content Sha256",
+            "type": "string"
+          },
+          "control_total_columns": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Control Total Columns",
+            "type": "array"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "expected_columns": {
+            "items": {
+              "$ref": "#/components/schemas/ContractColumn"
+            },
+            "title": "Expected Columns",
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "schema_code": {
+            "title": "Schema Code",
+            "type": "string"
+          },
+          "schema_id": {
+            "format": "uuid",
+            "title": "Schema Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ContractStatus"
+          },
+          "supersedes_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supersedes Id"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "status",
+          "schema_id",
+          "schema_code",
+          "expected_columns",
+          "business_key_columns",
+          "control_total_columns",
+          "content_sha256",
+          "supersedes_id",
+          "change_summary",
+          "created_by",
+          "created_at"
+        ],
+        "title": "ContractOut",
+        "type": "object"
+      },
+      "ContractStatus": {
+        "description": "Data Model \u00a79 `source_contract.status`.",
+        "enum": [
+          "PROVISIONAL",
+          "IN_REVIEW",
+          "APPROVED",
+          "SUPERSEDED"
+        ],
+        "title": "ContractStatus",
+        "type": "string"
+      },
+      "CsvDelimiter": {
+        "description": "D-16: the delimiters a CSV source profile may name.",
+        "enum": [
+          ",",
+          ";",
+          "\t",
+          "|"
+        ],
+        "title": "CsvDelimiter",
+        "type": "string"
+      },
       "DependentType": {
         "enum": [
           "SCHEMA",
@@ -624,10 +830,163 @@
           "schema:propose",
           "schema:approve",
           "audit:read",
-          "admin:read"
+          "admin:read",
+          "source:read",
+          "source:manage",
+          "import:read",
+          "import:write",
+          "mapping:read",
+          "mapping:propose",
+          "mapping:approve",
+          "quarantine:read",
+          "quality:review"
         ],
         "title": "Permission",
         "type": "string"
+      },
+      "ProfileIn": {
+        "description": "A new source's profile. Always provisional on create (D2): only the client's approval,\na later action, clears it. The API ignores unknown body fields, so a `provisional` sent\nhere has no effect.",
+        "properties": {
+          "cadence": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "e.g. 'daily'.",
+            "title": "Cadence"
+          },
+          "default_classification": {
+            "description": "Classification of values in columns no mapping has classified (D-20).",
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Default Classification",
+            "type": "string"
+          },
+          "delimiter": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CsvDelimiter"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "CSV only; defaults to ',' for CSV."
+          },
+          "encoding": {
+            "$ref": "#/components/schemas/SourceEncoding",
+            "default": "UTF-8"
+          },
+          "format": {
+            "$ref": "#/components/schemas/SourceFormat"
+          },
+          "owner": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Owner",
+            "type": "string"
+          },
+          "sheet_name": {
+            "anyOf": [
+              {
+                "maxLength": 31,
+                "minLength": 1,
+                "pattern": "^[^\\[\\]:*?/\\\\]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "XLSX only; else the first sheet. Excel forbids [ ] : * ? / \\.",
+            "title": "Sheet Name"
+          }
+        },
+        "required": [
+          "format",
+          "owner",
+          "default_classification"
+        ],
+        "title": "ProfileIn",
+        "type": "object"
+      },
+      "ProfileOut": {
+        "properties": {
+          "cadence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cadence"
+          },
+          "default_classification": {
+            "title": "Default Classification",
+            "type": "string"
+          },
+          "delimiter": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CsvDelimiter"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "encoding": {
+            "$ref": "#/components/schemas/SourceEncoding"
+          },
+          "format": {
+            "$ref": "#/components/schemas/SourceFormat"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "provisional": {
+            "title": "Provisional",
+            "type": "boolean"
+          },
+          "sheet_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sheet Name"
+          }
+        },
+        "required": [
+          "id",
+          "format",
+          "encoding",
+          "delimiter",
+          "sheet_name",
+          "cadence",
+          "owner",
+          "default_classification",
+          "provisional"
+        ],
+        "title": "ProfileOut",
+        "type": "object"
       },
       "ProposalApproval": {
         "properties": {
@@ -1504,6 +1863,279 @@
         ],
         "title": "SchemaVersionStatus",
         "type": "string"
+      },
+      "SourceCreate": {
+        "properties": {
+          "code": {
+            "description": "snake_case, unique in your tenant.",
+            "pattern": "^[a-z][a-z0-9_]{0,99}$",
+            "title": "Code",
+            "type": "string"
+          },
+          "contract": {
+            "$ref": "#/components/schemas/ContractIn"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/SourceKind",
+            "default": "FILE_DROP",
+            "description": "Only FILE_DROP is usable in the MVP (D-23)."
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/ProfileIn"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "profile",
+          "contract"
+        ],
+        "title": "SourceCreate",
+        "type": "object"
+      },
+      "SourceDetail": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "contract_count": {
+            "title": "Contract Count",
+            "type": "integer"
+          },
+          "contracts": {
+            "description": "Every contract version, oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/ContractOut"
+            },
+            "title": "Contracts",
+            "type": "array"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "current_contract": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContractOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The one contract version that is not SUPERSEDED."
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/SourceKind"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/ProfileOut"
+          },
+          "provisional": {
+            "description": "True until the client approves the source profile.",
+            "title": "Provisional",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "name",
+          "description",
+          "kind",
+          "provisional",
+          "profile",
+          "current_contract",
+          "contract_count",
+          "created_by",
+          "created_at",
+          "contracts"
+        ],
+        "title": "SourceDetail",
+        "type": "object"
+      },
+      "SourceEncoding": {
+        "description": "D-16: UTF-8 only (a BOM is allowed). Other encodings are deferred.",
+        "enum": [
+          "UTF-8"
+        ],
+        "title": "SourceEncoding",
+        "type": "string"
+      },
+      "SourceFormat": {
+        "description": "D-23: `source_profile.format`.",
+        "enum": [
+          "CSV",
+          "XLSX",
+          "JSON"
+        ],
+        "title": "SourceFormat",
+        "type": "string"
+      },
+      "SourceKind": {
+        "description": "D-23. Only FILE_DROP is usable in the MVP; the others are reserved.",
+        "enum": [
+          "FILE_DROP",
+          "WAREHOUSE",
+          "APPLICATION",
+          "FEED"
+        ],
+        "title": "SourceKind",
+        "type": "string"
+      },
+      "SourcePage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SourceSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "SourcePage",
+        "type": "object"
+      },
+      "SourceSummary": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "contract_count": {
+            "title": "Contract Count",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "current_contract": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContractOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The one contract version that is not SUPERSEDED."
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/SourceKind"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/ProfileOut"
+          },
+          "provisional": {
+            "description": "True until the client approves the source profile.",
+            "title": "Provisional",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "name",
+          "description",
+          "kind",
+          "provisional",
+          "profile",
+          "current_contract",
+          "contract_count",
+          "created_by",
+          "created_at"
+        ],
+        "title": "SourceSummary",
+        "type": "object"
       },
       "UserPage": {
         "properties": {
@@ -2734,6 +3366,257 @@
         "summary": "List Schema Versions",
         "tags": [
           "identity"
+        ]
+      }
+    },
+    "/api/v1/sources": {
+      "get": {
+        "operationId": "listSources",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourcePage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Sources",
+        "tags": [
+          "ingestion"
+        ]
+      },
+      "post": {
+        "operationId": "createSource",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Source",
+        "tags": [
+          "ingestion"
+        ]
+      }
+    },
+    "/api/v1/sources/{source_id}": {
+      "get": {
+        "operationId": "getSource",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Source",
+        "tags": [
+          "ingestion"
+        ]
+      }
+    },
+    "/api/v1/sources/{source_id}/contracts": {
+      "post": {
+        "operationId": "createSourceContract",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContractIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContractOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Source Contract",
+        "tags": [
+          "ingestion"
         ]
       }
     },

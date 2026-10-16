@@ -344,3 +344,715 @@ The final role model needs client approval (Arch §10).
   analysis uses seeded `schema_dependency` rows until those modules exist.
 - **Retention deletion jobs:** the policy is documented only.
 - **Penetration testing and production hardening:** pre-production gate (Arch §17).
+
+---
+
+## Feature 02 — WS2 Data Ingestion, Mapping & Data Quality
+
+Kickoff: `docs/prompts/kickoffs/02-ws2-ingestion.md` · Status: **PROPOSED 2026-10-16. Awaiting user approval of the plan and of D-15…D-23. No code before approval.**
+
+Covers WS2 DI-01…DI-06 and the paired contracts FE-DI-01…05 / BE-DI-01…05. Numbering
+(D-08): Feature 02 uses global **Phases 7–13**, so its task IDs run from `BE-7.1`/`FE-7.1`
+to `BE-13.n`/`FE-13.n` and cannot collide with Feature 01 (Phases 1–6). WS2-internal
+phases are cited as `WS2-P0…P5`.
+
+Constraining decisions:
+- **D-01** Every WS2 migration is additive. `import_job.mapping_version_id` arrives as a
+  new nullable column in Phase 10, not by altering Phase 8 tables.
+- **D-02** Tested downgrades. Rows hide by status and are never deleted. Every phase sits
+  behind a setting (`INGESTION_ENABLED`, `MAPPING_CHANGE_ENABLED`,
+  `DRIFT_DETECTION_ENABLED`).
+- **D-03** Isolated worktree plus a DB copy plus a paired artifact directory (D-15).
+- **D-04** Fail closed. Each endpoint names its permission (table below). Tenant row scope
+  comes from `ScopedRepository`.
+- **D-05** The WS plans' endpoint names are canonical (`POST /imports`, not Arch §9's
+  `datasets/imports`). Endpoints these plans need beyond those are added alongside them.
+- **D-06** UPPERCASE Data Model §9 enums with one transition table per object:
+  - `import_job` gains `QUARANTINED` from Appendix B.
+  - `mapping_version` uses the `schema_version` set.
+  - Enums that are in neither source are proposed in D-23.
+- **D-07** Error envelope.
+- **D-10** Audit trail. Every WS2 mutation and every refusal is audited, and quarantine
+  history lives in `audit_event`.
+- **D-11** WS2 seeds (permissions, illustrative source, default validation profile) are
+  tagged and PROVISIONAL.
+- **D-12** No object storage yet (see D-15).
+- **D-13** New settings that matter in deployments are required outside local/test.
+- **D-14** Synthetic data only outside production (see D-16 §5).
+
+Pre-plan findings (codebase at the Phase 6 merge):
+- **Modules.** `backend/app/ingestion`, `backend/app/mapping` and `backend/app/reconciliation`
+  are empty 7-file stubs, and none of them is mounted in `backend/app/api/v1/router.py`.
+  The migration head is `0008_schema_change_proposals`.
+- **Reuse rather than rebuild:**
+  - registry: `schema_definition`/`schema_version`/`schema_field` (`classification`,
+    `unit`, `scale`, `extension_eligible`) and `schema_dependency`. The seed already has an
+    illustrative `MAPPING core_banking_instrument` dependent (0007:138).
+  - Phase 5 impact analysis, which walks `schema_dependency`, so real mapping rows show up
+    there once they exist.
+  - `ScopedRepository`, `require_permission`, `governance.service.audit(...)`,
+    `mask_model`/`mask_mapping` (core/classification.py; unknown keys fail closed), the
+    log redaction filter, `ERROR_RESPONSES`, `test_route_registry`, the WS1 verification
+    `AUDITED` set (which every new mutating route must join), and the OpenAPI export with
+    FE `gen:api`.
+  - frontend: `StatusPill`, `MaskedValue`, `AuditTimeline`, `RequirePermission` and
+    `Forbidden`.
+- **Missing:**
+  - no multipart dependency (`python-multipart`), no XLSX library and no request-size
+    limit anywhere in the app.
+  - no `ARTIFACT_STORE_DIR` or other storage setting. ARCHITECTURE.md names a "local:
+    filesystem adapter".
+- **Frontend.** `/ingestion` is a `planned` entry in `frontend/src/config/navigation.ts:47-54`
+  and is rendered by the `[workspace]` placeholder route.
+- **Lessons from Feature 01 that become Done-when criteria here:**
+  - every protective trigger also blocks `TRUNCATE`, and no session-settable bypass setting
+    is used (BE-4.1 follow-ups a, b).
+  - status/enum columns get CHECK constraints (BE-4.1 e).
+  - downgrade refusals are tested (BE-4.1, BE-5.1).
+  - maker-checker refusals are audited (BE-5.3 a).
+  - the verification matrix asserts the 2xx side and that every `AUDITED` key is called
+    (BE-6.3 a, b).
+  - FE fetches that depend on changing inputs are cancelled (FE-4.2, FE-5.1 a).
+- **Carry-over (not prerequisites):** FE-2.2, BE-2.15, BE-2.16 and FE-2.5 are still open
+  under Feature 01.
+
+### WS2 endpoints and permissions (all under `/api/v1`)
+
+| Endpoint | Permission | Phase | Source |
+|---|---|---|---|
+| `POST sources` | `source:manage` | 7 | WS plan |
+| `GET sources`, `GET sources/{source_id}` | `source:read` | 7 | added (D-05) |
+| `POST sources/{source_id}/contracts` | `source:manage` | 7 | added |
+| `POST imports` (multipart) | `import:write` | 8 | WS plan |
+| `GET imports`, `GET imports/{import_id}` | `import:read` | 8 | WS plan (+ list added) |
+| `GET imports/{import_id}/profile` | `import:read` | 9 | WS plan |
+| `GET mappings`, `GET mappings/{mapping_id}` | `mapping:read` | 10 | WS plan (+ detail added) |
+| `POST mappings`, `POST mappings/{mapping_id}/versions` | `mapping:propose` | 10 | WS plan / Arch §9 |
+| `POST imports/{import_id}/mappings/validate` | `mapping:propose` | 10 | WS plan |
+| `POST mappings/{mapping_id}/versions/{version}/submit` | `mapping:propose` | 10 | added |
+| `POST mappings/{mapping_id}/versions/{version}/approval` | `mapping:approve` | 10 | added |
+| `POST imports/{import_id}/validate` | `import:write` | 11 | WS plan |
+| `GET imports/{import_id}/issues` | `import:read` | 11 | WS plan |
+| `GET quarantine/{batch_id}` | `quarantine:read` | 11 | WS plan |
+| `POST quarantine/{batch_id}/items/{quarantine_id}/disposition` | `quality:review` | 11 | added |
+| `GET imports/{import_id}/reconciliation` | `import:read` | 12 | WS plan |
+| `GET imports/{import_id}/drift` | `import:read` | 12 | WS plan |
+| `POST drift-events/{drift_event_id}/review` | `quality:review` | 12 | added |
+
+Raw artifacts have no download endpoint in this feature (Arch §10: "restrict raw
+artifacts"). That is deferred.
+
+### Role → permission matrix additions (seed, BE-7.2; PROVISIONAL, D-11)
+
+| Role | source:read | source:manage | import:read | import:write | mapping:read | mapping:propose | mapping:approve | quarantine:read | quality:review |
+|---|---|---|---|---|---|---|---|---|---|
+| platform_admin | ✓ | | ✓ | | ✓ | | | | |
+| data_steward | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | | ✓ | ✓ |
+| risk_analyst | ✓ | | ✓ | | ✓ | | | | |
+| approver | ✓ | | ✓ | | ✓ | | ✓ | ✓ | |
+| auditor | ✓ | | ✓ | | ✓ | | | ✓ | |
+
+How the roles split the new permissions:
+- `platform_admin` gets read-only access to WS2 and no quarantined values. This matches the
+  WS1 segregation of duties and Arch §10 data minimisation.
+- Only `data_steward` writes, and only `approver` activates mappings (maker-checker).
+- Values shown anywhere are still masked by each role's clearance (BE-3.5). Columns that are
+  not mapped use the source profile's default classification.
+- The final role model needs client approval (Arch §10).
+
+### Phase 7 — Source registration and synthetic sample contracts (DI-01; WS2-P0, WS2-P1)
+
+Goal: a data steward can register a source system, its profile and a PROVISIONAL source
+contract that names the target canonical schema. Synthetic samples exist for every later
+phase, and the Ingestion Workbench goes live, read-only for everyone else.
+
+- [x] **BE-7.1** Migration plus models in `ingestion`:
+  - `source_system`, with `kind` per D-23.
+  - `source_profile`, with format, encoding, delimiter, sheet name, cadence, owner,
+    `default_classification` (FK to `data_classification`) and `provisional`.
+  - `source_contract`, with `version`, `status` per Data Model §9, target `schema_id`,
+    expected columns, business-key columns, control-total columns, `content_sha256` and
+    `supersedes_id`.
+
+  Contract content is frozen from creation, in every status (D-24 §3, amended at the Phase 7
+  review). Only `status` and `updated_at` change, along `CONTRACT_TRANSITIONS`. A new
+  contract version supersedes the old one, which is not edited. CHECK constraints cover every enum column. A trigger
+  blocks UPDATE of contract content and DELETE/TRUNCATE. The downgrade refuses while user
+  rows exist.
+  - *Done-when:* the round trip passes, and tests prove the trigger rejects an
+    UPDATE/DELETE/TRUNCATE on an APPROVED contract, that a bad enum value is refused by the
+    CHECK, and that the downgrade refuses while a user-created source exists. — ✔ verified
+    (checks at 8bdb0cd; 2026-10-16 Phase 7 verification, docs/evidence/phase-7/REPORT.md).
+    Migration 0009 has CHECKs on kind, format, encoding, delimiter and status, and a
+    `source_contract_guard` trigger for UPDATE/DELETE plus a statement-level TRUNCATE trigger.
+    No session-settable bypass exists. `test_sources.py::test_approved_contract_rejects_update_and_delete`
+    covers 9 statements, plus `::test_approved_contract_rejects_truncate`,
+    `::test_enum_columns_are_checked` (9 cases), `::test_downgrade_refuses_while_a_user_source_exists`
+    and `::test_source_migrations_round_trip_without_user_sources`. The round trip
+    0011→0008→0011 is in checks.txt:28-33, and 352 passed (checks.txt:8). ⚠ follow-ups (REPORT
+    D1, D5, D6, D11): a PROVISIONAL contract's content is still editable in the DB, and Phase 8
+    pins `source_contract_id` (needs a user decision). `source_system.tenant_id` and
+    `source_profile.source_system_id` are updatable. The guard does not freeze
+    `created_by`/`created_at` or enforce the transition table. The downgrade-refusal test cannot
+    tell a re-seed from "nothing removed".
+- [x] **BE-7.2** Seed migration adding the nine WS2 permissions and the matrix above
+  (tagged, D-11). `governance/constants.py` `Permission` and `ROLE_PERMISSIONS` are
+  extended to match.
+  - *Done-when:* `test_identity_seed.py::test_seeded_matrix_matches_plan` passes against the
+    extended matrix, `test_me.py` per-role permission tests pass with the new sets, and a
+    test proves the downgrade removes only rows tagged by this migration. — ✔ verified
+    (checks at 8bdb0cd). Migration 0010's MATRIX, `governance/constants.py`
+    `WS2_ROLE_PERMISSIONS` and the plan table agree cell by cell.
+    `test_identity_seed.py::test_seeded_matrix_matches_plan` asserts DB = constants, and also
+    states the plan's holders explicitly (writes only data_steward, `mapping:approve` only
+    approver, `quarantine:read` = steward/approver/auditor). `test_me.py::test_ws2_permissions_per_role`
+    writes the matrix out from the plan, not from the constants.
+    `test_identity_seed.py::test_ws2_permission_downgrade_removes_only_its_rows` adds an
+    untagged `custom:read` grant, downgrades to 0009 and asserts WS1 ∪ {custom:read} remains
+    with zero tagged rows. All of these are in the 352 passed (checks.txt:8).
+- [x] **BE-7.3** Setting `INGESTION_ENABLED` (default `true`). When it is off, every WS2
+  write route returns 409 `ingestion_disabled` (audited DENIED) and reads still work.
+  - *Done-when:* a test with the setting off gets 409 plus one DENIED audit event on
+    `POST /sources`, and 200 on `GET /sources`. — ✔ verified (checks at 8bdb0cd).
+    `ingestion/router.py:46-70` is a dependency declared after the permission dependency on
+    both write routes. Its refusal goes through `record_denial`, which rolls back and audits
+    in its own session, matching the Phase 5 `SCHEMA_CHANGE_ENABLED` pattern.
+    `test_sources.py::test_switch_off_refuses_writes_with_one_audit_event_and_reads_work`
+    asserts 409 `ingestion_disabled` with exactly one DENIED event for `POST /api/v1/sources`
+    (by correlation ID), 200 on the list and on get-by-id, 409 on `POST …/contracts`, a plain
+    403 `forbidden` for risk_analyst (the switch reveals nothing) and no rows written.
+    ⚠ follow-up (REPORT D4): no structural test makes future WS2 write routes (Phases 8–13)
+    carry the switch.
+- [x] **BE-7.4** `POST /sources` creates the system, the profile and contract v1 in one
+  transaction (audited `source.create`). It also adds `GET /sources` (paginated),
+  `GET /sources/{source_id}` and `POST /sources/{source_id}/contracts`, which creates the
+  next version and marks the previous one SUPERSEDED. The target schema must exist in the
+  tenant and have an ACTIVE version. Permissions and tenant scope come from the table above.
+  - *Done-when:* tests cover create/list/get; a cross-tenant `GET` returns the same 404 as a
+    random ID; `risk_analyst` `POST` returns 403 with a DENIED audit event; and after
+    contract v2 is created, v1 is SUPERSEDED with an unchanged `content_sha256`. — ✔ verified
+    (checks at 8bdb0cd). The tests:
+    - `test_sources.py::test_create_list_and_get`: one `source.create` event, `X-Data-Class`,
+      and pagination ordered by code.
+    - `::test_cross_tenant_get_is_the_same_404_as_a_random_id`: identical envelopes apart from
+      the correlation ID, an empty list, and 404 on writes by id.
+    - `::test_post_without_source_manage_is_403_and_audited`: risk_analyst, auditor, approver
+      and platform_admin each get 403 with one DENIED event.
+    - `::test_new_contract_version_supersedes_the_previous_unchanged`: the v1 row is identical
+      except status and `updated_at`, and the create and supersede events are present.
+    - `::test_target_schema_must_exist_here_and_be_active` and `::test_seed_hash_matches_the_service`.
+
+    Contract versioning is serialised by `SELECT … FOR UPDATE` on the source
+    (`ingestion/repository.py:45-53`), backed by `uq_source_contract_current` and
+    `UNIQUE(source_profile_id, version)`. The WS1 matrix and the audit-completeness tests
+    include both write routes (checks.txt:10-21). ⚠ follow-ups (REPORT D2, D3, D8, D9, D12):
+    - the registrant can send `profile.provisional=false`;
+    - business-rule refusals (`duplicate_code`, `no_active_version`, `unsupported_source_kind`,
+      `no_change`) are not audited, although the Feature 02 constraint reads "every refusal is
+      audited";
+    - control characters and whitespace-only text are accepted, and NUL probably causes a 500;
+    - no concurrency test exists for two simultaneous new versions.
+- [x] **BE-7.5** Synthetic samples (WS2-P0):
+  - `backend/scripts/make_synthetic_samples.py` uses a fixed seed and writes ILLUSTRATIVE
+    files for `instrument` (CSV), `position` (XLSX) and `cashflow_event` (JSON). It also
+    writes deliberately bad variants: missing required column, bad date, over-scale decimal,
+    duplicate business key, unknown extra column, non-UTF-8 and bad currency code.
+  - A tagged seed migration adds one PROVISIONAL illustrative source
+    (`core_banking (illustrative)` → `instrument`).
+  - *Done-when:* a test runs the generator twice and gets identical SHA-256s for every
+    file, every file carries an "ILLUSTRATIVE / SYNTHETIC" marker (header comment, sheet
+    name or top-level key per format), and `GET /sources` lists the seeded source with
+    `provisional: true`. — ✔ verified (checks at 8bdb0cd). The tests:
+    - `test_synthetic_samples.py::test_two_runs_give_identical_files` runs the script twice as
+      a subprocess and compares SHA-256 per file and against `SHA256SUMS`.
+    - `::test_every_file_carries_the_marker` (parametrised over every file): a CSV `# …` first
+      line, a JSON top-level `marker`, and for XLSX the sheet name "ILLUSTRATIVE SYNTHETIC" plus
+      the full marker in `docProps/core.xml`.
+    - `::test_bad_variants_carry_their_defect` checks all 7 variants.
+    - `::test_committed_samples_are_current`, and "synthetic samples are up to date" in
+      checks.txt:25-26.
+    - `test_sources.py::test_seeded_source_is_listed_as_provisional`: 3 tagged rows, and the
+      contract columns equal the sample header.
+
+    ⚠ before Phase 8 (REPORT deviations 1–3, user decision): the JSON samples are a
+    `{"marker","records"}` object, but D-16 says a top-level array. The CSV marker line has to
+    be skipped by the BE-8.3 adapter. The XLSX is hand-written (stdlib zip), not with openpyxl
+    (D-17). The seed uses random IDs (REPORT D7).
+- [x] **FE-7.1** The Ingestion Workbench goes live:
+  - `navigation.ts` drops `planned` for `ingestion` and requires `source:read`.
+  - The `/ingestion` landing page has Sources and Imports tabs. Imports shows an empty state
+    until Phase 8.
+  - "Register source" is wrapped in `RequirePermission('source:manage')`.
+  - *Done-when:* a browser run shows `data_steward` with the Register button and `auditor`
+    without it; `auditor` on `/ingestion/sources/new` sees the 403 state and the backend
+    `POST /sources` also returns 403. — ✔ verified (checks at 8bdb0cd).
+    - `navigation.ts:47-54` has `permission: 'source:read'` and no `planned`.
+    - The landing page `ingestion/page.tsx` has Sources and Imports tabs (the Imports tab is an
+      empty state). Its Register button is in `RequirePermission('source:manage')` with a null
+      fallback, and `sources/new/page.tsx:205` wraps the form in `RequirePermission`.
+    - `IngestionGate` restores the placeholder when the nav entry is planned again
+      (`gate.test.ts`, D-02).
+    - The two `e2e/ingestion.spec.ts` FE-7.1 tests cover steward vs auditor, the auditor's 403
+      state on `/ingestion/sources/new`, and a backend 403 `forbidden` on `POST /sources` with
+      the auditor's token. Playwright passed 11/11 (checks.txt:46-56).
+
+    ⚠ evidence gap (REPORT D13): checks.txt is missing the per-test lines 1–2. The total
+    proves they passed; re-capture the full list.
+- [x] **FE-7.2** Source registration form and source detail page (profile, contract versions
+  with status pills, a resource-scoped `AuditTimeline`).
+  - *Done-when:* a browser run registers a source as `data_steward` and sees it in the list.
+    After a second contract version is added, the detail page shows v1 Superseded and v2
+    Provisional, and the timeline shows both events with correlation IDs. — ✔ verified (checks
+    at 8bdb0cd). `e2e/ingestion.spec.ts:70-135` covers:
+    - the steward registers a source through the form and sees it in the list as v1;
+    - contract v2 is added from v1 and the detail page shows v1 `SUPERSEDED`/"Superseded" and
+      v2 `PROVISIONAL`/"Provisional";
+    - the steward sees the `audit-unavailable` note;
+    - the auditor, on the same detail URL, sees exactly 3 events (`source.create`,
+      `source_contract.create`, `source_contract.supersede`), each SUCCESS with a correlation ID.
+
+    The detail fetch and the schema-field copy are cancelled with `AbortController`
+    (`[sourceId]/page.tsx:122-140`, `ContractEditor.tsx:48-82`), and the pills are tested
+    against the OpenAPI enums (`sources.test.ts:82-90`). ⚠ follow-ups:
+    - the steward cannot see the timeline because data_steward lacks `audit:read`
+      (deviation 7, user decision);
+    - the page stays in a stuck loading state after a non-API load failure (REPORT D10);
+    - the classification codes are hard-coded (deviation 8).
+
+*Reversibility:* additive tables and seed migrations. The downgrades refuse while user rows
+exist and remove only tagged seed rows. Turning off `INGESTION_ENABLED` makes WS2
+read-only. Reverting FE-7.1's nav entry restores the Phase 6 "planned" placeholder.
+
+### Phase 8 — Bounded file import and the adapter interface (DI-02; WS2-P1)
+
+Goal: a bounded synthetic upload becomes an import job with a write-once raw artifact, a
+checksum and one immutable `source_record` per row. Parsing goes through an adapter
+interface that does not depend on the first three formats.
+
+- [ ] **BE-8.1** Migration plus models:
+  - `import_job`: status per D-06/D-21, pinned `source_contract_id` and `schema_version_id`
+    (the ACTIVE version at creation), `data_class`, `synthetic_attested`,
+    `idempotency_key` (unique per tenant and actor), `correlation_id`, `retry_of_import_id`,
+    and optional expected row count and control totals.
+  - `import_artifact`: `sha256`, size, detected MIME, original filename (length-bounded),
+    `storage_ref`, `classification` and `retention_state`.
+  - `import_batch`
+  - `source_record`: batch, locator (row number / sheet / JSON index), `raw_values` JSONB of
+    strings, `row_sha256`.
+
+  Triggers make `import_artifact` and `source_record` append-only, TRUNCATE included.
+  CHECKs cover the enums. The downgrade refuses while user rows exist.
+  - *Done-when:* the round trip passes; tests prove UPDATE/DELETE/TRUNCATE on
+    `source_record` and `import_artifact` raise; the refusal to downgrade is tested.
+- [ ] **BE-8.2** `ArtifactStore` interface plus a filesystem implementation (D-15). It is
+  content-addressed by SHA-256 and write-once (an existing object is never rewritten). Reads
+  re-verify the hash. The root is `ARTIFACT_STORE_DIR`, which is required outside local/test
+  (D-13) and must sit outside the repository.
+  - *Done-when:* tests prove storing the same bytes twice gives one object and the same
+    ref, a tampered file makes the read raise `artifact_integrity_error`, and startup is
+    refused in staging without the setting.
+- [ ] **BE-8.3** `SourceAdapter` interface (`detect`, `iter_rows` → locator plus
+  `dict[str, str]`, never floats) and CSV, XLSX and JSON adapters per D-16/D-17.
+  - *Done-when:* parser tests cover:
+    - UTF-8 BOM, quoted newlines and a configured delimiter;
+    - the exact string `"12345678901234.123456"` surviving each format, and an XLSX numeric
+      cell becoming `Decimal(repr(x))` with a precision flag beyond 15 significant digits;
+    - an XLSX formula cell yielding its cached value and a flag;
+    - `.xlsm` and non-UTF-8 refused;
+    - nested JSON refused;
+    - each D-16 limit (bytes, rows, columns, cell length, XLSX uncompressed size/ratio)
+      refused with its own error code.
+- [ ] **BE-8.4** `POST /imports` (multipart: `source_id`, file, `Idempotency-Key` header,
+  `synthetic_attested`, optional `expected_row_count`/control totals):
+  - It enforces the byte limit while streaming (413 `payload_too_large` before the whole
+    body is read).
+  - It stores the artifact, parses into `source_record` and sets RECEIVED, all in one
+    transaction, audited `import.create`.
+  - It also adds `GET /imports` (paginated; filter by source and status) and
+    `GET /imports/{import_id}`.
+  - *Done-when:* tests cover:
+    - one fixture per format reaching RECEIVED with `row_count` equal to the file's data
+      rows;
+    - an 11 MiB upload getting 413 with no job, artifact or file left behind;
+    - a repeated `Idempotency-Key` returning the same `import_id`, and with different bytes
+      a 409 `idempotency_conflict`;
+    - a missing attestation under `DATA_CLASS=synthetic` getting 422
+      `synthetic_attestation_required`;
+    - `auditor` getting 403 with a DENIED event;
+    - a cross-tenant `GET` getting 404.
+- [ ] **BE-8.5** The `import_job` transition table (D-06, D-21) in `ingestion/constants.py`,
+  enforced by the service.
+  - *Done-when:* a unit test walks every (from, to) pair and asserts that only the table's
+    transitions are accepted.
+- [ ] **BE-8.6** No raw value leaks. Cell values never reach logs, error envelopes or audit
+  details.
+  - *Done-when:* a test uploads a fixture full of a sentinel string (including malformed
+    rows and a parse failure). The captured logs, every error body and the audit `details`
+    for the import never contain the sentinel.
+- [ ] **FE-8.1** Import wizard:
+  1. Choose a source.
+  2. Upload. A client-side size pre-check runs, and when `X-Data-Class` is `synthetic` a
+     synthetic-data attestation checkbox is shown, with the attestation recorded.
+  3. Status page: status pill, row count, SHA-256, pinned schema version and the audit
+     timeline.
+
+  It uses multipart through the generated client types.
+  - *Done-when:* a browser run uploads the synthetic CSV and lands on a detail page showing
+    RECEIVED, the row count and the SHA-256 from the API. A second run with the client-side
+    check bypassed shows the backend's 413 toast with its correlation ID.
+- [ ] **FE-8.2** Imports list with an `ImportStatusPill` covering every `import_job` status.
+  - *Done-when:* a unit test asserts that the pill map covers the full status enum from the
+    generated types, and the list shows the uploaded import.
+
+*Reversibility:* additive tables. The downgrade refuses while imports exist. Turning off
+`INGESTION_ENABLED` stops new uploads. Stored artifacts are write-once and stay on disk; no
+code path deletes them (D-20).
+
+### Phase 9 — Field profiling and type suggestions (DI-06 profiling half, DI-02; WS2-P4)
+
+Goal: every received import is profiled deterministically, and the user sees candidate
+types and unknown columns as suggestions. Profiling never changes a schema or contract.
+
+- [ ] **BE-9.1** Migration plus model `data_profile_snapshot`, one per import. It holds
+  per-column observations: candidate types, null rate, distinct count (capped), min/max for
+  numbers and dates, maximum length and precision/scale, date formats seen, currency-pattern
+  hits, a capped list of top values, and a `content_sha256`. The table is append-only
+  (trigger, TRUNCATE included).
+  - *Done-when:* the round trip passes; a test proves UPDATE/DELETE/TRUNCATE raise; the
+    downgrade refusal is tested.
+- [ ] **BE-9.2** Deterministic profiler using Decimal arithmetic only. It runs
+  synchronously after receipt (RECEIVED → PROFILING → RECEIVED, or MAPPING_REQUIRED when the
+  source contract has no usable ACTIVE mapping, D-21).
+  - *Done-when:* a golden-file test matches the profile of the synthetic CSV exactly, and
+    profiling the same artifact twice gives the same `content_sha256`.
+- [ ] **BE-9.3** `GET /imports/{import_id}/profile`:
+  - Top values are masked through `mask_mapping`. A column's class comes from its mapped
+    `schema_field.classification`, otherwise from the source profile's
+    `default_classification`.
+  - Each column carries `in_contract: bool` and a `suggested_target_field` (normalised
+    exact-name match against the pinned schema version), both marked `suggestion: true`.
+  - *Done-when:* tests prove a confidential column's top values are masked for
+    `risk_analyst` and clear for `data_steward`; the extra-column fixture reports
+    `in_contract: false`; and the schema registry and contract hashes are unchanged after
+    profiling.
+- [ ] **FE-9.1** Profile tab: per-column table, the inferred type labelled "Suggested", a
+  null-rate bar, `MaskedValue` for masked samples, and unknown columns flagged "Not in
+  contract". The only schema action is a link to the existing Phase 5 "New proposal" page.
+  - *Done-when:* a browser run on the extra-column fixture shows the Suggested labels and
+    the flagged column. A grep finds no profile code calling a mutating endpoint.
+
+*Reversibility:* additive table. Profiling is a pure function whose output is stored. If it
+is removed (downgrade), imports go RECEIVED → MAPPING_REQUIRED/RECEIVED with no profile, and
+the FE tab shows an empty state.
+
+### Phase 10 — Versioned mapping workbench (DI-03; WS2-P2)
+
+Goal: a steward builds a versioned, immutable mapping from source columns to the fields of
+one pinned schema version, using allowlisted deterministic transforms. The mapping is
+dry-run validated against a real import, and a different person activates it.
+
+- [ ] **BE-10.1** Migration plus models in `mapping`:
+  - `field_mapping`: code, `source_contract_id`, target `schema_id`.
+  - `mapping_version`: status as `schema_version` (D-06), pinned `schema_version_id`,
+    `content_sha256`, author, decision columns, `last_validation` reference.
+  - `mapping_rule`: source column, target field, transform code plus params, null/default
+    policy, column policy `MAP|PRESERVE`.
+  - `import_job.mapping_version_id`, added as a new nullable column (D-01).
+
+  Triggers make non-DRAFT versions and their rules immutable, TRUNCATE included, with no
+  session-settable bypass. CHECKs cover the enums.
+  - *Done-when:* the round trip passes; tests prove a rule INSERT/UPDATE/DELETE on an ACTIVE
+    version, `TRUNCATE mapping_rule` and `SET`-based bypass attempts all fail; the downgrade
+    refusal is tested.
+- [ ] **BE-10.2** Transform engine (D-19): a closed allowlist of pure, deterministic
+  functions with JSON-schema-validated params. There is no eval, no expressions and no
+  regex.
+  - *Done-when:* every allowlisted transform has unit tests, including Decimal results that
+    never pass through a float; an unknown transform code or bad params gets 422; and a test
+    asserts that the allowlist equals the D-19 list.
+- [ ] **BE-10.3** `GET /mappings` (filter by source and schema), `GET /mappings/{mapping_id}`
+  (versions and rules), `POST /mappings` (definition plus DRAFT v1 pinned to the target's
+  ACTIVE schema version) and `POST /mappings/{mapping_id}/versions` (the next DRAFT).
+  - *Done-when:* tests cover create/list/get; a new version leaves the previous version's
+    rules and hash unchanged; there is a cross-tenant 404; `risk_analyst` `POST` gets 403
+    with a DENIED event.
+- [ ] **BE-10.4** `POST /imports/{import_id}/mappings/validate` (body: `mapping_version_id`).
+  It is a dry run. It checks:
+  - every required target field is mapped;
+  - the profile's types are compatible with the targets;
+  - every transform applies to every row, reported as counts per rule with no values;
+  - every source column has `MAP` or `PRESERVE`;
+  - business keys are unique.
+
+  It stores a validation record (audited `mapping.validate`) and writes no canonical rows.
+  - *Done-when:* tests prove an unmapped required field gives a BLOCKER, an unmapped column
+    with no policy gives an issue, and a valid mapping returns `ok` with per-rule counts.
+    The `canonical_record` count is unchanged, and the issue texts contain no sentinel
+    values.
+- [ ] **BE-10.5** Submit and approval:
+  - `…/versions/{version}/submit` needs the author, `mapping:propose` and a recorded `ok`
+    validation for that version.
+  - `…/approval` (APPROVE/REJECT) needs `mapping:approve`, and the approver must not be the
+    author (403 `self_approval`, audited DENIED).
+  - Approval, in one transaction:
+    1. activates the version and DEPRECATES the mapping's previous ACTIVE version;
+    2. refuses with 409 `schema_version_not_active` if the pinned schema version is no
+       longer ACTIVE;
+    3. upserts a `schema_dependency` row (`MAPPING`, mapping code) (D-18).
+  - *Done-when:* tests cover:
+    - a self-approval returning 403 with exactly one DENIED event;
+    - a submit without a validation returning 409 `mapping_validation_required`;
+    - a valid approval leaving the new version ACTIVE and the old one DEPRECATED, with the
+      old hash unchanged and the audit events sharing one correlation ID;
+    - the Phase 5 `impact-analysis` on the target schema then listing this mapping as a
+      dependent;
+    - an approval after the schema version was deprecated returning 409.
+- [ ] **BE-10.6** Setting `MAPPING_CHANGE_ENABLED` (default `true`). When it is off, mapping
+  writes get 409 `mapping_change_disabled` (audited) and reads and existing ACTIVE versions
+  keep working.
+  - *Done-when:* a test with it off gets 409 plus a DENIED event on `POST /mappings`, and
+    200 on `GET /mappings`.
+- [ ] **FE-10.1** Mapping workbench grid:
+  - columns: source column, profiled type, target field, transform plus params, required,
+    policy;
+  - a version badge;
+  - draft editing;
+  - "Validate against this import" with per-rule results.
+
+  Changing the import or version cancels in-flight requests, and unsaved edits prompt before
+  they are discarded.
+  - *Done-when:* a browser run maps the synthetic CSV: validation shows the
+    missing-required BLOCKER until the field is mapped, then passes. A unit test proves a
+    stale response is ignored after a switch.
+- [ ] **FE-10.2** Mapping versions and approval view (reusing the Phase 5 proposal
+  patterns): Submit is disabled until a validation is `ok`, the author sees "You cannot
+  approve your own mapping", and the approver gets the decision panel.
+  - *Done-when:* a two-user browser run goes author → approver → ACTIVE badge, and a forced
+    early submit shows the backend's 409 envelope.
+
+*Reversibility:* additive tables and a nullable column. The downgrade refuses while
+mappings exist. Turning off `MAPPING_CHANGE_ENABLED` freezes mappings at their current
+ACTIVE versions. A bad mapping is undone by approving a new version, never by editing one.
+
+### Phase 11 — Validation, quarantine and canonical records (DI-04; WS2-P3)
+
+Goal: validating an import applies its pinned schema and mapping versions. Every source row
+ends in exactly one outcome (ACCEPTED → `canonical_record`, QUARANTINED or REJECTED). Issues
+are actionable and carry no values, and quarantine is reviewable and retryable. Nothing is
+edited in place.
+
+- [ ] **BE-11.1** Migration plus models:
+  - `validation_profile`: versioned and immutable; maps issue code → severity → disposition.
+  - `validation_issue`: code, severity, field, `source_record_id`, rule ref, value-free
+    message, disposition per D-23.
+  - `quarantine_item`: `source_record_id`, batch, reason codes, owner, status per Data Model
+    §9, `resolved_by_import_id`.
+  - `canonical_record`: import, `schema_version_id`, `mapping_version_id`,
+    `source_record_id`, typed-string `payload` JSONB, `payload_sha256` (D-22).
+  - `record_lineage`: canonical → source, mapping version, transform trace.
+  - a tagged PROVISIONAL default `validation_profile` seed.
+
+  `canonical_record`, `record_lineage`, `validation_issue` and `validation_profile` are
+  append-only. `quarantine_item` allows status changes only. TRUNCATE is blocked
+  everywhere, and CHECKs cover the enums.
+  - *Done-when:* the round trip passes; trigger tests cover each table, including an UPDATE
+    of `quarantine_item.source_record_id` being refused while a status change is allowed;
+    the downgrade refusal is tested.
+- [ ] **BE-11.2** Validation engine. It applies the import's mapping version and checks:
+  - type and required per `schema_field`;
+  - DECIMAL precision/scale (fixed precision; over-scale is an error, never rounded);
+  - date validity and format;
+  - ISO 4217 codes for fields with `unit = 'ISO4217'`;
+  - duplicate business keys from the source contract;
+  - the default profile's severities.
+
+  Columns marked `PRESERVE` and columns not in the contract stay in `source_record` and
+  produce an `UNMAPPED_COLUMN` warning (never dropped).
+  - *Done-when:*
+    - a test runs every bad fixture and asserts the exact expected (row, field, code)
+      issues;
+    - an invariant test asserts `source_rows == accepted + quarantined + rejected` for every
+      fixture, plus a property test over generated rows;
+    - validating the same artifact twice through two imports gives identical
+      `payload_sha256`s;
+    - no canonical value is a float (JSON-type assertion).
+- [ ] **BE-11.3** `POST /imports/{import_id}/validate` and `GET /imports/{import_id}/issues`
+  (paginated; filter by severity, code and field).
+  - `validate` needs a usable ACTIVE mapping version (otherwise 409 `mapping_required`, and
+    the status is MAPPING_REQUIRED). It pins `mapping_version_id` and moves VALIDATING →
+    COMPLETED / COMPLETED_WITH_WARNINGS / QUARANTINED / FAILED (a file-level BLOCKER means
+    no rows are accepted).
+  - It runs once per import; a second call gets 409 `already_validated`, and a re-run means
+    a new import (D-21). It is audited `import.validate`.
+  - *Done-when:* tests cover each final status with its fixture, a 409 for an import with no
+    mapping, a 409 on a second validate, and issue filters and pagination.
+- [ ] **BE-11.4** `GET /quarantine/{batch_id}`: items with masked raw values (D-20), using
+  `mask_mapping` with column classes as in BE-9.3.
+  `POST /quarantine/{batch_id}/items/{quarantine_id}/disposition`: transitions per the D-20
+  table, audited, with no row deletion. Retry is `POST /imports` with
+  `retry_of_import_id`. When that import contains and then accepts the same business key,
+  the RETRY_READY items move through CORRECTED to RESOLVED with `resolved_by_import_id`
+  (automatic and audited, D-20).
+  - *Done-when:* tests prove:
+    - every legal transition succeeds and every illegal one gets 409;
+    - `risk_analyst` gets 403 on both endpoints;
+    - `auditor` reads with masked values;
+    - a retry import resolves the matching items;
+    - the `quarantine_item` row count never decreases across the whole test.
+- [ ] **BE-11.5** Import manifest. `GET /imports/{import_id}` returns a `manifest` with:
+  artifact SHA-256 and classification, source contract version, `schema_version_id`,
+  `mapping_version_id`, validation profile version, and accepted/quarantined/rejected/warning
+  counts (the Data Model §10 shape).
+  - *Done-when:* a test asserts the manifest keys and values after validation, and that
+    they are unchanged after a later mapping version is activated and after a schema change
+    proposal is applied.
+- [ ] **FE-11.1** Validation dashboard tab: accepted/quarantined/rejected/warning counts, an
+  issues table with filters and field-level detail, and the manifest panel.
+  - *Done-when:* a browser run on the mixed-errors fixture shows counts and issue codes
+    equal to the API response, and the counts add up to the row count.
+- [ ] **FE-11.2** Quarantine view: masked values, disposition actions gated on
+  `quality:review`, and "Retry with corrected file", which opens the import wizard
+  pre-filled with `retry_of_import_id`.
+  - *Done-when:* a browser run as `data_steward` moves an item OPEN → UNDER_REVIEW →
+    RETRY_READY → RESOLVED via a retry upload; `risk_analyst` sees no Quarantine tab, and the
+    backend returns 403 on the direct call.
+
+*Reversibility:* additive tables. The downgrade refuses while canonical records or
+quarantine items exist. Turning off `INGESTION_ENABLED` stops validation and dispositions.
+Canonical records are versioned by import, so a bad result is superseded by a new import,
+never edited.
+
+### Phase 12 — Reconciliation and drift detection (DI-05, DI-06 drift half; WS2-P3/P4)
+
+Goal: every validated import has a reconciliation that cannot report MATCHED while any check
+fails. A changed source shape raises drift events that a person must review. Nothing
+changes a schema, contract or mapping automatically.
+
+- [ ] **BE-12.1** Migration plus models: `reconciliation_run` (outcome per D-23, tolerance
+  policy) and `reconciliation_item` in `backend/app/reconciliation`; `data_drift_event`
+  (`drift_type` and `status` per D-23, baseline import, column, observed vs baseline
+  summary) in `mapping`. Results are append-only, and drift events allow status and review
+  fields only. TRUNCATE is blocked and CHECKs cover the enums.
+  - *Done-when:* the round trip passes; the trigger tests pass; the downgrade refusal is
+    tested.
+- [ ] **BE-12.2** Reconciliation runs at the end of validation:
+  - **Count conservation:** `source_rows = accepted + quarantined + rejected`, with zero
+    tolerance.
+  - **Upload control count:** `expected_row_count` against the source rows, when provided.
+  - **Control totals:** for each control-total column in the contract, the source total of
+    the parseable values against the accepted total plus the held total, and against the
+    upload-declared total if one exists. Decimal throughout; default tolerance 0,
+    PROVISIONAL.
+
+  The outcome is MATCHED, REVIEW_REQUIRED or BROKEN. The route is
+  `GET /imports/{import_id}/reconciliation`.
+  - *Done-when:* tests prove the clean fixture is MATCHED, the quarantine fixture is
+    REVIEW_REQUIRED with the exact Decimal variance as a string, and a wrong
+    `expected_row_count` is BROKEN. A table test asserts the outcome is never MATCHED when
+    any item is not MATCHED.
+- [ ] **BE-12.3** Drift detection after profiling, behind `DRIFT_DETECTION_ENABLED` (default
+  `true`). It compares the import's profile with the baseline, which is the latest
+  COMPLETED or COMPLETED_WITH_WARNINGS import of the same source profile. It emits
+  COLUMN_ADDED, COLUMN_REMOVED, TYPE_CHANGED, NULL_RATE_SHIFT and RANGE_SHIFT events, with
+  PROVISIONAL thresholds as settings. A first import has no baseline and no events. The route
+  is `GET /imports/{import_id}/drift`.
+  - *Done-when:* tests prove the extra-column fixture after a clean baseline emits exactly
+    one COLUMN_ADDED; schema, contract and mapping hashes are unchanged after detection; and
+    with the setting off, no events are written.
+- [ ] **BE-12.4** `POST /drift-events/{drift_event_id}/review` (`quality:review`; outcome
+  ACKNOWLEDGED or ACTION_REQUIRED plus a required comment; audited). ACTION_REQUIRED returns
+  a link hint to the Phase 5 proposal page and creates nothing else.
+  - *Done-when:* tests prove the review is recorded with the reviewer and audit event, a
+    second review gets 409, `risk_analyst` gets 403, and the `schema_change_proposal` count
+    is unchanged after ACTION_REQUIRED.
+- [ ] **FE-12.1** Reconciliation tab: per-check rows with source, target, held, variance and
+  tolerance, and an outcome pill. Decimals are rendered from API strings and never parsed to
+  numbers.
+  - *Done-when:* a browser run on the quarantine fixture shows REVIEW_REQUIRED with the
+    variance text equal to the API string. A grep finds no `parseFloat`/`Number(` on
+    reconciliation values.
+- [ ] **FE-12.2** Drift alerts tab with a review dialog. "Propose schema change" links to the
+  existing Phase 5 new-proposal page (prefilled schema only).
+  - *Done-when:* a browser run uploads a clean import, then the extra-column import, sees
+    the COLUMN_ADDED alert, acknowledges it as `data_steward`, and the alert then shows the
+    reviewer and comment.
+
+*Reversibility:* additive tables. The downgrade refuses while runs or events exist.
+Turning off `DRIFT_DETECTION_ENABLED` stops new drift events (existing ones stay
+readable). Reconciliation is a control and has no off switch, but it only adds read-only
+results.
+
+### Phase 13 — Adapter readiness and WS2 verification (WS2-P5, WS2 Definition of Done)
+
+Goal: the adapter contract is documented and enforced by tests, so a future feed or
+warehouse adapter plugs in without changing the core. The whole of WS2 is proven by a
+verification suite and browser smoke tests in CI.
+
+- [ ] **BE-13.1** `docs/ADAPTERS.md`, the adapter contract: interface, limits, the row/locator
+  shape, error codes, the no-float rule and the provenance fields. It comes with a
+  parametrised contract test suite that every adapter must pass. The suite runs over CSV,
+  XLSX, JSON and a test-only in-memory `FakeFeedAdapter`.
+  - *Done-when:* the contract suite passes for all four adapters, and the fake adapter is
+    wired in only from `app/tests` (a grep of `app/` outside tests finds no reference to it).
+- [ ] **BE-13.2** WS2 verification suite (`pytest -m ws2`, a new CI step that prints the
+  matrix). It covers:
+  - every WS2 route × every seeded role, asserting the expected 2xx on a prepared fixture
+    for allowed roles and 403 `forbidden` with the declared `required_permission` for the
+    others;
+  - cross-tenant isolation for sources, imports, mappings, quarantine and drift (items must
+    belong to the caller's tenant);
+  - audit completeness, where every WS2 mutating route is in `AUDITED` and every `AUDITED`
+    key is called;
+  - an end-to-end CSV → profile → mapping → approval → validate → reconcile run;
+  - the row-conservation invariant;
+  - a base → head migration round trip.
+  - *Done-when:* the step runs green in CI on the Phase 13 PR and the matrix table appears in
+    the CI log.
+- [ ] **BE-13.3** `docs/RETENTION.md` gets PROVISIONAL rows for raw artifacts, source
+  records, canonical records and lineage, validation issues and quarantine, profiles and
+  drift, and reconciliation (owners named, no numbers). The restore procedure gains the
+  check that artifact store hashes match `import_artifact`.
+  - *Done-when:* every WS2 table appears in a RETENTION.md row and the restore outline lists
+    the artifact hash check.
+- [ ] **FE-13.1** Playwright WS2 smoke:
+  1. a steward registers a source and uploads;
+  2. the profile is shown;
+  3. the steward maps and validates the mapping;
+  4. the approver activates it;
+  5. the steward validates the import;
+  6. quarantine disposition and reconciliation;
+  7. the drift alert is reviewed.
+  - *Done-when:* the `e2e` job passes in CI with the WS2 specs and the `playwright-report`
+    artifact exists.
+
+*Reversibility:* tests and docs only.
+
+### Deferred (out of scope for Feature 02)
+
+- **Live feeds, warehouse, API and event adapters:** only the interface and a test fake
+  (BE-13.1). Real connectors need client protocols (Data Model §11).
+- **Object storage (S3-compatible), pre-signed uploads and malware scanning:** these are
+  infrastructure, and hosting is undecided (D-12, D-15). Acceptable for now only because
+  non-production holds synthetic data (D-14). They are a pre-production gate.
+- **Background/async import processing (`workflow_job`) and files beyond the D-16 limits:**
+  WS4 RO-01 owns the job model (D-21).
+- **Other formats and encodings:** non-UTF-8, multi-sheet XLSX, `.xls`/`.xlsm`, nested JSON,
+  fixed-width, XML and Parquet.
+- **Projecting canonical records into WS3 domain tables** (`instrument_version`,
+  `position_version`, …) and a cross-import `dataset_snapshot`: WS3 owns them (D-22).
+- **Reference-data checks** (e.g. that a counterparty exists): they need WS3 reference data.
+- **Authoring custom validation profiles** and regex rules: only the seeded default profile
+  (ReDoS and governance risk).
+- **AI mapping or type suggestions:** WS5. Suggestions here are deterministic exact-name
+  matches.
+- **Retention, purge and archival jobs** for artifacts, records and quarantine: the policy
+  is documented only (D-20, BE-13.3).
+- **Source, dataset and legal-entity row scopes beyond tenant:** this waits for the client
+  role model (D-04).
+- **Statistical distribution drift** (e.g. KS tests): only shape, null-rate and range drift.
+- **Automatic schema change proposals from drift:** forbidden by Arch §6.1 step 7; the
+  feature gives a link only.
+- **Downloading raw artifacts or exporting quarantined rows:** restricted by Arch §10. If
+  added later, it needs its own permission and CSV-injection safe output.
+- **Client data in local, test or staging:** forbidden by D-14.
+- **Incumbent and benchmark reconciliation:** WS4 RO-04.

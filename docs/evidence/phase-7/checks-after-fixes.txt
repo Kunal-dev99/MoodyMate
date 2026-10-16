@@ -1,0 +1,55 @@
+# Phase 7 checks after review fixes — 2026-10-16T12:59:58Z — dbeb58f
+$ ruff check . && ruff format --check .
+All checks passed!
+144 files already formatted
+$ mypy app scripts
+Success: no issues found in 144 source files
+$ pytest -q -m "not ws1"
+452 passed, 8 deselected, 2 warnings in 247.54s (0:04:07)
+$ pytest -m ws1 -q
+GET /api/v1/sources                                                 source:read                200            200            200            200            200
+POST /api/v1/sources                                                source:manage              403            422            403            403            403
+GET /api/v1/sources/{source_id}                                     source:read                200            200            200            200            200
+POST /api/v1/sources/{source_id}/contracts                          source:manage              403            422            403            403            403
+8 passed, 452 deselected, 1 warning in 11.64s
+$ openapi --check
+openapi.json is up to date
+$ samples --check
+synthetic samples are up to date
+$ alembic round trip head -> 0008 -> head (copy of moodymate_ws2_p7)
+0011 (head)
+INFO  [alembic.runtime.migration] Running downgrade 0011 -> 0010, Seed one PROVISIONAL illustrative source: core_banking (illustrative) -> instrument (BE-7.5).
+INFO  [alembic.runtime.migration] Running downgrade 0010 -> 0009, Seed the nine WS2 permissions and their role grants (BE-7.2, D-11).
+INFO  [alembic.runtime.migration] Running downgrade 0009 -> 0008, Source registration tables (BE-7.1, DI-01): source_system, source_profile, source_contract.
+0008
+INFO  [alembic.runtime.migration] Running upgrade 0008 -> 0009, Source registration tables (BE-7.1, DI-01): source_system, source_profile, source_contract.
+INFO  [alembic.runtime.migration] Running upgrade 0009 -> 0010, Seed the nine WS2 permissions and their role grants (BE-7.2, D-11).
+INFO  [alembic.runtime.migration] Running upgrade 0010 -> 0011, Seed one PROVISIONAL illustrative source: core_banking (illustrative) -> instrument (BE-7.5).
+0011 (head)
+$ npm run gen:api (no diff)
+(end diff)
+$ npm run typecheck
+exit=0
+$ npm run lint
+✔ No ESLint warnings or errors
+$ npm test
+ Test Files  10 passed (10)
+      Tests  72 passed (72)
+$ npm run build
+ ✓ Compiled successfully
+├ ○ /ingestion                           6.05 kB         148 kB
+├ ƒ /ingestion/sources/[sourceId]        3.18 kB         166 kB
+├ ○ /ingestion/sources/new               2.23 kB         141 kB
+$ playwright test
+  ✓   1 [chromium] › e2e/ingestion.spec.ts:27:5 › FE-7.1: data_steward sees the live workbench and the Register button (2.2s)
+  ✓   2 [chromium] › e2e/ingestion.spec.ts:40:5 › FE-7.1: auditor has no Register button, gets the 403 state and a backend 403 (1.3s)
+  ✓   3 [chromium] › e2e/ingestion.spec.ts:70:5 › FE-7.2: register a source, add contract v2, see the versions and the timeline (3.2s)
+  ✓   4 [chromium] › e2e/smoke.spec.ts:16:7 › sign-in as Platform administrator (673ms)
+  ✓   5 [chromium] › e2e/smoke.spec.ts:16:7 › sign-in as Data steward (617ms)
+  ✓   6 [chromium] › e2e/smoke.spec.ts:16:7 › sign-in as Risk analyst (703ms)
+  ✓   7 [chromium] › e2e/smoke.spec.ts:16:7 › sign-in as Approver (649ms)
+  ✓   8 [chromium] › e2e/smoke.spec.ts:16:7 › sign-in as Auditor (664ms)
+  ✓   9 [chromium] › e2e/smoke.spec.ts:24:5 › a page the role may not use shows the 403 state (889ms)
+  ✓  10 [chromium] › e2e/smoke.spec.ts:32:5 › schema compare shows every change with its badge (954ms)
+  ✓  11 [chromium] › e2e/smoke.spec.ts:53:5 › proposal flow: steward proposes, approver approves (2.9s)
+  11 passed (19.8s)

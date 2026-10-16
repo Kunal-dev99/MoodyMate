@@ -277,6 +277,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Sources */
+        get: operations["listSources"];
+        put?: never;
+        /** Create Source */
+        post: operations["createSource"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sources/{source_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Source */
+        get: operations["getSource"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sources/{source_id}/contracts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Source Contract */
+        post: operations["createSourceContract"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users": {
         parameters: {
             query?: never;
@@ -383,6 +435,95 @@ export interface components {
          * @enum {string}
          */
         Compatibility: "ADDITIVE" | "COMPATIBLE" | "BREAKING";
+        /** ContractColumn */
+        ContractColumn: {
+            /**
+             * Name
+             * @description Column name exactly as in the file header.
+             */
+            name: string;
+            /**
+             * Required
+             * @description Explicit: an omitted value is never assumed.
+             */
+            required: boolean;
+        };
+        /**
+         * ContractIn
+         * @description A source contract version: the expected shape of the files, and the canonical
+         *     schema they feed. Becomes PROVISIONAL until the client confirms it.
+         */
+        ContractIn: {
+            /**
+             * Business Key Columns
+             * @description Columns that identify a row; all expected.
+             */
+            business_key_columns: string[];
+            /** Change Summary */
+            change_summary?: string | null;
+            /**
+             * Control Total Columns
+             * @description Columns summed for reconciliation.
+             */
+            control_total_columns?: string[];
+            /** Expected Columns */
+            expected_columns: components["schemas"]["ContractColumn"][];
+            /**
+             * Schema Id
+             * Format: uuid
+             * @description Target canonical schema; must exist in your tenant with an ACTIVE version.
+             */
+            schema_id: string;
+        };
+        /** ContractOut */
+        ContractOut: {
+            /** Business Key Columns */
+            business_key_columns: string[];
+            /** Change Summary */
+            change_summary: string | null;
+            /** Content Sha256 */
+            content_sha256: string;
+            /** Control Total Columns */
+            control_total_columns: string[];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by: string;
+            /** Expected Columns */
+            expected_columns: components["schemas"]["ContractColumn"][];
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Schema Code */
+            schema_code: string;
+            /**
+             * Schema Id
+             * Format: uuid
+             */
+            schema_id: string;
+            status: components["schemas"]["ContractStatus"];
+            /** Supersedes Id */
+            supersedes_id: string | null;
+            /** Version */
+            version: number;
+        };
+        /**
+         * ContractStatus
+         * @description Data Model §9 `source_contract.status`.
+         * @enum {string}
+         */
+        ContractStatus: "PROVISIONAL" | "IN_REVIEW" | "APPROVED" | "SUPERSEDED";
+        /**
+         * CsvDelimiter
+         * @description D-16: the delimiters a CSV source profile may name.
+         * @enum {string}
+         */
+        CsvDelimiter: "," | ";" | "\t" | "|";
         /**
          * DependentType
          * @enum {string}
@@ -576,7 +717,58 @@ export interface components {
          * Permission
          * @enum {string}
          */
-        Permission: "schema:read" | "schema:propose" | "schema:approve" | "audit:read" | "admin:read";
+        Permission: "schema:read" | "schema:propose" | "schema:approve" | "audit:read" | "admin:read" | "source:read" | "source:manage" | "import:read" | "import:write" | "mapping:read" | "mapping:propose" | "mapping:approve" | "quarantine:read" | "quality:review";
+        /**
+         * ProfileIn
+         * @description A new source's profile. Always provisional on create (D2): only the client's approval,
+         *     a later action, clears it. The API ignores unknown body fields, so a `provisional` sent
+         *     here has no effect.
+         */
+        ProfileIn: {
+            /**
+             * Cadence
+             * @description e.g. 'daily'.
+             */
+            cadence?: string | null;
+            /**
+             * Default Classification
+             * @description Classification of values in columns no mapping has classified (D-20).
+             */
+            default_classification: string;
+            /** @description CSV only; defaults to ',' for CSV. */
+            delimiter?: components["schemas"]["CsvDelimiter"] | null;
+            /** @default UTF-8 */
+            encoding: components["schemas"]["SourceEncoding"];
+            format: components["schemas"]["SourceFormat"];
+            /** Owner */
+            owner: string;
+            /**
+             * Sheet Name
+             * @description XLSX only; else the first sheet. Excel forbids [ ] : * ? / \.
+             */
+            sheet_name?: string | null;
+        };
+        /** ProfileOut */
+        ProfileOut: {
+            /** Cadence */
+            cadence: string | null;
+            /** Default Classification */
+            default_classification: string;
+            delimiter: components["schemas"]["CsvDelimiter"] | null;
+            encoding: components["schemas"]["SourceEncoding"];
+            format: components["schemas"]["SourceFormat"];
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Owner */
+            owner: string;
+            /** Provisional */
+            provisional: boolean;
+            /** Sheet Name */
+            sheet_name: string | null;
+        };
         /** ProposalApproval */
         ProposalApproval: {
             /** Comment */
@@ -869,6 +1061,123 @@ export interface components {
          * @enum {string}
          */
         SchemaVersionStatus: "DRAFT" | "IN_REVIEW" | "APPROVED" | "ACTIVE" | "DEPRECATED" | "RETIRED" | "REJECTED";
+        /** SourceCreate */
+        SourceCreate: {
+            /**
+             * Code
+             * @description snake_case, unique in your tenant.
+             */
+            code: string;
+            contract: components["schemas"]["ContractIn"];
+            /** Description */
+            description?: string | null;
+            /**
+             * @description Only FILE_DROP is usable in the MVP (D-23).
+             * @default FILE_DROP
+             */
+            kind: components["schemas"]["SourceKind"];
+            /** Name */
+            name: string;
+            profile: components["schemas"]["ProfileIn"];
+        };
+        /** SourceDetail */
+        SourceDetail: {
+            /** Code */
+            code: string;
+            /** Contract Count */
+            contract_count: number;
+            /**
+             * Contracts
+             * @description Every contract version, oldest first.
+             */
+            contracts: components["schemas"]["ContractOut"][];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by: string;
+            /** @description The one contract version that is not SUPERSEDED. */
+            current_contract: components["schemas"]["ContractOut"] | null;
+            /** Description */
+            description: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            kind: components["schemas"]["SourceKind"];
+            /** Name */
+            name: string;
+            profile: components["schemas"]["ProfileOut"];
+            /**
+             * Provisional
+             * @description True until the client approves the source profile.
+             */
+            provisional: boolean;
+        };
+        /**
+         * SourceEncoding
+         * @description D-16: UTF-8 only (a BOM is allowed). Other encodings are deferred.
+         * @enum {string}
+         */
+        SourceEncoding: "UTF-8";
+        /**
+         * SourceFormat
+         * @description D-23: `source_profile.format`.
+         * @enum {string}
+         */
+        SourceFormat: "CSV" | "XLSX" | "JSON";
+        /**
+         * SourceKind
+         * @description D-23. Only FILE_DROP is usable in the MVP; the others are reserved.
+         * @enum {string}
+         */
+        SourceKind: "FILE_DROP" | "WAREHOUSE" | "APPLICATION" | "FEED";
+        /** SourcePage */
+        SourcePage: {
+            /** Items */
+            items: components["schemas"]["SourceSummary"][];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /** Total */
+            total: number;
+        };
+        /** SourceSummary */
+        SourceSummary: {
+            /** Code */
+            code: string;
+            /** Contract Count */
+            contract_count: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by: string;
+            /** @description The one contract version that is not SUPERSEDED. */
+            current_contract: components["schemas"]["ContractOut"] | null;
+            /** Description */
+            description: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            kind: components["schemas"]["SourceKind"];
+            /** Name */
+            name: string;
+            profile: components["schemas"]["ProfileOut"];
+            /**
+             * Provisional
+             * @description True until the client approves the source profile.
+             */
+            provisional: boolean;
+        };
         /** UserPage */
         UserPage: {
             /** Items */
@@ -1586,6 +1895,173 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SchemaVersionList"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    listSources: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourcePage"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    createSource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SourceCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceDetail"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    getSource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceDetail"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    createSourceContract: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContractIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContractOut"];
                 };
             };
             /** @description Client error (standard envelope) */

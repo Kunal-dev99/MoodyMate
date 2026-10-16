@@ -50,7 +50,7 @@ export const mainWorkspaces: Workspace[] = [
     label: 'Ingestion Workbench',
     icon: Database,
     description: 'Imports, mapping grid, profiling, validation issues and quarantine.',
-    planned: { phase: 'Feature 02', workstream: 'WS2' },
+    permission: 'source:read',
   },
   {
     slug: 'domain',

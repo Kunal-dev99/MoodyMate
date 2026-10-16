@@ -42,6 +42,7 @@ ignore = ["S101"]  # assert is fine in tests
 
 [tool.ruff.lint.per-file-ignores]
 "app/tests/**" = ["S105", "S106", "S608"]  # fake secrets; SQL with constant table names
+"scripts/make_synthetic_samples.py" = ["S311"]  # seeded, reproducible synthetic data by design
 
 [tool.mypy]
 python_version = "3.12"

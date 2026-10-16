@@ -9,6 +9,10 @@ from fastapi.testclient import TestClient
 from app.core.config import Settings
 from app.main import create_app
 
+# Tests build their own Settings: a developer's backend/.env (copied from .env.example,
+# which sets DATA_CLASS, AUTH_MODE, ...) must not leak into them.
+Settings.model_config["env_file"] = None
+
 # Never the live dev DB (D-03): tests use their own database.
 TEST_DATABASE_URL = os.environ.get(
     "TEST_DATABASE_URL",
@@ -95,6 +99,25 @@ ALTER TABLE schema_change_proposal ENABLE TRIGGER schema_change_proposal_immutab
 COMMIT;
 """
 
+# Sources tests register (Feature 02). Their rows are never deleted by the app, so the
+# no-delete/immutability triggers are lifted for this one transaction, as the seed
+# downgrade does. Runs before the registry cleanup: contracts reference schemas.
+_INGESTION_CLEANUP = """
+BEGIN;
+ALTER TABLE source_contract DISABLE TRIGGER source_contract_immutable;
+ALTER TABLE source_profile DISABLE TRIGGER source_profile_no_delete;
+ALTER TABLE source_system DISABLE TRIGGER source_system_no_delete;
+DELETE FROM source_contract WHERE seeded_by IS NULL;
+-- Tests supersede the seeded contract: put it back as seeded.
+UPDATE source_contract SET status = 'PROVISIONAL' WHERE seeded_by IS NOT NULL;
+DELETE FROM source_profile WHERE seeded_by IS NULL;
+DELETE FROM source_system WHERE seeded_by IS NULL;
+ALTER TABLE source_contract ENABLE TRIGGER source_contract_immutable;
+ALTER TABLE source_profile ENABLE TRIGGER source_profile_no_delete;
+ALTER TABLE source_system ENABLE TRIGGER source_system_no_delete;
+COMMIT;
+"""
+
 # Deletes everything that is not seed data (D-11), children first.
 _CLEANUP = [
     "DELETE FROM user_role",
@@ -102,6 +125,7 @@ _CLEANUP = [
     "DELETE FROM role_permission WHERE seeded_by IS NULL",
     "DELETE FROM role WHERE seeded_by IS NULL",
     "DELETE FROM permission WHERE seeded_by IS NULL",
+    _INGESTION_CLEANUP,
     _REGISTRY_CLEANUP,
     "DELETE FROM tenant WHERE seeded_by IS NULL",
 ]
@@ -144,7 +168,12 @@ def script(url: str, statements: str) -> None:
 
 def clean(url: str) -> None:
     for statement in _CLEANUP:
-        if statement is _REGISTRY_CLEANUP:
+        if statement is _INGESTION_CLEANUP:
+            try:
+                script(url, statement)
+            except asyncpg.UndefinedTableError:
+                pass  # a schema older than 0009 (session start): nothing of WS2 to clean
+        elif statement is _REGISTRY_CLEANUP:
             script(url, statement)
         else:
             sql(url, statement)

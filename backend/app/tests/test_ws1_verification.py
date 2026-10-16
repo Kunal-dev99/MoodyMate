@@ -27,6 +27,7 @@ from app.tests.test_schema_change import (
     token_for,
 )
 from app.tests.test_schema_registry import schema_id
+from app.tests.test_sources import contract_body, source_body
 
 pytestmark = [pytest.mark.db, pytest.mark.ws1]
 
@@ -67,10 +68,12 @@ def real_ids(api: TestClient, db: str) -> dict[str, str]:
     """Existing ids, so GET routes answer 2xx for permitted roles (the plan's 2xx side)."""
     proposal = removal_proposal(api, db, dev_token(api, "data_steward"))
     auditor = api.get("/api/v1/me", headers=dev_token(api, "auditor")).json()
+    source = sql(db, "SELECT id FROM source_system WHERE code = 'core_banking'")[0]["id"]
     return {
         "schema_id": str(schema_id(db, "instrument")),
         "proposal_id": proposal["id"],
         "user_id": auditor["user_id"],
+        "source_id": str(source),
     }
 
 
@@ -155,7 +158,10 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
     }
     assert audit["items"] and {e["id"] for e in audit["items"]} <= theirs
     # Direct reads and writes by id: not found, exactly as for an id that does not exist.
+    assert api.get("/api/v1/sources", headers=outsider).json()["total"] == 0
+    here_source = sql(db, "SELECT id FROM source_system WHERE code = 'core_banking'")[0]["id"]
     for path in (
+        f"/api/v1/sources/{here_source}",
         f"/api/v1/users/{here_user}",
         f"/api/v1/schemas/{instrument}/versions",
         f"/api/v1/schemas/{instrument}/diff?from=1&to=2",
@@ -236,6 +242,8 @@ AUDITED = {
     "POST /api/v1/schema-change-proposals/{proposal_id}/submit": "schema_change.submit",
     "POST /api/v1/schema-change-proposals/{proposal_id}/approval": "schema_change.approve",
     "POST /api/v1/schema-change-proposals/{proposal_id}/revert": "schema_change.revert",
+    "POST /api/v1/sources": "source.create",
+    "POST /api/v1/sources/{source_id}/contracts": "source_contract.create",
 }
 
 
@@ -302,6 +310,17 @@ def test_every_mutating_route_emits_an_audit_event(api: TestClient, db: str) -> 
         {"decision": "APPROVE"},
     )
     call("POST /api/v1/schema-change-proposals/{proposal_id}/revert", steward, f"{base}/revert", {})
+    source = call(
+        "POST /api/v1/sources",
+        steward,
+        body=source_body(db, code="audit_check_feed"),
+    )
+    call(
+        "POST /api/v1/sources/{source_id}/contracts",
+        steward,
+        f"/api/v1/sources/{source['id']}/contracts",
+        contract_body(db, schema="position"),
+    )
     # Every listed route was exercised here: listing a route without driving it fails.
     assert called == set(AUDITED)
 
