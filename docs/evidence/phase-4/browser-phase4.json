@@ -1,0 +1,78 @@
+{
+  "nav_has_schemas": true,
+  "catalogue_codes": [
+    "cashflow_event",
+    "instrument",
+    "position"
+  ],
+  "catalogue_rows": [
+    "Cash-flow event\ncashflow_event\nProvisional\n\tData governance (data_steward), provisional\tActive\tv1since 2026-01-01\tv1Active\t\nMODULE\nliquidity_gap (illustrative)\nREPORT\nmaturity_ladder (illustrative)",
+    "Instrument\ninstrument\nProvisional\n\tData governance (data_steward), provisional\tActive\tv1since 2026-01-01\tv2Draft\t\nMAPPING\ncore_banking_instrument (illustrative)\nSCHEMA\ncashflow_event\nSCHEMA\nposition",
+    "Position\nposition\nProvisional\n\tData governance (data_steward), provisional\tActive\tv1since 2026-01-01\tv1Active\t\nMODULE\nliquidity_gap (illustrative)"
+  ],
+  "status_values": [
+    "ACTIVE",
+    "ACTIVE",
+    "ACTIVE",
+    "DRAFT",
+    "ACTIVE",
+    "ACTIVE"
+  ],
+  "status_values_all_platform": true,
+  "provisional_badges": 3,
+  "planned_banner_absent": true,
+  "version_rows": 2,
+  "diff_overall": "BREAKING",
+  "diff_changes": [
+    {
+      "field": "legacy_book_code",
+      "badge": "BREAKING",
+      "text": "Breaking\nlegacy_book_code\nREMOVED\nField removed: producers and consumers relying on it break."
+    },
+    {
+      "field": "product_family",
+      "badge": "BREAKING",
+      "text": "Breaking\nproduct_family\nMODIFIED · REQUIRED\nfalse → true\nNow required: existing records may lack it."
+    },
+    {
+      "field": "interest_rate",
+      "badge": "COMPATIBLE",
+      "text": "Compatible\ninterest_rate\nMODIFIED · PRECISION_SCALE\nprecision=9, scale=4 → precision=11, scale=6\nPrecision/scale widened: every existing value still fits."
+    },
+    {
+      "field": "maturity_date",
+      "badge": "BREAKING",
+      "text": "Breaking\nmaturity_date\nMODIFIED · DATA_TYPE\nSTRING → DATE\nType changed: existing values and consumers may fail."
+    },
+    {
+      "field": "rating_category",
+      "badge": "ADDITIVE",
+      "text": "Additive\nrating_category\nADDED\nNew optional field: existing records stay valid."
+    }
+  ],
+  "side_by_side_rows": 10,
+  "api_fixture": [
+    {
+      "field": "legacy_book_code",
+      "badge": "BREAKING"
+    },
+    {
+      "field": "product_family",
+      "badge": "BREAKING"
+    },
+    {
+      "field": "interest_rate",
+      "badge": "COMPATIBLE"
+    },
+    {
+      "field": "maturity_date",
+      "badge": "BREAKING"
+    },
+    {
+      "field": "rating_category",
+      "badge": "ADDITIVE"
+    }
+  ],
+  "ui_matches_api_fixture": true,
+  "identical_when_same_version": true
+}

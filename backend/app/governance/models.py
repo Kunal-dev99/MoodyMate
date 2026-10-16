@@ -5,15 +5,34 @@ users are identity-provider subjects (Arch §10, D-09).
 """
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
+from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, func
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import AuditColumns, Base, ScopedModel
-from app.governance.constants import TenantStatus, UserStatus
+from app.governance.constants import (
+    Compatibility,
+    DependentType,
+    FieldType,
+    SchemaVersionStatus,
+    TenantStatus,
+    UserStatus,
+)
 
 
 class Tenant(AuditColumns, Base):
@@ -154,4 +173,116 @@ class AccessPolicy(AuditColumns, Base):
     max_clear_classification_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("data_classification.id"), nullable=False
     )
+    seeded_by: Mapped[str | None] = mapped_column(String(100))
+
+
+def _in(column: str, values: type[StrEnum]) -> str:
+    """CHECK expression limiting a column to an enum's values."""
+    return f"{column} IN ({', '.join(repr(v.value) for v in values)})"
+
+
+class SchemaDefinition(ScopedModel, Base):
+    """A logical contract such as instrument or position (BE-4.1, Data Model §2)."""
+
+    __tablename__ = "schema_definition"
+    __table_args__ = (UniqueConstraint("tenant_id", "code"),)
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenant.id"), index=True, nullable=False
+    )
+    code: Mapped[str] = mapped_column(String(100), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(1000))
+    owner: Mapped[str] = mapped_column(String(200), nullable=False)
+    provisional: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    seeded_by: Mapped[str | None] = mapped_column(String(100))
+
+    versions: Mapped[list["SchemaVersion"]] = relationship(
+        back_populates="schema", lazy="selectin", order_by="SchemaVersion.version"
+    )
+    dependents: Mapped[list["SchemaDependency"]] = relationship(
+        foreign_keys="SchemaDependency.schema_id",
+        lazy="selectin",
+        order_by="(SchemaDependency.dependent_type, SchemaDependency.dependent_ref)",
+    )
+
+
+class SchemaVersion(AuditColumns, Base):
+    """Immutable once it leaves DRAFT: the contract (its fields and content hash) can no
+    longer change; only the status moves (enforced by DB triggers, migration 0006)."""
+
+    __tablename__ = "schema_version"
+    __table_args__ = (
+        UniqueConstraint("schema_id", "version"),
+        CheckConstraint(_in("status", SchemaVersionStatus), name="status"),
+        CheckConstraint(
+            f"compatibility IS NULL OR {_in('compatibility', Compatibility)}", name="compatibility"
+        ),
+    )
+
+    schema_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("schema_definition.id"), index=True, nullable=False
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    effective_from: Mapped[date | None] = mapped_column(Date)
+    # Severity of the change from the previous version (null for version 1).
+    compatibility: Mapped[str | None] = mapped_column(String(20))
+    content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    change_summary: Mapped[str | None] = mapped_column(String(1000))
+    seeded_by: Mapped[str | None] = mapped_column(String(100))
+
+    schema: Mapped[SchemaDefinition] = relationship(back_populates="versions")
+    fields: Mapped[list["SchemaField"]] = relationship(
+        lazy="selectin", order_by="SchemaField.position"
+    )
+
+
+class SchemaField(AuditColumns, Base):
+    __tablename__ = "schema_field"
+    __table_args__ = (
+        UniqueConstraint("schema_version_id", "name"),
+        CheckConstraint(_in("data_type", FieldType), name="data_type"),
+    )
+
+    schema_version_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("schema_version.id"), index=True, nullable=False
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    data_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    required: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    unit: Mapped[str | None] = mapped_column(String(50))
+    precision: Mapped[int | None] = mapped_column(Integer)
+    scale: Mapped[int | None] = mapped_column(Integer)
+    # A data_classification code (BE-3.4): the sensitivity of values in this field.
+    classification: Mapped[str] = mapped_column(
+        String(50), ForeignKey("data_classification.code"), nullable=False
+    )
+    extension_eligible: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    description: Mapped[str | None] = mapped_column(String(1000))
+    seeded_by: Mapped[str | None] = mapped_column(String(100))
+
+
+class SchemaDependency(AuditColumns, Base):
+    """Something that consumes a schema (Data Model §2: schema_id + dependent ref). Until
+    WS2–WS4 exist, dependents are seeded illustrations used by impact analysis."""
+
+    __tablename__ = "schema_dependency"
+    __table_args__ = (
+        UniqueConstraint("schema_id", "dependent_type", "dependent_ref"),
+        CheckConstraint(_in("dependent_type", DependentType), name="dependent_type"),
+    )
+
+    schema_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("schema_definition.id"), index=True, nullable=False
+    )
+    dependent_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    dependent_ref: Mapped[str] = mapped_column(String(200), nullable=False)
+    # Set when the dependent is itself a registered schema.
+    dependent_schema_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("schema_definition.id")
+    )
+    description: Mapped[str | None] = mapped_column(String(500))
+    provisional: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     seeded_by: Mapped[str | None] = mapped_column(String(100))

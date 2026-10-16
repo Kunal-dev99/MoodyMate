@@ -168,6 +168,28 @@
         "title": "AuthConfig",
         "type": "object"
       },
+      "Compatibility": {
+        "description": "How a version change affects consumers, least to most severe.",
+        "enum": [
+          "ADDITIVE",
+          "COMPATIBLE",
+          "BREAKING"
+        ],
+        "title": "Compatibility",
+        "type": "string"
+      },
+      "DependentType": {
+        "enum": [
+          "SCHEMA",
+          "MAPPING",
+          "RULE",
+          "MODULE",
+          "REPORT",
+          "INTEGRATION"
+        ],
+        "title": "DependentType",
+        "type": "string"
+      },
       "DevPersona": {
         "properties": {
           "description": {
@@ -298,6 +320,18 @@
         ],
         "title": "ErrorEnvelope",
         "type": "object"
+      },
+      "FieldType": {
+        "enum": [
+          "STRING",
+          "INTEGER",
+          "DECIMAL",
+          "BOOLEAN",
+          "DATE",
+          "TIMESTAMP"
+        ],
+        "title": "FieldType",
+        "type": "string"
       },
       "HealthResponse": {
         "properties": {
@@ -460,6 +494,484 @@
           "auditor"
         ],
         "title": "Role",
+        "type": "string"
+      },
+      "SchemaDependent": {
+        "properties": {
+          "dependent_ref": {
+            "title": "Dependent Ref",
+            "type": "string"
+          },
+          "dependent_schema_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dependent Schema Id"
+          },
+          "dependent_type": {
+            "$ref": "#/components/schemas/DependentType"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "provisional": {
+            "title": "Provisional",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "dependent_type",
+          "dependent_ref",
+          "dependent_schema_id",
+          "description",
+          "provisional"
+        ],
+        "title": "SchemaDependent",
+        "type": "object"
+      },
+      "SchemaDiffOut": {
+        "properties": {
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/SchemaFieldChange"
+            },
+            "title": "Changes",
+            "type": "array"
+          },
+          "from_version": {
+            "$ref": "#/components/schemas/SchemaVersionRef"
+          },
+          "overall": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Compatibility"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Most severe change; null if identical."
+          },
+          "schema_id": {
+            "format": "uuid",
+            "title": "Schema Id",
+            "type": "string"
+          },
+          "to_version": {
+            "$ref": "#/components/schemas/SchemaVersionRef"
+          }
+        },
+        "required": [
+          "schema_id",
+          "from_version",
+          "to_version",
+          "overall",
+          "changes"
+        ],
+        "title": "SchemaDiffOut",
+        "type": "object"
+      },
+      "SchemaFieldChange": {
+        "properties": {
+          "attribute": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The changed attribute, for MODIFIED.",
+            "title": "Attribute"
+          },
+          "change": {
+            "enum": [
+              "ADDED",
+              "REMOVED",
+              "MODIFIED"
+            ],
+            "title": "Change",
+            "type": "string"
+          },
+          "compatibility": {
+            "$ref": "#/components/schemas/Compatibility"
+          },
+          "field": {
+            "title": "Field",
+            "type": "string"
+          },
+          "from_value": {
+            "title": "From Value"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "to_value": {
+            "title": "To Value"
+          }
+        },
+        "required": [
+          "field",
+          "change",
+          "attribute",
+          "from_value",
+          "to_value",
+          "compatibility",
+          "reason"
+        ],
+        "title": "SchemaFieldChange",
+        "type": "object"
+      },
+      "SchemaFieldOut": {
+        "properties": {
+          "classification": {
+            "description": "Sensitivity of values in this field (BE-3.4).",
+            "title": "Classification",
+            "type": "string"
+          },
+          "data_type": {
+            "$ref": "#/components/schemas/FieldType"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "extension_eligible": {
+            "title": "Extension Eligible",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "precision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Precision"
+          },
+          "required": {
+            "title": "Required",
+            "type": "boolean"
+          },
+          "scale": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scale"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          }
+        },
+        "required": [
+          "position",
+          "name",
+          "data_type",
+          "required",
+          "unit",
+          "precision",
+          "scale",
+          "classification",
+          "extension_eligible",
+          "description"
+        ],
+        "title": "SchemaFieldOut",
+        "type": "object"
+      },
+      "SchemaList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SchemaSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "SchemaList",
+        "type": "object"
+      },
+      "SchemaSummary": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "dependents": {
+            "items": {
+              "$ref": "#/components/schemas/SchemaDependent"
+            },
+            "title": "Dependents",
+            "type": "array"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "effective_version": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SchemaVersionRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "latest_version": {
+            "$ref": "#/components/schemas/SchemaVersionRef"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "provisional": {
+            "description": "True for seeded, not yet client-approved schemas.",
+            "title": "Provisional",
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SchemaVersionStatus",
+            "description": "Status of the effective version, or of the latest one if none is in effect."
+          },
+          "version_count": {
+            "title": "Version Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "name",
+          "description",
+          "owner",
+          "provisional",
+          "status",
+          "effective_version",
+          "latest_version",
+          "version_count",
+          "dependents"
+        ],
+        "title": "SchemaSummary",
+        "type": "object"
+      },
+      "SchemaVersionList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SchemaVersionOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "schema": {
+            "$ref": "#/components/schemas/SchemaSummary"
+          }
+        },
+        "required": [
+          "schema",
+          "items"
+        ],
+        "title": "SchemaVersionList",
+        "type": "object"
+      },
+      "SchemaVersionOut": {
+        "properties": {
+          "change_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Summary"
+          },
+          "compatibility": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Compatibility"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Severity of the change from the previous version (null for version 1)."
+          },
+          "content_sha256": {
+            "title": "Content Sha256",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "effective_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective From"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/SchemaFieldOut"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SchemaVersionStatus"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "status",
+          "effective_from",
+          "compatibility",
+          "content_sha256",
+          "change_summary",
+          "created_at",
+          "fields"
+        ],
+        "title": "SchemaVersionOut",
+        "type": "object"
+      },
+      "SchemaVersionRef": {
+        "properties": {
+          "effective_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective From"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SchemaVersionStatus"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "status",
+          "effective_from"
+        ],
+        "title": "SchemaVersionRef",
+        "type": "object"
+      },
+      "SchemaVersionStatus": {
+        "description": "Data Model \u00a79 plus REJECTED (D-06). Transitions arrive with Phase 5.",
+        "enum": [
+          "DRAFT",
+          "IN_REVIEW",
+          "APPROVED",
+          "ACTIVE",
+          "DEPRECATED",
+          "RETIRED",
+          "REJECTED"
+        ],
+        "title": "SchemaVersionStatus",
         "type": "string"
       },
       "UserPage": {
@@ -1035,6 +1547,192 @@
           }
         ],
         "summary": "My Permissions",
+        "tags": [
+          "identity"
+        ]
+      }
+    },
+    "/api/v1/schemas": {
+      "get": {
+        "operationId": "listSchemas",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchemaList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Schemas",
+        "tags": [
+          "identity"
+        ]
+      }
+    },
+    "/api/v1/schemas/{schema_id}/diff": {
+      "get": {
+        "operationId": "diffSchemaVersions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "schema_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Schema Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Base version number.",
+            "in": "query",
+            "name": "from",
+            "required": true,
+            "schema": {
+              "description": "Base version number.",
+              "minimum": 1,
+              "title": "From",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Compared version number.",
+            "in": "query",
+            "name": "to",
+            "required": true,
+            "schema": {
+              "description": "Compared version number.",
+              "minimum": 1,
+              "title": "To",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchemaDiffOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Diff Schema Versions",
+        "tags": [
+          "identity"
+        ]
+      }
+    },
+    "/api/v1/schemas/{schema_id}/versions": {
+      "get": {
+        "operationId": "listSchemaVersions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "schema_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Schema Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchemaVersionList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Schema Versions",
         "tags": [
           "identity"
         ]

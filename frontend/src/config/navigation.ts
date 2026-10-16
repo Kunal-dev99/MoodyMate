@@ -41,9 +41,8 @@ export const mainWorkspaces: Workspace[] = [
     href: '/schemas',
     label: 'Source & Schemas',
     icon: FileStack,
-    description: 'Schema catalogue, versions, compare and change proposals.',
+    description: 'Schema catalogue, versions and compare. Change proposals arrive in Phase 5.',
     permission: 'schema:read',
-    planned: { phase: 'Phases 4–5', workstream: 'WS1 DG-01, DG-05' },
   },
   {
     slug: 'ingestion',

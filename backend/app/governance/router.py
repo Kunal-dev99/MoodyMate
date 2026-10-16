@@ -13,10 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import authenticated, require_permission
 from app.core.classification import mask_model
+from app.core.errors import ApiError
 from app.core.principal import Principal
 from app.db.session import get_session
 from app.governance.constants import Permission
-from app.governance.models import UserAccount
+from app.governance.models import SchemaDefinition, SchemaVersion, UserAccount
 from app.governance.schemas import (
     AuditEventOut,
     AuditEventPage,
@@ -27,10 +28,26 @@ from app.governance.schemas import (
     Me,
     MyPermissions,
     OidcClientConfig,
+    SchemaDependent,
+    SchemaDiffOut,
+    SchemaFieldChange,
+    SchemaFieldOut,
+    SchemaList,
+    SchemaSummary,
+    SchemaVersionList,
+    SchemaVersionOut,
+    SchemaVersionRef,
     UserPage,
     UserSummary,
 )
-from app.governance.service import AuditFilters, AuditQueryService, IdentityService, UserService
+from app.governance.service import (
+    AuditFilters,
+    AuditQueryService,
+    IdentityService,
+    SchemaService,
+    UserService,
+    effective_version,
+)
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
@@ -186,4 +203,98 @@ async def list_audit_events(
         total=total,
         limit=limit,
         offset=offset,
+    )
+
+
+# --- Schema registry (BE-4.3) ------------------------------------------------------------
+
+SchemaReader = Annotated[Principal, Depends(require_permission(Permission.SCHEMA_READ))]
+
+
+def _version_ref(v: SchemaVersion) -> SchemaVersionRef:
+    return SchemaVersionRef(
+        id=v.id, version=v.version, status=v.status, effective_from=v.effective_from
+    )
+
+
+def _schema_summary(s: SchemaDefinition) -> SchemaSummary:
+    effective = effective_version(s)
+    latest = max(s.versions, key=lambda v: v.version)
+    return SchemaSummary(
+        id=s.id,
+        code=s.code,
+        name=s.name,
+        description=s.description,
+        owner=s.owner,
+        provisional=s.provisional,
+        status=(effective or latest).status,
+        effective_version=_version_ref(effective) if effective else None,
+        latest_version=_version_ref(latest),
+        version_count=len(s.versions),
+        dependents=[
+            SchemaDependent(
+                dependent_type=d.dependent_type,
+                dependent_ref=d.dependent_ref,
+                dependent_schema_id=d.dependent_schema_id,
+                description=d.description,
+                provisional=d.provisional,
+            )
+            for d in s.dependents
+        ],
+    )
+
+
+@router.get("/schemas", response_model=SchemaList, operation_id="listSchemas")
+async def list_schemas(principal: SchemaReader, session: SessionDep) -> SchemaList:
+    # A definition has at least one version once registered; skip any mid-creation.
+    schemas = [s for s in await SchemaService(session, principal).list_schemas() if s.versions]
+    return SchemaList(items=[_schema_summary(s) for s in schemas], total=len(schemas))
+
+
+@router.get(
+    "/schemas/{schema_id}/versions",
+    response_model=SchemaVersionList,
+    operation_id="listSchemaVersions",
+)
+async def list_schema_versions(
+    schema_id: uuid.UUID, principal: SchemaReader, session: SessionDep
+) -> SchemaVersionList:
+    schema = await SchemaService(session, principal).get_schema(schema_id)
+    if not schema.versions:
+        raise ApiError(404, "not_found", "Schema not found.")
+    return SchemaVersionList(
+        schema_=_schema_summary(schema),
+        items=[
+            SchemaVersionOut(
+                **_version_ref(v).model_dump(),
+                compatibility=v.compatibility,
+                content_sha256=v.content_sha256,
+                change_summary=v.change_summary,
+                created_at=v.created_at,
+                fields=[SchemaFieldOut.model_validate(f, from_attributes=True) for f in v.fields],
+            )
+            for v in schema.versions
+        ],
+    )
+
+
+@router.get(
+    "/schemas/{schema_id}/diff", response_model=SchemaDiffOut, operation_id="diffSchemaVersions"
+)
+async def diff_schema_versions(
+    schema_id: uuid.UUID,
+    principal: SchemaReader,
+    session: SessionDep,
+    from_version: Annotated[int, Query(alias="from", ge=1, description="Base version number.")],
+    to_version: Annotated[int, Query(alias="to", ge=1, description="Compared version number.")],
+) -> SchemaDiffOut:
+    schema, old, new, result = await SchemaService(session, principal).diff(
+        schema_id, from_version, to_version
+    )
+    return SchemaDiffOut(
+        schema_id=schema.id,
+        from_version=_version_ref(old),
+        to_version=_version_ref(new),
+        overall=result.overall,
+        changes=[SchemaFieldChange(**vars(c)) for c in result.changes],
     )

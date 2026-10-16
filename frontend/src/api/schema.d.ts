@@ -123,6 +123,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/schemas": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Schemas */
+        get: operations["listSchemas"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/schemas/{schema_id}/diff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Diff Schema Versions */
+        get: operations["diffSchemaVersions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/schemas/{schema_id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Schema Versions */
+        get: operations["listSchemaVersions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users": {
         parameters: {
             query?: never;
@@ -222,6 +273,17 @@ export interface components {
             mode: "oidc" | "dev";
             oidc?: components["schemas"]["OidcClientConfig"] | null;
         };
+        /**
+         * Compatibility
+         * @description How a version change affects consumers, least to most severe.
+         * @enum {string}
+         */
+        Compatibility: "ADDITIVE" | "COMPATIBLE" | "BREAKING";
+        /**
+         * DependentType
+         * @enum {string}
+         */
+        DependentType: "SCHEMA" | "MAPPING" | "RULE" | "MODULE" | "REPORT" | "INTEGRATION";
         /** DevPersona */
         DevPersona: {
             /** Description */
@@ -276,6 +338,11 @@ export interface components {
              */
             retryable: boolean;
         };
+        /**
+         * FieldType
+         * @enum {string}
+         */
+        FieldType: "STRING" | "INTEGER" | "DECIMAL" | "BOOLEAN" | "DATE" | "TIMESTAMP";
         /** HealthResponse */
         HealthResponse: {
             /**
@@ -353,6 +420,166 @@ export interface components {
          * @enum {string}
          */
         Role: "platform_admin" | "data_steward" | "risk_analyst" | "approver" | "auditor";
+        /** SchemaDependent */
+        SchemaDependent: {
+            /** Dependent Ref */
+            dependent_ref: string;
+            /** Dependent Schema Id */
+            dependent_schema_id: string | null;
+            dependent_type: components["schemas"]["DependentType"];
+            /** Description */
+            description: string | null;
+            /** Provisional */
+            provisional: boolean;
+        };
+        /** SchemaDiffOut */
+        SchemaDiffOut: {
+            /** Changes */
+            changes: components["schemas"]["SchemaFieldChange"][];
+            from_version: components["schemas"]["SchemaVersionRef"];
+            /** @description Most severe change; null if identical. */
+            overall: components["schemas"]["Compatibility"] | null;
+            /**
+             * Schema Id
+             * Format: uuid
+             */
+            schema_id: string;
+            to_version: components["schemas"]["SchemaVersionRef"];
+        };
+        /** SchemaFieldChange */
+        SchemaFieldChange: {
+            /**
+             * Attribute
+             * @description The changed attribute, for MODIFIED.
+             */
+            attribute: string | null;
+            /**
+             * Change
+             * @enum {string}
+             */
+            change: "ADDED" | "REMOVED" | "MODIFIED";
+            compatibility: components["schemas"]["Compatibility"];
+            /** Field */
+            field: string;
+            /** From Value */
+            from_value: unknown;
+            /** Reason */
+            reason: string;
+            /** To Value */
+            to_value: unknown;
+        };
+        /** SchemaFieldOut */
+        SchemaFieldOut: {
+            /**
+             * Classification
+             * @description Sensitivity of values in this field (BE-3.4).
+             */
+            classification: string;
+            data_type: components["schemas"]["FieldType"];
+            /** Description */
+            description: string | null;
+            /** Extension Eligible */
+            extension_eligible: boolean;
+            /** Name */
+            name: string;
+            /** Position */
+            position: number;
+            /** Precision */
+            precision: number | null;
+            /** Required */
+            required: boolean;
+            /** Scale */
+            scale: number | null;
+            /** Unit */
+            unit: string | null;
+        };
+        /** SchemaList */
+        SchemaList: {
+            /** Items */
+            items: components["schemas"]["SchemaSummary"][];
+            /** Total */
+            total: number;
+        };
+        /** SchemaSummary */
+        SchemaSummary: {
+            /** Code */
+            code: string;
+            /** Dependents */
+            dependents: components["schemas"]["SchemaDependent"][];
+            /** Description */
+            description: string | null;
+            effective_version: components["schemas"]["SchemaVersionRef"] | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            latest_version: components["schemas"]["SchemaVersionRef"];
+            /** Name */
+            name: string;
+            /** Owner */
+            owner: string;
+            /**
+             * Provisional
+             * @description True for seeded, not yet client-approved schemas.
+             */
+            provisional: boolean;
+            /** @description Status of the effective version, or of the latest one if none is in effect. */
+            status: components["schemas"]["SchemaVersionStatus"];
+            /** Version Count */
+            version_count: number;
+        };
+        /** SchemaVersionList */
+        SchemaVersionList: {
+            /** Items */
+            items: components["schemas"]["SchemaVersionOut"][];
+            schema: components["schemas"]["SchemaSummary"];
+        };
+        /** SchemaVersionOut */
+        SchemaVersionOut: {
+            /** Change Summary */
+            change_summary: string | null;
+            /** @description Severity of the change from the previous version (null for version 1). */
+            compatibility: components["schemas"]["Compatibility"] | null;
+            /** Content Sha256 */
+            content_sha256: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Effective From */
+            effective_from: string | null;
+            /** Fields */
+            fields: components["schemas"]["SchemaFieldOut"][];
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            status: components["schemas"]["SchemaVersionStatus"];
+            /** Version */
+            version: number;
+        };
+        /** SchemaVersionRef */
+        SchemaVersionRef: {
+            /** Effective From */
+            effective_from: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            status: components["schemas"]["SchemaVersionStatus"];
+            /** Version */
+            version: number;
+        };
+        /**
+         * SchemaVersionStatus
+         * @description Data Model §9 plus REJECTED (D-06). Transitions arrive with Phase 5.
+         * @enum {string}
+         */
+        SchemaVersionStatus: "DRAFT" | "IN_REVIEW" | "APPROVED" | "ACTIVE" | "DEPRECATED" | "RETIRED" | "REJECTED";
         /** UserPage */
         UserPage: {
             /** Items */
@@ -654,6 +881,129 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MyPermissions"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    listSchemas: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SchemaList"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    diffSchemaVersions: {
+        parameters: {
+            query: {
+                /** @description Base version number. */
+                from: number;
+                /** @description Compared version number. */
+                to: number;
+            };
+            header?: never;
+            path: {
+                schema_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SchemaDiffOut"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    listSchemaVersions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schema_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SchemaVersionList"];
                 };
             };
             /** @description Client error (standard envelope) */

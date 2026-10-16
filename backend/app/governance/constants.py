@@ -79,3 +79,54 @@ ROLE_CLEARANCE: dict[Role, ClassificationCode] = {
 }
 
 CLASSIFICATION_SEED_TAG = "0005_classification"
+
+
+# --- Schema registry (Phase 4, DG-01) ---------------------------------------------------
+
+
+class SchemaVersionStatus(StrEnum):
+    """Data Model §9 plus REJECTED (D-06). Transitions arrive with Phase 5."""
+
+    DRAFT = "DRAFT"
+    IN_REVIEW = "IN_REVIEW"
+    APPROVED = "APPROVED"
+    ACTIVE = "ACTIVE"
+    DEPRECATED = "DEPRECATED"
+    RETIRED = "RETIRED"
+    REJECTED = "REJECTED"
+
+
+class FieldType(StrEnum):
+    STRING = "STRING"
+    INTEGER = "INTEGER"
+    DECIMAL = "DECIMAL"
+    BOOLEAN = "BOOLEAN"
+    DATE = "DATE"
+    TIMESTAMP = "TIMESTAMP"
+
+
+class Compatibility(StrEnum):
+    """How a version change affects consumers, least to most severe."""
+
+    ADDITIVE = "ADDITIVE"  # only new optional fields: existing producers/consumers unaffected
+    COMPATIBLE = "COMPATIBLE"  # existing data still valid (e.g. a widened decimal)
+    BREAKING = "BREAKING"  # existing data or consumers may fail
+
+
+COMPATIBILITY_RANK = {
+    Compatibility.ADDITIVE: 0,
+    Compatibility.COMPATIBLE: 1,
+    Compatibility.BREAKING: 2,
+}
+
+
+class DependentType(StrEnum):
+    SCHEMA = "SCHEMA"
+    MAPPING = "MAPPING"
+    RULE = "RULE"
+    MODULE = "MODULE"
+    REPORT = "REPORT"
+    INTEGRATION = "INTEGRATION"
+
+
+SCHEMA_SEED_TAG = "0007_schema_seed"

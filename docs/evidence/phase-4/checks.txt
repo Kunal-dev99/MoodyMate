@@ -1,0 +1,115 @@
+# Phase 4 check output, captured 2026-10-16T06:09:41Z
+# worktree /home/user/MoodyMate-wt/ws1-phase4, branch feat/ws1-phase4 (from master a40b737); DB copy moodymate_ws1_p4; tests on moodymate_test.
+# The first section ran on the tree committed as 9684d9c; "Verification follow-ups" ran on the commit that adds that section.
+
+## Backend
+$ REQUIRE_DB=1 pytest -v app/tests/test_schema_registry.py
+app/tests/test_schema_registry.py::test_active_version_contract_cannot_change[UPDATE schema_field SET data_type = 'INTEGER' WHERE schema_version_id = $1] PASSED
+app/tests/test_schema_registry.py::test_active_version_contract_cannot_change[UPDATE schema_field SET description = 'edited' WHERE schema_version_id = $1] PASSED
+app/tests/test_schema_registry.py::test_active_version_contract_cannot_change[DELETE FROM schema_field WHERE schema_version_id = $1] PASSED
+app/tests/test_schema_registry.py::test_active_version_contract_cannot_change[INSERT INTO schema_field (id, schema_version_id, position, name, data_type, required, classification, extension_eligible, created_by) VALUES (gen_random_uuid(), $1, 99, 'smuggled', 'STRING', false, 'public', false, 'test')] PASSED
+app/tests/test_schema_registry.py::test_active_version_contract_cannot_change[UPDATE schema_version SET content_sha256 = repeat('0', 64) WHERE id = $1] PASSED
+app/tests/test_schema_registry.py::test_active_version_contract_cannot_change[UPDATE schema_version SET version = 99 WHERE id = $1] PASSED
+app/tests/test_schema_registry.py::test_active_version_contract_cannot_change[UPDATE schema_version SET status = 'DRAFT' WHERE id = $1] PASSED
+app/tests/test_schema_registry.py::test_active_version_contract_cannot_change[DELETE FROM schema_version WHERE id = $1] PASSED
+app/tests/test_schema_registry.py::test_status_can_still_move_forward PASSED
+app/tests/test_schema_registry.py::test_draft_version_fields_are_editable PASSED
+app/tests/test_schema_registry.py::test_seeded_content_hashes_match_the_service PASSED
+app/tests/test_schema_registry.py::test_seed_is_tagged_and_provisional PASSED
+app/tests/test_schema_registry.py::test_list_schemas PASSED
+app/tests/test_schema_registry.py::test_schemas_require_authentication PASSED
+app/tests/test_schema_registry.py::test_versions_include_fields PASSED
+app/tests/test_schema_registry.py::test_unknown_and_foreign_schemas_are_not_found PASSED
+app/tests/test_schema_registry.py::test_seeded_diff_fixture PASSED
+app/tests/test_schema_registry.py::test_diff_rejects_unknown_versions PASSED
+app/tests/test_schema_registry.py::test_change_classification[old0-new0-expected0] PASSED
+app/tests/test_schema_registry.py::test_change_classification[old1-new1-expected1] PASSED
+app/tests/test_schema_registry.py::test_change_classification[old2-new2-expected2] PASSED
+app/tests/test_schema_registry.py::test_change_classification[old3-new3-expected3] PASSED
+app/tests/test_schema_registry.py::test_change_classification[old4-new4-expected4] PASSED
+app/tests/test_schema_registry.py::test_change_classification[old5-new5-expected5] PASSED
+app/tests/test_schema_registry.py::test_change_classification[old6-new6-expected6] PASSED
+app/tests/test_schema_registry.py::test_change_classification[old7-new7-expected7] PASSED
+app/tests/test_schema_registry.py::test_change_classification[old8-new8-expected8] PASSED
+app/tests/test_schema_registry.py::test_change_classification[old9-new9-expected9] PASSED
+app/tests/test_schema_registry.py::test_change_classification[old10-new10-expected10] PASSED
+app/tests/test_schema_registry.py::test_change_classification[old11-new11-expected11] PASSED
+app/tests/test_schema_registry.py::test_change_classification[old12-new12-expected12] PASSED
+app/tests/test_schema_registry.py::test_identical_contracts_have_no_changes PASSED
+app/tests/test_schema_registry.py::test_overall_is_the_most_severe_change PASSED
+============================= 33 passed in 13.76s ==============================
+$ REQUIRE_DB=1 pytest -q app/tests
+172 passed in 63.37s (0:01:03)
+$ ruff check . && ruff format --check . && mypy app && export_openapi --check
+All checks passed!
+130 files already formatted
+Success: no issues found in 128 source files
+openapi.json is up to date
+
+## Migrations on the DB copy: head -> 0005 -> head (0003 and below keep the Phase 2 user-grant protection)
+INFO  [alembic.runtime.migration] Running downgrade 0007 -> 0006, Seed illustrative schemas instrument, position, cashflow_event (BE-4.2, D-11).
+INFO  [alembic.runtime.migration] Running downgrade 0006 -> 0005, Schema registry tables (BE-4.1, DG-01).
+INFO  [alembic.runtime.migration] Running upgrade 0005 -> 0006, Schema registry tables (BE-4.1, DG-01).
+INFO  [alembic.runtime.migration] Running upgrade 0006 -> 0007, Seed illustrative schemas instrument, position, cashflow_event (BE-4.2, D-11).
+0007 (head)
+$ alembic downgrade 0006:0005 --sql  (offline script carries the refusal guard)
+1
+$ seed after upgrade
+cashflow_event v1 ACTIVE fields=7
+instrument v1 ACTIVE fields=9
+instrument v2 DRAFT fields=9
+position v1 ACTIVE fields=9
+
+## Frontend
+$ gen:api (types regenerated from openapi.json and committed)
+ Test Files  5 passed (5)
+      Tests  40 passed (40)
+✔ No ESLint warnings or errors
+tsc: exit 0
+ ✓ Compiled successfully
+├ ○ /schemas                             3.67 kB         116 kB
+└ ƒ /schemas/[schemaId]                  5.08 kB         117 kB
+$ browser-phase4.mjs: see browser-phase4.json (ui_matches_api_fixture=true, status_values_all_platform=true)
+
+## Verification follow-ups (independent review of 9684d9c)
+$ REQUIRE_DB=1 pytest -v app/tests/test_schema_registry_hardening.py  (written first: all 21 failed before the fixes)
+app/tests/test_schema_registry_hardening.py::test_registry_tables_cannot_be_truncated[schema_field] PASSED
+app/tests/test_schema_registry_hardening.py::test_registry_tables_cannot_be_truncated[schema_version] PASSED
+app/tests/test_schema_registry_hardening.py::test_registry_tables_cannot_be_truncated[schema_definition] PASSED
+app/tests/test_schema_registry_hardening.py::test_session_setting_does_not_unlock_seeded_versions PASSED
+app/tests/test_schema_registry_hardening.py::test_field_insert_blocks_concurrent_activation PASSED
+app/tests/test_schema_registry_hardening.py::test_version_enums_are_checked[UPDATE schema_version SET status = 'active' WHERE id = $1-status] PASSED
+app/tests/test_schema_registry_hardening.py::test_version_enums_are_checked[UPDATE schema_version SET compatibility = 'MAYBE' WHERE id = $1-compatibility] PASSED
+app/tests/test_schema_registry_hardening.py::test_field_type_and_classification_are_checked[decimal-public-CheckViolationError] PASSED
+app/tests/test_schema_registry_hardening.py::test_field_type_and_classification_are_checked[STRING-top-secret-ForeignKeyViolationError] PASSED
+app/tests/test_schema_registry_hardening.py::test_dependent_type_is_checked PASSED
+app/tests/test_schema_registry_hardening.py::test_active_version_metadata_is_frozen[UPDATE schema_version SET effective_from = '2099-01-01' WHERE id = $1] PASSED
+app/tests/test_schema_registry_hardening.py::test_active_version_metadata_is_frozen[UPDATE schema_version SET compatibility = 'BREAKING' WHERE id = $1] PASSED
+app/tests/test_schema_registry_hardening.py::test_active_version_metadata_is_frozen[UPDATE schema_version SET seeded_by = NULL WHERE id = $1] PASSED
+app/tests/test_schema_registry_hardening.py::test_terminal_statuses_are_final[REJECTED] PASSED
+app/tests/test_schema_registry_hardening.py::test_terminal_statuses_are_final[RETIRED] PASSED
+app/tests/test_schema_registry_hardening.py::test_dependency_cannot_point_at_another_tenant PASSED
+app/tests/test_schema_registry_hardening.py::test_registry_downgrade_refuses_while_user_schemas_exist PASSED
+app/tests/test_schema_registry_hardening.py::test_removing_a_decimal_bound_is_a_widening PASSED
+app/tests/test_schema_registry_hardening.py::test_precision_changes_are_reported_on_any_type PASSED
+app/tests/test_schema_registry_hardening.py::test_type_change_does_not_hide_a_size_change PASSED
+app/tests/test_schema_registry_hardening.py::test_reordering_is_neither_a_change_nor_a_new_hash PASSED
+============================== 21 passed in 9.74s ==============================
+$ REQUIRE_DB=1 pytest -q app/tests
+193 passed in 59.07s
+$ ruff, format, mypy, export_openapi --check
+All checks passed!
+131 files already formatted
+Success: no issues found in 129 source files
+openapi.json is up to date
+$ DB copy: head -> 0005 -> head with the revised 0006/0007
+INFO  [alembic.runtime.migration] Running downgrade 0007 -> 0006, Seed illustrative schemas instrument, position, cashflow_event (BE-4.2, D-11).
+INFO  [alembic.runtime.migration] Running downgrade 0006 -> 0005, Schema registry tables (BE-4.1, DG-01).
+INFO  [alembic.runtime.migration] Running upgrade 0005 -> 0006, Schema registry tables (BE-4.1, DG-01).
+INFO  [alembic.runtime.migration] Running upgrade 0006 -> 0007, Seed illustrative schemas instrument, position, cashflow_event (BE-4.2, D-11).
+$ frontend: npm test, lint, typecheck, build
+      Tests  42 passed (42)
+✔ No ESLint warnings or errors
+tsc: exit 0
+ ✓ Compiled successfully
+$ browser-phase4.mjs re-run: ui_matches_api_fixture=true, status_values_all_platform=true
