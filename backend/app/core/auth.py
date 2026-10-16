@@ -9,7 +9,8 @@
   `undeclared_routes` (test_route_registry).
 """
 
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from contextlib import asynccontextmanager
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, Request
@@ -23,8 +24,9 @@ from starlette.routing import BaseRoute, Host, Mount
 from app.core.errors import ApiError
 from app.core.principal import Principal
 from app.core.tokens import InvalidToken, ProviderUnavailable, TokenExpired
-from app.db.session import get_session
-from app.governance.service import IdentityService
+from app.db.session import Database, get_session
+from app.governance.constants import AuditOutcome, ClassificationCode
+from app.governance.service import AccountDenied, IdentityService, audit, audit_by
 
 # Deliberately unauthenticated endpoints. Adding to this set is a security decision.
 PUBLIC_PATHS = frozenset(
@@ -45,6 +47,23 @@ _bearer = HTTPBearer(auto_error=False, description="Access token from the identi
 def _unauthorized(code: str, message: str, error: str | None = None) -> ApiError:
     challenge = "Bearer" if error is None else f'Bearer error="{error}"'
     return ApiError(401, code, message, headers={"WWW-Authenticate": challenge})
+
+
+@asynccontextmanager
+async def _audit_session(
+    request: Request, request_session: AsyncSession
+) -> AsyncIterator[AsyncSession]:
+    """A separate session that commits only the denial's audit row.
+
+    The request is being refused, so its own session is rolled back first: nothing it
+    holds is committed, and its connection goes back to the pool before a second one is
+    taken (otherwise concurrent denials could exhaust the pool waiting on each other).
+    """
+    await request_session.rollback()
+    db: Database = request.app.state.db
+    async with db.sessionmaker() as session:
+        yield session
+        await session.commit()
 
 
 async def get_principal(
@@ -73,9 +92,29 @@ async def get_principal(
         raise _unauthorized(
             "invalid_token", "The access token is not valid.", "invalid_token"
         ) from exc
-    principal = await IdentityService(session).resolve_principal(
-        identity, can_self_provision=request.app.state.settings.can_self_provision
-    )
+    settings = request.app.state.settings
+    try:
+        principal = await IdentityService(session).resolve_principal(
+            identity,
+            can_self_provision=settings.can_self_provision,
+            masking_enabled=settings.MASKING_ENABLED,
+        )
+    except AccountDenied as exc:
+        # BE-3.2: a known but disabled/suspended account leaves a trace on every attempt.
+        async with _audit_session(request, session) as audit_session:
+            audit(
+                audit_session,
+                tenant_id=exc.tenant_id,
+                actor=f"user:{exc.user_id}",
+                actor_user_id=exc.user_id,
+                action="auth.access",
+                resource_type="user",
+                resource_id=str(exc.user_id),
+                outcome=AuditOutcome.DENIED,
+                details={"reason": exc.code},
+                details_classification={"reason": ClassificationCode.PUBLIC},
+            )
+        raise
     request.state.principal = principal
     return principal
 
@@ -84,8 +123,27 @@ PrincipalDependency = Callable[..., Awaitable[Principal]]
 
 
 def require_permission(permission: str) -> PrincipalDependency:
-    async def dependency(principal: Annotated[Principal, Depends(get_principal)]) -> Principal:
+    async def dependency(
+        request: Request,
+        principal: Annotated[Principal, Depends(get_principal)],
+        session: Annotated[AsyncSession, Depends(get_session)],
+    ) -> Principal:
         if permission != AUTHENTICATED and permission not in principal.permissions:
+            # BE-3.2: denied requests are audited, in their own session so that nothing
+            # else pending in the request's session is committed by a refusal.
+            route = request.scope.get("route")
+            endpoint = getattr(route, "path", request.url.path)
+            async with _audit_session(request, session) as audit_session:
+                audit_by(
+                    audit_session,
+                    principal,
+                    f"{request.method} {endpoint}",
+                    "endpoint",
+                    outcome=AuditOutcome.DENIED,
+                    resource_id=endpoint,
+                    details={"required_permission": permission},
+                    details_classification={"required_permission": ClassificationCode.PUBLIC},
+                )
             raise ApiError(
                 403,
                 "forbidden",

@@ -16,6 +16,8 @@ class Principal:
     email: str | None
     roles: frozenset[str]
     permissions: frozenset[str]
+    # Classification codes this principal may see unmasked (BE-3.5).
+    clear_classifications: frozenset[str] = frozenset({"public"})
 
     @property
     def scope(self) -> DataScope:

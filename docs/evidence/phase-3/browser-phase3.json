@@ -1,0 +1,23 @@
+{
+  "risk_analyst_nav_has_audit": false,
+  "risk_analyst_audit_page": "forbidden",
+  "success_cid": "1ef112b4-cb50-4518-ba00-f0269e6bd1b3",
+  "denied_cid": "69e9a92c-e55a-4409-ae37-c56f323555ee",
+  "timeline_shows_success_cid": true,
+  "timeline_shows_denied_cid": true,
+  "denied_row": "DENIED\nGET /api/v1/users\non endpoint /api/v1/users\n10/16/2026, 5:47:26 AM\nactor user:14453ea4-18f5-422a-af0a-524bb17265ef\ncorrelation 69e9a92c-e55a-4409-ae37-c56f323555ee\nrequired_permission\nadmin:read",
+  "auditor_provision_row": "SUCCESS\nuser.provision\non user\n10/16/2026, 5:47:24 AM\nactor system:self-provision\ncorrelation e2e-provision-fixture\nemail\nmasked\nissuer\nhttps://idp.test",
+  "auditor_email_masked_text": "masked",
+  "auditor_sees_raw_email": false,
+  "tooltip": "Masked by policy: confidential data. Your role's clearance does not include it.",
+  "page1_pager": "1–20 of 88",
+  "page2_pager": "21–40 of 89",
+  "page2_repeats_page1": false,
+  "back_to_first_page": true,
+  "filtered_all_denied": true,
+  "pager_text": "1–5 of 5",
+  "exact_page_pager": "1–20 of 20",
+  "exact_page_older_disabled": true,
+  "admin_provision_row": "SUCCESS\nuser.provision\non user\n10/16/2026, 5:47:24 AM\nactor system:self-provision\ncorrelation e2e-provision-fixture\nemail\npat@example.test\nissuer\nhttps://idp.test",
+  "admin_sees_clear_email": true
+}

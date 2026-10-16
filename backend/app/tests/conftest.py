@@ -71,6 +71,8 @@ def alembic_config(url: str) -> Config:
     cfg = Config("alembic.ini")
     cfg.set_main_option("sqlalchemy.url", url)
     cfg.attributes["skip_logging"] = True
+    # Tests reset the schema freely; the audit-trail downgrade guard is tested on its own.
+    cfg.attributes["allow_audit_loss"] = True
     return cfg
 
 

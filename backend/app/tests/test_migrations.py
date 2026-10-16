@@ -7,6 +7,7 @@ from alembic.script import ScriptDirectory
 def _config(url: str) -> Config:
     cfg = Config("alembic.ini")
     cfg.set_main_option("sqlalchemy.url", url)
+    cfg.attributes["allow_audit_loss"] = True  # test data only
     return cfg
 
 

@@ -6,15 +6,18 @@ Redaction is applied by the formatter to the message, the args and every `extra`
 * keys that name credentials (authorization, password, secret, token, *key, cookie …)
 * bearer tokens and JWT-shaped strings anywhere in a string value
 * any value wrapped in `Sensitive(...)`
+* a `Classified(value, code)` whose code is not in `LOG_CLEAR` (BE-3.5)
 """
 
 import json
 import logging
 import re
 import sys
+import traceback
 from datetime import UTC, datetime
 from typing import Any
 
+from app.core.classification import LOG_CLEAR, Classified
 from app.core.correlation import get_correlation_id
 
 REDACTED = "[REDACTED]"
@@ -53,6 +56,9 @@ class Sensitive:
 def redact(value: Any, key: str | None = None) -> Any:
     if isinstance(value, Sensitive):
         return REDACTED
+    if isinstance(value, Classified):
+        # Same classification codes as API masking (BE-3.5); unknown codes are redacted.
+        return redact(value.value, key) if value.code in LOG_CLEAR else REDACTED
     if key is not None and _SENSITIVE_KEY.search(key):
         return REDACTED
     if isinstance(value, str):
@@ -66,7 +72,53 @@ def redact(value: Any, key: str | None = None) -> Any:
     return redact(str(value))
 
 
+def _is_database_error(exc: BaseException) -> bool:
+    from sqlalchemy.exc import StatementError
+
+    module = type(exc).__module__
+    return isinstance(exc, StatementError) or module.startswith(("asyncpg", "sqlalchemy.dialects"))
+
+
+def _exception_message(exc: BaseException) -> str:
+    """Database errors carry bound values (and row values, e.g. 'Key (email)=(...)') in
+    their message, so only the statement and the error identity are kept (BE-3.5)."""
+    if not _is_database_error(exc):
+        return str(exc)
+    statement = getattr(exc, "statement", None)
+    sqlstate = getattr(exc, "sqlstate", None)
+    constraint = getattr(exc, "constraint_name", None)
+    parts = [f"[SQL: {statement}]" if statement else "", f"sqlstate={sqlstate}" if sqlstate else ""]
+    parts.append(f"constraint={constraint}" if constraint else "")
+    return " ".join(p for p in parts + ["(driver message withheld)"] if p)
+
+
+def format_exception(exc: BaseException) -> str:
+    chain: list[BaseException] = []
+    current: BaseException | None = exc
+    while current is not None and all(current is not seen for seen in chain):
+        chain.append(current)
+        current = current.__cause__ or (
+            None if current.__suppress_context__ else current.__context__
+        )
+    out = []
+    for item in reversed(chain):
+        frames = "".join(traceback.format_tb(item.__traceback__))
+        name = f"{type(item).__module__}.{type(item).__qualname__}"
+        message = _exception_message(item)
+        out.append(f"Traceback (most recent call last):\n{frames}{name}: {message}")
+    text = "\n\nDuring handling, another exception occurred:\n\n".join(out)
+    if isinstance(exc, BaseExceptionGroup):
+        # Keep each grouped exception's diagnostics (same withholding rules apply).
+        for i, sub in enumerate(exc.exceptions, 1):
+            text += f"\n\n[group member {i}]\n" + format_exception(sub)
+    return text
+
+
 class JsonFormatter(logging.Formatter):
+    def formatException(self, ei: Any) -> str:  # noqa: N802 - logging API name
+        exc = ei[1]
+        return format_exception(exc) if exc is not None else super().formatException(ei)
+
     def format(self, record: logging.LogRecord) -> str:
         if isinstance(record.args, dict):
             record.args = redact(record.args)

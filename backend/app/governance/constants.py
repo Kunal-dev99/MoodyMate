@@ -52,3 +52,30 @@ SEED_TAG = "0003_identity_seed"
 
 DEV_ISSUER = "moodymate-dev"
 DEV_AUDIENCE = "moodymate-api"
+
+
+class AuditOutcome(StrEnum):
+    SUCCESS = "SUCCESS"
+    DENIED = "DENIED"
+    FAILURE = "FAILURE"
+
+
+class ClassificationCode(StrEnum):
+    """PROVISIONAL (D-11): seeded by migration 0005; ranks 0..3 in this order."""
+
+    PUBLIC = "public"
+    INTERNAL = "internal"
+    CONFIDENTIAL = "confidential"
+    RESTRICTED = "restricted"
+
+
+# Highest classification each role sees in clear (frozen copy in migration 0005).
+ROLE_CLEARANCE: dict[Role, ClassificationCode] = {
+    Role.PLATFORM_ADMIN: ClassificationCode.CONFIDENTIAL,
+    Role.DATA_STEWARD: ClassificationCode.RESTRICTED,
+    Role.RISK_ANALYST: ClassificationCode.INTERNAL,
+    Role.APPROVER: ClassificationCode.CONFIDENTIAL,
+    Role.AUDITOR: ClassificationCode.INTERNAL,
+}
+
+CLASSIFICATION_SEED_TAG = "0005_classification"

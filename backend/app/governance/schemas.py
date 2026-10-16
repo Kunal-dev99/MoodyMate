@@ -5,11 +5,12 @@ Request/response models for identity endpoints.
 
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
-from app.governance.constants import Permission, Role
+from app.core.classification import Classification, MaskedValue
+from app.governance.constants import ClassificationCode, Permission, Role
 
 
 class OidcClientConfig(BaseModel):
@@ -39,7 +40,7 @@ class MyPermissions(BaseModel):
 class UserSummary(BaseModel):
     id: uuid.UUID
     display_name: str
-    email: str | None
+    email: Annotated[str | None | MaskedValue, Classification(ClassificationCode.CONFIDENTIAL)]
     status: str
     roles: list[Role]
     created_at: datetime
@@ -67,3 +68,26 @@ class DevSessionResponse(BaseModel):
     access_token: str
     token_type: Literal["Bearer"] = "Bearer"  # noqa: S105 - token type, not a secret
     expires_in: int
+
+
+class AuditEventOut(BaseModel):
+    id: uuid.UUID
+    occurred_at: datetime
+    actor: str
+    actor_user_id: uuid.UUID | None
+    action: str
+    resource_type: str
+    resource_id: str | None
+    outcome: str
+    correlation_id: str | None
+    approval_ref: str | None
+    details: dict[str, MaskedValue | Any] = Field(
+        description="Safe metadata. Values the caller may not see are MaskedValue (BE-3.5)."
+    )
+
+
+class AuditEventPage(BaseModel):
+    items: list[AuditEventOut]
+    total: int
+    limit: int
+    offset: int

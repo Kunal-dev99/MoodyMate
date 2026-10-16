@@ -1,0 +1,168 @@
+# Phase 3 check output — captured 2026-10-16T05:21:48Z
+# worktree /home/user/MoodyMate-wt/ws1-phase3, branch feat/ws1-phase3 (from master 6b047d7).
+# The first section ran on the Phase 3 tree before commit e02e723 (no later edits before that commit).
+# "Verification follow-ups" ran on the tree committed as 9be31f5; "Re-verification follow-ups" on the commit that adds it.
+
+## Backend — run WITHOUT ENV set
+$ ruff check . && ruff format --check . && mypy app scripts
+All checks passed!
+128 files already formatted
+Success: no issues found in 128 source files
+$ env -u ENV REQUIRE_DB=1 pytest -v app/tests/test_audit.py
+app/tests/test_audit.py::test_audit_rows_cannot_be_updated_or_deleted[UPDATE audit_event SET actor = 'tampered' WHERE id = $1] PASSED [  5%]
+app/tests/test_audit.py::test_audit_rows_cannot_be_updated_or_deleted[DELETE FROM audit_event WHERE id = $1] PASSED [ 11%]
+app/tests/test_audit.py::test_audit_table_cannot_be_truncated PASSED     [ 16%]
+app/tests/test_audit.py::test_successful_action_produces_exactly_one_event PASSED [ 22%]
+app/tests/test_audit.py::test_denied_action_produces_exactly_one_event PASSED [ 27%]
+app/tests/test_audit.py::test_audit_joins_the_callers_transaction PASSED [ 33%]
+app/tests/test_audit.py::test_dev_session_creation_is_audited PASSED     [ 38%]
+app/tests/test_audit.py::test_audit_read_requires_audit_read PASSED      [ 44%]
+app/tests/test_audit.py::test_filters_and_pagination PASSED              [ 50%]
+app/tests/test_audit.py::test_reading_audit_is_itself_audited PASSED     [ 55%]
+app/tests/test_audit.py::test_audit_reads_are_tenant_scoped PASSED       [ 61%]
+app/tests/test_audit.py::test_seed_classifications_exist_and_are_provisional PASSED [ 66%]
+app/tests/test_audit.py::test_seed_clearances_match_constants PASSED     [ 72%]
+app/tests/test_audit.py::test_same_record_masked_for_risk_analyst_clear_for_data_steward PASSED [ 77%]
+app/tests/test_audit.py::test_audit_details_masked_by_clearance PASSED   [ 83%]
+app/tests/test_audit.py::test_masking_cannot_be_disabled_outside_local PASSED [ 88%]
+app/tests/test_audit.py::test_masking_disabled_in_local_shows_everything PASSED [ 94%]
+app/tests/test_audit.py::test_log_filter_uses_the_same_classifications PASSED [100%]
+============================== 18 passed in 7.41s ==============================
+$ env -u ENV REQUIRE_DB=1 pytest -q   (full suite)
+121 passed in 26.52s
+$ export_openapi --check
+openapi.json is up to date
+$ DATABASE_URL=…/moodymate_ws1_p3 alembic downgrade base && upgrade head && downgrade base && upgrade head  (DB copy holds E2E audit rows)
+INFO  [alembic.runtime.migration] Running downgrade 0005 -> 0004, Seed classification levels and role clearances (BE-3.4, D-11).
+INFO  [alembic.runtime.migration] Running downgrade 0004 -> 0003, Audit trail (BE-3.1, D-10) and classification tables (BE-3.4).
+INFO  [alembic.runtime.migration] Running downgrade 0003 -> 0002, Seed identity data (BE-2.2, D-11): default tenant, roles, permissions, matrix.
+asyncpg.exceptions.ForeignKeyViolationError: update or delete on table "role" violates foreign key constraint "fk_user_role_role_id_role" on table "user_role"
+    self._handle_exception(error)
+    self._adapt_connection._handle_exception(error)
+    raise translated_error from error
+sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_dbapi.IntegrityError: <class 'asyncpg.exceptions.ForeignKeyViolationError'>: update or delete on table "role" violates foreign key constraint "fk_user_role_role_id_role" on table "user_role"
+    self._handle_exception(error)
+    self._adapt_connection._handle_exception(error)
+    raise translated_error from error
+sqlalchemy.exc.IntegrityError: (sqlalchemy.dialects.postgresql.asyncpg.IntegrityError) <class 'asyncpg.exceptions.ForeignKeyViolationError'>: update or delete on table "role" violates foreign key constraint "fk_user_role_role_id_role" on table "user_role"
+(Background on this error at: https://sqlalche.me/e/20/gkpj)
+
+## Frontend
+$ gen:api (no-op check)
+unchanged
+$ npm test
+ Test Files  3 passed (3)
+      Tests  33 passed (33)
+$ lint / typecheck / build
+✔ No ESLint warnings or errors
+tsc: exit 0
+ ✓ Compiled successfully
+├ ○ /audit                               8.29 kB         157 kB
+
+## Migration round trip after clearing E2E users (audit rows are append-only and are dropped with the table on downgrade)
+DELETE 3
+DELETE 3
+$ alembic downgrade base && upgrade head && downgrade base && upgrade head
+INFO  [alembic.runtime.migration] Running downgrade 0005 -> 0004, Seed classification levels and role clearances (BE-3.4, D-11).
+INFO  [alembic.runtime.migration] Running downgrade 0004 -> 0003, Audit trail (BE-3.1, D-10) and classification tables (BE-3.4).
+INFO  [alembic.runtime.migration] Running downgrade 0003 -> 0002, Seed identity data (BE-2.2, D-11): default tenant, roles, permissions, matrix.
+INFO  [alembic.runtime.migration] Running downgrade 0002 -> 0001, Identity and authorization tables (BE-2.1): tenant, user_account, role, permission,
+INFO  [alembic.runtime.migration] Running downgrade 0001 -> , Baseline: empty schema. Feature tables start in Phase 2.
+INFO  [alembic.runtime.migration] Running upgrade  -> 0001, Baseline: empty schema. Feature tables start in Phase 2.
+INFO  [alembic.runtime.migration] Running upgrade 0001 -> 0002, Identity and authorization tables (BE-2.1): tenant, user_account, role, permission,
+INFO  [alembic.runtime.migration] Running upgrade 0002 -> 0003, Seed identity data (BE-2.2, D-11): default tenant, roles, permissions, matrix.
+INFO  [alembic.runtime.migration] Running upgrade 0003 -> 0004, Audit trail (BE-3.1, D-10) and classification tables (BE-3.4).
+INFO  [alembic.runtime.migration] Running upgrade 0004 -> 0005, Seed classification levels and role clearances (BE-3.4, D-11).
+INFO  [alembic.runtime.migration] Running downgrade 0005 -> 0004, Seed classification levels and role clearances (BE-3.4, D-11).
+INFO  [alembic.runtime.migration] Running downgrade 0004 -> 0003, Audit trail (BE-3.1, D-10) and classification tables (BE-3.4).
+INFO  [alembic.runtime.migration] Running downgrade 0003 -> 0002, Seed identity data (BE-2.2, D-11): default tenant, roles, permissions, matrix.
+INFO  [alembic.runtime.migration] Running downgrade 0002 -> 0001, Identity and authorization tables (BE-2.1): tenant, user_account, role, permission,
+INFO  [alembic.runtime.migration] Running downgrade 0001 -> , Baseline: empty schema. Feature tables start in Phase 2.
+INFO  [alembic.runtime.migration] Running upgrade  -> 0001, Baseline: empty schema. Feature tables start in Phase 2.
+INFO  [alembic.runtime.migration] Running upgrade 0001 -> 0002, Identity and authorization tables (BE-2.1): tenant, user_account, role, permission,
+INFO  [alembic.runtime.migration] Running upgrade 0002 -> 0003, Seed identity data (BE-2.2, D-11): default tenant, roles, permissions, matrix.
+INFO  [alembic.runtime.migration] Running upgrade 0003 -> 0004, Audit trail (BE-3.1, D-10) and classification tables (BE-3.4).
+INFO  [alembic.runtime.migration] Running upgrade 0004 -> 0005, Seed classification levels and role clearances (BE-3.4, D-11).
+0005 (head)
+
+## Verification follow-ups (after the independent Phase 3 review)
+$ REQUIRE_DB=1 pytest -v app/tests/test_audit_hardening.py  (written first: 12 failed before the fixes)
+app/tests/test_audit_hardening.py::test_audit_rejects_details_without_a_classification PASSED
+app/tests/test_audit_hardening.py::test_unclassified_stored_details_are_masked PASSED
+app/tests/test_audit_hardening.py::test_downgrade_refuses_while_audit_rows_exist PASSED
+app/tests/test_audit_hardening.py::test_database_errors_do_not_log_bound_values PASSED
+app/tests/test_audit_hardening.py::test_keyset_paging_does_not_repeat_rows_despite_self_audit PASSED
+app/tests/test_audit_hardening.py::test_unknown_or_foreign_before_cursor_is_rejected PASSED
+app/tests/test_audit_hardening.py::test_resource_id_filter PASSED
+app/tests/test_audit_hardening.py::test_filters_are_length_bounded PASSED
+app/tests/test_audit_hardening.py::test_disabled_account_denial_is_audited PASSED
+app/tests/test_audit_hardening.py::test_denied_audit_does_not_commit_pending_request_work PASSED
+app/tests/test_audit_hardening.py::test_mask_model_walks_containers_and_masks_none PASSED
+app/tests/test_audit_hardening.py::test_user_directory_email_is_confidential PASSED
+============================== 12 passed in 4.65s ==============================
+$ REQUIRE_DB=1 pytest -q app/tests
+133 passed in 33.20s
+$ ruff check . && ruff format --check . && mypy app
+All checks passed!
+129 files already formatted
+Success: no issues found in 127 source files
+$ export_openapi --check
+openapi.json is up to date
+$ alembic downgrade base  (DB copy holds audit rows; no opt-in)
+INFO  [alembic.runtime.migration] Running downgrade 0005 -> 0004, Seed classification levels and role clearances (BE-3.4, D-11).
+INFO  [alembic.runtime.migration] Running downgrade 0004 -> 0003, Audit trail (BE-3.1, D-10) and classification tables (BE-3.4).
+    raise RuntimeError(
+RuntimeError: audit_event has rows (61); refusing to drop the audit trail. Archive it, then re-run with -x allow_audit_loss=true.
+$ alembic current
+0005 (head)
+$ alembic -x allow_audit_loss=true downgrade base && upgrade head  (explicit opt-in)
+INFO  [alembic.runtime.migration] Running downgrade 0005 -> 0004, Seed classification levels and role clearances (BE-3.4, D-11).
+INFO  [alembic.runtime.migration] Running downgrade 0004 -> 0003, Audit trail (BE-3.1, D-10) and classification tables (BE-3.4).
+INFO  [alembic.runtime.migration] Running downgrade 0003 -> 0002, Seed identity data (BE-2.2, D-11): default tenant, roles, permissions, matrix.
+0
+0005 (head)
+(the 0003 refusal above is the Phase 2 foreign-key protection of user role grants, unchanged)
+$ frontend: gen:api, npm test, lint, typecheck, build
+schema.d.ts regenerated (committed with this change)
+      Tests  34 passed (34)
+✔ No ESLint warnings or errors
+tsc: exit 0
+ ✓ Compiled successfully
+├ ○ /audit                               5.02 kB         157 kB
+$ browser-phase3.mjs (adds keyset paging): see browser-phase3.json, page2_repeats_page1=false
+
+## Re-verification follow-ups (N1-N6 and the minor gaps)
+$ REQUIRE_DB=1 pytest -v app/tests/test_audit_hardening.py  (6 new tests written first; each failed before its fix)
+app/tests/test_audit_hardening.py::test_audit_rejects_details_without_a_classification PASSED
+app/tests/test_audit_hardening.py::test_unclassified_stored_details_are_masked PASSED
+app/tests/test_audit_hardening.py::test_downgrade_refuses_while_audit_rows_exist PASSED
+app/tests/test_audit_hardening.py::test_downgrade_guard_works_offline PASSED
+app/tests/test_audit_hardening.py::test_database_errors_do_not_log_bound_values PASSED
+app/tests/test_audit_hardening.py::test_keyset_paging_does_not_repeat_rows_despite_self_audit PASSED
+app/tests/test_audit_hardening.py::test_unknown_or_foreign_before_cursor_is_rejected PASSED
+app/tests/test_audit_hardening.py::test_resource_id_filter PASSED
+app/tests/test_audit_hardening.py::test_filters_are_length_bounded PASSED
+app/tests/test_audit_hardening.py::test_disabled_account_denial_is_audited PASSED
+app/tests/test_audit_hardening.py::test_denied_audit_does_not_commit_pending_request_work PASSED
+app/tests/test_audit_hardening.py::test_mask_model_walks_containers_and_masks_none PASSED
+app/tests/test_audit_hardening.py::test_user_directory_email_is_confidential PASSED
+app/tests/test_audit_hardening.py::test_denials_do_not_exhaust_a_one_connection_pool PASSED
+app/tests/test_audit_hardening.py::test_mask_model_handles_optional_tuple_and_dict_shapes PASSED
+app/tests/test_audit_hardening.py::test_mask_model_keeps_namedtuples_working PASSED
+app/tests/test_audit_hardening.py::test_keyset_read_records_its_cursor PASSED
+app/tests/test_audit_hardening.py::test_log_formatter_keeps_grouped_exceptions_without_values PASSED
+============================== 18 passed in 6.03s ==============================
+$ REQUIRE_DB=1 pytest -q app/tests
+139 passed in 34.81s
+$ ruff check . && ruff format --check . && mypy app && export_openapi --check
+All checks passed!
+129 files already formatted
+Success: no issues found in 127 source files
+openapi.json is up to date
+$ frontend: npm test, lint, typecheck, build
+      Tests  36 passed (36)
+✔ No ESLint warnings or errors
+tsc: exit 0
+ ✓ Compiled successfully
+├ ○ /audit                               5.12 kB         157 kB
+$ browser-phase3.mjs: page2_repeats_page1=false; exact_page_pager "1–20 of 20" with exact_page_older_disabled=true

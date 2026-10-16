@@ -6,18 +6,104 @@ or repositories.
 
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.classification import UNCLASSIFIED, mask_mapping
+from app.core.correlation import get_correlation_id
 from app.core.errors import ApiError
 from app.core.principal import Principal
 from app.core.tokens import DevTokens, VerifiedIdentity
-from app.governance.constants import DEFAULT_TENANT_ID, DEV_ISSUER, TenantStatus, UserStatus
-from app.governance.models import RoleModel, UserAccount
-from app.governance.repository import IdentityRepository, UserRepository
+from app.governance.constants import (
+    DEFAULT_TENANT_ID,
+    DEV_ISSUER,
+    AuditOutcome,
+    ClassificationCode,
+    TenantStatus,
+    UserStatus,
+)
+from app.governance.models import AuditEvent, RoleModel, UserAccount
+from app.governance.repository import AuditRepository, IdentityRepository, UserRepository
 
 
-def _principal(user: UserAccount) -> Principal:
+def audit(
+    session: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    actor: str,
+    action: str,
+    resource_type: str,
+    outcome: AuditOutcome,
+    actor_user_id: uuid.UUID | None = None,
+    resource_id: str | None = None,
+    details: dict[str, Any] | None = None,
+    details_classification: dict[str, str] | None = None,
+    approval_ref: str | None = None,
+) -> AuditEvent:
+    """Record a privileged action (BE-3.2) in the caller's transaction.
+
+    Nothing is committed here: the event is written atomically with the action it
+    describes, or not at all. `details` must hold safe metadata only; classify any key
+    and classify every key, so it is masked for readers without clearance (BE-3.5).
+    """
+    details = details or {}
+    details_classification = details_classification or {}
+    # Fail closed (BE-3.5): the trail is append-only, so a detail stored without a
+    # classification could never be fixed later. Reject it when it is written.
+    known = {c.value for c in ClassificationCode}
+    unclassified = sorted(set(details) - set(details_classification))
+    if unclassified:
+        raise ValueError(f"audit details need a classification: {', '.join(unclassified)}")
+    unknown = sorted(c for c in details_classification.values() if c not in known)
+    if unknown:
+        raise ValueError(f"unknown classification code(s): {', '.join(unknown)}")
+    event = AuditEvent(
+        tenant_id=tenant_id,
+        actor=actor,
+        actor_user_id=actor_user_id,
+        action=action,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        outcome=outcome,
+        correlation_id=get_correlation_id(),
+        approval_ref=approval_ref,
+        details=details,
+        details_classification=details_classification,
+    )
+    AuditRepository(session).add(event)
+    return event
+
+
+def audit_by(
+    session: AsyncSession,
+    principal: Principal,
+    action: str,
+    resource_type: str,
+    outcome: AuditOutcome = AuditOutcome.SUCCESS,
+    **kwargs: Any,
+) -> AuditEvent:
+    return audit(
+        session,
+        tenant_id=principal.tenant_id,
+        actor=principal.actor,
+        actor_user_id=principal.user_id,
+        action=action,
+        resource_type=resource_type,
+        outcome=outcome,
+        **kwargs,
+    )
+
+
+async def _principal(
+    user: UserAccount, repo: IdentityRepository, masking_enabled: bool
+) -> Principal:
+    clear = (
+        await repo.clear_classifications([r.id for r in user.roles])
+        if masking_enabled
+        else await repo.all_classifications() | {UNCLASSIFIED}
+    )
     return Principal(
         user_id=user.id,
         tenant_id=user.tenant_id,
@@ -27,7 +113,17 @@ def _principal(user: UserAccount) -> Principal:
         email=user.email,
         roles=frozenset(r.code for r in user.roles),
         permissions=frozenset(p.code for r in user.roles for p in r.permissions),
+        clear_classifications=clear,
     )
+
+
+class AccountDenied(ApiError):
+    """403 for a known account that may not sign in; carries what the audit row needs."""
+
+    def __init__(self, user: UserAccount, code: str, message: str) -> None:
+        super().__init__(403, code, message)
+        self.user_id = user.id
+        self.tenant_id = user.tenant_id
 
 
 @dataclass(frozen=True)
@@ -42,7 +138,7 @@ class IdentityService:
         self.repo = IdentityRepository(session)
 
     async def resolve_principal(
-        self, identity: VerifiedIdentity, can_self_provision: bool
+        self, identity: VerifiedIdentity, can_self_provision: bool, masking_enabled: bool = True
     ) -> Principal:
         user = await self.repo.find_user(identity.issuer, identity.subject)
         if user is None:
@@ -62,12 +158,29 @@ class IdentityService:
                 identity.name,
                 actor="system:self-provision",
             )
+            audit(
+                self.session,
+                tenant_id=user.tenant_id,
+                actor="system:self-provision",
+                actor_user_id=user.id,
+                action="user.provision",
+                resource_type="user",
+                resource_id=str(user.id),
+                outcome=AuditOutcome.SUCCESS,
+                details={"issuer": identity.issuer, "email": identity.email},
+                details_classification={
+                    "issuer": ClassificationCode.INTERNAL,
+                    "email": ClassificationCode.CONFIDENTIAL,
+                },
+            )
             await self.session.commit()
         if user.status != UserStatus.ACTIVE:
-            raise ApiError(403, "account_disabled", "Your account is disabled.")
+            raise AccountDenied(user, "account_disabled", "Your account is disabled.")
         if await self.repo.tenant_status(user.tenant_id) != TenantStatus.ACTIVE:
-            raise ApiError(403, "tenant_suspended", "Your organisation's access is suspended.")
-        return _principal(user)
+            raise AccountDenied(
+                user, "tenant_suspended", "Your organisation's access is suspended."
+            )
+        return await _principal(user, self.repo, masking_enabled)
 
     async def dev_personas(self) -> list[RoleModel]:
         return await self.repo.list_roles()
@@ -86,6 +199,18 @@ class IdentityService:
             )
         if role.code not in {r.code for r in user.roles}:
             await self.repo.assign_role(user, role, actor="system:dev-session")
+        audit(
+            self.session,
+            tenant_id=user.tenant_id,
+            actor="anonymous:dev-sign-in",
+            actor_user_id=user.id,
+            action="auth.dev_session.create",
+            resource_type="user",
+            resource_id=str(user.id),
+            outcome=AuditOutcome.SUCCESS,
+            details={"role": role.code},
+            details_classification={"role": ClassificationCode.INTERNAL},
+        )
         await self.session.commit()
         return DevSession(
             access_token=tokens.issue(subject, email, name),
@@ -94,15 +219,107 @@ class IdentityService:
 
 
 class UserService:
+    """Read-only user directory; every read is a privileged access and is audited."""
+
     def __init__(self, session: AsyncSession, principal: Principal) -> None:
+        self.session = session
+        self.principal = principal
         self.repo = UserRepository(session, principal.scope)
 
     async def list_users(self, limit: int, offset: int) -> tuple[list[UserAccount], int]:
-        return await self.repo.page(limit, offset)
+        users, total = await self.repo.page(limit, offset)
+        audit_by(
+            self.session,
+            self.principal,
+            "user.list",
+            "user",
+            details={"limit": limit, "offset": offset, "returned": len(users)},
+            details_classification=dict.fromkeys(
+                ("limit", "offset", "returned"), ClassificationCode.PUBLIC
+            ),
+        )
+        await self.session.commit()
+        return users, total
 
     async def get_user(self, user_id: uuid.UUID) -> UserAccount:
         user = await self.repo.get(user_id)
         if user is None:
             # Same response whether the user is absent or in another tenant.
             raise ApiError(404, "not_found", "User not found.")
+        audit_by(self.session, self.principal, "user.read", "user", resource_id=str(user.id))
+        await self.session.commit()
         return user
+
+
+@dataclass(frozen=True)
+class AuditFilters:
+    resource_type: str | None = None
+    resource_id: str | None = None
+    actor: str | None = None
+    action: str | None = None
+    outcome: str | None = None
+    occurred_from: datetime | None = None
+    occurred_to: datetime | None = None
+
+
+class AuditQueryService:
+    """Reads the audit trail (BE-3.3). Reading audit is itself audited."""
+
+    def __init__(self, session: AsyncSession, principal: Principal) -> None:
+        self.session = session
+        self.principal = principal
+        self.repo = AuditRepository(session)
+
+    async def page(
+        self, filters: AuditFilters, limit: int, offset: int, before: uuid.UUID | None = None
+    ) -> tuple[list[tuple[AuditEvent, dict[str, Any]]], int]:
+        """One page, newest first. `before` (an event id) pages by key, not offset, so the
+        `audit.read` event each read appends cannot shift the next page."""
+        cursor = None
+        if before is not None:
+            cursor = await self.repo.position(self.principal.scope, before)
+            if cursor is None:
+                raise ApiError(422, "invalid_cursor", "Unknown 'before' event.")
+        events, total = await self.repo.page(
+            self.principal.scope,
+            limit=limit,
+            offset=offset,
+            before=cursor,
+            resource_type=filters.resource_type,
+            resource_id=filters.resource_id,
+            actor=filters.actor,
+            action=filters.action,
+            outcome=filters.outcome,
+            occurred_from=filters.occurred_from,
+            occurred_to=filters.occurred_to,
+        )
+        used = {
+            k: (v.isoformat() if isinstance(v, datetime) else v)
+            for k, v in vars(filters).items()
+            if v is not None
+        }
+        audit_by(
+            self.session,
+            self.principal,
+            "audit.read",
+            "audit",
+            details={
+                "filters": used,
+                "limit": limit,
+                "offset": offset,
+                "before": str(before) if before else None,
+                "returned": len(events),
+            },
+            details_classification={
+                # Filter values are typed by the reader and may name people or records.
+                "filters": ClassificationCode.INTERNAL,
+                **dict.fromkeys(
+                    ("limit", "offset", "before", "returned"), ClassificationCode.PUBLIC
+                ),
+            },
+        )
+        await self.session.commit()
+        clear = self.principal.clear_classifications
+        return [
+            (e, mask_mapping(e.details, e.details_classification, clear)) for e in events
+        ], total

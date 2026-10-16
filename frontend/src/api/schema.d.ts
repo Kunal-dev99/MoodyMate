@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+    "/api/v1/audit-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Audit Events */
+        get: operations["listAuditEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/config": {
         parameters: {
             query?: never;
@@ -144,6 +161,53 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AuditEventOut */
+        AuditEventOut: {
+            /** Action */
+            action: string;
+            /** Actor */
+            actor: string;
+            /** Actor User Id */
+            actor_user_id: string | null;
+            /** Approval Ref */
+            approval_ref: string | null;
+            /** Correlation Id */
+            correlation_id: string | null;
+            /**
+             * Details
+             * @description Safe metadata. Values the caller may not see are MaskedValue (BE-3.5).
+             */
+            details: {
+                [key: string]: components["schemas"]["MaskedValue"] | unknown;
+            };
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /** Outcome */
+            outcome: string;
+            /** Resource Id */
+            resource_id: string | null;
+            /** Resource Type */
+            resource_type: string;
+        };
+        /** AuditEventPage */
+        AuditEventPage: {
+            /** Items */
+            items: components["schemas"]["AuditEventOut"][];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /** Total */
+            total: number;
+        };
         /** AuthConfig */
         AuthConfig: {
             /**
@@ -229,6 +293,23 @@ export interface components {
             /** Version */
             version: string;
         };
+        /**
+         * MaskedValue
+         * @description Stands in for a value the caller may not see (FE renders it as 'masked by policy').
+         */
+        MaskedValue: {
+            /**
+             * Classification
+             * @description Classification code of the hidden value.
+             */
+            classification: string;
+            /**
+             * Masked
+             * @default true
+             * @constant
+             */
+            masked: true;
+        };
         /** Me */
         Me: {
             /** Display Name */
@@ -293,7 +374,7 @@ export interface components {
             /** Display Name */
             display_name: string;
             /** Email */
-            email: string | null;
+            email: string | components["schemas"]["MaskedValue"] | null;
             /**
              * Id
              * Format: uuid
@@ -313,6 +394,56 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    listAuditEvents: {
+        parameters: {
+            query?: {
+                resource_type?: string | null;
+                resource_id?: string | null;
+                actor?: string | null;
+                action?: string | null;
+                outcome?: string | null;
+                from?: string | null;
+                to?: string | null;
+                limit?: number;
+                offset?: number;
+                /** @description Return events older than this event id (stable keyset paging). */
+                before?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditEventPage"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     getAuthConfig: {
         parameters: {
             query?: never;
