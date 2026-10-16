@@ -63,6 +63,11 @@ _CLEANUP = [
     "DELETE FROM role_permission WHERE seeded_by IS NULL",
     "DELETE FROM role WHERE seeded_by IS NULL",
     "DELETE FROM permission WHERE seeded_by IS NULL",
+    # Registry rows tests add (never on non-DRAFT versions: those are immutable).
+    "DELETE FROM schema_dependency WHERE seeded_by IS NULL",
+    "DELETE FROM schema_field WHERE seeded_by IS NULL",
+    "DELETE FROM schema_version WHERE seeded_by IS NULL",
+    "DELETE FROM schema_definition WHERE seeded_by IS NULL",
     "DELETE FROM tenant WHERE seeded_by IS NULL",
 ]
 

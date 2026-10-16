@@ -22,6 +22,7 @@ from app.governance.models import (
     AuditEvent,
     DataClassification,
     RoleModel,
+    SchemaDefinition,
     Tenant,
     UserAccount,
     UserRole,
@@ -192,3 +193,14 @@ class AuditRepository:
             .offset(offset)
         )
         return list(result.scalars()), int(total or 0)
+
+
+class SchemaRepository(ScopedRepository[SchemaDefinition]):
+    """Schema definitions in the caller's tenant; versions, fields and dependents load
+    with them (D-04: versions are only reachable through a scoped definition)."""
+
+    model = SchemaDefinition
+
+    async def list_all(self) -> list[SchemaDefinition]:
+        result = await self.session.execute(self.scoped().order_by(SchemaDefinition.code))
+        return list(result.scalars())

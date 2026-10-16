@@ -4,9 +4,11 @@ Identity resolution and user queries. Transactions are committed here, not in ro
 or repositories.
 """
 
+import hashlib
+import json
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,15 +19,30 @@ from app.core.errors import ApiError
 from app.core.principal import Principal
 from app.core.tokens import DevTokens, VerifiedIdentity
 from app.governance.constants import (
+    COMPATIBILITY_RANK,
     DEFAULT_TENANT_ID,
     DEV_ISSUER,
     AuditOutcome,
     ClassificationCode,
+    Compatibility,
+    FieldType,
+    SchemaVersionStatus,
     TenantStatus,
     UserStatus,
 )
-from app.governance.models import AuditEvent, RoleModel, UserAccount
-from app.governance.repository import AuditRepository, IdentityRepository, UserRepository
+from app.governance.models import (
+    AuditEvent,
+    RoleModel,
+    SchemaDefinition,
+    SchemaVersion,
+    UserAccount,
+)
+from app.governance.repository import (
+    AuditRepository,
+    IdentityRepository,
+    SchemaRepository,
+    UserRepository,
+)
 
 
 def audit(
@@ -323,3 +340,209 @@ class AuditQueryService:
         return [
             (e, mask_mapping(e.details, e.details_classification, clear)) for e in events
         ], total
+
+
+# --- Schema registry (Phase 4, DG-01) ---------------------------------------------------
+
+CONTRACT_KEYS = (
+    "name",
+    "data_type",
+    "required",
+    "unit",
+    "precision",
+    "scale",
+    "classification",
+    "extension_eligible",
+)
+
+
+@dataclass(frozen=True)
+class FieldSpec:
+    """The contract-relevant attributes of a schema field (descriptions excluded)."""
+
+    name: str
+    data_type: str
+    required: bool
+    unit: str | None
+    precision: int | None
+    scale: int | None
+    classification: str
+    extension_eligible: bool
+
+    @classmethod
+    def from_row(cls, row: Any) -> "FieldSpec":
+        """From a SchemaField or a mapping with the same keys."""
+        values: dict[str, Any] = (
+            {k: row[k] for k in CONTRACT_KEYS}
+            if isinstance(row, dict)
+            else {k: getattr(row, k) for k in CONTRACT_KEYS}
+        )
+        return cls(**values)
+
+
+def contract_sha256(fields: list[FieldSpec]) -> str:
+    """Content hash of a version's contract, in field order. Migration 0007 holds a frozen
+    copy of this algorithm; test_schema_registry keeps the two equal."""
+    canonical = [{k: getattr(f, k) for k in CONTRACT_KEYS} for f in fields]
+    payload = json.dumps(canonical, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
+@dataclass(frozen=True)
+class FieldChange:
+    field: str
+    change: str  # ADDED | REMOVED | MODIFIED
+    attribute: str | None
+    from_value: Any
+    to_value: Any
+    compatibility: Compatibility
+    reason: str
+
+
+@dataclass(frozen=True)
+class SchemaDiff:
+    changes: list[FieldChange]
+    overall: Compatibility | None  # None: the contracts are identical
+
+
+def _decimal_change(old: FieldSpec, new: FieldSpec) -> FieldChange | None:
+    if (old.precision, old.scale) == (new.precision, new.scale):
+        return None
+    before = {"precision": old.precision, "scale": old.scale}
+    after = {"precision": new.precision, "scale": new.scale}
+    widened = (
+        None not in (old.precision, old.scale, new.precision, new.scale)
+        and new.scale >= old.scale  # type: ignore[operator]
+        and new.precision - new.scale >= old.precision - old.scale  # type: ignore[operator]
+    )
+    if widened:
+        return FieldChange(
+            new.name,
+            "MODIFIED",
+            "scale",
+            before,
+            after,
+            Compatibility.COMPATIBLE,
+            "Precision/scale widened: every existing value still fits.",
+        )
+    return FieldChange(
+        new.name,
+        "MODIFIED",
+        "scale",
+        before,
+        after,
+        Compatibility.BREAKING,
+        "Precision/scale narrowed: existing values may no longer fit.",
+    )
+
+
+def _field_changes(old: FieldSpec, new: FieldSpec) -> list[FieldChange]:
+    changes: list[FieldChange] = []
+
+    def add(attr: str, compat: Compatibility, reason: str) -> None:
+        changes.append(
+            FieldChange(
+                new.name, "MODIFIED", attr, getattr(old, attr), getattr(new, attr), compat, reason
+            )
+        )
+
+    if old.data_type != new.data_type:
+        add(
+            "data_type",
+            Compatibility.BREAKING,
+            "Type changed: existing values and consumers may fail.",
+        )
+    elif new.data_type == FieldType.DECIMAL and (decimal := _decimal_change(old, new)):
+        changes.append(decimal)
+    if old.required != new.required:
+        if new.required:
+            add("required", Compatibility.BREAKING, "Now required: existing records may lack it.")
+        else:
+            add("required", Compatibility.COMPATIBLE, "Now optional: consumers must allow absence.")
+    if old.unit != new.unit:
+        add("unit", Compatibility.BREAKING, "Unit changed: values would be misread.")
+    if old.classification != new.classification:
+        add(
+            "classification", Compatibility.COMPATIBLE, "Sensitivity changed: who sees it in clear."
+        )
+    if old.extension_eligible != new.extension_eligible:
+        add("extension_eligible", Compatibility.COMPATIBLE, "Extension eligibility changed.")
+    return changes
+
+
+def diff_fields(old: list[FieldSpec], new: list[FieldSpec]) -> SchemaDiff:
+    """Classify every contract change from `old` to `new` (BE-4.3)."""
+    before = {f.name: f for f in old}
+    after = {f.name: f for f in new}
+    changes: list[FieldChange] = []
+    for f in old:
+        if f.name not in after:
+            changes.append(
+                FieldChange(
+                    f.name,
+                    "REMOVED",
+                    None,
+                    f.data_type,
+                    None,
+                    Compatibility.BREAKING,
+                    "Field removed: producers and consumers relying on it break.",
+                )
+            )
+    for f in new:
+        if f.name not in before:
+            compat = Compatibility.BREAKING if f.required else Compatibility.ADDITIVE
+            reason = (
+                "New required field: existing records do not have it."
+                if f.required
+                else "New optional field: existing records stay valid."
+            )
+            changes.append(FieldChange(f.name, "ADDED", None, None, f.data_type, compat, reason))
+        else:
+            changes.extend(_field_changes(before[f.name], f))
+    overall = max(
+        (c.compatibility for c in changes), key=COMPATIBILITY_RANK.__getitem__, default=None
+    )
+    return SchemaDiff(changes=changes, overall=overall)
+
+
+def effective_version(schema: SchemaDefinition, today: date | None = None) -> SchemaVersion | None:
+    """The newest ACTIVE version already in effect."""
+    today = today or date.today()
+    active = [
+        v
+        for v in schema.versions
+        if v.status == SchemaVersionStatus.ACTIVE
+        and (v.effective_from is None or v.effective_from <= today)
+    ]
+    return max(active, key=lambda v: v.version, default=None)
+
+
+class SchemaService:
+    """Read-only schema registry (BE-4.3). Rows are tenant-scoped through the definition."""
+
+    def __init__(self, session: AsyncSession, principal: Principal) -> None:
+        self.repo = SchemaRepository(session, principal.scope)
+
+    async def list_schemas(self) -> list[SchemaDefinition]:
+        return await self.repo.list_all()
+
+    async def get_schema(self, schema_id: uuid.UUID) -> SchemaDefinition:
+        schema = await self.repo.get(schema_id)
+        if schema is None:
+            # Same response whether the schema is absent or in another tenant.
+            raise ApiError(404, "not_found", "Schema not found.")
+        return schema
+
+    async def diff(
+        self, schema_id: uuid.UUID, from_version: int, to_version: int
+    ) -> tuple[SchemaDefinition, SchemaVersion, SchemaVersion, SchemaDiff]:
+        schema = await self.get_schema(schema_id)
+        by_number = {v.version: v for v in schema.versions}
+        for number in (from_version, to_version):
+            if number not in by_number:
+                raise ApiError(404, "not_found", "Schema version not found.", {"version": number})
+        old, new = by_number[from_version], by_number[to_version]
+        result = diff_fields(
+            [FieldSpec.from_row(f) for f in old.fields], [FieldSpec.from_row(f) for f in new.fields]
+        )
+        return schema, old, new, result

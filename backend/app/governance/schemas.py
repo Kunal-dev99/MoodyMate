@@ -4,13 +4,21 @@ Request/response models for identity endpoints.
 """
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
 from app.core.classification import Classification, MaskedValue
-from app.governance.constants import ClassificationCode, Permission, Role
+from app.governance.constants import (
+    ClassificationCode,
+    Compatibility,
+    DependentType,
+    FieldType,
+    Permission,
+    Role,
+    SchemaVersionStatus,
+)
 
 
 class OidcClientConfig(BaseModel):
@@ -91,3 +99,90 @@ class AuditEventPage(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+# --- Schema registry (Phase 4) -----------------------------------------------------------
+
+
+class SchemaVersionRef(BaseModel):
+    id: uuid.UUID
+    version: int
+    status: SchemaVersionStatus
+    effective_from: date | None
+
+
+class SchemaDependent(BaseModel):
+    dependent_type: DependentType
+    dependent_ref: str
+    dependent_schema_id: uuid.UUID | None
+    description: str | None
+    provisional: bool
+
+
+class SchemaSummary(BaseModel):
+    id: uuid.UUID
+    code: str
+    name: str
+    description: str | None
+    owner: str
+    provisional: bool = Field(description="True for seeded, not yet client-approved schemas.")
+    status: SchemaVersionStatus = Field(
+        description="Status of the effective version, or of the latest one if none is in effect."
+    )
+    effective_version: SchemaVersionRef | None
+    latest_version: SchemaVersionRef
+    version_count: int
+    dependents: list[SchemaDependent]
+
+
+class SchemaList(BaseModel):
+    items: list[SchemaSummary]
+    total: int
+
+
+class SchemaFieldOut(BaseModel):
+    position: int
+    name: str
+    data_type: FieldType
+    required: bool
+    unit: str | None
+    precision: int | None
+    scale: int | None
+    classification: str = Field(description="Sensitivity of values in this field (BE-3.4).")
+    extension_eligible: bool
+    description: str | None
+
+
+class SchemaVersionOut(SchemaVersionRef):
+    compatibility: Compatibility | None = Field(
+        description="Severity of the change from the previous version (null for version 1)."
+    )
+    content_sha256: str
+    change_summary: str | None
+    created_at: datetime
+    fields: list[SchemaFieldOut]
+
+
+class SchemaVersionList(BaseModel):
+    schema_: SchemaSummary = Field(alias="schema")
+    items: list[SchemaVersionOut]
+
+    model_config = {"populate_by_name": True, "serialize_by_alias": True}
+
+
+class SchemaFieldChange(BaseModel):
+    field: str
+    change: Literal["ADDED", "REMOVED", "MODIFIED"]
+    attribute: str | None = Field(description="The changed attribute, for MODIFIED.")
+    from_value: Any
+    to_value: Any
+    compatibility: Compatibility
+    reason: str
+
+
+class SchemaDiffOut(BaseModel):
+    schema_id: uuid.UUID
+    from_version: SchemaVersionRef
+    to_version: SchemaVersionRef
+    overall: Compatibility | None = Field(description="Most severe change; null if identical.")
+    changes: list[SchemaFieldChange]
