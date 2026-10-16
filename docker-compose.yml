@@ -11,7 +11,8 @@ services:
       POSTGRES_PASSWORD: moodymate   # local-only credential; never reuse elsewhere
       POSTGRES_DB: moodymate_dev
     ports:
-      - "5432:5432"
+      # start-backend.bat sets MOODYMATE_DB_PORT when another database already uses 5432.
+      - "${MOODYMATE_DB_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
