@@ -1,0 +1,595 @@
+{
+  "profiler_version": 1,
+  "row_count": 25,
+  "column_count": 9,
+  "summary": {
+    "blank_rows": 0,
+    "rows_with_missing_cells": 0,
+    "rows_with_extra_cells": 0,
+    "max_extra_cells": 0,
+    "flag_counts": {}
+  },
+  "columns": [
+    {
+      "name": "instrument_id",
+      "position": 1,
+      "value_count": 25,
+      "null_count": 0,
+      "null_rate": "0.0000",
+      "distinct_count": 25,
+      "distinct_capped": false,
+      "candidate_types": [
+        "STRING"
+      ],
+      "min": null,
+      "max": null,
+      "max_length": 10,
+      "max_precision": null,
+      "max_scale": null,
+      "date_formats": {},
+      "currency_pattern_hits": {
+        "ISO_4217_CODE": 0,
+        "AMOUNT_WITH_CURRENCY": 0
+      },
+      "top_values": [
+        {
+          "value": "INS-000001",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "INS-000002",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "INS-000003",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "INS-000004",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "INS-000005",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "INS-000006",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "INS-000007",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "INS-000008",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "INS-000009",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "INS-000010",
+          "count": 1,
+          "truncated": false
+        }
+      ],
+      "top_values_exact": true
+    },
+    {
+      "name": "instrument_type",
+      "position": 2,
+      "value_count": 25,
+      "null_count": 0,
+      "null_rate": "0.0000",
+      "distinct_count": 3,
+      "distinct_capped": false,
+      "candidate_types": [
+        "STRING"
+      ],
+      "min": null,
+      "max": null,
+      "max_length": 7,
+      "max_precision": null,
+      "max_scale": null,
+      "date_formats": {},
+      "currency_pattern_hits": {
+        "ISO_4217_CODE": 0,
+        "AMOUNT_WITH_CURRENCY": 0
+      },
+      "top_values": [
+        {
+          "value": "DEPOSIT",
+          "count": 9,
+          "truncated": false
+        },
+        {
+          "value": "BOND",
+          "count": 8,
+          "truncated": false
+        },
+        {
+          "value": "LOAN",
+          "count": 8,
+          "truncated": false
+        }
+      ],
+      "top_values_exact": true
+    },
+    {
+      "name": "currency",
+      "position": 3,
+      "value_count": 25,
+      "null_count": 0,
+      "null_rate": "0.0000",
+      "distinct_count": 4,
+      "distinct_capped": false,
+      "candidate_types": [
+        "STRING"
+      ],
+      "min": null,
+      "max": null,
+      "max_length": 3,
+      "max_precision": null,
+      "max_scale": null,
+      "date_formats": {},
+      "currency_pattern_hits": {
+        "ISO_4217_CODE": 25,
+        "AMOUNT_WITH_CURRENCY": 0
+      },
+      "top_values": [
+        {
+          "value": "CHF",
+          "count": 9,
+          "truncated": false
+        },
+        {
+          "value": "GBP",
+          "count": 8,
+          "truncated": false
+        },
+        {
+          "value": "EUR",
+          "count": 6,
+          "truncated": false
+        },
+        {
+          "value": "USD",
+          "count": 2,
+          "truncated": false
+        }
+      ],
+      "top_values_exact": true
+    },
+    {
+      "name": "counterparty_id",
+      "position": 4,
+      "value_count": 25,
+      "null_count": 0,
+      "null_rate": "0.0000",
+      "distinct_count": 25,
+      "distinct_capped": false,
+      "candidate_types": [
+        "STRING"
+      ],
+      "min": null,
+      "max": null,
+      "max_length": 7,
+      "max_precision": null,
+      "max_scale": null,
+      "date_formats": {},
+      "currency_pattern_hits": {
+        "ISO_4217_CODE": 0,
+        "AMOUNT_WITH_CURRENCY": 0
+      },
+      "top_values": [
+        {
+          "value": "CP-0063",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "CP-0630",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "CP-1186",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "CP-1491",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "CP-1619",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "CP-1686",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "CP-2018",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "CP-3318",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "CP-3374",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "CP-3533",
+          "count": 1,
+          "truncated": false
+        }
+      ],
+      "top_values_exact": true
+    },
+    {
+      "name": "product_family",
+      "position": 5,
+      "value_count": 25,
+      "null_count": 0,
+      "null_rate": "0.0000",
+      "distinct_count": 3,
+      "distinct_capped": false,
+      "candidate_types": [
+        "STRING"
+      ],
+      "min": null,
+      "max": null,
+      "max_length": 9,
+      "max_precision": null,
+      "max_scale": null,
+      "date_formats": {},
+      "currency_pattern_hits": {
+        "ISO_4217_CODE": 0,
+        "AMOUNT_WITH_CURRENCY": 0
+      },
+      "top_values": [
+        {
+          "value": "TREASURY",
+          "count": 11,
+          "truncated": false
+        },
+        {
+          "value": "CORPORATE",
+          "count": 7,
+          "truncated": false
+        },
+        {
+          "value": "RETAIL",
+          "count": 7,
+          "truncated": false
+        }
+      ],
+      "top_values_exact": true
+    },
+    {
+      "name": "notional",
+      "position": 6,
+      "value_count": 25,
+      "null_count": 0,
+      "null_rate": "0.0000",
+      "distinct_count": 25,
+      "distinct_capped": false,
+      "candidate_types": [
+        "DECIMAL",
+        "STRING"
+      ],
+      "min": "27988.62",
+      "max": "4787180.73",
+      "max_length": 10,
+      "max_precision": 9,
+      "max_scale": 2,
+      "date_formats": {},
+      "currency_pattern_hits": {
+        "ISO_4217_CODE": 0,
+        "AMOUNT_WITH_CURRENCY": 0
+      },
+      "top_values": [
+        {
+          "value": "1169305.97",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "1266664.27",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "1343253.24",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "1361566.22",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "1385032.17",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "1641990.25",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "2061402.21",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "2156771.92",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "2257099.77",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "2272884.80",
+          "count": 1,
+          "truncated": false
+        }
+      ],
+      "top_values_exact": true
+    },
+    {
+      "name": "interest_rate",
+      "position": 7,
+      "value_count": 25,
+      "null_count": 0,
+      "null_rate": "0.0000",
+      "distinct_count": 25,
+      "distinct_capped": false,
+      "candidate_types": [
+        "DECIMAL",
+        "STRING"
+      ],
+      "min": "0.2377",
+      "max": "11.5582",
+      "max_length": 7,
+      "max_precision": 6,
+      "max_scale": 4,
+      "date_formats": {},
+      "currency_pattern_hits": {
+        "ISO_4217_CODE": 0,
+        "AMOUNT_WITH_CURRENCY": 0
+      },
+      "top_values": [
+        {
+          "value": "0.2377",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "0.8725",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "0.8889",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "0.9508",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "1.3908",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "10.8897",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "11.5582",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "2.0986",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "2.1193",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "2.9667",
+          "count": 1,
+          "truncated": false
+        }
+      ],
+      "top_values_exact": true
+    },
+    {
+      "name": "maturity_date",
+      "position": 8,
+      "value_count": 25,
+      "null_count": 0,
+      "null_rate": "0.0000",
+      "distinct_count": 25,
+      "distinct_capped": false,
+      "candidate_types": [
+        "DATE",
+        "STRING"
+      ],
+      "min": "2027-01-16",
+      "max": "2036-10-04",
+      "max_length": 10,
+      "max_precision": null,
+      "max_scale": null,
+      "date_formats": {
+        "YYYY-MM-DD": 25
+      },
+      "currency_pattern_hits": {
+        "ISO_4217_CODE": 0,
+        "AMOUNT_WITH_CURRENCY": 0
+      },
+      "top_values": [
+        {
+          "value": "2027-01-16",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "2027-04-17",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "2027-06-22",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "2027-07-11",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "2027-08-21",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "2028-01-12",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "2028-12-24",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "2029-01-04",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "2029-01-05",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "2029-01-30",
+          "count": 1,
+          "truncated": false
+        }
+      ],
+      "top_values_exact": true
+    },
+    {
+      "name": "book_code",
+      "position": 9,
+      "value_count": 25,
+      "null_count": 0,
+      "null_rate": "0.0000",
+      "distinct_count": 16,
+      "distinct_capped": false,
+      "candidate_types": [
+        "STRING"
+      ],
+      "min": null,
+      "max": null,
+      "max_length": 5,
+      "max_precision": null,
+      "max_scale": null,
+      "date_formats": {},
+      "currency_pattern_hits": {
+        "ISO_4217_CODE": 0,
+        "AMOUNT_WITH_CURRENCY": 0
+      },
+      "top_values": [
+        {
+          "value": "BK-11",
+          "count": 3,
+          "truncated": false
+        },
+        {
+          "value": "BK-08",
+          "count": 2,
+          "truncated": false
+        },
+        {
+          "value": "BK-10",
+          "count": 2,
+          "truncated": false
+        },
+        {
+          "value": "BK-12",
+          "count": 2,
+          "truncated": false
+        },
+        {
+          "value": "BK-20",
+          "count": 2,
+          "truncated": false
+        },
+        {
+          "value": "BK-23",
+          "count": 2,
+          "truncated": false
+        },
+        {
+          "value": "BK-27",
+          "count": 2,
+          "truncated": false
+        },
+        {
+          "value": "BK-40",
+          "count": 2,
+          "truncated": false
+        },
+        {
+          "value": "BK-02",
+          "count": 1,
+          "truncated": false
+        },
+        {
+          "value": "BK-05",
+          "count": 1,
+          "truncated": false
+        }
+      ],
+      "top_values_exact": true
+    }
+  ],
+  "content_sha256": "3fcb11cc894c56c2be452e1e4b163b5a9087e65d0b31aab996f82bb3c2de290e"
+}
