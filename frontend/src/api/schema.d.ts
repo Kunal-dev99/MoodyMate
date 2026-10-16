@@ -89,6 +89,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/imports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Imports
+         * @description Newest first; filter by source and status.
+         */
+        get: operations["listImports"];
+        put?: never;
+        /**
+         * Create Import
+         * @description Upload a file for a source (multipart). Processed synchronously (D-21): the raw
+         *     artifact is stored, every row becomes a source record and the import is RECEIVED.
+         */
+        post: operations["createImport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/imports/{import_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Import */
+        get: operations["getImport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/me": {
         parameters: {
             query?: never;
@@ -367,6 +409,29 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** ArtifactOut */
+        ArtifactOut: {
+            /**
+             * Classification
+             * @description The source profile's default classification.
+             */
+            classification: string;
+            /**
+             * Detected Mime
+             * @description Detected from content, not from the file name.
+             */
+            detected_mime: string;
+            /** Original Filename */
+            original_filename: string | null;
+            retention_state: components["schemas"]["RetentionState"];
+            /**
+             * Sha256
+             * @description SHA-256 of the uploaded bytes (hex).
+             */
+            sha256: string;
+            /** Size Bytes */
+            size_bytes: number;
+        };
         /** AuditEventOut */
         AuditEventOut: {
             /** Action */
@@ -428,6 +493,17 @@ export interface components {
              */
             mode: "oidc" | "dev";
             oidc?: components["schemas"]["OidcClientConfig"] | null;
+        };
+        /** BatchOut */
+        BatchOut: {
+            /** Batch Number */
+            batch_number: number;
+            /** Column Count */
+            column_count: number;
+            /** Row Count */
+            row_count: number;
+            /** Sheet Name */
+            sheet_name: string | null;
         };
         /**
          * Compatibility
@@ -524,6 +600,12 @@ export interface components {
          * @enum {string}
          */
         CsvDelimiter: "," | ";" | "\t" | "|";
+        /**
+         * DataClass
+         * @description D-14/D-16 §5: the class of data an import was uploaded as (the environment's).
+         * @enum {string}
+         */
+        DataClass: "synthetic" | "client";
         /**
          * DependentType
          * @enum {string}
@@ -662,6 +744,174 @@ export interface components {
              * @description Shortest route: schema codes walked to reach it, from the changed one.
              */
             via: string[];
+        };
+        /** ImportDetail */
+        ImportDetail: {
+            artifact: components["schemas"]["ArtifactOut"];
+            /** Batches */
+            batches: components["schemas"]["BatchOut"][];
+            /** Contract Version */
+            contract_version: number | null;
+            /**
+             * Control Totals
+             * @description Declared control totals (decimal text), masked by the artifact's classification.
+             */
+            control_totals: {
+                [key: string]: string | components["schemas"]["MaskedValue"];
+            } | null;
+            /** Correlation Id */
+            correlation_id: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by: string;
+            /** @description The environment's data class at upload (D-14). */
+            data_class: components["schemas"]["DataClass"];
+            /** Expected Row Count */
+            expected_row_count: number | null;
+            format: components["schemas"]["SourceFormat"];
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Retry Of Import Id */
+            retry_of_import_id: string | null;
+            /**
+             * Row Count
+             * @description Data rows read from the file (one source_record each).
+             */
+            row_count: number;
+            /** Schema Code */
+            schema_code: string | null;
+            /** Schema Version */
+            schema_version: number | null;
+            /**
+             * Schema Version Id
+             * Format: uuid
+             * @description The ACTIVE schema version at upload.
+             */
+            schema_version_id: string;
+            /** Source Code */
+            source_code: string;
+            /**
+             * Source Contract Id
+             * Format: uuid
+             */
+            source_contract_id: string;
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+            status: components["schemas"]["ImportStatus"];
+            /** Synthetic Attested */
+            synthetic_attested: boolean;
+            /**
+             * Synthetic Marker
+             * @description The file carried the ILLUSTRATIVE / SYNTHETIC marker (D-24).
+             */
+            synthetic_marker: boolean;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** ImportPage */
+        ImportPage: {
+            /** Items */
+            items: components["schemas"]["ImportSummary"][];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /** Total */
+            total: number;
+        };
+        /**
+         * ImportStatus
+         * @description Data Model §9 `import_job.status` plus QUARANTINED from Appendix B (D-06, D-21).
+         *     Appendix B's `uploaded` is RECEIVED and `ready` is COMPLETED.
+         * @enum {string}
+         */
+        ImportStatus: "CREATED" | "RECEIVED" | "PROFILING" | "MAPPING_REQUIRED" | "VALIDATING" | "COMPLETED" | "COMPLETED_WITH_WARNINGS" | "QUARANTINED" | "FAILED" | "CANCELLED";
+        /** ImportSummary */
+        ImportSummary: {
+            artifact: components["schemas"]["ArtifactOut"];
+            /** Contract Version */
+            contract_version: number | null;
+            /**
+             * Control Totals
+             * @description Declared control totals (decimal text), masked by the artifact's classification.
+             */
+            control_totals: {
+                [key: string]: string | components["schemas"]["MaskedValue"];
+            } | null;
+            /** Correlation Id */
+            correlation_id: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by: string;
+            /** @description The environment's data class at upload (D-14). */
+            data_class: components["schemas"]["DataClass"];
+            /** Expected Row Count */
+            expected_row_count: number | null;
+            format: components["schemas"]["SourceFormat"];
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Retry Of Import Id */
+            retry_of_import_id: string | null;
+            /**
+             * Row Count
+             * @description Data rows read from the file (one source_record each).
+             */
+            row_count: number;
+            /** Schema Code */
+            schema_code: string | null;
+            /** Schema Version */
+            schema_version: number | null;
+            /**
+             * Schema Version Id
+             * Format: uuid
+             * @description The ACTIVE schema version at upload.
+             */
+            schema_version_id: string;
+            /** Source Code */
+            source_code: string;
+            /**
+             * Source Contract Id
+             * Format: uuid
+             */
+            source_contract_id: string;
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+            status: components["schemas"]["ImportStatus"];
+            /** Synthetic Attested */
+            synthetic_attested: boolean;
+            /**
+             * Synthetic Marker
+             * @description The file carried the ILLUSTRATIVE / SYNTHETIC marker (D-24).
+             */
+            synthetic_marker: boolean;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
         };
         /**
          * MaskedValue
@@ -870,6 +1120,13 @@ export interface components {
              */
             regression_evidence_ref?: string | null;
         };
+        /**
+         * RetentionState
+         * @description `import_artifact.retention_state`. D-20 §4 (PROVISIONAL): artifacts are kept
+         *     indefinitely until the client sets retention; no other state exists yet.
+         * @enum {string}
+         */
+        RetentionState: "RETAINED";
         /**
          * Role
          * @enum {string}
@@ -1403,6 +1660,159 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    listImports: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                source_id?: string | null;
+                status?: components["schemas"]["ImportStatus"] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportPage"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    createImport: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Unique per upload (per user). A retry with the same key and the same upload returns the original import; with a different upload, 409 idempotency_conflict (D-21). */
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** @description JSON object of the contract's control-total columns to exact decimal text, e.g. {"notional": "1234.50"}. */
+                    control_totals?: string;
+                    expected_row_count?: number;
+                    /**
+                     * Format: binary
+                     * @description The file, in the source profile's format (CSV, XLSX or JSON; detected from content). At most IMPORT_MAX_BYTES (10 MiB). Its name is kept, at most 255 characters.
+                     */
+                    file: string;
+                    /** Format: uuid */
+                    source_id: string;
+                    /**
+                     * @description Required true while the environment's X-Data-Class is synthetic (D-16 §5): you confirm the file holds no client data.
+                     * @default false
+                     */
+                    synthetic_attested?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Idempotent replay: this key was used for the same upload; the original import is returned (header Idempotent-Replayed: true). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportDetail"];
+                };
+            };
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportDetail"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    getImport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                import_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportDetail"];
                 };
             };
             /** @description Client error (standard envelope) */

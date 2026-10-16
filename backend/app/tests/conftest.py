@@ -71,6 +71,7 @@ def client(settings: Settings) -> TestClient:
 # --- Phase 2: migrated database, cleanup and helpers -----------------------------------
 
 from collections.abc import Iterator  # noqa: E402
+from pathlib import Path  # noqa: E402
 
 from alembic import command  # noqa: E402
 from alembic.config import Config  # noqa: E402
@@ -118,6 +119,26 @@ ALTER TABLE source_system ENABLE TRIGGER source_system_no_delete;
 COMMIT;
 """
 
+# Imports tests create (Phase 8). Append-only and never deleted by the app, so the triggers
+# are lifted for this one transaction, as above. Runs before the source cleanup: imports
+# reference sources and contracts.
+_IMPORT_CLEANUP = """
+BEGIN;
+ALTER TABLE source_record DISABLE TRIGGER source_record_append_only;
+ALTER TABLE import_batch DISABLE TRIGGER import_batch_append_only;
+ALTER TABLE import_artifact DISABLE TRIGGER import_artifact_append_only;
+ALTER TABLE import_job DISABLE TRIGGER import_job_immutable;
+DELETE FROM source_record;
+DELETE FROM import_batch;
+DELETE FROM import_artifact;
+DELETE FROM import_job;
+ALTER TABLE source_record ENABLE TRIGGER source_record_append_only;
+ALTER TABLE import_batch ENABLE TRIGGER import_batch_append_only;
+ALTER TABLE import_artifact ENABLE TRIGGER import_artifact_append_only;
+ALTER TABLE import_job ENABLE TRIGGER import_job_immutable;
+COMMIT;
+"""
+
 # Deletes everything that is not seed data (D-11), children first.
 _CLEANUP = [
     "DELETE FROM user_role",
@@ -125,6 +146,7 @@ _CLEANUP = [
     "DELETE FROM role_permission WHERE seeded_by IS NULL",
     "DELETE FROM role WHERE seeded_by IS NULL",
     "DELETE FROM permission WHERE seeded_by IS NULL",
+    _IMPORT_CLEANUP,
     _INGESTION_CLEANUP,
     _REGISTRY_CLEANUP,
     "DELETE FROM tenant WHERE seeded_by IS NULL",
@@ -168,11 +190,11 @@ def script(url: str, statements: str) -> None:
 
 def clean(url: str) -> None:
     for statement in _CLEANUP:
-        if statement is _INGESTION_CLEANUP:
+        if statement is _INGESTION_CLEANUP or statement is _IMPORT_CLEANUP:
             try:
                 script(url, statement)
             except asyncpg.UndefinedTableError:
-                pass  # a schema older than 0009 (session start): nothing of WS2 to clean
+                pass  # an older schema (session start): nothing of that phase to clean
         elif statement is _REGISTRY_CLEANUP:
             script(url, statement)
         else:
@@ -199,8 +221,15 @@ def db(migrated_db: str) -> Iterator[str]:
 
 
 @pytest.fixture
-def api(db: str) -> Iterator[TestClient]:
-    with TestClient(create_app(Settings(ENV="test", DATABASE_URL=db))) as c:
+def artifact_dir(tmp_path: Path) -> Path:
+    """This test's own artifact store root (D-15), outside the repository."""
+    return tmp_path / "artifacts"
+
+
+@pytest.fixture
+def api(db: str, artifact_dir: Path) -> Iterator[TestClient]:
+    settings = Settings(ENV="test", DATABASE_URL=db, ARTIFACT_STORE_DIR=artifact_dir)
+    with TestClient(create_app(settings)) as c:
         yield c
 
 

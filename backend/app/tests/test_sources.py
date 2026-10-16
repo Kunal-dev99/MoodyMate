@@ -207,6 +207,14 @@ def source_rows(db: str) -> dict[str, list[Any]]:
     }
 
 
+def head() -> str:
+    """The migration head (the revision a refused downgrade leaves in place)."""
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    return str(ScriptDirectory.from_config(Config("alembic.ini")).get_current_head())
+
+
 def revision(db: str) -> str:
     return str(sql(db, "SELECT version_num FROM alembic_version")[0]["version_num"])
 
@@ -221,7 +229,7 @@ def test_downgrade_refuses_while_a_user_source_exists(
         with pytest.raises(Exception, match="source_system has rows"):
             command.downgrade(alembic_config(db), "0008")
         # One transaction: nothing was downgraded, so nothing needs re-applying...
-        assert revision(db) == "0011"
+        assert revision(db) == head()
         # ...and nothing was removed, the seeded source included (same IDs, same rows).
         assert source_rows(db) == before
     finally:
@@ -628,7 +636,7 @@ def test_seed_downgrade_removes_only_its_rows(
     try:
         with pytest.raises(Exception, match="ForeignKeyViolation|foreign key"):
             command.downgrade(cfg, "0010")
-        assert revision(db) == "0011"
+        assert revision(db) == head()
         assert source_rows(db) == before
     finally:
         command.upgrade(cfg, "head")

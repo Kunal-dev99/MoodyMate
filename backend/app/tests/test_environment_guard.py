@@ -16,12 +16,14 @@ OIDC: dict[str, Any] = {
     "OIDC_AUDIENCE": "moodymate-api",
     "OIDC_CLIENT_ID": "moodymate-web",
 }
-# Settings each ENV needs to be valid apart from DATA_CLASS.
+# Settings each ENV needs to be valid apart from DATA_CLASS (deployments also need the
+# artifact store, D-15).
+DEPLOYED = {**OIDC, "ARTIFACT_STORE_DIR": "/var/lib/moodymate/artifacts"}
 BASE: dict[str, dict[str, Any]] = {
     "local": {},
     "test": {},
-    "staging": OIDC,
-    "production": OIDC,
+    "staging": DEPLOYED,
+    "production": DEPLOYED,
 }
 # ENV x DATA_CLASS (D-14): client data only in production; every other ENV is synthetic.
 MATRIX = [

@@ -444,6 +444,38 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
   a shared refusal-audit helper covers point 4.
 - **Reversal:** a new decision. Points 3 and 4 only ever tighten controls.
 
+## D-25 Upload content cap, refused uploads and Phase 8 clarifications
+
+- **Status:** active (decided by the user 2026-10-16, Phase 8 review)
+- **Date:** 2026-10-16
+- **Context:** the Phase 8 review (`docs/evidence/phase-8/REPORT.md`) found that an XLSX can
+  expand far beyond its file size (D1). It also raised points the plan left open.
+- **Decision:**
+  1. **Decoded content cap (D-16 addendum).** A running total of decoded cell characters is
+     kept for every format. An upload above **50 MiB** of decoded content is refused with 422
+     `content_too_large`. It is a hard ceiling that settings may only lower.
+  2. **Code layout.** A module may hold one sub-package for pluggable format adapters
+     (`app/ingestion/adapters/`). Shared storage plumbing lives in `app/core/artifacts.py`.
+  3. **A refused upload persists nothing.** A refusal at upload time (limits, format,
+     encoding, shape) is audited DENIED with its reason (D-24 §4). No import is created and
+     no file is kept. D-20's "a file-level BLOCKER fails the import" applies once an import
+     exists, at validation (Phase 11), which ends FAILED with its artifact kept.
+  4. **Retention state.** `import_artifact.retention_state` has one value, RETAINED. More
+     states only come with BE-13.3 and a decision.
+  5. **Row semantics** (D-20: never drop, never invent):
+     - ragged rows keep the cells they have and are flagged `MISSING_CELLS`;
+     - extra cells go to `extra_values`, flagged `EXTRA_CELLS`;
+     - interior blank rows are kept, flagged `BLANK_ROW`, and trailing blank rows are not
+       rows;
+     - a JSON null leaves the key out and is flagged `NULL_VALUE`;
+     - the XLSX marker is recognised from the sheet name or the workbook title (it is
+       informational only);
+     - a bare JSON scalar for a JSON source is `json_invalid_shape`.
+  6. **Idempotency (D-21 clarification).** The fingerprint covers source, file SHA-256,
+     attestation, expected row count and control totals, but not the file name. A replay
+     changes nothing and is not audited; a replay conflict is.
+- **Reversal:** a new decision. Point 1 only ever tightens.
+
 ---
 
 <!-- Never renumber existing IDs. New decisions are appended as D-05, D-06, … -->

@@ -629,7 +629,7 @@ Goal: a bounded synthetic upload becomes an import job with a write-once raw art
 checksum and one immutable `source_record` per row. Parsing goes through an adapter
 interface that does not depend on the first three formats.
 
-- [ ] **BE-8.1** Migration plus models:
+- [x] **BE-8.1** Migration plus models:
   - `import_job`: status per D-06/D-21, pinned `source_contract_id` and `schema_version_id`
     (the ACTIVE version at creation), `data_class`, `synthetic_attested`,
     `idempotency_key` (unique per tenant and actor), `correlation_id`, `retry_of_import_id`,
@@ -643,15 +643,45 @@ interface that does not depend on the first three formats.
   Triggers make `import_artifact` and `source_record` append-only, TRUNCATE included.
   CHECKs cover the enums. The downgrade refuses while user rows exist.
   - *Done-when:* the round trip passes; tests prove UPDATE/DELETE/TRUNCATE on
-    `source_record` and `import_artifact` raise; the refusal to downgrade is tested.
-- [ ] **BE-8.2** `ArtifactStore` interface plus a filesystem implementation (D-15). It is
+    `source_record` and `import_artifact` raise; the refusal to downgrade is tested. — ✔ verified
+    (checks at 8b9d006). Migration `0012_import_tables.py`: `import_append_only` row and TRUNCATE
+    triggers on `import_artifact`, `import_batch` and `source_record`; `import_job_guard` freezes
+    the content columns, refuses DELETE/TRUNCATE and allows status moves only along a frozen copy
+    of `IMPORT_TRANSITIONS`; `import_job_same_tenant`; no `current_setting` bypass. The tests:
+    - `test_import_tables.py::test_append_only_rows_reject_update_and_delete` (10 statements,
+      row unchanged afterwards) and `::test_import_tables_reject_truncate` (all four tables).
+    - `::test_import_job_content_is_frozen_and_never_deleted` (16 statements),
+      `::test_import_job_cannot_move_tenant`, `::test_import_job_enums_are_checked`,
+      `::test_artifact_retention_state_is_checked`, `::test_artifact_ref_must_match_its_hash`.
+    - `::test_import_migration_round_trips_without_imports` and
+      `::test_downgrade_refuses_while_an_import_exists` (rows compared before/after); the CLI
+      round trip 0012→0011→0012 is in checks.txt:22-26.
+
+    ⚠ follow-up (Phase 8 REPORT D15): the same-tenant trigger does not check that the pinned
+    schema version belongs to the contract's schema, and an INSERT may start in any status.
+- [x] **BE-8.2** `ArtifactStore` interface plus a filesystem implementation (D-15). It is
   content-addressed by SHA-256 and write-once (an existing object is never rewritten). Reads
   re-verify the hash. The root is `ARTIFACT_STORE_DIR`, which is required outside local/test
   (D-13) and must sit outside the repository.
   - *Done-when:* tests prove storing the same bytes twice gives one object and the same
     ref, a tampered file makes the read raise `artifact_integrity_error`, and startup is
-    refused in staging without the setting.
-- [ ] **BE-8.3** `SourceAdapter` interface (`detect`, `iter_rows` → locator plus
+    refused in staging without the setting. — ✔ verified (checks at 8b9d006).
+    `app/core/artifacts.py`: refs are regex-checked (`sha256/<2>/<64>`, no traversal), new
+    objects go to a `mkstemp` file in the target directory and are `os.link`ed into place (never
+    replaces), every read and every re-put re-hashes. `app/core/config.py:135-150` requires the
+    root outside local/test, absolute and outside `REPO_ROOT`. The tests:
+    - `test_artifacts.py::test_same_bytes_twice_give_one_object_and_the_same_ref`,
+      `::test_a_tampered_object_fails_the_read`, `::test_an_existing_object_is_never_rewritten`,
+      `::test_a_missing_object_fails_the_read`, `::test_malformed_refs_are_refused`.
+    - `::test_startup_is_refused_without_the_setting` (staging and production),
+      `::test_the_store_may_not_sit_inside_the_repo`, `::test_the_store_must_be_an_absolute_path`,
+      and the IMPORT_MAX_* lower-only tests.
+
+    ⚠ follow-ups (REPORT D6, D7): objects are 0444 and directories follow the umask (world
+    readable); the local default `/tmp/moodymate-artifacts` is shared by every worktree; the
+    directory is not fsynced after the link; orphan objects after a failed transaction are not
+    detected (BE-13.3).
+- [x] **BE-8.3** `SourceAdapter` interface (`detect`, `iter_rows` → locator plus
   `dict[str, str]`, never floats) and CSV, XLSX and JSON adapters per D-16/D-17.
   - *Done-when:* parser tests cover:
     - UTF-8 BOM, quoted newlines and a configured delimiter;
@@ -662,7 +692,32 @@ interface that does not depend on the first three formats.
     - nested JSON refused;
     - each D-16 limit (bytes, rows, columns, cell length, XLSX uncompressed size/ratio)
       refused with its own error code.
-- [ ] **BE-8.4** `POST /imports` (multipart: `source_id`, file, `Idempotency-Key` header,
+
+    — ✔ verified (checks at 8b9d006). `app/ingestion/adapters/` (`base.py`, `csv_adapter.py`,
+    `xlsx_adapter.py`, `json_adapter.py`, `parse_upload` in `__init__.py`). The tests in
+    `test_adapters.py`:
+    - `::test_csv_utf8_bom_is_accepted_and_not_part_of_the_header`,
+      `::test_csv_quoted_newlines_stay_in_the_value_and_the_locator_is_the_start_line`,
+      `::test_csv_uses_the_configured_delimiter` (`;` tab `|` `,`);
+    - `::test_exact_decimal_string_survives_csv`, `…_json` (number and string),
+      `…_xlsx_as_text`, `::test_xlsx_numeric_cell_is_decimal_of_repr_with_a_precision_flag`,
+      `::test_xlsx_precision_flag_counts_significant_digits`;
+    - `::test_xlsx_formula_yields_its_cached_value_and_a_flag` (cached and uncached);
+    - `::test_xlsm_is_refused_by_content_not_extension` (content type and vbaProject),
+      `::test_non_utf8_samples_are_refused`, `::test_nested_json_values_are_refused`;
+    - `::test_each_limit_has_its_own_code`, `::test_each_limit_applies_to_xlsx`,
+      `::test_hard_ceilings_hold_at_their_values`, `::test_xlsx_uncompressed_size_is_bounded`,
+      `::test_xlsx_compression_ratio_is_bounded`, `::test_xlsx_uncompressed_ceiling_holds_at_50_mib`;
+    - also `::test_xml_entity_attacks_are_refused`, `::test_openpyxl_uses_defusedxml`, the D-24
+      marker tests and `::test_openpyxl_opens_every_committed_position_workbook`.
+
+    ⚠ before merge (REPORT D1, D2, MAJOR): an XLSX can amplify one 4,000-character shared string
+    into every cell (about 2 GB of `raw_values` from a 10 MiB stored workbook), and a
+    `<row r="2000000000">` makes openpyxl yield two billion empty rows. Neither is bounded by a
+    D-16 limit. ⚠ follow-ups (REPORT D4, D5, D12, D14): openpyxl silently drops a row whose number
+    does not increase; an out-of-range date serial becomes `#VALUE!`; the private `_get_row` hook
+    is not proven by a test; a bare JSON scalar is reported as `format_mismatch` ("is CSV").
+- [x] **BE-8.4** `POST /imports` (multipart: `source_id`, file, `Idempotency-Key` header,
   `synthetic_attested`, optional `expected_row_count`/control totals):
   - It enforces the byte limit while streaming (413 `payload_too_large` before the whole
     body is read).
@@ -680,16 +735,60 @@ interface that does not depend on the first three formats.
       `synthetic_attestation_required`;
     - `auditor` getting 403 with a DENIED event;
     - a cross-tenant `GET` getting 404.
-- [ ] **BE-8.5** The `import_job` transition table (D-06, D-21) in `ingestion/constants.py`,
+
+    — ✔ verified (checks at 8b9d006). The router reads the multipart body itself after the
+    permission and switch dependencies (`router.py:311-349`): a declared Content-Length over
+    `IMPORT_MAX_BYTES + 64 KiB` is refused before any read, the stream is cut at that bound, and
+    `parse_upload` then checks the file's exact size. The service stores, parses and moves
+    CREATED→RECEIVED in one transaction with `import.create`; refusals go through
+    `ImportService.refuse` (DENIED, reason code). The tests in `test_imports.py`:
+    - `::test_each_format_reaches_received_with_one_record_per_data_row` (CSV, XLSX, JSON; 25
+      rows; pinned ACTIVE schema version; artifact read back verified; one SUCCESS event);
+    - `::test_an_11_mib_upload_is_413_with_nothing_left_behind`,
+      `::test_just_over_the_file_limit_is_413_too`, `::test_the_byte_limit_is_enforced_while_streaming`
+      (chunked 20 MiB, at most 12 chunks pulled), `::test_a_declared_oversize_body_is_refused_before_reading_it`
+      (0 chunks pulled);
+    - `::test_a_repeated_key_with_the_same_bytes_returns_the_same_import` (200,
+      `Idempotent-Replayed`), `::test_a_repeated_key_with_different_bytes_is_409`,
+      `::test_keys_are_unique_per_actor`, `::test_concurrent_uploads_with_one_key_make_one_import`;
+    - `::test_a_missing_attestation_under_synthetic_is_422`;
+    - `::test_without_import_write_is_403_with_a_denied_event` (auditor and three other roles);
+    - `::test_cross_tenant_get_is_the_same_404_as_a_random_id` (also the cross-tenant upload,
+      audited `not_found`);
+    - the route is in the ws1 matrix and the AUDITED set (checks.txt:10-12,
+      `test_ws1_verification.py:256,334-344`).
+
+    ⚠ follow-ups (REPORT D7, D8, D9, D13): an artifact written before a failed commit stays as an
+    orphan; `get_schema` at `service.py:555` is not wrapped in `refuse`; the Starlette version that
+    `max_part_size` needs is not pinned; file names may hold bidi/format characters.
+- [x] **BE-8.5** The `import_job` transition table (D-06, D-21) in `ingestion/constants.py`,
   enforced by the service.
   - *Done-when:* a unit test walks every (from, to) pair and asserts that only the table's
-    transitions are accepted.
-- [ ] **BE-8.6** No raw value leaks. Cell values never reach logs, error envelopes or audit
+    transitions are accepted. — ✔ verified (checks at 8b9d006).
+    `test_import_transitions.py::test_service_accepts_only_the_tables_transitions` walks all 100
+    pairs through `service.move` (409 `invalid_status`, status unchanged on refusal);
+    `::test_the_status_set_is_d21`, `::test_outcomes_are_final_and_reachable`. The database side
+    walks the same 100 pairs (`test_import_tables.py::test_import_status_moves_only_along_the_transition_table`)
+    and `::test_trigger_transition_table_matches_the_service` keeps the frozen copy equal. The
+    table matches D-21 (profiling returns to RECEIVED or MAPPING_REQUIRED; outcomes are final).
+- [x] **BE-8.6** No raw value leaks. Cell values never reach logs, error envelopes or audit
   details.
   - *Done-when:* a test uploads a fixture full of a sentinel string (including malformed
     rows and a parse failure). The captured logs, every error body and the audit `details`
-    for the import never contain the sentinel.
-- [ ] **FE-8.1** Import wizard:
+    for the import never contain the sentinel. — ✔ verified (checks at 8b9d006).
+    `test_import_no_leak.py::test_no_sentinel_in_logs_error_bodies_or_audit` uploads an accepted
+    CSV with the sentinel in every header and cell (ragged, extra, blank, quoted rows), 14 parse
+    failures across the three adapters, an idempotency conflict, a missing attestation, a 413 and
+    broken multipart framing. It asserts the sentinel reached `source_record`, then checks every
+    response body, the app's JSON-formatted log records at DEBUG plus raw stdout/stderr, and
+    the audit details of every request. Adapter errors carry positions only
+    (`test_adapters.py::test_refusals_carry_no_cell_values`).
+
+    ⚠ before merge (REPORT D3, MAJOR): openpyxl's `warn()` for a date-formatted cell outside the
+    date range quotes the raw serial value (`openpyxl/worksheet/_reader.py:222`). Python
+    warnings go to raw stderr, bypassing the redacting formatter, and pytest captures warnings, so
+    this test cannot see that channel.
+- [x] **FE-8.1** Import wizard:
   1. Choose a source.
   2. Upload. A client-side size pre-check runs, and when `X-Data-Class` is `synthetic` a
      synthetic-data attestation checkbox is shown, with the attestation recorded.
@@ -699,10 +798,34 @@ interface that does not depend on the first three formats.
   It uses multipart through the generated client types.
   - *Done-when:* a browser run uploads the synthetic CSV and lands on a detail page showing
     RECEIVED, the row count and the SHA-256 from the API. A second run with the client-side
-    check bypassed shows the backend's 413 toast with its correlation ID.
-- [ ] **FE-8.2** Imports list with an `ImportStatusPill` covering every `import_job` status.
+    check bypassed shows the backend's 413 toast with its correlation ID. — ✔ verified (checks
+    at 8b9d006). `e2e/imports.spec.ts`:
+    - `:61` uploads `instrument.csv` as data_steward. It checks that the attestation is required
+      and recorded, the request is multipart with an `Idempotency-Key`, the response is 201
+      RECEIVED with 25 rows and the sample's SHA-256, and the status page shows the same values
+      plus the pinned schema version (and again after a reload);
+    - `:137` shows that 10 MiB + 1 is stopped client-side (no POST). It then swaps the body on the
+      wire (test-only `page.route`; the app has no bypass switch) and gets the backend's 413
+      `payload_too_large` toast carrying the response's correlation ID; nothing is created;
+    - `:195`: the auditor sees the `import.create` event with its correlation ID, the 403 state
+      on the wizard and a backend 403.
+
+    The wizard uses `CreateImportBody` from the generated `paths` with `multipart()`
+    (`imports.test.ts` "multipart through the generated client types"). The attestation fails
+    closed on a missing or unknown `X-Data-Class` (`attestationRequired`, tested), and the
+    backend enforces it itself. Playwright passed 15/15 (checks.txt:43-59). ⚠ follow-ups (REPORT
+    D10, D11): the upload POST is not cancellable, so leaving mid-upload later navigates the user
+    to the import; the key reuse-on-retry logic and the `NEXT_PUBLIC_IMPORTS_UI=off` reversal
+    are untested.
+- [x] **FE-8.2** Imports list with an `ImportStatusPill` covering every `import_job` status.
   - *Done-when:* a unit test asserts that the pill map covers the full status enum from the
-    generated types, and the list shows the uploaded import.
+    generated types, and the list shows the uploaded import. — ✔ verified (checks at 8b9d006).
+    `imports.test.ts` "maps exactly the import_job status enum of the generated API" compares
+    `IMPORT_STATUSES` with `openapi.json`'s `ImportStatus` (a `Record<ImportStatus, …>` also makes
+    a missing status a compile error). It renders every status and checks that only COMPLETED looks
+    like success. `e2e/imports.spec.ts:117` finds the uploaded import first in the list,
+    RECEIVED/"Received", with source, file name and SHA-256 prefix, and its link opens the detail
+    page.
 
 *Reversibility:* additive tables. The downgrade refuses while imports exist. Turning off
 `INGESTION_ENABLED` stops new uploads. Stored artifacts are write-once and stay on disk; no

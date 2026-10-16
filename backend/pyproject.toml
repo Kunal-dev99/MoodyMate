@@ -12,6 +12,11 @@ dependencies = [
     "pydantic>=2.9,<3",
     "pydantic-settings>=2.6,<3",
     "pyjwt[crypto]>=2.9,<3",
+    # D-17: XLSX in read_only/data_only mode; defusedxml hardens its XML parsing.
+    "openpyxl>=3.1,<3.2",
+    "defusedxml>=0.7,<0.8",
+    # BE-8.4: multipart uploads (POST /imports).
+    "python-multipart>=0.0.20,<0.1",
 ]
 
 [project.optional-dependencies]
@@ -22,6 +27,7 @@ dev = [
     "ruff>=0.8,<0.9",
     "mypy>=1.13,<2",
     "openapi-spec-validator>=0.7,<0.8",
+    "types-openpyxl>=3.1,<3.2",
 ]
 
 [build-system]

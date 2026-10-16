@@ -1,7 +1,8 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { Suspense, useEffect, useState } from 'react'
 import { ChevronLeft, ChevronRight, Database, FileUp, Plus } from 'lucide-react'
 import { api, call, ApiError, type Schemas } from '@/api/client'
 import { Forbidden } from '@/components/auth/Forbidden'
@@ -13,11 +14,13 @@ import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
 import { toastApiError } from '@/components/common/api-error-toast'
 import { ContractStatusPill } from '@/components/ingestion/ContractStatusPill'
+import { ImportsPlanned, ImportsTab } from '@/components/ingestion/ImportsTab'
 import { SOURCE_KINDS } from '@/components/ingestion/sources'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { IMPORTS_UI_ENABLED } from '@/config/features'
 
 const PAGE_SIZE = 50
 
@@ -140,7 +143,33 @@ function SourcesTab() {
   )
 }
 
-/** Ingestion Workbench landing page (FE-7.1): Sources now, Imports from Phase 8. */
+const TABS = ['sources', 'imports'] as const
+type Tab = (typeof TABS)[number]
+
+/** The tabs, with the open one in `?tab=` so links (e.g. a breadcrumb) can open Imports. */
+function WorkbenchTabs() {
+  const router = useRouter()
+  const params = useSearchParams()
+  const requested = params.get('tab')
+  const tab: Tab = TABS.find((t) => t === requested) ?? 'sources'
+
+  return (
+    <Tabs value={tab} onValueChange={(v) => router.replace(v === 'sources' ? '/ingestion' : `/ingestion?tab=${v}`, { scroll: false })}>
+      <TabsList>
+        <TabsTrigger value="sources">Sources</TabsTrigger>
+        <TabsTrigger value="imports">Imports</TabsTrigger>
+      </TabsList>
+      <TabsContent value="sources" className="mt-4">
+        <SourcesTab />
+      </TabsContent>
+      <TabsContent value="imports" className="mt-4">
+        {IMPORTS_UI_ENABLED ? <ImportsTab /> : <ImportsPlanned />}
+      </TabsContent>
+    </Tabs>
+  )
+}
+
+/** Ingestion Workbench landing page (FE-7.1): Sources, and Imports from Phase 8 (FE-8.2). */
 export default function IngestionPage() {
   const { has } = useCurrentSession()
 
@@ -150,14 +179,26 @@ export default function IngestionPage() {
         title="Ingestion Workbench"
         description="Registered source systems, their profiles and versioned source contracts."
         actions={
-          <RequirePermission permission="source:manage" fallback={null}>
-            <Button asChild size="sm" data-testid="register-source">
-              <Link href="/ingestion/sources/new">
-                <Plus className="mr-1 h-3.5 w-3.5" />
-                Register source
-              </Link>
-            </Button>
-          </RequirePermission>
+          <>
+            {IMPORTS_UI_ENABLED && (
+              <RequirePermission permission="import:write" fallback={null}>
+                <Button asChild size="sm" variant="outline" data-testid="new-import">
+                  <Link href="/ingestion/imports/new">
+                    <FileUp className="mr-1 h-3.5 w-3.5" />
+                    New import
+                  </Link>
+                </Button>
+              </RequirePermission>
+            )}
+            <RequirePermission permission="source:manage" fallback={null}>
+              <Button asChild size="sm" data-testid="register-source">
+                <Link href="/ingestion/sources/new">
+                  <Plus className="mr-1 h-3.5 w-3.5" />
+                  Register source
+                </Link>
+              </Button>
+            </RequirePermission>
+          </>
         }
       />
       <div className="px-6 pb-6">
@@ -165,28 +206,9 @@ export default function IngestionPage() {
         {!has('source:read') ? (
           <Forbidden permission="source:read" />
         ) : (
-          <Tabs defaultValue="sources">
-            <TabsList>
-              <TabsTrigger value="sources">Sources</TabsTrigger>
-              <TabsTrigger value="imports">Imports</TabsTrigger>
-            </TabsList>
-            <TabsContent value="sources" className="mt-4">
-              <SourcesTab />
-            </TabsContent>
-            <TabsContent value="imports" className="mt-4">
-              <EmptyState
-                icon={FileUp}
-                title="No imports yet"
-                description={
-                  <>
-                    File imports are <strong>planned</strong> for Feature 02 Phase 8 (WS2). Nothing can be uploaded
-                    yet.
-                  </>
-                }
-                action={<Badge variant="secondary">Planned</Badge>}
-              />
-            </TabsContent>
-          </Tabs>
+          <Suspense fallback={<LoadingBlock rows={4} />}>
+            <WorkbenchTabs />
+          </Suspense>
         )}
       </div>
     </>
