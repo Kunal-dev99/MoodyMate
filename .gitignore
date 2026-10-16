@@ -25,3 +25,7 @@ backend/.venv/
 .ruff_cache/
 *.tsbuildinfo
 *.egg-info/
+
+# Playwright (FE-6.2)
+frontend/playwright-report/
+frontend/test-results/

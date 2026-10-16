@@ -2,6 +2,7 @@
 
 import type { ReactNode } from 'react'
 import { useCurrentSession } from '@/components/auth/SessionProvider'
+import { EnvironmentBanner } from '@/components/layout/EnvironmentBanner'
 import { Header } from '@/components/layout/header'
 import { Sidebar, type NavItem } from '@/components/layout/sidebar'
 import { ThemeToggle } from '@/components/layout/ThemeToggle'
@@ -15,7 +16,7 @@ const toNav = ({ href, label, icon }: Workspace): NavItem => ({ href, label, ico
  * the pages show a 403 state and the backend enforces the permission (D-04).
  */
 export function AppShell({ children }: { children: ReactNode }) {
-  const { me, has, signOut } = useCurrentSession()
+  const { me, has, signOut, authConfig } = useCurrentSession()
   const visible = (w: Workspace) => !w.permission || has(w.permission)
 
   return (
@@ -31,12 +32,16 @@ export function AppShell({ children }: { children: ReactNode }) {
         onLogout={() => void signOut()}
       />
       <div className="ml-64 transition-all duration-300">
-        <Header
-          title="Financial Risk Platform"
-          logoSrc="/brand/logo.png"
-          logoAlt="Fusion Practices"
-          actions={<ThemeToggle />}
-        />
+        {/* One sticky block, so the banner never covers the header when the page scrolls. */}
+        <div className="sticky top-0 z-40">
+          <EnvironmentBanner environment={authConfig.environment} />
+          <Header
+            title="Financial Risk Platform"
+            logoSrc="/brand/logo.png"
+            logoAlt="Fusion Practices"
+            actions={<ThemeToggle />}
+          />
+        </div>
         <main>{children}</main>
       </div>
     </>

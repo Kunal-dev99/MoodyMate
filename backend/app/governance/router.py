@@ -30,6 +30,7 @@ from app.governance.schemas import (
     DevPersona,
     DevSessionRequest,
     DevSessionResponse,
+    EnvironmentInfo,
     ImpactAnalysis,
     Me,
     MyPermissions,
@@ -78,7 +79,12 @@ async def auth_config(request: Request) -> AuthConfig:
         oidc = OidcClientConfig(
             issuer=s.OIDC_ISSUER, client_id=s.OIDC_CLIENT_ID, scopes=s.OIDC_SCOPES
         )
-    return AuthConfig(mode=s.AUTH_MODE, dev_sessions=s.dev_sessions_enabled, oidc=oidc)
+    return AuthConfig(
+        mode=s.AUTH_MODE,
+        environment=EnvironmentInfo(env=s.ENV, data_class=s.data_class),
+        dev_sessions=s.dev_sessions_enabled,
+        oidc=oidc,
+    )
 
 
 # --- dev only (mounted when settings.dev_sessions_enabled) -----------------------------

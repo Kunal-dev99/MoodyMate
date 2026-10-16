@@ -369,6 +369,7 @@ export interface components {
              * @description True when the dev sign-in endpoints are available.
              */
             dev_sessions: boolean;
+            environment: components["schemas"]["EnvironmentInfo"];
             /**
              * Mode
              * @enum {string}
@@ -414,6 +415,22 @@ export interface components {
              * @constant
              */
             token_type: "Bearer";
+        };
+        /**
+         * EnvironmentInfo
+         * @description Shown on every page outside production (FE-6.1).
+         */
+        EnvironmentInfo: {
+            /**
+             * Data Class
+             * @enum {string}
+             */
+            data_class: "synthetic" | "client";
+            /**
+             * Env
+             * @enum {string}
+             */
+            env: "local" | "test" | "staging" | "production";
         };
         /** ErrorEnvelope */
         ErrorEnvelope: {

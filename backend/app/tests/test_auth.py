@@ -165,6 +165,7 @@ def test_dev_endpoints_absent_in_oidc_mode(oidc: TestClient) -> None:
     assert oidc.post("/api/v1/dev/sessions", json={"role": "auditor"}).status_code == 404
     assert oidc.get("/api/v1/auth/config").json() == {
         "mode": "oidc",
+        "environment": {"env": "test", "data_class": "synthetic"},
         "dev_sessions": False,
         "oidc": {"issuer": ISSUER, "client_id": "moodymate-web", "scopes": "openid profile email"},
     }
@@ -176,6 +177,7 @@ def test_dev_endpoints_absent_in_oidc_mode(oidc: TestClient) -> None:
 def test_dev_token_round_trip(api: TestClient) -> None:
     assert api.get("/api/v1/auth/config").json() == {
         "mode": "dev",
+        "environment": {"env": "test", "data_class": "synthetic"},
         "dev_sessions": True,
         "oidc": None,
     }

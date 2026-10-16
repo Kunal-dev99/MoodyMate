@@ -24,6 +24,7 @@ def test_app_refuses_to_start_with_dev_auth_in_production(monkeypatch: pytest.Mo
 def test_production_with_oidc_is_allowed() -> None:
     s = Settings(
         ENV="production",
+        DATA_CLASS="client",
         AUTH_MODE="oidc",
         OIDC_ISSUER="https://idp.example",
         OIDC_AUDIENCE="moodymate-api",
@@ -35,4 +36,4 @@ def test_production_with_oidc_is_allowed() -> None:
 def test_safe_defaults() -> None:
     s = Settings(ENV="local")
     assert s.AI_ENABLED is False
-    assert s.DATA_CLASS == "synthetic"
+    assert s.data_class == "synthetic"

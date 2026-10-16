@@ -142,6 +142,9 @@
             "title": "Dev Sessions",
             "type": "boolean"
           },
+          "environment": {
+            "$ref": "#/components/schemas/EnvironmentInfo"
+          },
           "mode": {
             "enum": [
               "oidc",
@@ -163,6 +166,7 @@
         },
         "required": [
           "mode",
+          "environment",
           "dev_sessions"
         ],
         "title": "AuthConfig",
@@ -264,6 +268,35 @@
           "expires_in"
         ],
         "title": "DevSessionResponse",
+        "type": "object"
+      },
+      "EnvironmentInfo": {
+        "description": "Shown on every page outside production (FE-6.1).",
+        "properties": {
+          "data_class": {
+            "enum": [
+              "synthetic",
+              "client"
+            ],
+            "title": "Data Class",
+            "type": "string"
+          },
+          "env": {
+            "enum": [
+              "local",
+              "test",
+              "staging",
+              "production"
+            ],
+            "title": "Env",
+            "type": "string"
+          }
+        },
+        "required": [
+          "env",
+          "data_class"
+        ],
+        "title": "EnvironmentInfo",
         "type": "object"
       },
       "ErrorEnvelope": {

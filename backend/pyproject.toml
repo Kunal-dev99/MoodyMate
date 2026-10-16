@@ -61,4 +61,7 @@ disallow_untyped_defs = false
 testpaths = ["app/tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
-markers = ["db: needs a reachable PostgreSQL (DATABASE_URL); required when REQUIRE_DB=1"]
+markers = [
+    "db: needs a reachable PostgreSQL (DATABASE_URL); required when REQUIRE_DB=1",
+    "ws1: WS1 verification suite (BE-6.3); prints the route x role matrix",
+]

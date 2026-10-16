@@ -1,0 +1,139 @@
+# Phase 6 check output, captured 2026-10-16T08:52:49Z
+# worktree /home/user/MoodyMate-wt/ws1-phase6, branch feat/ws1-phase6 (from master c8e0c56); tests on moodymate_test; e2e on a fresh copy moodymate_ws1_p6_e2e.
+# Captured on the tree committed in the Phase 6 build commit.
+
+## Backend (CI order)
+$ ruff check . && ruff format --check . && mypy app scripts
+All checks passed!
+136 files already formatted
+Success: no issues found in 136 source files
+$ REQUIRE_DB=1 pytest -q -m "not ws1"
+2 failed, 244 passed, 7 deselected in 95.42s (0:01:35)
+# The 2 failures were test_auth.py asserting the exact /auth/config body, which now also
+# carries `environment` (BE-6.1/FE-6.1). Both assertions updated; re-run:
+246 passed, 7 deselected in 96.37s (0:01:36)
+$ REQUIRE_DB=1 pytest -m ws1 -v   (BE-6.3 WS1 verification suite)
+
+app/tests/test_ws1_verification.py::test_route_by_role_authorization_matrix PASSED
+app/tests/test_ws1_verification.py::test_matrix_covers_every_route_without_a_token PASSED
+app/tests/test_ws1_verification.py::test_another_tenant_sees_and_changes_nothing_here PASSED
+app/tests/test_ws1_verification.py::test_breaking_change_needs_analysis_and_a_second_person PASSED
+app/tests/test_ws1_verification.py::test_every_mutating_route_is_listed PASSED
+app/tests/test_ws1_verification.py::test_every_mutating_route_emits_an_audit_event PASSED
+app/tests/test_ws1_verification.py::test_migration_round_trip_base_to_head PASSED
+====== WS1 authorization matrix (route x role, HTTP status; 403 = denied) ======
+
+route                                                               permission      platform_admin   data_steward   risk_analyst       approver        auditor
+GET /api/v1/audit-events                                            audit:read                 200            403            403            403            200
+GET /api/v1/me                                                      authenticated              200            200            200            200            200
+GET /api/v1/me/permissions                                          authenticated              200            200            200            200            200
+GET /api/v1/schema-change-proposals                                 schema:read                200            200            200            200            200
+POST /api/v1/schema-change-proposals                                schema:propose             403            422            403            403            403
+GET /api/v1/schema-change-proposals/{proposal_id}                   schema:read                404            404            404            404            404
+POST /api/v1/schema-change-proposals/{proposal_id}/approval         schema:approve             403            403            403            422            403
+POST /api/v1/schema-change-proposals/{proposal_id}/impact-analysis  schema:propose             403            404            403            403            403
+POST /api/v1/schema-change-proposals/{proposal_id}/revert           schema:propose             403            404            403            403            403
+POST /api/v1/schema-change-proposals/{proposal_id}/submit           schema:propose             403            404            403            403            403
+GET /api/v1/schemas                                                 schema:read                200            200            200            200            200
+GET /api/v1/schemas/{schema_id}/diff                                schema:read                422            422            422            422            422
+GET /api/v1/schemas/{schema_id}/versions                            schema:read                404            404            404            404            404
+GET /api/v1/users                                                   admin:read                 200            403            403            403            403
+GET /api/v1/users/{user_id}                                         admin:read                 404            403            403            403            403
+====================== 7 passed, 246 deselected in 7.96s =======================
+$ pytest -v app/tests/test_environment_guard.py   (BE-6.1)
+app/tests/test_environment_guard.py::test_env_by_data_class[local-synthetic-True] PASSED
+app/tests/test_environment_guard.py::test_env_by_data_class[local-client-False] PASSED
+app/tests/test_environment_guard.py::test_env_by_data_class[test-synthetic-True] PASSED
+app/tests/test_environment_guard.py::test_env_by_data_class[test-client-False] PASSED
+app/tests/test_environment_guard.py::test_env_by_data_class[staging-synthetic-True] PASSED
+app/tests/test_environment_guard.py::test_env_by_data_class[staging-client-True] PASSED
+app/tests/test_environment_guard.py::test_env_by_data_class[production-synthetic-True] PASSED
+app/tests/test_environment_guard.py::test_env_by_data_class[production-client-True] PASSED
+app/tests/test_environment_guard.py::test_every_combination_is_covered PASSED
+app/tests/test_environment_guard.py::test_every_response_carries_the_data_class[GET-/api/v1/health-200] PASSED
+app/tests/test_environment_guard.py::test_every_response_carries_the_data_class[GET-/api/v1/auth/config-200] PASSED
+app/tests/test_environment_guard.py::test_every_response_carries_the_data_class[GET-/api/v1/me-401] PASSED
+app/tests/test_environment_guard.py::test_every_response_carries_the_data_class[GET-/api/v1/no-such-route-404] PASSED
+app/tests/test_environment_guard.py::test_data_class_header_is_readable_cross_origin PASSED
+app/tests/test_environment_guard.py::test_auth_config_reports_the_environment PASSED
+============================== 15 passed in 0.39s ==============================
+$ export_openapi --check
+openapi.json is up to date
+
+## Frontend
+generated types regenerated (committed)
+ Test Files  7 passed (7)
+      Tests  50 passed (50)
+✔ No ESLint warnings or errors
+tsc: exit 0
+ ✓ Compiled successfully
+$ npx playwright test   (FE-6.2, fresh DB copy, backend ENV=test)
+  ✓  1 [chromium] › e2e/smoke.spec.ts:16:7 › sign-in as Platform administrator (889ms)
+  ✓  2 [chromium] › e2e/smoke.spec.ts:16:7 › sign-in as Data steward (664ms)
+  ✓  3 [chromium] › e2e/smoke.spec.ts:16:7 › sign-in as Risk analyst (607ms)
+  ✓  4 [chromium] › e2e/smoke.spec.ts:16:7 › sign-in as Approver (599ms)
+  ✓  5 [chromium] › e2e/smoke.spec.ts:16:7 › sign-in as Auditor (633ms)
+  ✓  6 [chromium] › e2e/smoke.spec.ts:24:5 › a page the role may not use shows the 403 state (854ms)
+  ✓  7 [chromium] › e2e/smoke.spec.ts:32:5 › schema compare shows every change with its badge (958ms)
+  ✓  8 [chromium] › e2e/smoke.spec.ts:53:5 › proposal flow: steward proposes, approver approves (2.6s)
+  8 passed (10.6s)
+$ browser-phase6.mjs (backend ENV=local): see browser-phase6.json
+
+## Verification follow-ups (independent review of 670fed6)
+$ pytest -v app/tests/test_environment_guard.py  (new: DATA_CLASS required in staging/production; preflight and 500 carry X-Data-Class)
+app/tests/test_environment_guard.py::test_deployments_must_state_their_data_class[staging] PASSED
+app/tests/test_environment_guard.py::test_deployments_must_state_their_data_class[production] PASSED
+app/tests/test_environment_guard.py::test_local_and_test_default_to_synthetic[local] PASSED
+app/tests/test_environment_guard.py::test_local_and_test_default_to_synthetic[test] PASSED
+app/tests/test_environment_guard.py::test_cors_preflight_carries_the_data_class PASSED
+app/tests/test_environment_guard.py::test_unhandled_error_carries_the_data_class PASSED
+============================== 21 passed in 0.44s ==============================
+$ REQUIRE_DB=1 pytest -q -m "not ws1"
+252 passed, 8 deselected in 98.78s (0:01:38)
+$ REQUIRE_DB=1 pytest -m ws1 -v  (matrix now on real ids: allowed roles reach 2xx, refusals name the permission; audit test asserts every listed route is driven; tenant isolation both ways)
+
+app/tests/test_ws1_verification.py::test_seeded_roles_are_the_roles_tested PASSED
+app/tests/test_ws1_verification.py::test_route_by_role_authorization_matrix PASSED
+app/tests/test_ws1_verification.py::test_matrix_covers_every_route_without_a_token PASSED
+app/tests/test_ws1_verification.py::test_another_tenant_sees_and_changes_nothing_here PASSED
+app/tests/test_ws1_verification.py::test_breaking_change_needs_analysis_and_a_second_person PASSED
+app/tests/test_ws1_verification.py::test_every_mutating_route_is_listed PASSED
+app/tests/test_ws1_verification.py::test_every_mutating_route_emits_an_audit_event PASSED
+app/tests/test_ws1_verification.py::test_migration_round_trip_base_to_head PASSED
+====== WS1 authorization matrix (route x role, HTTP status; 403 = denied) ======
+
+route                                                               permission      platform_admin   data_steward   risk_analyst       approver        auditor
+GET /api/v1/audit-events                                            audit:read                 200            403            403            403            200
+GET /api/v1/me                                                      authenticated              200            200            200            200            200
+GET /api/v1/me/permissions                                          authenticated              200            200            200            200            200
+GET /api/v1/schema-change-proposals                                 schema:read                200            200            200            200            200
+POST /api/v1/schema-change-proposals                                schema:propose             403            422            403            403            403
+GET /api/v1/schema-change-proposals/{proposal_id}                   schema:read                200            200            200            200            200
+POST /api/v1/schema-change-proposals/{proposal_id}/approval         schema:approve             403            403            403            422            403
+POST /api/v1/schema-change-proposals/{proposal_id}/impact-analysis  schema:propose             403            200            403            403            403
+POST /api/v1/schema-change-proposals/{proposal_id}/revert           schema:propose             403            409            403            403            403
+POST /api/v1/schema-change-proposals/{proposal_id}/submit           schema:propose             403            200            403            403            403
+GET /api/v1/schemas                                                 schema:read                200            200            200            200            200
+GET /api/v1/schemas/{schema_id}/diff                                schema:read                200            200            200            200            200
+GET /api/v1/schemas/{schema_id}/versions                            schema:read                200            200            200            200            200
+GET /api/v1/users                                                   admin:read                 200            403            403            403            403
+GET /api/v1/users/{user_id}                                         admin:read                 200            403            403            403            403
+====================== 8 passed, 252 deselected in 9.03s =======================
+$ ruff, format, mypy app scripts, export_openapi --check
+All checks passed!
+136 files already formatted
+Success: no issues found in 136 source files
+openapi.json is up to date
+$ frontend: npm test, lint, typecheck, build
+      Tests  51 passed (51)
+✔ No ESLint warnings or errors
+tsc: exit 0
+ ✓ Compiled successfully
+$ npx playwright test (fresh DB copy)
+  8 passed (11.1s)
+$ banner after scrolling (03-banner-after-scroll.png): banner y=0 h=25, header y=25 -> no overlap; opaque surface + tint; text rgb(26,26,26); role=region aria-label=Environment
+
+## D-14 (user decision: client data only in production)
+$ pytest -q app/tests/test_environment_guard.py   (staging-client now refused; written first and failing before the change)
+$ REQUIRE_DB=1 pytest -q app/tests
+260 passed in 106.44s (0:01:46)

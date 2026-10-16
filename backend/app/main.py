@@ -15,6 +15,7 @@ from app.api.v1.router import build_api_router
 from app.core.auth import enforce_declared_permission
 from app.core.config import Settings, get_settings
 from app.core.correlation import HEADER, CorrelationIdMiddleware
+from app.core.environment import DATA_CLASS_HEADER, DataClassHeaderMiddleware
 from app.core.errors import register_error_handlers
 from app.core.logging import configure_logging
 from app.core.tokens import build_verifier
@@ -44,16 +45,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     register_error_handlers(app)
     app.include_router(build_api_router(settings))
 
-    # Middleware order: the last added runs outermost. CORS must be outermost so that
-    # the 500 envelope CorrelationIdMiddleware produces for unhandled errors still gets
-    # CORS headers; otherwise a browser on another origin blocks it and loses the
-    # correlation ID.
+    # Middleware order: the last added runs outermost. CORS must be outside the
+    # correlation middleware so that the 500 envelope CorrelationIdMiddleware produces for
+    # unhandled errors still gets CORS headers; otherwise a browser on another origin
+    # blocks it and loses the correlation ID.
     app.add_middleware(CorrelationIdMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.CORS_ORIGINS,
         allow_methods=["*"],
         allow_headers=["*"],
-        expose_headers=[HEADER],
+        expose_headers=[HEADER, DATA_CLASS_HEADER],
     )
+    # Outermost (BE-6.1): every response carries it, including CORS preflights that the
+    # CORS middleware answers itself and the 500 envelope from CorrelationIdMiddleware.
+    app.add_middleware(DataClassHeaderMiddleware, data_class=settings.data_class)
     return app
