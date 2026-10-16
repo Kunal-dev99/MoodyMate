@@ -9,13 +9,21 @@ before the migrations fail with a long traceback. Exit codes, acted on by the sc
                                     4  any other failure (message printed)
 
 Usage (from backend/):
-  python -m scripts.db_check               check and print a one-line diagnosis
-  python -m scripts.db_check --port        print the port from DATABASE_URL
-  python -m scripts.db_check --move-port   point backend/.env at the first free port
-                                           from 5433 and print it
+  python -m scripts.db_check                check and print a one-line diagnosis
+  python -m scripts.db_check --port         print the port from DATABASE_URL
+  python -m scripts.db_check --move-port    point backend/.env at the first free port
+                                            from 5433 and print it
+  python -m scripts.db_check --setup        create (or reset) the DATABASE_URL user and
+                                            database, signed in as a PostgreSQL superuser:
+                                            PGADMINUSER (default postgres) and
+                                            PGADMINPASSWORD, else a password prompt
+  python -m scripts.db_check --new-password print a random password for a new install
 """
 
 import asyncio
+import getpass
+import os
+import secrets
 import socket
 import sys
 from pathlib import Path
@@ -34,6 +42,17 @@ def _describe(url: URL) -> str:
     return f"database {url.database} at {url.host}:{url.port or 5432} as {url.username}"
 
 
+def _classify(exc: Exception, where: str) -> tuple[int, str]:
+    if isinstance(exc, asyncpg.InvalidAuthorizationSpecificationError):
+        # Wrong password, unknown user or no pg_hba entry: all are a refused sign-in.
+        return BAD_LOGIN, f"The server refused the user name or password for {where}."
+    if isinstance(exc, asyncpg.InvalidCatalogNameError):
+        return NO_DATABASE, f"The server is up but has no {where}."
+    if isinstance(exc, OSError | TimeoutError):
+        return UNREACHABLE, f"Nothing accepts connections for {where}."
+    return OTHER, f"Could not connect to {where}: {type(exc).__name__}: {exc}"
+
+
 async def check(database_url: str, connect_timeout: float = 5) -> tuple[int, str]:
     url = make_url(database_url)
     where = _describe(url)
@@ -46,17 +65,56 @@ async def check(database_url: str, connect_timeout: float = 5) -> tuple[int, str
             database=url.database,
             timeout=connect_timeout,
         )
-    except asyncpg.InvalidAuthorizationSpecificationError:
-        # Wrong password, unknown user or no pg_hba entry: all are a refused sign-in.
-        return BAD_LOGIN, f"The server refused the user name or password for {where}."
-    except asyncpg.InvalidCatalogNameError:
-        return NO_DATABASE, f"The server is up but has no {where}."
-    except (OSError, TimeoutError):
-        return UNREACHABLE, f"Nothing accepts connections for {where}."
-    except Exception as exc:  # report anything else as-is
-        return OTHER, f"Could not connect to {where}: {type(exc).__name__}: {exc}"
+    except Exception as exc:  # every failure maps to an exit code
+        return _classify(exc, where)
     await conn.close()
     return OK, f"Signed in to {where}."
+
+
+def _ident(name: str) -> str:
+    return '"' + name.replace('"', '""') + '"'
+
+
+def _literal(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+async def setup(
+    database_url: str, admin_user: str, admin_password: str, connect_timeout: float = 10
+) -> tuple[int, str]:
+    """Create the DATABASE_URL role and database, or reset the role's password to match.
+
+    Signs in as a superuser (local development only). The role gets CREATEDB, which the
+    test suite and D-03 database copies need, and owns its database.
+    """
+    url = make_url(database_url)
+    role, password, database = url.username or "", url.password or "", url.database or ""
+    where = f"database postgres at {url.host}:{url.port or 5432} as {admin_user}"
+    try:
+        conn = await asyncpg.connect(
+            host=url.host,
+            port=url.port or 5432,
+            user=admin_user,
+            password=admin_password,
+            database="postgres",
+            timeout=connect_timeout,
+        )
+    except Exception as exc:  # every failure maps to an exit code
+        return _classify(exc, where)
+    try:
+        exists = await conn.fetchval("SELECT 1 FROM pg_roles WHERE rolname = $1", role)
+        verb = "ALTER" if exists else "CREATE"
+        # DDL takes no bind parameters: names and the password are quoted instead.
+        await conn.execute(
+            f"{verb} ROLE {_ident(role)} WITH LOGIN CREATEDB PASSWORD {_literal(password)}"
+        )
+        if not await conn.fetchval("SELECT 1 FROM pg_database WHERE datname = $1", database):
+            await conn.execute(f"CREATE DATABASE {_ident(database)} OWNER {_ident(role)}")
+    except Exception as exc:  # e.g. the admin user is not a superuser
+        return OTHER, f"Could not set up {_describe(url)}: {type(exc).__name__}: {exc}"
+    finally:
+        await conn.close()
+    return OK, f"Set up {_describe(url)}."
 
 
 def _in_use(port: int) -> bool:
@@ -94,6 +152,9 @@ def set_env_port(env_file: Path, port: int) -> None:
 
 
 def main(argv: list[str]) -> int:
+    if "--new-password" in argv:
+        print(secrets.token_hex(16))  # letters and digits only: safe on any command line
+        return OK
     url = Settings().DATABASE_URL  # ENV comes from the environment or backend/.env
     if "--port" in argv:
         print(make_url(url).port or 5432)
@@ -103,7 +164,15 @@ def main(argv: list[str]) -> int:
         set_env_port(ENV_FILE, port)
         print(port)
         return OK
-    code, message = asyncio.run(check(url))
+    if "--setup" in argv:
+        admin = os.environ.get("PGADMINUSER", "postgres")
+        password = os.environ.get("PGADMINPASSWORD") or getpass.getpass(
+            f"Password of the PostgreSQL superuser '{admin}' on port "
+            f"{make_url(url).port or 5432}: "
+        )
+        code, message = asyncio.run(setup(url, admin, password))
+    else:
+        code, message = asyncio.run(check(url))
     print(message)
     return code
 
