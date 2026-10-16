@@ -16,9 +16,8 @@ from app.core.config import Settings
 from app.core.logging import JsonFormatter
 from app.main import create_app
 from app.tests.conftest import dev_token, sql
-from app.tests.test_adapters import _rewrite
-from app.tests.test_imports import IMPORTS, seeded_source_id, source_for, upload
-from app.tests.xlsx_kit import xlsx
+from app.tests.helpers import IMPORTS, seeded_source_id, source_for, upload
+from app.tests.xlsx_kit import rewrite, xlsx
 
 pytestmark = pytest.mark.db
 
@@ -43,7 +42,7 @@ def accepted_csv() -> bytes:
 
 def _broken_sheet() -> bytes:
     sheet = f'<worksheet><sheetData><row r="1"><c t="inlineStr"><is><t>{S}</t>'.encode()
-    return _rewrite(xlsx([[("s", "a")]]), "xl/worksheets/sheet1.xml", sheet)
+    return rewrite(xlsx([[("s", "a")]]), "xl/worksheets/sheet1.xml", sheet)
 
 
 def failing_files() -> list[tuple[str, bytes, str]]:

@@ -476,6 +476,34 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
      changes nothing and is not audited; a replay conflict is.
 - **Reversal:** a new decision. Point 1 only ever tightens.
 
+## D-26 Essential backend tests only
+
+- **Status:** active (decided by the user 2026-10-16)
+- **Date:** 2026-10-16
+- **Context:** the backend suite had grown to 1,013 tests and took about 9.5 minutes per run,
+  mostly through per-combination parametrisation. That slowed every phase and every CI run.
+- **Decision:**
+  1. The backend suite stays **under 50 tests** in total (ws1 included), covering
+     security and core flows only:
+     - authentication and RBAC, with the route×role matrix;
+     - tenant isolation;
+     - the audit trail and its immutability;
+     - environment guards;
+     - DB immutability triggers;
+     - one happy path per feature;
+     - no raw-value leaks;
+     - migrations.
+  2. Each new phase adds at most a handful of essential tests. Loops inside one test replace
+     parametrised variants.
+  3. Frontend unit tests and Playwright are not limited by this decision.
+  4. A plan Done-when may cite a consolidated test. Earlier ticks that name removed tests
+     stay as history.
+- **Consequences:** a full backend run takes about 50 s instead of about 9.5 min. Detailed
+  edge cases are no longer guarded by tests. The removed areas are listed in the commit
+  `Trim the backend test suite to 33 essential tests` (3cc448c), and can be re-added one at a time if a
+  regression shows up.
+- **Reversal:** a new decision.
+
 ---
 
 <!-- Never renumber existing IDs. New decisions are appended as D-05, D-06, … -->

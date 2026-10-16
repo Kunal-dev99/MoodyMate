@@ -2,11 +2,13 @@
 separate step and the route x role matrix is printed in the test report.
 
 1. Authorization matrix: every /api/v1 route x every seeded role -> 2xx/4xx as declared,
-   403 exactly where the role lacks the route's permission.
-2. Cross-tenant isolation: a user of another tenant sees and changes nothing here.
-3. Breaking-change approval: analysis, maker-checker approval, activation.
-4. Audit completeness: every mutating route emits an audit event.
-5. Migration round trip base -> head (with the seeded data).
+   403 exactly where the role lacks the route's permission; 401 for every route without a
+   token.
+2. Cross-tenant isolation: a user of another tenant sees and changes nothing here, and
+   another tenant's resource is the same 404 as a random id.
+3. Audit completeness: every mutating route is listed and emits its audit event.
+4. Migrations: base -> head round trip with the seed; the downgrade refuses while user data
+   or audit rows exist.
 """
 
 import uuid
@@ -14,26 +16,35 @@ from typing import Any
 
 import pytest
 from alembic import command
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from app.core.auth import AUTHENTICATED, PUBLIC_PATHS, declared_permission
 from app.governance.constants import ROLE_PERMISSIONS, Role
-from app.tests.conftest import WS1_MATRIX, alembic_config, dev_token, insert_tenant, sql
-from app.tests.test_imports import upload
-from app.tests.test_schema_change import (
-    BASE,
+from app.tests.conftest import WS1_MATRIX, alembic_config, clean, dev_token, insert_tenant, sql
+from app.tests.helpers import (
+    FIELD_KEYS,
+    IMPORTS,
+    PROPOSALS,
+    SOURCES,
+    cid,
+    contract_body,
+    events,
     removal_proposal,
-    submitted,
+    schema_id,
+    seeded_source_id,
+    source_body,
     token_for,
+    upload,
 )
-from app.tests.test_schema_registry import schema_id
-from app.tests.test_sources import contract_body, source_body
 
 pytestmark = [pytest.mark.db, pytest.mark.ws1]
 
 ROLES = [r.value for r in Role]
 MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
+ALLOWED_OUTCOMES = {200, 201, 404, 409, 422}  # a permitted role is never refused
 
 
 def protected_routes(api: TestClient) -> list[tuple[str, str, str]]:
@@ -51,59 +62,49 @@ def protected_routes(api: TestClient) -> list[tuple[str, str, str]]:
     return sorted(found, key=lambda r: (r[1], r[0]))
 
 
-def concrete(path: str) -> str:
-    """A path template with every parameter filled by a random (absent) id."""
+def fill(path: str, ids: dict[str, str] | None = None) -> str:
+    """A path template with its parameters filled from `ids`, else by random (absent) ids."""
+    for name, value in (ids or {}).items():
+        path = path.replace("{" + name + "}", value)
     while "{" in path:
         start, end = path.index("{"), path.index("}")
         path = path[:start] + str(uuid.uuid4()) + path[end + 1 :]
-    return path
+    return path + ("?from=1&to=2" if path.endswith("/diff") and ids else "")
 
 
-# --- 1. Authorization matrix ---
-
-
-ALLOWED_OUTCOMES = {200, 201, 404, 409, 422}  # a permitted role is never refused
-
-
-def real_ids(api: TestClient, db: str) -> dict[str, str]:
-    """Existing ids, so GET routes answer 2xx for permitted roles (the plan's 2xx side)."""
-    proposal = removal_proposal(api, db, dev_token(api, "data_steward"))
-    auditor = api.get("/api/v1/me", headers=dev_token(api, "auditor")).json()
-    source = sql(db, "SELECT id FROM source_system WHERE code = 'core_banking'")[0]["id"]
-    imported = upload(api, dev_token(api, "data_steward"), str(source), b"instrument_id\nA\n")
-    assert imported.status_code == 201, imported.text
-    return {
-        "schema_id": str(schema_id(db, "instrument")),
-        "proposal_id": proposal["id"],
-        "user_id": auditor["user_id"],
-        "source_id": str(source),
-        "import_id": imported.json()["id"],
-    }
-
-
-def concrete_with(path: str, ids: dict[str, str]) -> str:
-    for name, value in ids.items():
-        path = path.replace("{" + name + "}", value)
-    return path + ("?from=1&to=2" if path.endswith("/diff") else "")
-
-
-def test_seeded_roles_are_the_roles_tested(db: str) -> None:
-    seeded = {r["code"] for r in sql(db, "SELECT code FROM role")}
-    assert seeded == set(ROLES)
+# --- 1. Authorization matrix ---------------------------------------------------------------------
 
 
 def test_route_by_role_authorization_matrix(api: TestClient, db: str) -> None:
-    ids = real_ids(api, db)
+    assert {r["code"] for r in sql(db, "SELECT code FROM role")} == set(ROLES)
+    routes = protected_routes(api)
+    # Without a token every protected route is 401.
+    for method, path, _ in routes:
+        r = api.request(method, fill(path), json={} if method in MUTATING else None)
+        assert r.status_code == 401, f"{method} {path} answered {r.status_code} without a token"
+
+    # Existing ids, so GET routes answer 2xx for permitted roles (the plan's 2xx side).
+    steward = dev_token(api, "data_steward")
+    proposal = removal_proposal(api, db, steward)
+    imported = upload(api, steward, seeded_source_id(db), b"instrument_id\nA\n")
+    assert imported.status_code == 201, imported.text
+    ids = {
+        "schema_id": str(schema_id(db, "instrument")),
+        "proposal_id": proposal["id"],
+        "user_id": api.get("/api/v1/me", headers=dev_token(api, "auditor")).json()["user_id"],
+        "source_id": seeded_source_id(db),
+        "import_id": imported.json()["id"],
+    }
     tokens = {role: dev_token(api, role) for role in ROLES}
     failures = []
     successes = dict.fromkeys(ROLES, 0)
-    for method, path, permission in protected_routes(api):
+    for method, path, permission in routes:
         row: dict[str, Any] = {"route": f"{method} {path}", "permission": permission}
         for role in ROLES:
             allowed = permission == AUTHENTICATED or permission in ROLE_PERMISSIONS[Role(role)]
             r = api.request(
                 method,
-                concrete_with(path, ids),
+                fill(path, ids),
                 headers=tokens[role],
                 json={} if method in MUTATING else None,
             )
@@ -126,27 +127,23 @@ def test_route_by_role_authorization_matrix(api: TestClient, db: str) -> None:
     assert not failures, "\n".join(failures)
     # Every role really uses the routes it may use, not only gets past the check.
     assert all(successes.values()), successes
-    # BE-9.3: the profile route is in the matrix, declared import:read, and every seeded role
-    # (all hold import:read) reads the real import's profile.
+    # BE-9.3: the profile route is declared import:read and every seeded role reads it.
     [profile] = [r for r in WS1_MATRIX if r["route"] == "GET /api/v1/imports/{import_id}/profile"]
     assert profile["permission"] == "import:read"
     assert all(profile[role] == 200 for role in ROLES), profile
     assert len(WS1_MATRIX) >= 12
 
 
-def test_matrix_covers_every_route_without_a_token(api: TestClient) -> None:
-    for method, path, _ in protected_routes(api):
-        r = api.request(method, concrete(path), json={} if method in MUTATING else None)
-        assert r.status_code == 401, f"{method} {path} answered {r.status_code} without a token"
-
-
-# --- 2. Cross-tenant isolation ---
+# --- 2. Cross-tenant isolation -------------------------------------------------------------------
 
 
 def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) -> None:
-    here = removal_proposal(api, db, dev_token(api, "data_steward"))
+    steward = dev_token(api, "data_steward")
+    here = removal_proposal(api, db, steward)
     instrument = schema_id(db, "instrument")
     here_user = api.get("/api/v1/me", headers=dev_token(api, "auditor")).json()["user_id"]
+    here_source = seeded_source_id(db)
+    here_import = upload(api, steward, here_source, b"instrument_id\nA\n").json()["id"]
 
     other_tenant = insert_tenant(db, f"other-{uuid.uuid4().hex[:6]}")
     outsider = token_for(
@@ -158,56 +155,63 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
     # Lists hold only the outsider's own tenant.
     users = api.get("/api/v1/users", headers=outsider).json()["items"]
     assert len(users) == 1 and users[0]["display_name"].endswith("dev:outsider")
-    assert api.get("/api/v1/schemas", headers=outsider).json()["total"] == 0
-    assert api.get(BASE, headers=outsider).json()["total"] == 0
+    for path in ("/api/v1/schemas", PROPOSALS, SOURCES, IMPORTS):
+        assert api.get(path, headers=outsider).json()["total"] == 0, path
     audit = api.get("/api/v1/audit-events", params={"limit": 200}, headers=outsider).json()
     theirs = {
         str(r["id"])
         for r in sql(db, "SELECT id FROM audit_event WHERE tenant_id = $1", other_tenant)
     }
     assert audit["items"] and {e["id"] for e in audit["items"]} <= theirs
-    # Direct reads and writes by id: not found, exactly as for an id that does not exist.
-    assert api.get("/api/v1/sources", headers=outsider).json()["total"] == 0
-    here_source = sql(db, "SELECT id FROM source_system WHERE code = 'core_banking'")[0]["id"]
-    here_import = upload(
-        api, dev_token(api, "data_steward"), str(here_source), b"instrument_id\nA\n"
-    ).json()["id"]
-    assert api.get("/api/v1/imports", headers=outsider).json()["total"] == 0
-    for path in (
-        f"/api/v1/imports/{here_import}",
-        f"/api/v1/imports/{here_import}/profile",
-        f"/api/v1/sources/{here_source}",
-        f"/api/v1/users/{here_user}",
-        f"/api/v1/schemas/{instrument}/versions",
-        f"/api/v1/schemas/{instrument}/diff?from=1&to=2",
-        f"{BASE}/{here['id']}",
+
+    # Reads by id: exactly the 404 an id that does not exist gets (no existence oracle).
+    def without_cid(r: Any) -> dict[str, Any]:
+        return {k: v for k, v in r.json().items() if k != "correlation_id"}
+
+    for real, random_id in (
+        (f"{SOURCES}/{here_source}", f"{SOURCES}/{uuid.uuid4()}"),
+        (f"{IMPORTS}/{here_import}", f"{IMPORTS}/{uuid.uuid4()}"),
+        (f"{IMPORTS}/{here_import}/profile", f"{IMPORTS}/{uuid.uuid4()}/profile"),
+        (f"/api/v1/schemas/{instrument}/versions", f"/api/v1/schemas/{uuid.uuid4()}/versions"),
+        (
+            f"/api/v1/schemas/{instrument}/diff?from=1&to=2",
+            f"/api/v1/schemas/{uuid.uuid4()}/diff?from=1&to=2",
+        ),
+        (f"{PROPOSALS}/{here['id']}", f"{PROPOSALS}/{uuid.uuid4()}"),
+        (f"/api/v1/users/{here_user}", f"/api/v1/users/{uuid.uuid4()}"),
     ):
-        assert api.get(path, headers=outsider).status_code == 404, path
+        mine, absent = api.get(real, headers=outsider), api.get(random_id, headers=outsider)
+        assert mine.status_code == absent.status_code == 404, real
+        assert without_cid(mine) == without_cid(absent), real
+
+    # Writes by id and against this tenant's schema/source find nothing either.
     for action, body in (
         ("impact-analysis", None),
         ("submit", {}),
         ("approval", {"decision": "APPROVE"}),
         ("revert", {}),
     ):
-        r = api.post(f"{BASE}/{here['id']}/{action}", json=body, headers=outsider)
+        r = api.post(f"{PROPOSALS}/{here['id']}/{action}", json=body, headers=outsider)
         assert r.status_code == 404, action
-    fields = api.get(f"{BASE}/{here['id']}", headers=dev_token(api, "auditor")).json()[
-        "proposed_fields"
-    ]
+    fields = here["proposed_fields"]
     r = api.post(
-        BASE,
+        PROPOSALS,
         json={"schema_id": str(instrument), "title": "Cross tenant", "fields": fields},
         headers=outsider,
     )
     assert r.status_code == 404
-    assert (
-        sql(
-            db,
-            "SELECT count(*) AS n FROM schema_change_proposal WHERE tenant_id = $1",
-            other_tenant,
-        )[0]["n"]
-        == 0
-    )
+    r = api.post(f"{SOURCES}/{here_source}/contracts", json=contract_body(db), headers=outsider)
+    assert r.status_code == 404
+    r = api.post(SOURCES, json=source_body(db, code="outsider_feed"), headers=outsider)
+    assert (r.status_code, r.json()["message"]) == (404, "Schema not found.")
+    correlation = cid()
+    r = upload(api, outsider, here_source, b"instrument_id\nA\n", cid=correlation)
+    assert (r.status_code, r.json()["code"]) == (404, "not_found")
+    [denied] = events(db, correlation)
+    assert denied["outcome"] == "DENIED"
+    for table in ("schema_change_proposal", "source_system", "import_job"):
+        n = sql(db, f"SELECT count(*) AS n FROM {table} WHERE tenant_id = $1", other_tenant)
+        assert n[0]["n"] == 0, table
 
     # And the other way round: this tenant sees nothing of the outsider's.
     foreign = sql(
@@ -224,30 +228,10 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
     assert all(not u["display_name"].endswith("dev:outsider") for u in users_here)
 
 
-# --- 3. Breaking-change approval ---
+# --- 3. Audit completeness -----------------------------------------------------------------------
 
-
-def test_breaking_change_needs_analysis_and_a_second_person(api: TestClient, db: str) -> None:
-    steward = dev_token(api, "data_steward")
-    draft = removal_proposal(api, db, steward)
-    assert api.post(f"{BASE}/{draft['id']}/submit", json={}, headers=steward).status_code == 409
-    both = token_for(db, "dev:maker-and-checker", ("data_steward", "approver"))
-    mine = submitted(api, db, both)
-    assert mine["impact"]["overall"] == "BREAKING"
-    r = api.post(f"{BASE}/{mine['id']}/approval", json={"decision": "APPROVE"}, headers=both)
-    assert r.status_code == 403
-    r = api.post(
-        f"{BASE}/{mine['id']}/approval",
-        json={"decision": "APPROVE"},
-        headers=dev_token(api, "approver"),
-    )
-    assert r.status_code == 200 and r.json()["proposed_version"]["status"] == "ACTIVE"
-
-
-# --- 4. Audit completeness ---
-
-# Every mutating route and the audit action it must record. A new mutating route fails
-# test_every_mutating_route_is_listed until it is added here and exercised below.
+# Every mutating route and the audit action it must record. A new mutating route fails this
+# test until it is added here and exercised below.
 AUDITED = {
     "POST /api/v1/dev/sessions": "auth.dev_session.create",
     "POST /api/v1/schema-change-proposals": "schema_change.create",
@@ -263,7 +247,7 @@ AUDITED = {
 }
 
 
-def test_every_mutating_route_is_listed(api: TestClient) -> None:
+def test_every_mutating_route_is_listed_and_emits_an_audit_event(api: TestClient, db: str) -> None:
     mutating = {
         f"{m} {route.path}"
         for route in api.app.routes  # type: ignore[attr-defined]
@@ -272,90 +256,98 @@ def test_every_mutating_route_is_listed(api: TestClient) -> None:
         if m in MUTATING
     }
     assert mutating == set(AUDITED)
-
-
-def test_every_mutating_route_emits_an_audit_event(api: TestClient, db: str) -> None:
     called: set[str] = set()
 
-    def call(route: str, headers: dict[str, str], path: str | None = None, body: Any = None) -> Any:
+    def check(route: str, correlation: str) -> None:
         called.add(route)
-        cid = f"ws1-{uuid.uuid4().hex[:10]}"
+        actions = [e["action"] for e in events(db, correlation)]
+        assert AUDITED[route] in actions, f"{route} recorded {actions}"
+
+    def call(route: str, headers: dict[str, str], path: str | None = None, body: Any = None) -> Any:
+        correlation = cid()
         method, template = route.split(" ", 1)
         r = api.request(
-            method, path or template, json=body, headers={**headers, "X-Correlation-ID": cid}
+            method,
+            path or template,
+            json=body,
+            headers={**headers, "X-Correlation-ID": correlation},
         )
         assert r.status_code < 300, f"{route}: {r.status_code} {r.text}"
-        actions = [
-            e["action"]
-            for e in sql(db, "SELECT action FROM audit_event WHERE correlation_id = $1", cid)
-        ]
-        assert AUDITED[route] in actions, f"{route} recorded {actions}"
+        check(route, correlation)
         return r.json()
 
     call("POST /api/v1/dev/sessions", {}, body={"role": "auditor"})
     steward, approver = dev_token(api, "data_steward"), dev_token(api, "approver")
     instrument = schema_id(db, "instrument")
     v1 = api.get(f"/api/v1/schemas/{instrument}/versions", headers=steward).json()["items"][0]
-    keep = (
-        "name",
-        "data_type",
-        "required",
-        "unit",
-        "precision",
-        "scale",
-        "classification",
-        "extension_eligible",
-    )
-    fields = [{k: f[k] for k in keep} for f in v1["fields"] if f["name"] != "legacy_book_code"]
+    fields = [
+        {k: f[k] for k in FIELD_KEYS} for f in v1["fields"] if f["name"] != "legacy_book_code"
+    ]
     p = call(
         "POST /api/v1/schema-change-proposals",
         steward,
         body={"schema_id": str(instrument), "title": "Audit check", "fields": fields},
     )
-    base = f"{BASE}/{p['id']}"
-    call(
-        "POST /api/v1/schema-change-proposals/{proposal_id}/impact-analysis",
-        steward,
-        f"{base}/impact-analysis",
-    )
-    call("POST /api/v1/schema-change-proposals/{proposal_id}/submit", steward, f"{base}/submit", {})
-    call(
-        "POST /api/v1/schema-change-proposals/{proposal_id}/approval",
-        approver,
-        f"{base}/approval",
-        {"decision": "APPROVE"},
-    )
-    call("POST /api/v1/schema-change-proposals/{proposal_id}/revert", steward, f"{base}/revert", {})
-    source = call(
-        "POST /api/v1/sources",
-        steward,
-        body=source_body(db, code="audit_check_feed"),
-    )
+    base = f"{PROPOSALS}/{p['id']}"
+    call(f"POST {PROPOSALS}/{{proposal_id}}/impact-analysis", steward, f"{base}/impact-analysis")
+    call(f"POST {PROPOSALS}/{{proposal_id}}/submit", steward, f"{base}/submit", {})
+    approval = {"decision": "APPROVE"}
+    call(f"POST {PROPOSALS}/{{proposal_id}}/approval", approver, f"{base}/approval", approval)
+    call(f"POST {PROPOSALS}/{{proposal_id}}/revert", steward, f"{base}/revert", {})
+    source = call("POST /api/v1/sources", steward, body=source_body(db, code="audit_check_feed"))
     call(
         "POST /api/v1/sources/{source_id}/contracts",
         steward,
-        f"/api/v1/sources/{source['id']}/contracts",
+        f"{SOURCES}/{source['id']}/contracts",
         contract_body(db, schema="position"),
     )
-    called.add("POST /api/v1/imports")
-    imported_cid = f"ws1-{uuid.uuid4().hex[:10]}"
-    r = upload(api, steward, source["id"], b"Instrument ID\nA\n", cid=imported_cid)
+    correlation = cid()
+    r = upload(api, steward, source["id"], b"Instrument ID\nA\n", cid=correlation)
     assert r.status_code == 201, r.text
-    actions = [
-        e["action"]
-        for e in sql(db, "SELECT action FROM audit_event WHERE correlation_id = $1", imported_cid)
-    ]
-    assert AUDITED["POST /api/v1/imports"] in actions, actions
+    check("POST /api/v1/imports", correlation)
     # Every listed route was exercised here: listing a route without driving it fails.
     assert called == set(AUDITED)
 
 
-# --- 5. Migration round trip ---
+# --- 4. Migrations -------------------------------------------------------------------------------
 
 
-def test_migration_round_trip_base_to_head(db: str) -> None:
+def test_migration_round_trip_and_downgrade_guards(api: TestClient, db: str) -> None:
+    head = str(ScriptDirectory.from_config(Config("alembic.ini")).get_current_head())
+
+    def revision() -> str:
+        return str(sql(db, "SELECT version_num FROM alembic_version")[0]["version_num"])
+
+    # User data blocks the downgrade, in one transaction: nothing is removed or downgraded.
+    steward = dev_token(api, "data_steward")
+    assert upload(api, steward, seeded_source_id(db), b"instrument_id\nA\n").status_code == 201
+    tables = ("data_profile_snapshot", "import_job", "source_record", "audit_event")
+    before = {t: sql(db, f"SELECT * FROM {t} ORDER BY id") for t in tables}
+    try:
+        with pytest.raises(Exception, match="data_profile_snapshot has rows"):
+            command.downgrade(alembic_config(db), "base")
+        assert revision() == head
+        assert {t: sql(db, f"SELECT * FROM {t} ORDER BY id") for t in tables} == before
+
+        # Without user data, audit rows still block it unless the loss is acknowledged.
+        clean(db)
+        assert sql(db, "SELECT count(*) AS n FROM audit_event")[0]["n"] > 0
+        guarded = alembic_config(db)
+        guarded.attributes.pop("allow_audit_loss", None)
+        with pytest.raises(Exception, match="refusing to drop the audit trail"):
+            command.downgrade(guarded, "base")
+        assert revision() == head
+    finally:
+        command.upgrade(alembic_config(db), "head")
+
+    # base -> head with the seed.
     cfg = alembic_config(db)
     command.downgrade(cfg, "base")
+    assert sql(db, "SELECT to_regclass('schema_version') AS t")[0]["t"] is None
     command.upgrade(cfg, "head")
+    assert revision() == head
     seeded = sql(db, "SELECT count(*) AS n FROM schema_version WHERE seeded_by IS NOT NULL")
     assert seeded[0]["n"] == 4
+    assert (
+        sql(db, "SELECT count(*) AS n FROM source_system WHERE seeded_by IS NOT NULL")[0]["n"] == 1
+    )
