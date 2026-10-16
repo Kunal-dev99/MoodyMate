@@ -1,6 +1,53 @@
 {
   "components": {
     "schemas": {
+      "ArtifactOut": {
+        "properties": {
+          "classification": {
+            "description": "The source profile's default classification.",
+            "title": "Classification",
+            "type": "string"
+          },
+          "detected_mime": {
+            "description": "Detected from content, not from the file name.",
+            "title": "Detected Mime",
+            "type": "string"
+          },
+          "original_filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Filename"
+          },
+          "retention_state": {
+            "$ref": "#/components/schemas/RetentionState"
+          },
+          "sha256": {
+            "description": "SHA-256 of the uploaded bytes (hex).",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sha256",
+          "size_bytes",
+          "detected_mime",
+          "original_filename",
+          "classification",
+          "retention_state"
+        ],
+        "title": "ArtifactOut",
+        "type": "object"
+      },
       "AuditEventOut": {
         "properties": {
           "action": {
@@ -170,6 +217,41 @@
           "dev_sessions"
         ],
         "title": "AuthConfig",
+        "type": "object"
+      },
+      "BatchOut": {
+        "properties": {
+          "batch_number": {
+            "title": "Batch Number",
+            "type": "integer"
+          },
+          "column_count": {
+            "title": "Column Count",
+            "type": "integer"
+          },
+          "row_count": {
+            "title": "Row Count",
+            "type": "integer"
+          },
+          "sheet_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sheet Name"
+          }
+        },
+        "required": [
+          "batch_number",
+          "sheet_name",
+          "row_count",
+          "column_count"
+        ],
+        "title": "BatchOut",
         "type": "object"
       },
       "Compatibility": {
@@ -386,6 +468,15 @@
           "|"
         ],
         "title": "CsvDelimiter",
+        "type": "string"
+      },
+      "DataClass": {
+        "description": "D-14/D-16 \u00a75: the class of data an import was uploaded as (the environment's).",
+        "enum": [
+          "synthetic",
+          "client"
+        ],
+        "title": "DataClass",
         "type": "string"
       },
       "DependentType": {
@@ -717,6 +808,432 @@
           "via"
         ],
         "title": "ImpactDependent",
+        "type": "object"
+      },
+      "ImportDetail": {
+        "properties": {
+          "artifact": {
+            "$ref": "#/components/schemas/ArtifactOut"
+          },
+          "batches": {
+            "items": {
+              "$ref": "#/components/schemas/BatchOut"
+            },
+            "title": "Batches",
+            "type": "array"
+          },
+          "contract_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contract Version"
+          },
+          "control_totals": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MaskedValue"
+                    }
+                  ]
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Declared control totals (decimal text), masked by the artifact's classification.",
+            "title": "Control Totals"
+          },
+          "correlation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Correlation Id"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "data_class": {
+            "$ref": "#/components/schemas/DataClass",
+            "description": "The environment's data class at upload (D-14)."
+          },
+          "expected_row_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Row Count"
+          },
+          "format": {
+            "$ref": "#/components/schemas/SourceFormat"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "retry_of_import_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry Of Import Id"
+          },
+          "row_count": {
+            "description": "Data rows read from the file (one source_record each).",
+            "title": "Row Count",
+            "type": "integer"
+          },
+          "schema_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Code"
+          },
+          "schema_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Version"
+          },
+          "schema_version_id": {
+            "description": "The ACTIVE schema version at upload.",
+            "format": "uuid",
+            "title": "Schema Version Id",
+            "type": "string"
+          },
+          "source_code": {
+            "title": "Source Code",
+            "type": "string"
+          },
+          "source_contract_id": {
+            "format": "uuid",
+            "title": "Source Contract Id",
+            "type": "string"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ImportStatus"
+          },
+          "synthetic_attested": {
+            "title": "Synthetic Attested",
+            "type": "boolean"
+          },
+          "synthetic_marker": {
+            "description": "The file carried the ILLUSTRATIVE / SYNTHETIC marker (D-24).",
+            "title": "Synthetic Marker",
+            "type": "boolean"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "source_id",
+          "source_code",
+          "format",
+          "row_count",
+          "expected_row_count",
+          "control_totals",
+          "data_class",
+          "synthetic_attested",
+          "synthetic_marker",
+          "source_contract_id",
+          "contract_version",
+          "schema_version_id",
+          "schema_code",
+          "schema_version",
+          "artifact",
+          "retry_of_import_id",
+          "correlation_id",
+          "created_by",
+          "created_at",
+          "updated_at",
+          "batches"
+        ],
+        "title": "ImportDetail",
+        "type": "object"
+      },
+      "ImportPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ImportSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "ImportPage",
+        "type": "object"
+      },
+      "ImportStatus": {
+        "description": "Data Model \u00a79 `import_job.status` plus QUARANTINED from Appendix B (D-06, D-21).\nAppendix B's `uploaded` is RECEIVED and `ready` is COMPLETED.",
+        "enum": [
+          "CREATED",
+          "RECEIVED",
+          "PROFILING",
+          "MAPPING_REQUIRED",
+          "VALIDATING",
+          "COMPLETED",
+          "COMPLETED_WITH_WARNINGS",
+          "QUARANTINED",
+          "FAILED",
+          "CANCELLED"
+        ],
+        "title": "ImportStatus",
+        "type": "string"
+      },
+      "ImportSummary": {
+        "properties": {
+          "artifact": {
+            "$ref": "#/components/schemas/ArtifactOut"
+          },
+          "contract_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contract Version"
+          },
+          "control_totals": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MaskedValue"
+                    }
+                  ]
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Declared control totals (decimal text), masked by the artifact's classification.",
+            "title": "Control Totals"
+          },
+          "correlation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Correlation Id"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "data_class": {
+            "$ref": "#/components/schemas/DataClass",
+            "description": "The environment's data class at upload (D-14)."
+          },
+          "expected_row_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Row Count"
+          },
+          "format": {
+            "$ref": "#/components/schemas/SourceFormat"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "retry_of_import_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry Of Import Id"
+          },
+          "row_count": {
+            "description": "Data rows read from the file (one source_record each).",
+            "title": "Row Count",
+            "type": "integer"
+          },
+          "schema_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Code"
+          },
+          "schema_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Version"
+          },
+          "schema_version_id": {
+            "description": "The ACTIVE schema version at upload.",
+            "format": "uuid",
+            "title": "Schema Version Id",
+            "type": "string"
+          },
+          "source_code": {
+            "title": "Source Code",
+            "type": "string"
+          },
+          "source_contract_id": {
+            "format": "uuid",
+            "title": "Source Contract Id",
+            "type": "string"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ImportStatus"
+          },
+          "synthetic_attested": {
+            "title": "Synthetic Attested",
+            "type": "boolean"
+          },
+          "synthetic_marker": {
+            "description": "The file carried the ILLUSTRATIVE / SYNTHETIC marker (D-24).",
+            "title": "Synthetic Marker",
+            "type": "boolean"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "source_id",
+          "source_code",
+          "format",
+          "row_count",
+          "expected_row_count",
+          "control_totals",
+          "data_class",
+          "synthetic_attested",
+          "synthetic_marker",
+          "source_contract_id",
+          "contract_version",
+          "schema_version_id",
+          "schema_code",
+          "schema_version",
+          "artifact",
+          "retry_of_import_id",
+          "correlation_id",
+          "created_by",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ImportSummary",
         "type": "object"
       },
       "MaskedValue": {
@@ -1287,6 +1804,14 @@
         },
         "title": "ProposalSubmit",
         "type": "object"
+      },
+      "RetentionState": {
+        "description": "`import_artifact.retention_state`. D-20 \u00a74 (PROVISIONAL): artifacts are kept\nindefinitely until the client sets retention; no other state exists yet.",
+        "enum": [
+          "RETAINED"
+        ],
+        "title": "RetentionState",
+        "type": "string"
       },
       "Role": {
         "enum": [
@@ -2620,6 +3145,279 @@
         "summary": "Health",
         "tags": [
           "platform"
+        ]
+      }
+    },
+    "/api/v1/imports": {
+      "get": {
+        "description": "Newest first; filter by source and status.",
+        "operationId": "listImports",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ImportStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Imports",
+        "tags": [
+          "ingestion"
+        ]
+      },
+      "post": {
+        "description": "Upload a file for a source (multipart). Processed synchronously (D-21): the raw\nartifact is stored, every row becomes a source record and the import is RECEIVED.",
+        "operationId": "createImport",
+        "parameters": [
+          {
+            "description": "Unique per upload (per user). A retry with the same key and the same upload returns the original import; with a different upload, 409 idempotency_conflict (D-21).",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Unique per upload (per user). A retry with the same key and the same upload returns the original import; with a different upload, 409 idempotency_conflict (D-21).",
+              "maxLength": 255,
+              "minLength": 1,
+              "pattern": "^[!-~]+$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "control_totals": {
+                    "description": "JSON object of the contract's control-total columns to exact decimal text, e.g. {\"notional\": \"1234.50\"}.",
+                    "type": "string"
+                  },
+                  "expected_row_count": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "file": {
+                    "description": "The file, in the source profile's format (CSV, XLSX or JSON; detected from content). At most IMPORT_MAX_BYTES (10 MiB). Its name is kept, at most 255 characters.",
+                    "format": "binary",
+                    "type": "string"
+                  },
+                  "source_id": {
+                    "format": "uuid",
+                    "type": "string"
+                  },
+                  "synthetic_attested": {
+                    "default": false,
+                    "description": "Required true while the environment's X-Data-Class is synthetic (D-16 \u00a75): you confirm the file holds no client data.",
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "source_id",
+                  "file"
+                ],
+                "title": "ImportUpload",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportDetail"
+                }
+              }
+            },
+            "description": "Idempotent replay: this key was used for the same upload; the original import is returned (header Idempotent-Replayed: true)."
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Import",
+        "tags": [
+          "ingestion"
+        ]
+      }
+    },
+    "/api/v1/imports/{import_id}": {
+      "get": {
+        "operationId": "getImport",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "import_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Import Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Import",
+        "tags": [
+          "ingestion"
         ]
       }
     },

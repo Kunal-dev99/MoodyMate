@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 from app.core.auth import AUTHENTICATED, PUBLIC_PATHS, declared_permission
 from app.governance.constants import ROLE_PERMISSIONS, Role
 from app.tests.conftest import WS1_MATRIX, alembic_config, dev_token, insert_tenant, sql
+from app.tests.test_imports import upload
 from app.tests.test_schema_change import (
     BASE,
     removal_proposal,
@@ -69,11 +70,14 @@ def real_ids(api: TestClient, db: str) -> dict[str, str]:
     proposal = removal_proposal(api, db, dev_token(api, "data_steward"))
     auditor = api.get("/api/v1/me", headers=dev_token(api, "auditor")).json()
     source = sql(db, "SELECT id FROM source_system WHERE code = 'core_banking'")[0]["id"]
+    imported = upload(api, dev_token(api, "data_steward"), str(source), b"instrument_id\nA\n")
+    assert imported.status_code == 201, imported.text
     return {
         "schema_id": str(schema_id(db, "instrument")),
         "proposal_id": proposal["id"],
         "user_id": auditor["user_id"],
         "source_id": str(source),
+        "import_id": imported.json()["id"],
     }
 
 
@@ -160,7 +164,12 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
     # Direct reads and writes by id: not found, exactly as for an id that does not exist.
     assert api.get("/api/v1/sources", headers=outsider).json()["total"] == 0
     here_source = sql(db, "SELECT id FROM source_system WHERE code = 'core_banking'")[0]["id"]
+    here_import = upload(
+        api, dev_token(api, "data_steward"), str(here_source), b"instrument_id\nA\n"
+    ).json()["id"]
+    assert api.get("/api/v1/imports", headers=outsider).json()["total"] == 0
     for path in (
+        f"/api/v1/imports/{here_import}",
         f"/api/v1/sources/{here_source}",
         f"/api/v1/users/{here_user}",
         f"/api/v1/schemas/{instrument}/versions",
@@ -244,6 +253,7 @@ AUDITED = {
     "POST /api/v1/schema-change-proposals/{proposal_id}/revert": "schema_change.revert",
     "POST /api/v1/sources": "source.create",
     "POST /api/v1/sources/{source_id}/contracts": "source_contract.create",
+    "POST /api/v1/imports": "import.create",
 }
 
 
@@ -321,6 +331,15 @@ def test_every_mutating_route_emits_an_audit_event(api: TestClient, db: str) -> 
         f"/api/v1/sources/{source['id']}/contracts",
         contract_body(db, schema="position"),
     )
+    called.add("POST /api/v1/imports")
+    imported_cid = f"ws1-{uuid.uuid4().hex[:10]}"
+    r = upload(api, steward, source["id"], b"Instrument ID\nA\n", cid=imported_cid)
+    assert r.status_code == 201, r.text
+    actions = [
+        e["action"]
+        for e in sql(db, "SELECT action FROM audit_event WHERE correlation_id = $1", imported_cid)
+    ]
+    assert AUDITED["POST /api/v1/imports"] in actions, actions
     # Every listed route was exercised here: listing a route without driving it fails.
     assert called == set(AUDITED)
 

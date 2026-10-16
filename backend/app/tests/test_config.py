@@ -29,6 +29,7 @@ def test_production_with_oidc_is_allowed() -> None:
         OIDC_ISSUER="https://idp.example",
         OIDC_AUDIENCE="moodymate-api",
         OIDC_CLIENT_ID="moodymate-web",
+        ARTIFACT_STORE_DIR="/var/lib/moodymate/artifacts",  # required outside local/test (D-15)
     )
     assert s.AUTH_MODE == "oidc"
 

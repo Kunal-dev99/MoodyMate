@@ -1,3 +1,5 @@
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { defineConfig, devices } from '@playwright/test'
 
 /**
@@ -13,6 +15,10 @@ const WEB_PORT = 3000
 const backendDb = process.env.E2E_DATABASE_URL ?? process.env.DATABASE_URL
 // CI installs the backend without a virtualenv; locally it runs from backend/.venv.
 const uvicorn = process.env.E2E_UVICORN ?? '.venv/bin/uvicorn'
+// D-15: uploads (Phase 8) are written to a write-once artifact store, which must be an
+// absolute path outside the repository. Pair one directory with each database copy; the
+// default is a temp directory, so CI and a fresh checkout work without setting it.
+const artifactDir = process.env.E2E_ARTIFACT_STORE_DIR ?? join(tmpdir(), 'moodymate-e2e-artifacts')
 
 export default defineConfig({
   testDir: './e2e',
@@ -44,7 +50,7 @@ export default defineConfig({
       cwd: '../backend',
       url: `http://localhost:${API_PORT}/api/v1/health`,
       reuseExistingServer: !process.env.CI,
-      env: { ENV: 'test', ...(backendDb ? { DATABASE_URL: backendDb } : {}) },
+      env: { ENV: 'test', ARTIFACT_STORE_DIR: artifactDir, ...(backendDb ? { DATABASE_URL: backendDb } : {}) },
       timeout: 60_000,
     },
     {

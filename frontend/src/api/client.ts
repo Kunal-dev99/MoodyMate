@@ -99,10 +99,13 @@ export function unwrap<T>(result: { data?: T; error?: unknown; response: Respons
   throw new ApiError(response.status, envelope)
 }
 
-/** Wraps fetch failures (backend down, CORS) as an ApiError so callers handle one type. */
-export async function call<T>(
+/**
+ * Like `call`, but also returns the response, for callers that read its status or headers
+ * (e.g. 200 versus 201 on an idempotent replay, or `X-Data-Class`).
+ */
+export async function callWithResponse<T>(
   request: () => Promise<{ data?: T; error?: unknown; response: Response }>,
-): Promise<T> {
+): Promise<{ data: T; response: Response }> {
   let result: { data?: T; error?: unknown; response: Response }
   try {
     result = await request()
@@ -115,5 +118,55 @@ export async function call<T>(
       retryable: true,
     })
   }
-  return unwrap(result)
+  return { data: unwrap(result), response: result.response }
+}
+
+/** Wraps fetch failures (backend down, CORS) as an ApiError so callers handle one type. */
+export async function call<T>(
+  request: () => Promise<{ data?: T; error?: unknown; response: Response }>,
+): Promise<T> {
+  return (await callWithResponse(request)).data
+}
+
+/** The environment's data class, which the backend sends on every response (BE-6.1). */
+export const DATA_CLASS_HEADER = 'X-Data-Class'
+export type DataClass = Schemas['DataClass']
+
+/** `X-Data-Class` from a response; null when it is missing or not a known class. */
+export function dataClassOf(response: Response): DataClass | null {
+  const value = response.headers.get(DATA_CLASS_HEADER)
+  return value === 'synthetic' || value === 'client' ? value : null
+}
+
+/**
+ * A `multipart/form-data` request body as generated from the OpenAPI schema.
+ * openapi-typescript types `format: binary` fields as `string`; at runtime they carry a
+ * Blob or File, so string fields also accept a Blob here.
+ */
+export type MultipartFields<T> = { [K in keyof T]: T[K] extends string | undefined ? T[K] | Blob : T[K] }
+
+/**
+ * Serialises multipart fields: a Blob is sent as a file part (a File keeps its name),
+ * numbers and booleans as their text, and undefined or null fields are left out.
+ */
+export function toFormData(fields: Record<string, unknown>): FormData {
+  const form = new FormData()
+  for (const [name, value] of Object.entries(fields)) {
+    if (value === undefined || value === null) continue
+    if (value instanceof Blob) form.append(name, value, value instanceof File ? value.name : name)
+    else if (typeof value === 'string') form.append(name, value)
+    else if (typeof value === 'number' || typeof value === 'boolean') form.append(name, String(value))
+    else throw new TypeError(`Multipart field ${name} must be text, a number, a boolean or a file.`)
+  }
+  return form
+}
+
+/**
+ * The `body` and `bodySerializer` options for a multipart operation of the generated
+ * client, e.g. `api.POST('/api/v1/imports', { params, ...multipart<Body>(fields) })`.
+ * The body keeps the generated type; the serializer sends it as FormData, so the browser
+ * sets the multipart Content-Type with its boundary.
+ */
+export function multipart<T extends object>(fields: MultipartFields<T>): { body: T; bodySerializer: () => FormData } {
+  return { body: fields as unknown as T, bodySerializer: () => toFormData(fields as Record<string, unknown>) }
 }

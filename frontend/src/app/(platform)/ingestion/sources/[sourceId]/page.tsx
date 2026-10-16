@@ -1,8 +1,9 @@
 'use client'
 
+import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Database, FileCode2, GitBranchPlus, ListChecks, ScrollText } from 'lucide-react'
+import { Database, FileCode2, FileUp, GitBranchPlus, ListChecks, ScrollText } from 'lucide-react'
 import { api, call } from '@/api/client'
 import { AuditTimeline } from '@/components/audit/AuditTimeline'
 import { Forbidden } from '@/components/auth/Forbidden'
@@ -31,6 +32,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { IMPORTS_UI_ENABLED } from '@/config/features'
 
 type State = { kind: 'loading' } | { kind: 'ready'; source: SourceDetail } | LoadFailure
 
@@ -176,6 +178,16 @@ export default function SourceDetailPage() {
         breadcrumbs={[{ label: 'Ingestion Workbench', href: '/ingestion' }, { label: 'Sources', href: '/ingestion' }, { label: source.code }]}
         actions={
           <div className="flex items-center gap-2">
+            {IMPORTS_UI_ENABLED && source.current_contract && (
+              <RequirePermission permission="import:write" fallback={null}>
+                <Button asChild size="sm" variant="outline" data-testid="source-new-import">
+                  <Link href={`/ingestion/imports/new?source=${source.id}`}>
+                    <FileUp className="mr-1 h-3.5 w-3.5" />
+                    New import
+                  </Link>
+                </Button>
+              </RequirePermission>
+            )}
             {source.provisional && <Badge variant="warning">Provisional profile</Badge>}
             {source.current_contract && (
               <span className="flex items-center gap-1 text-sm text-muted-foreground">

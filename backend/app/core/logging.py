@@ -149,3 +149,6 @@ def configure_logging(level: str = "INFO") -> None:
         lg = logging.getLogger(name)
         lg.handlers[:] = []
         lg.propagate = True
+    # python-multipart's warnings quote positions and byte values of the request body
+    # (BE-8.6: no upload content in logs); its errors carry none.
+    logging.getLogger("python_multipart").setLevel(logging.ERROR)

@@ -1,0 +1,59 @@
+# Phase 8 checks — 2026-10-16T14:25:34Z — 8b9d006
+$ ruff check . && ruff format --check .
+All checks passed!
+157 files already formatted
+$ mypy app scripts
+Success: no issues found in 157 source files
+$ pytest -q -m "not ws1"
+932 passed, 8 deselected, 31 warnings in 471.15s (0:07:51)
+$ pytest -m ws1 -q
+GET /api/v1/imports                                                 import:read                200            200            200            200            200
+POST /api/v1/imports                                                import:write               403            422            403            403            403
+GET /api/v1/imports/{import_id}                                     import:read                200            200            200            200            200
+GET /api/v1/sources                                                 source:read                200            200            200            200            200
+POST /api/v1/sources                                                source:manage              403            422            403            403            403
+GET /api/v1/sources/{source_id}                                     source:read                200            200            200            200            200
+POST /api/v1/sources/{source_id}/contracts                          source:manage              403            422            403            403            403
+8 passed, 932 deselected, 1 warning in 12.99s
+$ openapi --check
+openapi.json is up to date
+$ samples --check
+synthetic samples are up to date
+$ alembic round trip head -> 0011 -> head (copy of moodymate_ws2_p8)
+0012 (head)
+INFO  [alembic.runtime.migration] Running downgrade 0012 -> 0011, Import tables (BE-8.1, DI-02): import_job, import_artifact, import_batch, source_record.
+INFO  [alembic.runtime.migration] Running upgrade 0011 -> 0012, Import tables (BE-8.1, DI-02): import_job, import_artifact, import_batch, source_record.
+0012 (head)
+$ npm run gen:api (no diff)
+(end diff)
+$ npm run typecheck
+exit=0
+$ npm run lint
+✔ No ESLint warnings or errors
+$ npm test
+ Test Files  11 passed (11)
+      Tests  90 passed (90)
+$ npm run build
+ ✓ Compiled successfully
+├ ○ /ingestion                           7.87 kB         153 kB
+├ ƒ /ingestion/imports/[importId]        3.19 kB         166 kB
+├ ○ /ingestion/imports/new               7.81 kB         150 kB
+├ ƒ /ingestion/sources/[sourceId]        3.44 kB         166 kB
+├ ○ /ingestion/sources/new               2.46 kB         141 kB
+$ playwright test
+  ✓   1 [chromium] › e2e/imports.spec.ts:61:5 › FE-8.1: data_steward uploads the synthetic CSV and lands on its RECEIVED status page (1.9s)
+  ✓   2 [chromium] › e2e/imports.spec.ts:117:5 › FE-8.2: the imports list shows the uploaded import with its status pill (1.2s)
+  ✓   3 [chromium] › e2e/imports.spec.ts:137:5 › FE-8.1: an oversize file is stopped client-side; bypassed, the backend 413 toast shows its correlation ID (4.3s)
+  ✓   4 [chromium] › e2e/imports.spec.ts:195:5 › FE-8.1: auditor sees the import and its audit timeline, and cannot upload (1.3s)
+  ✓   5 [chromium] › e2e/ingestion.spec.ts:27:5 › FE-7.1: data_steward sees the live workbench and the Register button (1.0s)
+  ✓   6 [chromium] › e2e/ingestion.spec.ts:43:5 › FE-7.1: auditor has no Register button, gets the 403 state and a backend 403 (1.1s)
+  ✓   7 [chromium] › e2e/ingestion.spec.ts:73:5 › FE-7.2: register a source, add contract v2, see the versions and the timeline (3.1s)
+  ✓   8 [chromium] › e2e/smoke.spec.ts:16:7 › sign-in as Platform administrator (669ms)
+  ✓   9 [chromium] › e2e/smoke.spec.ts:16:7 › sign-in as Data steward (637ms)
+  ✓  10 [chromium] › e2e/smoke.spec.ts:16:7 › sign-in as Risk analyst (665ms)
+  ✓  11 [chromium] › e2e/smoke.spec.ts:16:7 › sign-in as Approver (649ms)
+  ✓  12 [chromium] › e2e/smoke.spec.ts:16:7 › sign-in as Auditor (611ms)
+  ✓  13 [chromium] › e2e/smoke.spec.ts:24:5 › a page the role may not use shows the 403 state (916ms)
+  ✓  14 [chromium] › e2e/smoke.spec.ts:32:5 › schema compare shows every change with its badge (985ms)
+  ✓  15 [chromium] › e2e/smoke.spec.ts:53:5 › proposal flow: steward proposes, approver approves (2.7s)
+  15 passed (25.9s)

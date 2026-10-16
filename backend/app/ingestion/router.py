@@ -1,27 +1,50 @@
 """ingestion.router
 
-Source registration endpoints (BE-7.4). Every route declares its permission (D-04, the
-Feature 02 endpoint table); tenant scope comes from the principal. Writes are refused with
-409 `ingestion_disabled` (audited) while INGESTION_ENABLED is off (BE-7.3).
+Source registration (BE-7.4) and import (BE-8.4) endpoints. Every route declares its
+permission (D-04, the Feature 02 endpoint table); tenant scope comes from the principal.
+Writes are refused with 409 `ingestion_disabled` (audited) while INGESTION_ENABLED is off
+(BE-7.3).
+
+POST /imports reads its multipart body itself, after authorization, so that the D-16 byte
+limit is enforced while streaming: a declared or received size beyond the limit is refused
+with 413 `payload_too_large` before the rest of the body is read.
 """
 
+import json
+import unicodedata
 import uuid
-from typing import Annotated
+from collections.abc import AsyncGenerator, AsyncIterator
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Header, Query, Request, Response
+from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
+from python_multipart.exceptions import MultipartParseError
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.datastructures import UploadFile
+from starlette.formparsers import MultiPartException, MultiPartParser
 
 from app.core.auth import get_principal, require_permission
+from app.core.classification import mask_mapping
+from app.core.config import Settings
 from app.core.errors import ApiError
 from app.core.principal import Principal
 from app.db.session import get_session
 from app.governance.constants import Permission
 from app.governance.service import record_denial
-from app.ingestion.models import SourceContract, SourceSystem
+from app.ingestion.adapters import Limits
+from app.ingestion.constants import ImportStatus, UploadRefusal
+from app.ingestion.models import ImportJob, SourceContract, SourceSystem
 from app.ingestion.schemas import (
+    ArtifactOut,
+    BatchOut,
     ContractColumn,
     ContractIn,
     ContractOut,
+    ImportDetail,
+    ImportForm,
+    ImportPage,
+    ImportSummary,
     ProfileOut,
     SourceCreate,
     SourceDetail,
@@ -30,8 +53,12 @@ from app.ingestion.schemas import (
 )
 from app.ingestion.service import (
     ContractSpec,
+    ImportLabels,
+    ImportPolicy,
+    ImportService,
     ProfileSpec,
     SourceService,
+    UploadSpec,
     current_contract,
     profile_of,
 )
@@ -39,6 +66,8 @@ from app.ingestion.service import (
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 SourceReader = Annotated[Principal, Depends(require_permission(Permission.SOURCE_READ))]
 SourceManager = Annotated[Principal, Depends(require_permission(Permission.SOURCE_MANAGE))]
+ImportReader = Annotated[Principal, Depends(require_permission(Permission.IMPORT_READ))]
+ImportWriter = Annotated[Principal, Depends(require_permission(Permission.IMPORT_WRITE))]
 
 router = APIRouter(tags=["ingestion"])
 
@@ -187,3 +216,295 @@ async def create_source_contract(
     service = SourceService(session, principal)
     contract = await service.add_contract(source_id, _contract_spec(body))
     return _contract_out(contract, await service.schema_codes())
+
+
+# --- Phase 8: imports (BE-8.4) ------------------------------------------------------------------
+
+# Multipart framing (boundaries, part headers) and the small form fields, on top of the
+# file's own D-16 byte limit. Also the cap on any non-file field.
+FORM_OVERHEAD = 64 * 1024
+FILENAME_MAX = 255
+
+UPLOAD_BODY: dict[str, Any] = {
+    "required": True,
+    "content": {
+        "multipart/form-data": {
+            "schema": {
+                "title": "ImportUpload",
+                "type": "object",
+                "required": ["source_id", "file"],
+                "properties": {
+                    "source_id": {"type": "string", "format": "uuid"},
+                    "file": {
+                        "type": "string",
+                        "format": "binary",
+                        "description": "The file, in the source profile's format (CSV, XLSX "
+                        "or JSON; detected from content). At most IMPORT_MAX_BYTES (10 MiB). "
+                        f"Its name is kept, at most {FILENAME_MAX} characters.",
+                    },
+                    "synthetic_attested": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Required true while the environment's X-Data-Class "
+                        "is synthetic (D-16 §5): you confirm the file holds no client data.",
+                    },
+                    "expected_row_count": {"type": "integer", "minimum": 0},
+                    "control_totals": {
+                        "type": "string",
+                        "description": "JSON object of the contract's control-total columns "
+                        'to exact decimal text, e.g. {"notional": "1234.50"}.',
+                    },
+                },
+            }
+        }
+    },
+}
+
+
+class _TooLarge(MultiPartException):
+    def __init__(self) -> None:
+        super().__init__(UploadRefusal.PAYLOAD_TOO_LARGE)
+
+
+async def _bounded(stream: AsyncIterator[bytes], limit: int) -> AsyncGenerator[bytes, None]:
+    """Pass the body through, refusing as soon as more than `limit` bytes arrived."""
+    received = 0
+    async for chunk in stream:
+        received += len(chunk)
+        if received > limit:
+            raise _TooLarge()
+        yield chunk
+
+
+def _malformed(message: str, *loc: str) -> RequestValidationError:
+    return RequestValidationError([{"loc": ("body", *loc), "msg": message, "type": "value_error"}])
+
+
+def _filename(name: str | None) -> str | None:
+    """The file's base name, bounded and free of control characters."""
+    base = (name or "").replace("\\", "/").rsplit("/", 1)[-1].strip()
+    if not base:
+        return None
+    if len(base) > FILENAME_MAX:
+        raise _malformed(f"The file name is longer than {FILENAME_MAX} characters.", "file")
+    if any(unicodedata.category(c) == "Cc" for c in base):
+        raise _malformed("The file name contains control characters.", "file")
+    return base
+
+
+def _form_fields(form: Any) -> dict[str, Any]:
+    fields: dict[str, Any] = {
+        k: v for k, v in form.multi_items() if isinstance(v, str) and k in ImportForm.model_fields
+    }
+    if fields.get("control_totals") in ("", None):
+        fields.pop("control_totals", None)
+    elif "control_totals" in fields:
+        try:
+            fields["control_totals"] = json.loads(fields["control_totals"])
+        except ValueError:
+            raise _malformed("control_totals must be a JSON object.", "control_totals") from None
+    if fields.get("expected_row_count") == "":
+        fields.pop("expected_row_count")
+    return fields
+
+
+async def read_upload(request: Request, limits: Limits) -> tuple[ImportForm, bytes, str | None]:
+    """The validated form, the file's bytes and its name. Raises _TooLarge (413) while
+    streaming, or RequestValidationError (422) for a malformed body."""
+    body_limit = limits.max_bytes + FORM_OVERHEAD
+    if not request.headers.get("content-type", "").lower().startswith("multipart/form-data"):
+        raise _malformed("Expected a multipart/form-data body.")
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > body_limit:
+        raise _TooLarge()  # refused before any of the body is read
+    parser = MultiPartParser(
+        request.headers,
+        _bounded(request.stream(), body_limit),
+        max_files=1,
+        max_fields=10,
+        max_part_size=FORM_OVERHEAD,
+    )
+    try:
+        form = await parser.parse()
+    except _TooLarge:
+        raise
+    except (MultiPartException, MultipartParseError):
+        raise _malformed("The multipart body is malformed.") from None
+    try:
+        upload = form.get("file")
+        if not isinstance(upload, UploadFile):
+            raise _malformed("A file is required.", "file")
+        filename = _filename(upload.filename)
+        try:
+            fields = ImportForm.model_validate(_form_fields(form))
+        except ValidationError as exc:
+            raise RequestValidationError(
+                [
+                    {"loc": ("body", *e["loc"]), "msg": e["msg"], "type": e["type"]}
+                    for e in exc.errors()
+                ]
+            ) from None
+        return fields, await upload.read(), filename
+    finally:
+        await form.close()
+
+
+def limits_from(settings: Settings) -> Limits:
+    return Limits(
+        max_bytes=settings.IMPORT_MAX_BYTES,
+        max_rows=settings.IMPORT_MAX_ROWS,
+        max_columns=settings.IMPORT_MAX_COLUMNS,
+        max_cell_chars=settings.IMPORT_MAX_CELL_CHARS,
+        max_xlsx_uncompressed_bytes=settings.IMPORT_MAX_XLSX_UNCOMPRESSED_BYTES,
+        max_xlsx_ratio=settings.IMPORT_MAX_XLSX_RATIO,
+    )
+
+
+def _import_fields(job: ImportJob, labels: ImportLabels, principal: Principal) -> ImportSummary:
+    artifact = job.artifact
+    schema = labels.schema_versions.get(job.schema_version_id)
+    totals = job.control_totals
+    return ImportSummary(
+        id=job.id,
+        status=ImportStatus(job.status),
+        source_id=job.source_system_id,
+        source_code=labels.source_codes.get(job.source_system_id, ""),
+        format=job.format,
+        row_count=job.row_count,
+        expected_row_count=job.expected_row_count,
+        control_totals=(
+            mask_mapping(
+                totals,
+                dict.fromkeys(totals, artifact.classification),
+                principal.clear_classifications,
+            )
+            if totals is not None
+            else None
+        ),
+        data_class=job.data_class,
+        synthetic_attested=job.synthetic_attested,
+        synthetic_marker=job.synthetic_marker,
+        source_contract_id=job.source_contract_id,
+        contract_version=labels.contract_versions.get(job.source_contract_id),
+        schema_version_id=job.schema_version_id,
+        schema_code=schema[0] if schema else None,
+        schema_version=schema[1] if schema else None,
+        artifact=ArtifactOut.model_validate(artifact, from_attributes=True),
+        retry_of_import_id=job.retry_of_import_id,
+        correlation_id=job.correlation_id,
+        created_by=job.created_by,
+        created_at=job.created_at,
+        updated_at=job.updated_at,
+    )
+
+
+def _import_detail(job: ImportJob, labels: ImportLabels, principal: Principal) -> ImportDetail:
+    return ImportDetail(
+        **_import_fields(job, labels, principal).model_dump(),
+        batches=[
+            BatchOut(
+                batch_number=b.batch_number,
+                sheet_name=b.sheet_name,
+                row_count=b.row_count,
+                column_count=len(b.columns),
+            )
+            for b in job.batches
+        ],
+    )
+
+
+@router.post(
+    "/imports",
+    response_model=ImportDetail,
+    status_code=201,
+    operation_id="createImport",
+    openapi_extra={"requestBody": UPLOAD_BODY},
+    responses={
+        200: {
+            "model": ImportDetail,
+            "description": "Idempotent replay: this key was used for the same upload; the "
+            "original import is returned (header Idempotent-Replayed: true).",
+        }
+    },
+)
+async def create_import(
+    request: Request,
+    response: Response,
+    principal: ImportWriter,
+    session: SessionDep,
+    _: IngestionEnabled,
+    idempotency_key: Annotated[
+        str,
+        Header(
+            alias="Idempotency-Key",
+            min_length=1,
+            max_length=255,
+            pattern=r"^[!-~]+$",
+            description="Unique per upload (per user). A retry with the same key and the "
+            "same upload returns the original import; with a different upload, 409 "
+            "idempotency_conflict (D-21).",
+        ),
+    ],
+) -> ImportDetail:
+    """Upload a file for a source (multipart). Processed synchronously (D-21): the raw
+    artifact is stored, every row becomes a source record and the import is RECEIVED."""
+    settings: Settings = request.app.state.settings
+    limits = limits_from(settings)
+    service = ImportService(session, principal)
+    try:
+        form, data, filename = await read_upload(request, limits)
+    except _TooLarge:
+        await service.refuse(
+            ApiError(
+                413,
+                UploadRefusal.PAYLOAD_TOO_LARGE,
+                f"The file is larger than {limits.max_bytes} bytes.",
+                {"limit": limits.max_bytes},
+            )
+        )
+    job, created = await service.create(
+        UploadSpec(
+            source_id=form.source_id,
+            data=data,
+            filename=filename,
+            idempotency_key=idempotency_key,
+            synthetic_attested=form.synthetic_attested,
+            expected_row_count=form.expected_row_count,
+            control_totals=form.control_totals,
+        ),
+        ImportPolicy(settings.data_class, limits, request.app.state.artifact_store),
+    )
+    if not created:
+        response.status_code = 200
+        response.headers["Idempotent-Replayed"] = "true"
+    return _import_detail(job, await service.labels([job]), principal)
+
+
+@router.get("/imports", response_model=ImportPage, operation_id="listImports")
+async def list_imports(
+    principal: ImportReader,
+    session: SessionDep,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    source_id: uuid.UUID | None = None,
+    status: ImportStatus | None = None,
+) -> ImportPage:
+    """Newest first; filter by source and status."""
+    service = ImportService(session, principal)
+    jobs, total = await service.page(limit, offset, source_id, status)
+    labels = await service.labels(jobs)
+    return ImportPage(
+        items=[_import_fields(j, labels, principal) for j in jobs],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/imports/{import_id}", response_model=ImportDetail, operation_id="getImport")
+async def get_import(
+    import_id: uuid.UUID, principal: ImportReader, session: SessionDep
+) -> ImportDetail:
+    service = ImportService(session, principal)
+    job = await service.get(import_id)
+    return _import_detail(job, await service.labels([job]), principal)

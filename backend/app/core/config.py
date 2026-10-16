@@ -5,9 +5,13 @@ Values come from environment variables or `backend/.env`; never commit real valu
 
 Fail-safe (D-13): `ENV` has no default, dev authentication exists only in local/test, and
 OIDC outside local/test requires HTTPS and an API audience distinct from the client ID.
+Raw upload artifacts (D-15) live under `ARTIFACT_STORE_DIR`, required outside local/test and
+never inside the repository; upload bounds (D-16) may be lowered, never raised.
 """
 
+import tempfile
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import model_validator
@@ -21,6 +25,30 @@ LOCAL_ENVS = ("local", "test")
 
 # Signing secret for AUTH_MODE=dev, which itself only runs in local/test (D-13).
 DEV_SECRET_DEFAULT = "local-dev-only-secret-change-me-0123456789"  # noqa: S105
+
+_MIB = 1024 * 1024
+# D-16 §1: hard upload ceilings. The IMPORT_MAX_* settings may lower them, never raise them.
+IMPORT_HARD_LIMITS: dict[str, int] = {
+    "IMPORT_MAX_BYTES": 10 * _MIB,
+    "IMPORT_MAX_ROWS": 50_000,
+    "IMPORT_MAX_COLUMNS": 200,
+    "IMPORT_MAX_CELL_CHARS": 4_000,
+    "IMPORT_MAX_XLSX_UNCOMPRESSED_BYTES": 50 * _MIB,
+    "IMPORT_MAX_XLSX_RATIO": 100,
+}
+
+
+def _repo_root() -> Path:
+    """The checkout this code runs from (the parent of backend/), else the backend dir."""
+    backend = Path(__file__).resolve().parents[2]
+    parent = backend.parent
+    return parent if (parent / ".git").exists() or (parent / "docs").is_dir() else backend
+
+
+# D-15: artifacts never live inside the source tree (they would be one `git add` away).
+REPO_ROOT = _repo_root()
+# local/test only, when ARTIFACT_STORE_DIR is unset: outside any checkout.
+LOCAL_ARTIFACT_DIR = Path(tempfile.gettempdir()) / "moodymate-artifacts"
 
 
 class Settings(BaseSettings):
@@ -43,6 +71,19 @@ class Settings(BaseSettings):
     # makes WS2 read-only: writes answer 409 ingestion_disabled (audited), reads still work.
     INGESTION_ENABLED: bool = True
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
+
+    # D-15: root of the write-once raw artifact store. Required outside local/test (D-13);
+    # must be absolute and outside the repository. Pair one directory with each DB copy.
+    ARTIFACT_STORE_DIR: Path | None = None
+    # D-16 §1: upload bounds; each may only lower its IMPORT_HARD_LIMITS ceiling.
+    IMPORT_MAX_BYTES: int = IMPORT_HARD_LIMITS["IMPORT_MAX_BYTES"]
+    IMPORT_MAX_ROWS: int = IMPORT_HARD_LIMITS["IMPORT_MAX_ROWS"]
+    IMPORT_MAX_COLUMNS: int = IMPORT_HARD_LIMITS["IMPORT_MAX_COLUMNS"]
+    IMPORT_MAX_CELL_CHARS: int = IMPORT_HARD_LIMITS["IMPORT_MAX_CELL_CHARS"]
+    IMPORT_MAX_XLSX_UNCOMPRESSED_BYTES: int = IMPORT_HARD_LIMITS[
+        "IMPORT_MAX_XLSX_UNCOMPRESSED_BYTES"
+    ]
+    IMPORT_MAX_XLSX_RATIO: int = IMPORT_HARD_LIMITS["IMPORT_MAX_XLSX_RATIO"]
 
     # D-09 dev mode: HS256 tokens signed with this local secret (local/test only).
     AUTH_DEV_SECRET: str = DEV_SECRET_DEFAULT
@@ -88,7 +129,30 @@ class Settings(BaseSettings):
             raise ValueError(f"DATA_CLASS is required when ENV={self.ENV}")
         if self.DATA_CLASS == "client" and self.ENV != "production":  # D-14
             raise ValueError(f"DATA_CLASS=client is not allowed when ENV={self.ENV}")
+        self._guard_imports()
         return self
+
+    def _guard_imports(self) -> None:
+        """D-15 artifact root and D-16 bounds (Feature 02, Phase 8)."""
+        root = self.ARTIFACT_STORE_DIR
+        if root is None and self.ENV not in LOCAL_ENVS:
+            raise ValueError(f"ARTIFACT_STORE_DIR is required when ENV={self.ENV}")
+        if root is not None:
+            if not root.is_absolute():
+                raise ValueError("ARTIFACT_STORE_DIR must be an absolute path")
+            if root.resolve().is_relative_to(REPO_ROOT):
+                raise ValueError("ARTIFACT_STORE_DIR must be outside the repository")
+        for name, ceiling in IMPORT_HARD_LIMITS.items():
+            value = getattr(self, name)
+            if value < 1:
+                raise ValueError(f"{name} must be at least 1")
+            if value > ceiling:
+                raise ValueError(f"{name} may only lower the hard ceiling ({ceiling})")
+
+    @property
+    def artifact_store_dir(self) -> Path:
+        """The configured root, else (local/test only, D-13) a directory outside the repo."""
+        return self.ARTIFACT_STORE_DIR or LOCAL_ARTIFACT_DIR
 
     @property
     def data_class(self) -> DataClass:

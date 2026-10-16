@@ -1,6 +1,6 @@
 """ingestion.schemas
 
-Request/response models for source registration (BE-7.4, DI-01).
+Request/response models for source registration (BE-7.4, DI-01) and imports (BE-8.4, DI-02).
 """
 
 import uuid
@@ -9,10 +9,14 @@ from typing import Annotated
 
 from pydantic import AfterValidator, BaseModel, Field, StringConstraints, model_validator
 
+from app.core.classification import MaskedValue
 from app.core.text import SafeMultilineText, SafeText, single_line
 from app.ingestion.constants import (
     ContractStatus,
     CsvDelimiter,
+    DataClass,
+    ImportStatus,
+    RetentionState,
     SourceEncoding,
     SourceFormat,
     SourceKind,
@@ -163,6 +167,80 @@ class SourceDetail(SourceSummary):
 
 class SourcePage(BaseModel):
     items: list[SourceSummary]
+    total: int
+    limit: int
+    offset: int
+
+
+# --- Phase 8: imports (BE-8.4) ------------------------------------------------------------------
+
+# A control total as exact decimal text (never a float): optional sign, up to 28 digits
+# before and 18 after the point.
+DECIMAL_TEXT = r"^-?\d{1,28}(\.\d{1,18})?$"
+DecimalText = Annotated[str, StringConstraints(pattern=DECIMAL_TEXT)]
+
+
+class ImportForm(BaseModel):
+    """The non-file fields of a POST /imports multipart body, as validated."""
+
+    source_id: uuid.UUID
+    synthetic_attested: bool = False
+    expected_row_count: int | None = Field(default=None, ge=0, le=1_000_000_000)
+    control_totals: dict[ColumnName, DecimalText] | None = Field(default=None, max_length=20)
+
+
+class ArtifactOut(BaseModel):
+    sha256: str = Field(description="SHA-256 of the uploaded bytes (hex).")
+    size_bytes: int
+    detected_mime: str = Field(description="Detected from content, not from the file name.")
+    original_filename: str | None
+    classification: str = Field(description="The source profile's default classification.")
+    retention_state: RetentionState
+
+
+class BatchOut(BaseModel):
+    batch_number: int
+    sheet_name: str | None
+    row_count: int
+    column_count: int
+
+
+class ImportSummary(BaseModel):
+    id: uuid.UUID
+    status: ImportStatus
+    source_id: uuid.UUID
+    source_code: str
+    format: SourceFormat
+    row_count: int = Field(description="Data rows read from the file (one source_record each).")
+    expected_row_count: int | None
+    control_totals: dict[str, str | MaskedValue] | None = Field(
+        description="Declared control totals (decimal text), masked by the artifact's "
+        "classification."
+    )
+    data_class: DataClass = Field(description="The environment's data class at upload (D-14).")
+    synthetic_attested: bool
+    synthetic_marker: bool = Field(
+        description="The file carried the ILLUSTRATIVE / SYNTHETIC marker (D-24)."
+    )
+    source_contract_id: uuid.UUID
+    contract_version: int | None
+    schema_version_id: uuid.UUID = Field(description="The ACTIVE schema version at upload.")
+    schema_code: str | None
+    schema_version: int | None
+    artifact: ArtifactOut
+    retry_of_import_id: uuid.UUID | None
+    correlation_id: str | None
+    created_by: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class ImportDetail(ImportSummary):
+    batches: list[BatchOut]
+
+
+class ImportPage(BaseModel):
+    items: list[ImportSummary]
     total: int
     limit: int
     offset: int
