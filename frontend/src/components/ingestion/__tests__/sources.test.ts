@@ -103,7 +103,7 @@ describe('source registration form (FE-7.2)', () => {
   it('accepts a complete draft', () => {
     expect(sourceProblems(validDraft())).toEqual([])
   })
-  it('builds the POST /sources body: trimmed, CSV delimiter only, provisional', () => {
+  it('builds the POST /sources body: trimmed, CSV delimiter only, no provisional flag', () => {
     const body = toSourceCreate(validDraft())
     expect(body).toEqual({
       code: 'loan_book',
@@ -118,7 +118,6 @@ describe('source registration form (FE-7.2)', () => {
         cadence: null,
         owner: 'Dev Data steward',
         default_classification: 'internal',
-        provisional: true,
       },
       contract: {
         schema_id: SCHEMA,

@@ -718,7 +718,12 @@ export interface components {
          * @enum {string}
          */
         Permission: "schema:read" | "schema:propose" | "schema:approve" | "audit:read" | "admin:read" | "source:read" | "source:manage" | "import:read" | "import:write" | "mapping:read" | "mapping:propose" | "mapping:approve" | "quarantine:read" | "quality:review";
-        /** ProfileIn */
+        /**
+         * ProfileIn
+         * @description A new source's profile. Always provisional on create (D2): only the client's approval,
+         *     a later action, clears it. The API ignores unknown body fields, so a `provisional` sent
+         *     here has no effect.
+         */
         ProfileIn: {
             /**
              * Cadence
@@ -738,13 +743,8 @@ export interface components {
             /** Owner */
             owner: string;
             /**
-             * Provisional
-             * @default true
-             */
-            provisional: boolean;
-            /**
              * Sheet Name
-             * @description XLSX only; else the first sheet.
+             * @description XLSX only; else the first sheet. Excel forbids [ ] : * ? / \.
              */
             sheet_name?: string | null;
         };

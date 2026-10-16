@@ -168,7 +168,8 @@ export function toContractIn(d: ContractDraft): ContractIn {
   }
 }
 
-/** The POST /sources body. Delimiter is sent only for CSV and sheet name only for XLSX. */
+/** The POST /sources body. Delimiter is sent only for CSV and sheet name only for XLSX. The
+ * profile is always provisional on create, so the body has no `provisional` field. */
 export function toSourceCreate(d: SourceDraft): SourceCreate {
   const p = d.profile
   return {
@@ -184,7 +185,6 @@ export function toSourceCreate(d: SourceDraft): SourceCreate {
       cadence: orNull(p.cadence),
       owner: p.owner.trim(),
       default_classification: p.defaultClassification,
-      provisional: true,
     },
     contract: toContractIn(d.contract),
   }
