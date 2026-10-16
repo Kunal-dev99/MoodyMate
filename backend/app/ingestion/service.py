@@ -1,9 +1,12 @@
 """ingestion.service
 
 Source registration (BE-7.4, DI-01): a source system, its profile and versioned source
-contracts. Every write is audited in the same transaction and committed here (D-10). Every
-refused write is audited too, as DENIED with its reason code (D-24 §4), through
-`record_denial` after a rollback. Target schemas are checked through the governance
+contracts. Bounded file import (BE-8.4, DI-02): one upload becomes an import job with a
+write-once raw artifact and one immutable `source_record` per row, synchronously (D-21).
+
+Every write is audited in the same transaction and committed here (D-10). Every refused
+write is audited too, as DENIED with its reason code (D-24 §4), through `record_denial`
+after a rollback. Target schemas are checked through the governance
 service, never its repository.
 """
 
@@ -15,7 +18,10 @@ from typing import Any, NoReturn
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.concurrency import run_in_threadpool
 
+from app.core.artifacts import ArtifactStore
+from app.core.correlation import get_correlation_id
 from app.core.errors import ApiError
 from app.core.principal import Principal
 from app.governance.constants import ClassificationCode
@@ -26,16 +32,35 @@ from app.governance.service import (
     known_classifications,
     record_denial,
 )
+from app.ingestion.adapters import (
+    AdapterError,
+    AdapterOptions,
+    Limits,
+    ParsedUpload,
+    SourceRow,
+    parse_upload,
+)
 from app.ingestion.constants import (
     CONTRACT_TRANSITIONS,
+    IMPORT_TRANSITIONS,
     USABLE_SOURCE_KINDS,
     ContractStatus,
     CsvDelimiter,
+    ImportStatus,
+    RetentionState,
     SourceFormat,
     SourceKind,
+    UploadRefusal,
 )
-from app.ingestion.models import SourceContract, SourceProfile, SourceSystem
-from app.ingestion.repository import SourceRepository
+from app.ingestion.models import (
+    ImportArtifact,
+    ImportBatch,
+    ImportJob,
+    SourceContract,
+    SourceProfile,
+    SourceSystem,
+)
+from app.ingestion.repository import ImportRepository, SourceRepository
 
 
 @dataclass(frozen=True)
@@ -364,3 +389,316 @@ class SourceService:
 
 def _duplicate(code: str) -> ApiError:
     return ApiError(409, "duplicate_code", "A source with this code exists.", {"code": code})
+
+
+# --- Phase 8: imports (BE-8.4, BE-8.5) ---------------------------------------------------------
+
+# Audit action of an upload; a refusal is recorded under the same action, DENIED (D-24 §4).
+CREATE_IMPORT = "import.create"
+
+
+def move(job: ImportJob, to: ImportStatus) -> None:
+    """BE-8.5: change an import's status only along IMPORT_TRANSITIONS (the database
+    trigger enforces the same table)."""
+    current = ImportStatus(job.status)
+    if to not in IMPORT_TRANSITIONS[current]:
+        raise ApiError(
+            409,
+            "invalid_status",
+            f"An import cannot move from {current} to {to}.",
+            {"from": current.value, "to": to.value},
+        )
+    job.status = to
+
+
+@dataclass(frozen=True)
+class UploadSpec:
+    """One POST /imports, as validated by the router (never trusted for scope)."""
+
+    source_id: uuid.UUID
+    data: bytes
+    filename: str | None
+    idempotency_key: str
+    synthetic_attested: bool
+    expected_row_count: int | None = None
+    control_totals: dict[str, str] | None = None  # column -> decimal text
+
+
+@dataclass(frozen=True)
+class ImportPolicy:
+    """What the deployment decides: the effective data class (D-14), the D-16 limits and
+    where raw artifacts go (D-15)."""
+
+    data_class: str
+    limits: Limits
+    store: ArtifactStore
+
+
+def request_sha256(spec: UploadSpec, file_sha256: str) -> str:
+    """What a replay under the same Idempotency-Key must repeat (D-21): the source, the
+    file's bytes and the declared figures. The file name is not part of it."""
+    payload = {
+        "source_id": str(spec.source_id),
+        "file_sha256": file_sha256,
+        "synthetic_attested": spec.synthetic_attested,
+        "expected_row_count": spec.expected_row_count,
+        "control_totals": spec.control_totals or {},
+    }
+    text = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def row_sha256(row: SourceRow) -> str:
+    text = json.dumps(
+        {"values": row.values, "extras": row.extras},
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def _flags(row: SourceRow) -> list[dict[str, Any]]:
+    return [{"code": f.code.value, "column": f.column} for f in row.flags]
+
+
+@dataclass(frozen=True)
+class ImportLabels:
+    """Names for the ids an import pins, resolved for the caller's tenant."""
+
+    source_codes: dict[uuid.UUID, str]
+    contract_versions: dict[uuid.UUID, int]
+    schema_versions: dict[uuid.UUID, tuple[str, int]]  # version id -> (schema code, version)
+
+
+class ImportService:
+    """Upload → parse → store → RECEIVED in one transaction (BE-8.4, D-21). Every refused
+    upload is audited DENIED with its reason code (D-24 §4); malformed requests (422
+    validation_error) are refused by the router before reaching here and are not."""
+
+    def __init__(self, session: AsyncSession, principal: Principal) -> None:
+        self.session = session
+        self.principal = principal
+        self.repo = ImportRepository(session, principal.scope)
+        self.sources = SourceService(session, principal)
+        self.schemas = SchemaService(session, principal)
+
+    # --- reads --------------------------------------------------------------------------
+
+    async def page(
+        self,
+        limit: int,
+        offset: int,
+        source_id: uuid.UUID | None = None,
+        status: ImportStatus | None = None,
+    ) -> tuple[list[ImportJob], int]:
+        return await self.repo.page_filtered(limit, offset, source_id, status)
+
+    async def get(self, import_id: uuid.UUID) -> ImportJob:
+        job = await self.repo.fresh(import_id)
+        if job is None:
+            # Same response whether the import is absent or in another tenant (D-04).
+            raise ApiError(404, "not_found", "Import not found.")
+        return job
+
+    async def labels(self, jobs: list[ImportJob]) -> ImportLabels:
+        versions = {
+            v.id: (s.code, v.version) for s in await self.schemas.list_schemas() for v in s.versions
+        }
+        return ImportLabels(
+            await self.repo.source_codes({j.source_system_id for j in jobs}),
+            await self.repo.contract_versions({j.source_contract_id for j in jobs}),
+            versions,
+        )
+
+    # --- writes -------------------------------------------------------------------------
+
+    async def refuse(self, error: ApiError, resource_id: uuid.UUID | None = None) -> NoReturn:
+        """Roll back, audit the refusal (DENIED, reason = the error code) and raise it."""
+        await record_denial(
+            self.session,
+            self.principal,
+            CREATE_IMPORT,
+            "import_job",
+            str(resource_id) if resource_id else None,
+            error.code,
+        )
+        raise error
+
+    async def create(self, spec: UploadSpec, policy: ImportPolicy) -> tuple[ImportJob, bool]:
+        """The import and whether it was created now (False: an idempotent replay)."""
+        if policy.data_class == "synthetic" and not spec.synthetic_attested:
+            await self.refuse(
+                ApiError(
+                    422,
+                    UploadRefusal.SYNTHETIC_ATTESTATION_REQUIRED,
+                    "This environment holds synthetic data only: confirm the file is "
+                    "synthetic (synthetic_attested=true).",
+                )
+            )
+        file_sha = hashlib.sha256(spec.data).hexdigest()
+        fingerprint = request_sha256(spec, file_sha)
+        replay = await self._replay(spec.idempotency_key, fingerprint)
+        if replay is not None:
+            return replay, False
+
+        try:
+            source = await self.sources.get(spec.source_id)
+        except ApiError as exc:
+            await self.refuse(exc)
+        profile = profile_of(source)
+        contract = current_contract(profile.contracts)
+        if contract is None:
+            await self.refuse(
+                ApiError(409, UploadRefusal.NO_CURRENT_CONTRACT, "The source has no contract.")
+            )
+        schema = await self.schemas.get_schema(contract.schema_id)
+        version = effective_version(schema)
+        if version is None:
+            await self.refuse(
+                ApiError(
+                    409,
+                    UploadRefusal.NO_ACTIVE_VERSION,
+                    "The contract's target schema has no ACTIVE version.",
+                    {"schema_id": str(schema.id)},
+                )
+            )
+        unknown = sorted(set(spec.control_totals or {}) - set(contract.control_total_columns))
+        if unknown:
+            await self.refuse(
+                ApiError(
+                    422,
+                    UploadRefusal.UNKNOWN_CONTROL_TOTAL_COLUMN,
+                    "Control totals may only name the contract's control-total columns.",
+                    {"columns": unknown},
+                )
+            )
+        options = AdapterOptions(
+            delimiter=profile.delimiter or CsvDelimiter.COMMA, sheet_name=profile.sheet_name
+        )
+        try:
+            parsed: ParsedUpload = await run_in_threadpool(
+                parse_upload, spec.data, SourceFormat(profile.format), options, policy.limits
+            )
+        except AdapterError as exc:
+            await self.refuse(ApiError(exc.status_code, exc.code, exc.message, exc.details))
+        try:
+            stored = await run_in_threadpool(policy.store.put, spec.data)
+        except ApiError as exc:  # artifact_integrity_error: fail closed
+            await self.refuse(exc)
+
+        actor = self.principal.actor
+        job = ImportJob(
+            tenant_id=self.principal.tenant_id,
+            source_system_id=source.id,
+            source_contract_id=contract.id,
+            schema_version_id=version.id,
+            status=ImportStatus.CREATED,
+            format=profile.format,
+            data_class=policy.data_class,
+            synthetic_attested=spec.synthetic_attested,
+            synthetic_marker=parsed.marker_present,
+            idempotency_key=spec.idempotency_key,
+            request_sha256=fingerprint,
+            correlation_id=get_correlation_id(),
+            expected_row_count=spec.expected_row_count,
+            control_totals=spec.control_totals,
+            row_count=len(parsed.rows),
+            created_by=actor,
+        )
+        self.repo.add(job)
+        try:
+            await self.repo.flush()
+        except IntegrityError:
+            # A concurrent request with the same key won: answer as its replay would.
+            await self.session.rollback()
+            replay = await self._replay(spec.idempotency_key, fingerprint)
+            if replay is None:
+                raise
+            return replay, False
+        batch = ImportBatch(
+            import_job_id=job.id,
+            batch_number=1,
+            sheet_name=parsed.sheet_name,
+            columns=parsed.columns,
+            row_count=len(parsed.rows),
+            created_by=actor,
+        )
+        self.repo.add(
+            ImportArtifact(
+                import_job_id=job.id,
+                sha256=stored.sha256,
+                size_bytes=stored.size,
+                detected_mime=parsed.media_type,
+                original_filename=spec.filename,
+                storage_ref=stored.ref,
+                classification=profile.default_classification,
+                retention_state=RetentionState.RETAINED,
+                created_by=actor,
+            ),
+            batch,
+        )
+        await self.repo.flush()
+        await self.repo.add_records(
+            [
+                {
+                    "id": uuid.uuid4(),
+                    "batch_id": batch.id,
+                    "ordinal": row.ordinal,
+                    "locator": row.locator,
+                    "raw_values": row.values,
+                    "extra_values": row.extras,
+                    "flags": _flags(row),
+                    "row_sha256": row_sha256(row),
+                    "created_by": actor,
+                }
+                for row in parsed.rows
+            ]
+        )
+        move(job, ImportStatus.RECEIVED)
+        await self.repo.flush()
+        details: dict[str, Any] = {
+            "source_id": str(source.id),
+            "source_code": source.code,
+            "format": profile.format,
+            "status": job.status,
+            "row_count": job.row_count,
+            "sha256": stored.sha256,
+            "size_bytes": stored.size,
+            "data_class": policy.data_class,
+            "synthetic_attested": spec.synthetic_attested,
+            "synthetic_marker": parsed.marker_present,
+            "contract_id": str(contract.id),
+            "schema_version_id": str(version.id),
+            "expected_row_count": spec.expected_row_count,
+            "control_total_columns": sorted(spec.control_totals or {}),
+        }
+        audit_by(
+            self.session,
+            self.principal,
+            CREATE_IMPORT,
+            "import_job",
+            resource_id=str(job.id),
+            details=details,
+            details_classification=_public(*details),
+        )
+        await self.session.commit()
+        return await self.get(job.id), True
+
+    async def _replay(self, key: str, fingerprint: str) -> ImportJob | None:
+        """D-21: the same key with the same request is the original import; with anything
+        else it is a 409 idempotency_conflict (audited)."""
+        existing = await self.repo.by_idempotency_key(self.principal.actor, key)
+        if existing is None:
+            return None
+        if existing.request_sha256 != fingerprint:
+            await self.refuse(
+                ApiError(
+                    409,
+                    UploadRefusal.IDEMPOTENCY_CONFLICT,
+                    "This Idempotency-Key was already used for a different upload.",
+                    {"import_id": str(existing.id)},
+                ),
+                existing.id,
+            )
+        return existing

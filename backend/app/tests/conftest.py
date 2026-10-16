@@ -71,6 +71,7 @@ def client(settings: Settings) -> TestClient:
 # --- Phase 2: migrated database, cleanup and helpers -----------------------------------
 
 from collections.abc import Iterator  # noqa: E402
+from pathlib import Path  # noqa: E402
 
 from alembic import command  # noqa: E402
 from alembic.config import Config  # noqa: E402
@@ -220,8 +221,15 @@ def db(migrated_db: str) -> Iterator[str]:
 
 
 @pytest.fixture
-def api(db: str) -> Iterator[TestClient]:
-    with TestClient(create_app(Settings(ENV="test", DATABASE_URL=db))) as c:
+def artifact_dir(tmp_path: Path) -> Path:
+    """This test's own artifact store root (D-15), outside the repository."""
+    return tmp_path / "artifacts"
+
+
+@pytest.fixture
+def api(db: str, artifact_dir: Path) -> Iterator[TestClient]:
+    settings = Settings(ENV="test", DATABASE_URL=db, ARTIFACT_STORE_DIR=artifact_dir)
+    with TestClient(create_app(settings)) as c:
         yield c
 
 

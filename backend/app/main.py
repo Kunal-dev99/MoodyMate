@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
 from app.api.v1.router import build_api_router
+from app.core.artifacts import FilesystemArtifactStore
 from app.core.auth import enforce_declared_permission
 from app.core.config import Settings, get_settings
 from app.core.correlation import HEADER, CorrelationIdMiddleware
@@ -41,6 +42,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.db = db
     app.state.token_verifier = build_verifier(settings)
+    # D-15: write-once raw artifacts (created on first upload).
+    app.state.artifact_store = FilesystemArtifactStore(settings.artifact_store_dir)
 
     register_error_handlers(app)
     app.include_router(build_api_router(settings))
