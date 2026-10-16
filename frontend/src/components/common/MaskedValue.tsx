@@ -22,6 +22,7 @@ export function isMasked(value: unknown): value is Masked {
  * for a blank one.
  */
 export function MaskedValue({ value }: { value: Masked }) {
+  const level = value.classification || 'unclassified'
   return (
     <TooltipProvider delayDuration={150}>
       <Tooltip>
@@ -29,14 +30,14 @@ export function MaskedValue({ value }: { value: Masked }) {
           <span
             className="inline-flex items-center gap-1 rounded-sm border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-xs text-muted-foreground"
             data-testid="masked-value"
-            aria-label={`Masked by policy: ${value.classification} data`}
+            aria-label={`Masked by policy: ${level} data`}
           >
             <Lock className="h-3 w-3" />
             masked
           </span>
         </TooltipTrigger>
         <TooltipContent>
-          Masked by policy: <strong>{value.classification}</strong> data. Your role&apos;s
+          Masked by policy: <strong>{level}</strong> data. Your role&apos;s
           clearance does not include it.
         </TooltipContent>
       </Tooltip>

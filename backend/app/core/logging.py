@@ -13,6 +13,7 @@ import json
 import logging
 import re
 import sys
+import traceback
 from datetime import UTC, datetime
 from typing import Any
 
@@ -71,7 +72,48 @@ def redact(value: Any, key: str | None = None) -> Any:
     return redact(str(value))
 
 
+def _is_database_error(exc: BaseException) -> bool:
+    from sqlalchemy.exc import StatementError
+
+    module = type(exc).__module__
+    return isinstance(exc, StatementError) or module.startswith(("asyncpg", "sqlalchemy.dialects"))
+
+
+def _exception_message(exc: BaseException) -> str:
+    """Database errors carry bound values (and row values, e.g. 'Key (email)=(...)') in
+    their message, so only the statement and the error identity are kept (BE-3.5)."""
+    if not _is_database_error(exc):
+        return str(exc)
+    statement = getattr(exc, "statement", None)
+    sqlstate = getattr(exc, "sqlstate", None)
+    constraint = getattr(exc, "constraint_name", None)
+    parts = [f"[SQL: {statement}]" if statement else "", f"sqlstate={sqlstate}" if sqlstate else ""]
+    parts.append(f"constraint={constraint}" if constraint else "")
+    return " ".join(p for p in parts + ["(driver message withheld)"] if p)
+
+
+def format_exception(exc: BaseException) -> str:
+    chain: list[BaseException] = []
+    current: BaseException | None = exc
+    while current is not None and all(current is not seen for seen in chain):
+        chain.append(current)
+        current = current.__cause__ or (
+            None if current.__suppress_context__ else current.__context__
+        )
+    out = []
+    for item in reversed(chain):
+        frames = "".join(traceback.format_tb(item.__traceback__))
+        name = f"{type(item).__module__}.{type(item).__qualname__}"
+        message = _exception_message(item)
+        out.append(f"Traceback (most recent call last):\n{frames}{name}: {message}")
+    return "\n\nDuring handling, another exception occurred:\n\n".join(out)
+
+
 class JsonFormatter(logging.Formatter):
+    def formatException(self, ei: Any) -> str:  # noqa: N802 - logging API name
+        exc = ei[1]
+        return format_exception(exc) if exc is not None else super().formatException(ei)
+
     def format(self, record: logging.LogRecord) -> str:
         if isinstance(record.args, dict):
             record.args = redact(record.args)

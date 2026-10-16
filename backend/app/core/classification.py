@@ -13,7 +13,7 @@ are PROVISIONAL (D-11) and seeded by migration 0005.
 """
 
 from collections.abc import Mapping
-from typing import Any, Literal, TypeVar
+from typing import Annotated, Any, Literal, TypeVar, get_args, get_origin
 
 from pydantic import BaseModel, Field
 
@@ -52,32 +52,69 @@ class Classified:
 
 M = TypeVar("M", bound=BaseModel)
 
+# Stored audit details written before every key had to be classified (or by hand) are
+# masked under this code, which no role is cleared for (fail closed).
+UNCLASSIFIED = "unclassified"
+
 
 def _marker(metadata: list[Any]) -> Classification | None:
     return next((m for m in metadata if isinstance(m, Classification)), None)
 
 
+def _element_marker(annotation: Any) -> Classification | None:
+    """Marker on the element type of `list[Annotated[..., Classification(...)]]`."""
+    if get_origin(annotation) in (list, tuple, set, frozenset):
+        for arg in get_args(annotation):
+            if get_origin(arg) is Annotated:
+                marker = _marker(list(get_args(arg)[1:]))
+                if marker is not None:
+                    return marker
+    return None
+
+
+def _mask_nested(value: Any, clear: frozenset[str]) -> Any:
+    """Walk containers so models nested anywhere in a field are masked too."""
+    if isinstance(value, BaseModel):
+        return mask_model(value, clear)
+    if isinstance(value, list | tuple):
+        return type(value)(_mask_nested(v, clear) for v in value)
+    if isinstance(value, dict):
+        return {k: _mask_nested(v, clear) for k, v in value.items()}
+    return value
+
+
 def mask_model(model: M, clear: frozenset[str]) -> M:
+    """Copy of `model` with every classified value the caller may not see replaced.
+
+    A classified `None` is masked as well, so the response does not reveal whether the
+    hidden value exists (same rule as `mask_mapping`).
+    """
     updates: dict[str, Any] = {}
     for name, field in type(model).model_fields.items():
         value = getattr(model, name)
         marker = _marker(field.metadata)
-        if marker is not None and value is not None and marker.code not in clear:
+        element = _element_marker(field.annotation)
+        if marker is not None and marker.code not in clear:
             updates[name] = MaskedValue(classification=marker.code)
-        elif isinstance(value, BaseModel):
-            updates[name] = mask_model(value, clear)
-        elif isinstance(value, list) and value and isinstance(value[0], BaseModel):
-            updates[name] = [mask_model(v, clear) for v in value]
+        elif element is not None and element.code not in clear and isinstance(value, list):
+            updates[name] = [MaskedValue(classification=element.code) for _ in value]
+        elif isinstance(value, BaseModel | list | tuple | dict):
+            masked = _mask_nested(value, clear)
+            if masked != value:
+                updates[name] = masked
     return model.model_copy(update=updates) if updates else model
 
 
 def mask_mapping(
     values: Mapping[str, Any], classes: Mapping[str, str], clear: frozenset[str]
 ) -> dict[str, Any]:
-    """Mask the keys of a free-form mapping whose classification is not clear."""
+    """Mask the keys of a free-form mapping whose classification is not clear.
+
+    A key with no classification is masked as `unclassified` (fail closed).
+    """
     return {
-        key: MaskedValue(classification=classes[key])
-        if key in classes and classes[key] not in clear
-        else value
+        key: value
+        if classes.get(key, UNCLASSIFIED) in clear
+        else MaskedValue(classification=classes.get(key, UNCLASSIFIED))
         for key, value in values.items()
     }

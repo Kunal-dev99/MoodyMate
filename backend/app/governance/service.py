@@ -11,7 +11,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.classification import mask_mapping
+from app.core.classification import UNCLASSIFIED, mask_mapping
 from app.core.correlation import get_correlation_id
 from app.core.errors import ApiError
 from app.core.principal import Principal
@@ -46,8 +46,19 @@ def audit(
 
     Nothing is committed here: the event is written atomically with the action it
     describes, or not at all. `details` must hold safe metadata only; classify any key
-    whose value is not public, so it is masked for readers without clearance (BE-3.5).
+    and classify every key, so it is masked for readers without clearance (BE-3.5).
     """
+    details = details or {}
+    details_classification = details_classification or {}
+    # Fail closed (BE-3.5): the trail is append-only, so a detail stored without a
+    # classification could never be fixed later. Reject it when it is written.
+    known = {c.value for c in ClassificationCode}
+    unclassified = sorted(set(details) - set(details_classification))
+    if unclassified:
+        raise ValueError(f"audit details need a classification: {', '.join(unclassified)}")
+    unknown = sorted(c for c in details_classification.values() if c not in known)
+    if unknown:
+        raise ValueError(f"unknown classification code(s): {', '.join(unknown)}")
     event = AuditEvent(
         tenant_id=tenant_id,
         actor=actor,
@@ -58,8 +69,8 @@ def audit(
         outcome=outcome,
         correlation_id=get_correlation_id(),
         approval_ref=approval_ref,
-        details=details or {},
-        details_classification=details_classification or {},
+        details=details,
+        details_classification=details_classification,
     )
     AuditRepository(session).add(event)
     return event
@@ -91,7 +102,7 @@ async def _principal(
     clear = (
         await repo.clear_classifications([r.id for r in user.roles])
         if masking_enabled
-        else await repo.all_classifications()
+        else await repo.all_classifications() | {UNCLASSIFIED}
     )
     return Principal(
         user_id=user.id,
@@ -104,6 +115,15 @@ async def _principal(
         permissions=frozenset(p.code for r in user.roles for p in r.permissions),
         clear_classifications=clear,
     )
+
+
+class AccountDenied(ApiError):
+    """403 for a known account that may not sign in; carries what the audit row needs."""
+
+    def __init__(self, user: UserAccount, code: str, message: str) -> None:
+        super().__init__(403, code, message)
+        self.user_id = user.id
+        self.tenant_id = user.tenant_id
 
 
 @dataclass(frozen=True)
@@ -155,9 +175,11 @@ class IdentityService:
             )
             await self.session.commit()
         if user.status != UserStatus.ACTIVE:
-            raise ApiError(403, "account_disabled", "Your account is disabled.")
+            raise AccountDenied(user, "account_disabled", "Your account is disabled.")
         if await self.repo.tenant_status(user.tenant_id) != TenantStatus.ACTIVE:
-            raise ApiError(403, "tenant_suspended", "Your organisation's access is suspended.")
+            raise AccountDenied(
+                user, "tenant_suspended", "Your organisation's access is suspended."
+            )
         return await _principal(user, self.repo, masking_enabled)
 
     async def dev_personas(self) -> list[RoleModel]:
@@ -212,6 +234,9 @@ class UserService:
             "user.list",
             "user",
             details={"limit": limit, "offset": offset, "returned": len(users)},
+            details_classification=dict.fromkeys(
+                ("limit", "offset", "returned"), ClassificationCode.PUBLIC
+            ),
         )
         await self.session.commit()
         return users, total
@@ -246,12 +271,20 @@ class AuditQueryService:
         self.repo = AuditRepository(session)
 
     async def page(
-        self, filters: AuditFilters, limit: int, offset: int
+        self, filters: AuditFilters, limit: int, offset: int, before: uuid.UUID | None = None
     ) -> tuple[list[tuple[AuditEvent, dict[str, Any]]], int]:
+        """One page, newest first. `before` (an event id) pages by key, not offset, so the
+        `audit.read` event each read appends cannot shift the next page."""
+        cursor = None
+        if before is not None:
+            cursor = await self.repo.position(self.principal.scope, before)
+            if cursor is None:
+                raise ApiError(422, "invalid_cursor", "Unknown 'before' event.")
         events, total = await self.repo.page(
             self.principal.scope,
             limit=limit,
             offset=offset,
+            before=cursor,
             resource_type=filters.resource_type,
             resource_id=filters.resource_id,
             actor=filters.actor,
@@ -271,6 +304,11 @@ class AuditQueryService:
             "audit.read",
             "audit",
             details={"filters": used, "limit": limit, "offset": offset, "returned": len(events)},
+            details_classification={
+                # Filter values are typed by the reader and may name people or records.
+                "filters": ClassificationCode.INTERNAL,
+                **dict.fromkeys(("limit", "offset", "returned"), ClassificationCode.PUBLIC),
+            },
         )
         await self.session.commit()
         clear = self.principal.clear_classifications

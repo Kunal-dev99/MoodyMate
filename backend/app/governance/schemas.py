@@ -5,12 +5,12 @@ Request/response models for identity endpoints.
 
 import uuid
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
-from app.core.classification import MaskedValue
-from app.governance.constants import Permission, Role
+from app.core.classification import Classification, MaskedValue
+from app.governance.constants import ClassificationCode, Permission, Role
 
 
 class OidcClientConfig(BaseModel):
@@ -40,7 +40,7 @@ class MyPermissions(BaseModel):
 class UserSummary(BaseModel):
     id: uuid.UUID
     display_name: str
-    email: str | None
+    email: Annotated[str | None | MaskedValue, Classification(ClassificationCode.CONFIDENTIAL)]
     status: str
     roles: list[Role]
     created_at: datetime

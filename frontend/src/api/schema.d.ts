@@ -374,7 +374,7 @@ export interface components {
             /** Display Name */
             display_name: string;
             /** Email */
-            email: string | null;
+            email: string | components["schemas"]["MaskedValue"] | null;
             /**
              * Id
              * Format: uuid
@@ -406,6 +406,8 @@ export interface operations {
                 to?: string | null;
                 limit?: number;
                 offset?: number;
+                /** @description Return events older than this event id (stable keyset paging). */
+                before?: string | null;
             };
             header?: never;
             path?: never;

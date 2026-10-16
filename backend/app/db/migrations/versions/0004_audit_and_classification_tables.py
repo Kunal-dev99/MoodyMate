@@ -11,7 +11,7 @@ D-01: additive only (no DROP in upgrade). D-02: downgrade must restore the prior
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from alembic import op
+from alembic import context, op
 from sqlalchemy.dialects import postgresql
 
 revision: str = '0004'
@@ -92,7 +92,23 @@ def upgrade() -> None:
     )
 
 
+def _audit_loss_allowed() -> bool:
+    """Explicit opt-in: `alembic -x allow_audit_loss=true downgrade ...` (or the test
+    suite's config attribute). Without it the audit trail is never dropped."""
+    cfg = context.config
+    flag = context.get_x_argument(as_dictionary=True).get("allow_audit_loss", "")
+    return bool(cfg.attributes.get("allow_audit_loss")) or flag.lower() == "true"
+
+
 def downgrade() -> None:
+    # D-10: dropping audit_event would destroy the trail the triggers protect. Refuse while
+    # it holds rows unless the operator opts in explicitly.
+    rows = op.get_bind().execute(sa.text("SELECT count(*) FROM audit_event")).scalar_one()
+    if rows and not _audit_loss_allowed():
+        raise RuntimeError(
+            f"audit_event has rows ({rows}); refusing to drop the audit trail. Archive it, "
+            "then re-run with -x allow_audit_loss=true."
+        )
     op.execute("DROP TRIGGER IF EXISTS audit_event_no_truncate ON audit_event")
     op.execute("DROP TRIGGER IF EXISTS audit_event_no_update_delete ON audit_event")
     op.execute("DROP FUNCTION IF EXISTS audit_event_append_only()")

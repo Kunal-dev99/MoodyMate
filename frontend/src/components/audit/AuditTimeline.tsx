@@ -26,7 +26,26 @@ interface Filters {
 function DetailValue({ value }: { value: unknown }) {
   if (isMasked(value)) return <MaskedValue value={value} />
   if (value === null || value === undefined) return <span className="text-muted-foreground">—</span>
-  if (typeof value === 'object') return <code className="font-mono text-xs">{JSON.stringify(value)}</code>
+  if (Array.isArray(value))
+    return (
+      <span className="inline-flex flex-wrap gap-1">
+        {value.map((v, i) => (
+          <DetailValue key={i} value={v} />
+        ))}
+      </span>
+    )
+  if (typeof value === 'object')
+    // Walk nested objects so a masked marker inside one renders as MaskedValue, not JSON.
+    return (
+      <span className="inline-flex flex-wrap gap-x-3 gap-y-1">
+        {Object.entries(value).map(([k, v]) => (
+          <span key={k} className="inline-flex items-center gap-1">
+            <span className="text-xs text-muted-foreground">{k}</span>
+            <DetailValue value={v} />
+          </span>
+        ))}
+      </span>
+    )
   return <span className="font-mono text-xs">{String(value)}</span>
 }
 
@@ -92,8 +111,12 @@ export function AuditTimeline({
 }) {
   const [filters, setFilters] = useState<Filters>({ action: '', actor: '', outcome: '' })
   const [applied, setApplied] = useState<Filters>(filters)
-  const [offset, setOffset] = useState(0)
-  const [page, setPage] = useState<Page | null>(null)
+  // Keyset paging (`before` = last id of the previous page): stable even though every
+  // read appends an audit.read event at the top. Each entry is the cursor of one page.
+  const [cursors, setCursors] = useState<string[]>([])
+  const before = cursors.at(-1)
+  // The page on screen and its position, set together so the range label never runs ahead.
+  const [page, setPage] = useState<(Page & { index: number }) | null>(null)
   const [forbidden, setForbidden] = useState<string | null | false>(false)
   const [loading, setLoading] = useState(true)
 
@@ -105,7 +128,7 @@ export function AuditTimeline({
           params: {
             query: {
               limit: PAGE_SIZE,
-              offset,
+              before,
               resource_type: resourceType,
               resource_id: resourceId,
               action: applied.action || undefined,
@@ -115,14 +138,14 @@ export function AuditTimeline({
           },
         }),
       )
-      setPage(result)
+      setPage({ ...result, index: cursors.length })
     } catch (err) {
       if (err instanceof ApiError && err.status === 403) setForbidden(err.correlationId)
       else toastApiError(err, 'Could not load the audit trail')
     } finally {
       setLoading(false)
     }
-  }, [applied, offset, resourceId, resourceType])
+  }, [applied, before, cursors.length, resourceId, resourceType])
 
   useEffect(() => {
     void load()
@@ -131,7 +154,7 @@ export function AuditTimeline({
   if (forbidden !== false) return <Forbidden permission="audit:read" correlationId={forbidden} />
 
   const apply = () => {
-    setOffset(0)
+    setCursors([])
     setApplied(filters)
   }
 
@@ -190,14 +213,14 @@ export function AuditTimeline({
           </ul>
           <div className="flex items-center justify-between text-xs text-muted-foreground">
             <span>
-              {page.offset + 1}–{page.offset + page.items.length} of {page.total}
+              {page.index * PAGE_SIZE + 1}–{page.index * PAGE_SIZE + page.items.length} of {page.total}
             </span>
             <div className="flex gap-2">
               <Button
                 variant="outline"
                 size="sm"
-                disabled={offset === 0 || loading}
-                onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
+                disabled={cursors.length === 0 || loading}
+                onClick={() => setCursors(cursors.slice(0, -1))}
               >
                 <ChevronLeft className="h-3.5 w-3.5" />
                 Newer
@@ -205,8 +228,8 @@ export function AuditTimeline({
               <Button
                 variant="outline"
                 size="sm"
-                disabled={offset + PAGE_SIZE >= page.total || loading}
-                onClick={() => setOffset(offset + PAGE_SIZE)}
+                disabled={page.items.length < PAGE_SIZE || loading}
+                onClick={() => setCursors([...cursors, page.items[page.items.length - 1].id])}
               >
                 Older
                 <ChevronRight className="h-3.5 w-3.5" />

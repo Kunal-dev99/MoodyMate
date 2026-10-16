@@ -18,8 +18,10 @@ from sqlalchemy.ext.asyncio import (
 class Database:
     def __init__(self, url: str) -> None:
         # Creating the engine does not connect; the app starts without a DB.
+        # hide_parameters: bound values (possibly classified, BE-3.5) never appear in
+        # error messages, and so never reach the logs.
         self.engine: AsyncEngine = create_async_engine(
-            url, pool_pre_ping=True, connect_args={"timeout": 2}
+            url, pool_pre_ping=True, hide_parameters=True, connect_args={"timeout": 2}
         )
         self.sessionmaker = async_sessionmaker(self.engine, expire_on_commit=False)
 

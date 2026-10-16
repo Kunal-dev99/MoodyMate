@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import authenticated, require_permission
+from app.core.classification import mask_model
 from app.core.principal import Principal
 from app.db.session import get_session
 from app.governance.constants import Permission
@@ -100,8 +101,8 @@ async def my_permissions(
     return MyPermissions(permissions=sorted(principal.permissions))
 
 
-def _summary(u: UserAccount) -> UserSummary:
-    return UserSummary(
+def _summary(u: UserAccount, principal: Principal) -> UserSummary:
+    summary = UserSummary(
         id=u.id,
         display_name=u.display_name,
         email=u.email,
@@ -109,6 +110,7 @@ def _summary(u: UserAccount) -> UserSummary:
         roles=[r.code for r in u.roles],
         created_at=u.created_at,
     )
+    return mask_model(summary, principal.clear_classifications)
 
 
 @router.get("/users", response_model=UserPage, operation_id="listUsers")
@@ -119,7 +121,8 @@ async def list_users(
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> UserPage:
     users, total = await UserService(session, principal).list_users(limit, offset)
-    return UserPage(items=[_summary(u) for u in users], total=total, limit=limit, offset=offset)
+    items = [_summary(u, principal) for u in users]
+    return UserPage(items=items, total=total, limit=limit, offset=offset)
 
 
 @router.get("/users/{user_id}", response_model=UserSummary, operation_id="getUser")
@@ -128,22 +131,30 @@ async def get_user(
     principal: Annotated[Principal, Depends(require_permission(Permission.ADMIN_READ))],
     session: SessionDep,
 ) -> UserSummary:
-    return _summary(await UserService(session, principal).get_user(user_id))
+    return _summary(await UserService(session, principal).get_user(user_id), principal)
+
+
+# Filter values are stored in the audit.read event, so they are bounded.
+FilterText = Annotated[str | None, Query(max_length=200)]
 
 
 @router.get("/audit-events", response_model=AuditEventPage, operation_id="listAuditEvents")
 async def list_audit_events(
     principal: Annotated[Principal, Depends(require_permission(Permission.AUDIT_READ))],
     session: SessionDep,
-    resource_type: str | None = None,
-    resource_id: str | None = None,
-    actor: str | None = None,
-    action: str | None = None,
-    outcome: str | None = None,
+    resource_type: FilterText = None,
+    resource_id: FilterText = None,
+    actor: FilterText = None,
+    action: FilterText = None,
+    outcome: FilterText = None,
     occurred_from: Annotated[datetime | None, Query(alias="from")] = None,
     occurred_to: Annotated[datetime | None, Query(alias="to")] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    before: Annotated[
+        uuid.UUID | None,
+        Query(description="Return events older than this event id (stable keyset paging)."),
+    ] = None,
 ) -> AuditEventPage:
     filters = AuditFilters(
         resource_type=resource_type,
@@ -154,7 +165,7 @@ async def list_audit_events(
         occurred_from=occurred_from,
         occurred_to=occurred_to,
     )
-    rows, total = await AuditQueryService(session, principal).page(filters, limit, offset)
+    rows, total = await AuditQueryService(session, principal).page(filters, limit, offset, before)
     return AuditEventPage(
         items=[
             AuditEventOut(

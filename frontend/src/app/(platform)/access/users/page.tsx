@@ -8,6 +8,7 @@ import { useCurrentSession } from '@/components/auth/SessionProvider'
 import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
 import { LoadingBlock } from '@/components/common/LoadingBlock'
+import { MaskedValue, isMasked } from '@/components/common/MaskedValue'
 import { toastApiError } from '@/components/common/api-error-toast'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -58,7 +59,9 @@ export default function UsersPage() {
                 {state.page.items.map((u) => (
                   <TableRow key={u.id}>
                     <TableCell className="font-medium">{u.display_name}</TableCell>
-                    <TableCell className="text-muted-foreground">{u.email ?? '—'}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {isMasked(u.email) ? <MaskedValue value={u.email} /> : (u.email ?? '—')}
+                    </TableCell>
                     <TableCell>
                       <div className="flex flex-wrap gap-1">
                         {u.roles.map((r) => (

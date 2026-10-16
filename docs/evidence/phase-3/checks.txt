@@ -82,3 +82,49 @@ INFO  [alembic.runtime.migration] Running upgrade 0002 -> 0003, Seed identity da
 INFO  [alembic.runtime.migration] Running upgrade 0003 -> 0004, Audit trail (BE-3.1, D-10) and classification tables (BE-3.4).
 INFO  [alembic.runtime.migration] Running upgrade 0004 -> 0005, Seed classification levels and role clearances (BE-3.4, D-11).
 0005 (head)
+
+## Verification follow-ups (after the independent Phase 3 review)
+$ REQUIRE_DB=1 pytest -v app/tests/test_audit_hardening.py  (written first: 12 failed before the fixes)
+app/tests/test_audit_hardening.py::test_audit_rejects_details_without_a_classification PASSED
+app/tests/test_audit_hardening.py::test_unclassified_stored_details_are_masked PASSED
+app/tests/test_audit_hardening.py::test_downgrade_refuses_while_audit_rows_exist PASSED
+app/tests/test_audit_hardening.py::test_database_errors_do_not_log_bound_values PASSED
+app/tests/test_audit_hardening.py::test_keyset_paging_does_not_repeat_rows_despite_self_audit PASSED
+app/tests/test_audit_hardening.py::test_unknown_or_foreign_before_cursor_is_rejected PASSED
+app/tests/test_audit_hardening.py::test_resource_id_filter PASSED
+app/tests/test_audit_hardening.py::test_filters_are_length_bounded PASSED
+app/tests/test_audit_hardening.py::test_disabled_account_denial_is_audited PASSED
+app/tests/test_audit_hardening.py::test_denied_audit_does_not_commit_pending_request_work PASSED
+app/tests/test_audit_hardening.py::test_mask_model_walks_containers_and_masks_none PASSED
+app/tests/test_audit_hardening.py::test_user_directory_email_is_confidential PASSED
+============================== 12 passed in 4.65s ==============================
+$ REQUIRE_DB=1 pytest -q app/tests
+133 passed in 33.20s
+$ ruff check . && ruff format --check . && mypy app
+All checks passed!
+129 files already formatted
+Success: no issues found in 127 source files
+$ export_openapi --check
+openapi.json is up to date
+$ alembic downgrade base  (DB copy holds audit rows; no opt-in)
+INFO  [alembic.runtime.migration] Running downgrade 0005 -> 0004, Seed classification levels and role clearances (BE-3.4, D-11).
+INFO  [alembic.runtime.migration] Running downgrade 0004 -> 0003, Audit trail (BE-3.1, D-10) and classification tables (BE-3.4).
+    raise RuntimeError(
+RuntimeError: audit_event has rows (61); refusing to drop the audit trail. Archive it, then re-run with -x allow_audit_loss=true.
+$ alembic current
+0005 (head)
+$ alembic -x allow_audit_loss=true downgrade base && upgrade head  (explicit opt-in)
+INFO  [alembic.runtime.migration] Running downgrade 0005 -> 0004, Seed classification levels and role clearances (BE-3.4, D-11).
+INFO  [alembic.runtime.migration] Running downgrade 0004 -> 0003, Audit trail (BE-3.1, D-10) and classification tables (BE-3.4).
+INFO  [alembic.runtime.migration] Running downgrade 0003 -> 0002, Seed identity data (BE-2.2, D-11): default tenant, roles, permissions, matrix.
+0
+0005 (head)
+(the 0003 refusal above is the Phase 2 foreign-key protection of user role grants, unchanged)
+$ frontend: gen:api, npm test, lint, typecheck, build
+schema.d.ts regenerated (committed with this change)
+      Tests  34 passed (34)
+✔ No ESLint warnings or errors
+tsc: exit 0
+ ✓ Compiled successfully
+├ ○ /audit                               5.02 kB         157 kB
+$ browser-phase3.mjs (adds keyset paging): see browser-phase3.json, page2_repeats_page1=false

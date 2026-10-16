@@ -12,7 +12,7 @@ Conventions (see proposed D-08):
 
 ## Feature 01 — WS1 Data Governance, Security & Platform Foundation
 
-Kickoff: `docs/prompts/kickoffs/01-ws1-foundation.md` · Status: **APPROVED 2026-10-15 — Phase 1 merged (PR #2); Phase 2 merged (PR #3); Phase 2 hardening merged (PR #4); PR #6 merged (Phase 2 hardening complete); Phase 3 built — verification pending**
+Kickoff: `docs/prompts/kickoffs/01-ws1-foundation.md` · Status: **APPROVED 2026-10-15 — Phase 1 merged (PR #2); Phase 2 merged (PR #3); Phase 2 hardening merged (PR #4); PR #6 merged (Phase 2 hardening complete); Phase 3 built — verification recorded**
 
 Constraining decisions: D-01…D-12 (all active).
 
@@ -194,35 +194,35 @@ row scope is applied in repositories.
 Goal: privileged actions are recorded immutably; sensitive values are masked in API, UI
 and logs.
 
-- [ ] **BE-3.1** `audit_event` table plus a DB trigger rejecting `UPDATE`/`DELETE`
+- [x] **BE-3.1** `audit_event` table plus a DB trigger rejecting `UPDATE`/`DELETE`
   (D-10), with a tested downgrade.
   - *Done-when:* a test attempting `UPDATE` and `DELETE` on `audit_event` gets a DB error;
-    the round trip passes.
-- [ ] **BE-3.2** `governance.service.audit(...)`: records actor, action, resource
+    the round trip passes. — ✔ verified: `test_audit.py::test_audit_rows_cannot_be_updated_or_deleted[UPDATE…]` and `[DELETE…]` expect `asyncpg.InsufficientPrivilegeError` "append-only" and re-read the row unchanged; `::test_audit_table_cannot_be_truncated`; all PASSED in checks.txt:10-12. Triggers at backend/app/db/migrations/versions/0004_audit_and_classification_tables.py:74-92. Round trip base→head→base→head completed in checks.txt:63-84 (second run, after removing E2E users). Caveat (not a Done-when gap): the 0004 downgrade drops `audit_event` with its rows unguarded (0004:95-105); flagged in the 2026-10-16 verification report.
+- [x] **BE-3.2** `governance.service.audit(...)`: records actor, action, resource
   type/id, outcome, correlation ID, safe metadata and approval reference, in the same
   transaction as the action it records. Denied (403) requests are audited too.
   - *Done-when:* tests show a successful action and a denied action each produce exactly
-    one event with the correct correlation ID.
+    one event with the correct correlation ID. — ✔ verified: `test_audit.py::test_successful_action_produces_exactly_one_event` (sends `X-Correlation-ID`, asserts exactly one row with that ID: `user.list`/SUCCESS) and `::test_denied_action_produces_exactly_one_event` (risk_analyst, 403, exactly one DENIED row with that ID and `required_permission`), PASSED in checks.txt:13-14; same-transaction behaviour by `::test_audit_joins_the_callers_transaction` (checks.txt:15). Impl: backend/app/governance/service.py:31-85, denied path backend/app/core/auth.py:96-115. Caveat: only permission-check 403s are audited; `account_disabled`/`tenant_suspended`/`account_not_provisioned` 403s (service.py:126-160) are not.
 - [ ] **BE-3.3** `GET /api/v1/audit-events?resource_id=&resource_type=&actor=&from=&to=`,
   paginated, requiring `audit:read`. Reading audit is itself audited.
   - *Done-when:* tests cover filters, pagination, 403 for `risk_analyst`, and the
-    self-audit event.
-- [ ] **BE-3.4** `data_classification` and `access_policy` tables. Seeded classifications
+    self-audit event. — ⚠ open: pagination (`test_filters_and_pagination`, disjoint pages under `action=user.list`), 403 (`test_audit_read_requires_audit_read`), self-audit (`test_reading_audit_is_itself_audited`) and tenant scope are covered and PASSED (checks.txt:17-20), and resource_type/actor/action/outcome/from/to filters are exercised; but the `resource_id` filter named in this task's endpoint signature (and used by the resource-scoped FE-3.1 timeline) has no test anywhere under backend/app/tests (grep: no match). Needed: a test that `resource_id=` returns only that resource's events. Also add a test for unfiltered paging, which the self-audit row currently shifts (see verification report).
+- [x] **BE-3.4** `data_classification` and `access_policy` tables. Seeded classifications
   are `public`, `internal`, `confidential`, `restricted`, marked PROVISIONAL pending the
   client (D-11).
-  - *Done-when:* the round trip passes and seed classifications exist after upgrade.
-- [ ] **BE-3.5** Masking utility: response serialisation masks fields whose
+  - *Done-when:* the round trip passes and seed classifications exist after upgrade. — ✔ verified: tables at 0004_audit_and_classification_tables.py:44-71; tagged seed at 0005_classification_seed.py:25-60, downgrade deletes only `seeded_by='0005_classification'` rows (0005:63-66, D-11). `test_audit.py::test_seed_classifications_exist_and_are_provisional` (codes and ranks 0–3, `provisional` and tag on every row) and `::test_seed_clearances_match_constants` PASSED (checks.txt:21-22). Round trip checks.txt:63-84 ends at `0005 (head)`. Note: the first round-trip attempt (checks.txt:33-46) failed with an unhandled FK violation in 0003, not a deliberate D-11 refusal as the report says.
+- [x] **BE-3.5** Masking utility: response serialisation masks fields whose
   classification exceeds the principal's allowance, and the log filter (BE-1.5) uses the
   same classification.
   - *Done-when:* a test proves the same record returns masked to `risk_analyst` and clear
-    to `data_steward` for a `restricted` field.
-- [ ] **FE-3.1** Audit timeline component (resource-scoped, filterable, paginated) and
+    to `data_steward` for a `restricted` field. — ✔ verified: `test_audit.py::test_same_record_masked_for_risk_analyst_clear_for_data_steward` PASSED (checks.txt:23). It asserts `{"masked": true, "classification": "restricted"}` and no "12345" for risk_analyst, and the clear value for data_steward. The record is served by a test-only route (test_audit.py:242-253), but everything the Done-when is about is production code: real dev tokens, `require_permission`, clearance from the seeded `access_policy` (repository.py:81-92), and `mask_model` (classification.py:60-71). No production endpoint has a restricted field before Phase 4, so a test record is the honest way to prove it. Log side: `::test_log_filter_uses_the_same_classifications` (checks.txt:27). Caveat: masking is opt-in per route (each handler must call `mask_model`) rather than enforced in serialisation. Phase 4 needs a guard (see verification report).
+- [x] **FE-3.1** Audit timeline component (resource-scoped, filterable, paginated) and
   an Audit page.
   - *Done-when:* the timeline renders events created in BE-3.2 tests on the seeded
-    environment, with the correlation ID visible.
-- [ ] **FE-3.2** `MaskedValue` component with an explicit "masked by policy" state.
+    environment, with the correlation ID visible. — ✔ verified: browser-phase3.mjs:14-40 replays the two BE-3.2 scenarios (platform_admin `user.list`, risk_analyst denied `GET /api/v1/users`) against the seeded DB copy and captures their `X-Correlation-ID` headers. browser-phase3.json has `timeline_shows_success_cid: true`, `timeline_shows_denied_cid: true`, and the denied row shows its correlation ID (screenshot 01). The ID is rendered at frontend/src/components/audit/AuditTimeline.tsx:55. Filters at AuditTimeline.tsx:140-177 (`filtered_all_denied: true`, screenshot 03), pager at :191-214, `resourceType`/`resourceId` props at :84-115, page at frontend/src/app/(platform)/audit/page.tsx:17-21. The browser exercised only one page.
+- [x] **FE-3.2** `MaskedValue` component with an explicit "masked by policy" state.
   - *Done-when:* a masked API value renders as masked text with a tooltip, never as an
-    empty string.
+    empty string. — ✔ verified: frontend/src/components/common/MaskedValue.tsx:24-45 always renders the literal "masked" with a lock icon, an aria-label and a tooltip; `isMasked` (:10-17) needs `masked === true` and a string classification. browser-phase3.json: `auditor_email_masked_text: "masked"`, tooltip "Masked by policy: confidential data…", `auditor_sees_raw_email: false`, `admin_sees_clear_email: true` (screenshots 02, 04). Unit test frontend/src/components/common/__tests__/masked.test.ts covers the marker predicate (33 FE tests passed, checks.txt:51-53). The masked row was a hand-inserted fixture; the masking itself went through the real API.
 
 *Reversibility:* tables are additive; masking ships behind setting `MASKING_ENABLED`
 (default `true`), which, if set to `false`, restores unmasked output in `ENV=local` only.

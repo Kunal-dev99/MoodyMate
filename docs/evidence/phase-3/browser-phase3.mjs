@@ -49,6 +49,20 @@ const tip = p.getByRole('tooltip')
 await tip.waitFor()
 r.tooltip = await tip.innerText()
 await prov.screenshot({ path: `${OUT}/02-masked-value-tooltip.png` })
+// 4b. Keyset paging (defect 4): page 2 never repeats page 1, though each read is audited
+const page1 = await p.getByTestId('audit-event').evaluateAll((els) => els.map((e) => e.innerText))
+r.page1_pager = await p.getByText(/\d+–\d+ of \d+/).innerText()
+await Promise.all([
+  p.waitForResponse((res) => res.url().includes('/api/v1/audit-events') && res.url().includes('before=')),
+  p.getByRole('button', { name: 'Older' }).click(),
+])
+await p.getByText(/^21–/).waitFor()
+const page2 = await p.getByTestId('audit-event').evaluateAll((els) => els.map((e) => e.innerText))
+r.page2_pager = await p.getByText(/\d+–\d+ of \d+/).innerText()
+r.page2_repeats_page1 = page2.some((t) => page1.includes(t))
+await p.getByRole('button', { name: 'Newer' }).click()
+await p.getByText(/^1–/).waitFor()
+r.back_to_first_page = true
 // 5. Filters + pagination
 await p.getByLabel('Filter by outcome').selectOption('DENIED')
 await p.getByRole('button', { name: 'Apply' }).click()

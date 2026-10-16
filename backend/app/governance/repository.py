@@ -11,7 +11,7 @@ The only code that touches the DB session for this module.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, literal, select, tuple_
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -123,6 +123,19 @@ class AuditRepository:
         # No flush/commit here: the event joins the caller's transaction (BE-3.2).
         self.session.add(event)
 
+    async def position(
+        self, scope: DataScope, event_id: uuid.UUID
+    ) -> tuple[datetime, uuid.UUID] | None:
+        """Sort key of an event in the caller's tenant (paging cursor)."""
+        row = (
+            await self.session.execute(
+                select(AuditEvent.occurred_at, AuditEvent.id).where(
+                    AuditEvent.id == event_id, AuditEvent.tenant_id == scope.tenant_id
+                )
+            )
+        ).first()
+        return (row[0], row[1]) if row else None
+
     def _filtered(
         self,
         scope: DataScope,
@@ -157,6 +170,7 @@ class AuditRepository:
         *,
         limit: int,
         offset: int,
+        before: tuple[datetime, uuid.UUID] | None = None,
         resource_type: str | None = None,
         resource_id: str | None = None,
         actor: str | None = None,
@@ -169,6 +183,9 @@ class AuditRepository:
             scope, resource_type, resource_id, actor, action, outcome, occurred_from, occurred_to
         )
         total = await self.session.scalar(select(func.count()).select_from(stmt.subquery()))
+        if before is not None:
+            key = tuple_(AuditEvent.occurred_at, AuditEvent.id)
+            stmt = stmt.where(key < tuple_(literal(before[0]), literal(before[1])))
         result = await self.session.execute(
             stmt.order_by(AuditEvent.occurred_at.desc(), AuditEvent.id.desc())
             .limit(limit)
