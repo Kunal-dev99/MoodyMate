@@ -81,7 +81,7 @@ async def auth_config(request: Request) -> AuthConfig:
         )
     return AuthConfig(
         mode=s.AUTH_MODE,
-        environment=EnvironmentInfo(env=s.ENV, data_class=s.DATA_CLASS),
+        environment=EnvironmentInfo(env=s.ENV, data_class=s.data_class),
         dev_sessions=s.dev_sessions_enabled,
         oidc=oidc,
     )

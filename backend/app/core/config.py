@@ -31,7 +31,8 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+asyncpg://moodymate:moodymate@localhost:5432/moodymate_dev"
     AUTH_MODE: AuthMode = "dev"
     AI_ENABLED: bool = False
-    DATA_CLASS: DataClass = "synthetic"
+    # BE-6.1: required in staging/production (fail closed, D-13); local/test are synthetic.
+    DATA_CLASS: DataClass | None = None
     LOG_LEVEL: str = "INFO"
     # BE-3.5: mask classified values the caller may not see. Off only in ENV=local.
     MASKING_ENABLED: bool = True
@@ -54,10 +55,6 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _guard_auth(self) -> "Settings":
         local = self.ENV in LOCAL_ENVS
-        # BE-6.1 (DG-06): client data only where it may live; local and test hold
-        # synthetic data only.
-        if self.DATA_CLASS == "client" and self.ENV not in ("staging", "production"):
-            raise ValueError(f"DATA_CLASS=client is not allowed when ENV={self.ENV}")
         if not self.MASKING_ENABLED and self.ENV != "local":
             raise ValueError(f"MASKING_ENABLED=false is not allowed when ENV={self.ENV}")
         if self.AUTH_MODE == "dev":
@@ -82,7 +79,18 @@ class Settings(BaseSettings):
                     value = getattr(self, name)
                     if value and not value.startswith("https://"):
                         raise ValueError(f"{name} must use https:// when ENV={self.ENV}")
+        # BE-6.1 (DG-06): client data only where it may live; local and test hold
+        # synthetic data only. Checked last, so more specific errors surface first.
+        if self.DATA_CLASS is None and self.ENV in ("staging", "production"):
+            raise ValueError(f"DATA_CLASS is required when ENV={self.ENV}")
+        if self.DATA_CLASS == "client" and self.ENV not in ("staging", "production"):
+            raise ValueError(f"DATA_CLASS=client is not allowed when ENV={self.ENV}")
         return self
+
+    @property
+    def data_class(self) -> DataClass:
+        """The effective data class: as configured, else synthetic (local/test only)."""
+        return self.DATA_CLASS or "synthetic"
 
     @property
     def allow_insecure_oidc(self) -> bool:

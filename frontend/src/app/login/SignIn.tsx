@@ -62,7 +62,8 @@ export function SignIn() {
 
   return (
     <div className="min-h-screen bg-background">
-      {config && <EnvironmentBanner environment={config.environment} />}
+      {/* Unknown while loading is not shown; unknown after a failure is (fail closed). */}
+      {(config || error) && <EnvironmentBanner environment={config?.environment ?? null} />}
       <div className="px-6 py-16">
       <div className="mx-auto max-w-3xl space-y-6">
         <div className="flex items-center gap-3">

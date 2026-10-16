@@ -87,3 +87,39 @@ def test_data_class_header_is_readable_cross_origin(plain: TestClient) -> None:
 def test_auth_config_reports_the_environment(plain: TestClient) -> None:
     body = plain.get("/api/v1/auth/config").json()
     assert body["environment"] == {"env": "test", "data_class": "synthetic"}
+
+
+# --- Phase 6 review follow-ups -------------------------------------------------------------
+
+
+@pytest.mark.parametrize("env", ["staging", "production"])
+def test_deployments_must_state_their_data_class(env: str) -> None:
+    """Fail closed (D-13): a deployment that forgets DATA_CLASS must not claim 'synthetic'."""
+    with pytest.raises(ValidationError, match=f"DATA_CLASS is required when ENV={env}"):
+        Settings(ENV=env, **BASE[env])
+
+
+@pytest.mark.parametrize("env", ["local", "test"])
+def test_local_and_test_default_to_synthetic(env: str) -> None:
+    assert Settings(ENV=env).data_class == "synthetic"
+
+
+def test_cors_preflight_carries_the_data_class(plain: TestClient) -> None:
+    r = plain.options(
+        "/api/v1/me",
+        headers={"Origin": "http://localhost:3000", "Access-Control-Request-Method": "GET"},
+    )
+    assert r.status_code == 200
+    assert r.headers["X-Data-Class"] == "synthetic"
+
+
+def test_unhandled_error_carries_the_data_class() -> None:
+    app = create_app(Settings(ENV="test", DATABASE_URL="postgresql+asyncpg://x:y@127.0.0.1:1/none"))
+
+    @app.get("/boom")
+    async def boom() -> None:
+        raise RuntimeError("boom")
+
+    r = TestClient(app, raise_server_exceptions=False).get("/boom")
+    assert r.status_code == 500
+    assert r.headers["X-Data-Class"] == "synthetic"

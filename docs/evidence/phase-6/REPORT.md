@@ -16,13 +16,30 @@ Evidence:
 
 ## Design notes
 
-- **ENV × DATA_CLASS.** The plan says "synthetic is required outside production" and "client data allowed in staging or production". I implemented the reading that satisfies both: local and test are synthetic only, and staging and production may hold either. The banner shows client data in red and synthetic data in amber.
+- **ENV × DATA_CLASS (open for decision, see follow-up 2).** The plan says "synthetic is required outside production" and "client data allowed in staging or production". I implemented the reading that satisfies both: local and test are synthetic only, and staging and production may hold either. The banner shows client data in red and synthetic data in amber.
 - **Matrix semantics.**
   - "Allowed" means the route's declared permission is held, or the route is open to any signed-in user.
   - An allowed role may still get 404, 409 or 422, because the matrix uses random ids and empty bodies.
   - A denied role must get 403 `forbidden`, which proves the permission check runs before any lookup.
 - **Audit completeness is enforced going forward.** `test_every_mutating_route_is_listed` fails as soon as a mutating route is added without an audit expectation.
 - **Playwright** is pinned to 1.56.1 to match the preinstalled browser build here, and CI installs its own Chromium. `PW_CHROMIUM_PATH` and `E2E_UVICORN` keep the config usable both in this sandbox and in CI.
+
+## Verification follow-ups
+
+The independent review ticked BE-6.1, BE-6.2 and FE-6.1. It left BE-6.3 and FE-6.2 pending until CI runs, as expected. The fixes below are recorded in checks.txt, in the "Verification follow-ups" section.
+
+| # | Finding | Resolution |
+|---|---|---|
+| 1 | `DATA_CLASS` defaulted to `synthetic` everywhere, so a staging or production deployment that forgot it would falsely claim synthetic data. | `DATA_CLASS` is now required when ENV is staging or production (startup refuses otherwise, D-13). local and test still default to synthetic (tests). |
+| 2 | Whether staging may hold client data. | **Open: your decision.** The code currently allows it, but it is one line in `config.py` plus the test matrix. |
+| 3 | The audit test could be bypassed by listing a route without exercising it. | The emit test records every route it drives and asserts that the set equals `AUDITED`. |
+| 4 | The matrix didn't prove the "2xx" side. | The matrix now uses real ids, so allowed roles get 200 on every GET. An allowed role passes only on 2xx, 404, 409 or 422, so any 401 or 403 fails. A denial must be `forbidden` and name the route's declared permission. Every role must reach at least one 2xx. The seeded roles must equal the roles tested. |
+| 5 | The banner overlapped the header on scroll. | The banner and header now sit in one sticky block (no overlap after scrolling; screenshot 03). The background is opaque: a tint over the surface colour. |
+| 6 | The banner had low contrast and the wrong role. | The text uses the body colour (about 15:1); the colour bar only adds emphasis. It is now `role="region"` with `aria-label="Environment"`. |
+| 7 | Not every response carried the header. | The header middleware now runs outermost, so CORS preflights carry `X-Data-Class`. The 500 path is tested. |
+| 8 | The cross-tenant audit check was weak. | Every audit item an outsider sees is checked to belong to their tenant. The reverse direction is tested too (this tenant cannot list or read the outsider's schema or users). |
+| 9 | RETENTION.md was incomplete against Arch §11. | Added a `tenant` row, a deletion-evidence section covering every class, and a restore procedure outline. The outline includes verifying the triggers exist and running `pytest -m ws1` against the restored database. |
+| 10 | No banner when `/auth/config` fails. | Sign-in shows "ENVIRONMENT UNKNOWN · TREAT DATA AS REAL" (fail closed). `/auth/callback` is a transient redirect page and is left without a banner. |
 
 ## Not done / follow-ups
 

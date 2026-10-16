@@ -69,7 +69,9 @@ def test_http_jwks_url_refused_in_production() -> None:
 
 
 def test_https_oidc_accepted_in_production() -> None:
-    s = Settings(ENV="production", OIDC_ISSUER="https://idp.example/realm", **OIDC)
+    s = Settings(
+        ENV="production", DATA_CLASS="client", OIDC_ISSUER="https://idp.example/realm", **OIDC
+    )
     assert not s.allow_insecure_oidc
 
 

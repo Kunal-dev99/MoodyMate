@@ -60,25 +60,65 @@ def concrete(path: str) -> str:
 # --- 1. Authorization matrix ---
 
 
-def test_route_by_role_authorization_matrix(api: TestClient) -> None:
+ALLOWED_OUTCOMES = {200, 201, 404, 409, 422}  # a permitted role is never refused
+
+
+def real_ids(api: TestClient, db: str) -> dict[str, str]:
+    """Existing ids, so GET routes answer 2xx for permitted roles (the plan's 2xx side)."""
+    proposal = removal_proposal(api, db, dev_token(api, "data_steward"))
+    auditor = api.get("/api/v1/me", headers=dev_token(api, "auditor")).json()
+    return {
+        "schema_id": str(schema_id(db, "instrument")),
+        "proposal_id": proposal["id"],
+        "user_id": auditor["user_id"],
+    }
+
+
+def concrete_with(path: str, ids: dict[str, str]) -> str:
+    for name, value in ids.items():
+        path = path.replace("{" + name + "}", value)
+    return path + ("?from=1&to=2" if path.endswith("/diff") else "")
+
+
+def test_seeded_roles_are_the_roles_tested(db: str) -> None:
+    seeded = {r["code"] for r in sql(db, "SELECT code FROM role")}
+    assert seeded == set(ROLES)
+
+
+def test_route_by_role_authorization_matrix(api: TestClient, db: str) -> None:
+    ids = real_ids(api, db)
     tokens = {role: dev_token(api, role) for role in ROLES}
     failures = []
+    successes = dict.fromkeys(ROLES, 0)
     for method, path, permission in protected_routes(api):
         row: dict[str, Any] = {"route": f"{method} {path}", "permission": permission}
         for role in ROLES:
             allowed = permission == AUTHENTICATED or permission in ROLE_PERMISSIONS[Role(role)]
             r = api.request(
                 method,
-                concrete(path),
+                concrete_with(path, ids),
                 headers=tokens[role],
                 json={} if method in MUTATING else None,
             )
-            denied = r.status_code == 403 and r.json().get("code") == "forbidden"
             row[role] = r.status_code
-            if r.status_code >= 500 or denied == allowed:
-                failures.append(f"{method} {path} as {role}: {r.status_code} (allowed={allowed})")
+            if allowed:
+                # Any refusal at all (401, 403 for whatever reason) is a failure.
+                if r.status_code not in ALLOWED_OUTCOMES:
+                    failures.append(f"{method} {path} as {role}: {r.status_code}, expected allowed")
+                successes[role] += r.status_code < 300
+            else:
+                body = r.json()
+                proved = (
+                    r.status_code == 403
+                    and body.get("code") == "forbidden"
+                    and body.get("details", {}).get("required_permission") == permission
+                )
+                if not proved:
+                    failures.append(f"{method} {path} as {role}: {r.status_code} {body}")
         WS1_MATRIX.append(row)
     assert not failures, "\n".join(failures)
+    # Every role really uses the routes it may use, not only gets past the check.
+    assert all(successes.values()), successes
     assert len(WS1_MATRIX) >= 12
 
 
@@ -109,7 +149,11 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
     assert api.get("/api/v1/schemas", headers=outsider).json()["total"] == 0
     assert api.get(BASE, headers=outsider).json()["total"] == 0
     audit = api.get("/api/v1/audit-events", params={"limit": 200}, headers=outsider).json()
-    assert all(here["id"] != e["resource_id"] for e in audit["items"])
+    theirs = {
+        str(r["id"])
+        for r in sql(db, "SELECT id FROM audit_event WHERE tenant_id = $1", other_tenant)
+    }
+    assert audit["items"] and {e["id"] for e in audit["items"]} <= theirs
     # Direct reads and writes by id: not found, exactly as for an id that does not exist.
     for path in (
         f"/api/v1/users/{here_user}",
@@ -143,6 +187,20 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
         )[0]["n"]
         == 0
     )
+
+    # And the other way round: this tenant sees nothing of the outsider's.
+    foreign = sql(
+        db,
+        "INSERT INTO schema_definition (id, tenant_id, code, name, owner, provisional, created_by)"
+        " VALUES (gen_random_uuid(), $1, 'outsider_only', 'Outsider', 'x', false, 'test')"
+        " RETURNING id",
+        other_tenant,
+    )[0]["id"]
+    insider = dev_token(api, "platform_admin")
+    assert "outsider_only" not in api.get("/api/v1/schemas", headers=insider).text
+    assert api.get(f"/api/v1/schemas/{foreign}/versions", headers=insider).status_code == 404
+    users_here = api.get("/api/v1/users", params={"limit": 200}, headers=insider).json()["items"]
+    assert all(not u["display_name"].endswith("dev:outsider") for u in users_here)
 
 
 # --- 3. Breaking-change approval ---
@@ -193,7 +251,10 @@ def test_every_mutating_route_is_listed(api: TestClient) -> None:
 
 
 def test_every_mutating_route_emits_an_audit_event(api: TestClient, db: str) -> None:
+    called: set[str] = set()
+
     def call(route: str, headers: dict[str, str], path: str | None = None, body: Any = None) -> Any:
+        called.add(route)
         cid = f"ws1-{uuid.uuid4().hex[:10]}"
         method, template = route.split(" ", 1)
         r = api.request(
@@ -241,6 +302,8 @@ def test_every_mutating_route_emits_an_audit_event(api: TestClient, db: str) -> 
         {"decision": "APPROVE"},
     )
     call("POST /api/v1/schema-change-proposals/{proposal_id}/revert", steward, f"{base}/revert", {})
+    # Every listed route was exercised here: listing a route without driving it fails.
+    assert called == set(AUDITED)
 
 
 # --- 5. Migration round trip ---

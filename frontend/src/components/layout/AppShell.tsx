@@ -32,13 +32,16 @@ export function AppShell({ children }: { children: ReactNode }) {
         onLogout={() => void signOut()}
       />
       <div className="ml-64 transition-all duration-300">
-        <EnvironmentBanner environment={authConfig.environment} />
-        <Header
-          title="Financial Risk Platform"
-          logoSrc="/brand/logo.png"
-          logoAlt="Fusion Practices"
-          actions={<ThemeToggle />}
-        />
+        {/* One sticky block, so the banner never covers the header when the page scrolls. */}
+        <div className="sticky top-0 z-40">
+          <EnvironmentBanner environment={authConfig.environment} />
+          <Header
+            title="Financial Risk Platform"
+            logoSrc="/brand/logo.png"
+            logoAlt="Fusion Practices"
+            actions={<ThemeToggle />}
+          />
+        </div>
         <main>{children}</main>
       </div>
     </>
