@@ -4,7 +4,8 @@ ILLUSTRATIVE and PROVISIONAL (D-11): a FILE_DROP source whose CSV profile and co
 match backend/samples/synthetic/instrument.csv (test_sources keeps them equal). It is not a
 client system. Every row is tagged `seeded_by = '0011_ws2_source_seed'`; downgrade removes
 only tagged rows, and fails on the foreign key rather than delete user data that refers to
-them (e.g. a later contract version someone added).
+them (e.g. a later contract version someone added). Row IDs are uuid5 values (as 0003), so
+a downgrade and upgrade gives the seeded source the same IDs.
 
 Revision ID: 0011
 Revises: 0010
@@ -13,6 +14,7 @@ Create Date: 2026-10-16
 
 import hashlib
 import json
+import uuid
 from collections.abc import Sequence
 from typing import Any
 
@@ -27,6 +29,10 @@ depends_on: str | Sequence[str] | None = None
 TAG = "0011_ws2_source_seed"
 ACTOR = "system:migration"
 TENANT = "00000000-0000-4000-8000-000000000001"
+NS = uuid.UUID("2b7d0f4e-8c1a-4e57-9b3d-5f6a1c0e9d21")  # namespace for seed IDs
+SYSTEM_ID = uuid.uuid5(NS, f"source_system:{TENANT}:core_banking")
+PROFILE_ID = uuid.uuid5(NS, f"source_profile:{TENANT}:core_banking")
+CONTRACT_ID = uuid.uuid5(NS, f"source_contract:{TENANT}:core_banking:1")
 ILLUSTRATIVE = "ILLUSTRATIVE seed for synthetic samples; not a client system."
 
 EXPECTED_COLUMNS = [
@@ -82,10 +88,11 @@ def upgrade() -> None:
     system_id = bind.execute(
         sa.text(
             "INSERT INTO source_system (id, tenant_id, code, name, kind, description,"
-            " created_by, seeded_by) VALUES (gen_random_uuid(), CAST(:tenant AS uuid),"
+            " created_by, seeded_by) VALUES (:id, CAST(:tenant AS uuid),"
             " 'core_banking', 'core_banking (illustrative)', 'FILE_DROP', :description,"
             " :actor, :tag) RETURNING id"
         ).bindparams(
+            id=SYSTEM_ID,
             tenant=TENANT,
             description=f"Core banking instrument extract (file drop). {ILLUSTRATIVE}",
             actor=ACTOR,
@@ -96,9 +103,10 @@ def upgrade() -> None:
         sa.text(
             "INSERT INTO source_profile (id, source_system_id, format, encoding, delimiter,"
             " cadence, owner, default_classification, provisional, created_by, seeded_by)"
-            " VALUES (gen_random_uuid(), :system_id, 'CSV', 'UTF-8', ',', 'daily (illustrative)',"
+            " VALUES (:id, :system_id, 'CSV', 'UTF-8', ',', 'daily (illustrative)',"
             " :owner, 'confidential', true, :actor, :tag) RETURNING id"
         ).bindparams(
+            id=PROFILE_ID,
             system_id=system_id,
             owner="Data governance (data_steward), provisional",
             actor=ACTOR,
@@ -109,10 +117,11 @@ def upgrade() -> None:
         sa.text(
             "INSERT INTO source_contract (id, source_profile_id, version, status, schema_id,"
             " expected_columns, business_key_columns, control_total_columns, content_sha256,"
-            " change_summary, created_by, seeded_by) VALUES (gen_random_uuid(), :profile_id, 1,"
+            " change_summary, created_by, seeded_by) VALUES (:id, :profile_id, 1,"
             " 'PROVISIONAL', :schema_id, CAST(:expected AS jsonb), CAST(:keys AS jsonb),"
             " CAST(:totals AS jsonb), :sha, :summary, :actor, :tag)"
         ).bindparams(
+            id=CONTRACT_ID,
             profile_id=profile_id,
             schema_id=schema_id,
             expected=json.dumps(EXPECTED_COLUMNS),

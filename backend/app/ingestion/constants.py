@@ -51,9 +51,9 @@ class ContractStatus(StrEnum):
     SUPERSEDED = "SUPERSEDED"
 
 
-# D-06 transition table: status -> statuses it may move to. Enforced by the service; the
-# database trigger (0009) additionally makes SUPERSEDED final, forbids a return to
-# PROVISIONAL and freezes a contract's content once it is not PROVISIONAL.
+# D-06 transition table: status -> statuses it may move to. Enforced by the service and by
+# the database trigger (0009, a frozen copy kept equal by a test), which also freezes a
+# contract's content from creation in every status (D-24 §3).
 CONTRACT_TRANSITIONS: dict[ContractStatus, frozenset[ContractStatus]] = {
     ContractStatus.PROVISIONAL: frozenset(
         {ContractStatus.IN_REVIEW, ContractStatus.APPROVED, ContractStatus.SUPERSEDED}

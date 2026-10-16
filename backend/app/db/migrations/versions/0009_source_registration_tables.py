@@ -1,13 +1,18 @@
 """Source registration tables (BE-7.1, DI-01): source_system, source_profile, source_contract.
 
 Nothing is deleted (D-02): triggers reject DELETE and TRUNCATE on all three tables. A
-source_contract's content (profile, version, target schema, expected / business-key /
-control-total columns, hash, lineage, summary, seed tag) is frozen once it is not
-PROVISIONAL, a contract never returns to PROVISIONAL, and SUPERSEDED is final. A contract
-targets a schema of its own source's tenant and supersedes only a contract of its own
-profile (D-04). Every enum column has a CHECK (D-06, D-23). A seed migration's downgrade
-(D-11) disables the row triggers for its own transaction, which needs the table owner: no
-session setting unlocks them.
+source_contract's content (D-24 §3: id, profile, version, target schema, expected /
+business-key / control-total columns, hash, lineage, summary, seed tag, created_by,
+created_at) is frozen from creation, in every status; only `status` and `updated_at` change,
+and `status` only along the transition table below (a frozen copy of
+app.ingestion.constants.CONTRACT_TRANSITIONS, kept equal by a test). SUPERSEDED is final.
+A source never moves tenant and a profile never moves source (D-04); a source has at most
+one profile. A contract targets a schema of its own source's tenant and supersedes only a
+contract of its own profile. Every enum column has a CHECK (D-06, D-23). A seed migration's
+downgrade (D-11) disables the row triggers for its own transaction, which needs the table
+owner: no session setting unlocks them.
+
+Amended in place before release (D-24 Consequences): never merged or deployed.
 
 Revision ID: 0009
 Revises: 0008
@@ -37,6 +42,20 @@ CONTENT_COLUMNS = (
     "supersedes_id",
     "change_summary",
     "seeded_by",
+    "id",
+    "created_by",
+    "created_at",
+)
+# D-06 transition table: a frozen copy of CONTRACT_TRANSITIONS, kept equal by
+# test_source_contract_guards. A status may also be "set" to itself, which is not a move.
+CONTRACT_TRANSITIONS: dict[str, list[str]] = {
+    "PROVISIONAL": ["APPROVED", "IN_REVIEW", "SUPERSEDED"],
+    "IN_REVIEW": ["APPROVED", "SUPERSEDED"],
+    "APPROVED": ["SUPERSEDED"],
+    "SUPERSEDED": [],
+}
+ALLOWED_MOVES = ", ".join(
+    f"('{a}', '{b}')" for a, targets in CONTRACT_TRANSITIONS.items() for b in targets
 )
 NEW_CONTENT = ", ".join(f"NEW.{c}" for c in CONTENT_COLUMNS)
 OLD_CONTENT = ", ".join(f"OLD.{c}" for c in CONTENT_COLUMNS)
@@ -56,15 +75,15 @@ BEGIN
         RAISE EXCEPTION 'source_contract % is SUPERSEDED, which is final and immutable (BE-7.1)',
             OLD.id USING ERRCODE = 'insufficient_privilege';
     END IF;
-    IF NEW.status = 'PROVISIONAL' AND OLD.status <> 'PROVISIONAL' THEN
-        RAISE EXCEPTION 'source_contract % is % and immutable (BE-7.1): cannot return to PROVISIONAL',
-            OLD.id, OLD.status USING ERRCODE = 'insufficient_privilege';
+    IF ({NEW_CONTENT}) IS DISTINCT FROM ({OLD_CONTENT}) THEN
+        RAISE EXCEPTION 'source_contract % is immutable (D-24): content change rejected; add a new version',
+            OLD.id USING ERRCODE = 'insufficient_privilege';
     END IF;
-    IF (OLD.status <> 'PROVISIONAL' OR NEW.status <> 'PROVISIONAL')
-        AND ({NEW_CONTENT}) IS DISTINCT FROM ({OLD_CONTENT})
+    IF NEW.status IS DISTINCT FROM OLD.status
+        AND (OLD.status, NEW.status) NOT IN ({ALLOWED_MOVES})
     THEN
-        RAISE EXCEPTION 'source_contract % is % and immutable (BE-7.1): content change rejected',
-            OLD.id, OLD.status USING ERRCODE = 'insufficient_privilege';
+        RAISE EXCEPTION 'source_contract % is immutable (D-06): % -> % is not an allowed transition',
+            OLD.id, OLD.status, NEW.status USING ERRCODE = 'insufficient_privilege';
     END IF;
     RETURN NEW;
 END;
@@ -77,6 +96,31 @@ CREATE FUNCTION source_registration_no_delete() RETURNS trigger LANGUAGE plpgsql
 BEGIN
     RAISE EXCEPTION '% rows are never deleted (BE-7.1, D-02): % rejected',
         TG_TABLE_NAME, TG_OP USING ERRCODE = 'insufficient_privilege';
+END;
+$$
+"""
+
+# D-04: a source never moves tenant and a profile never moves source. Two functions: a
+# PL/pgSQL expression naming a column the row lacks fails even when not reached.
+NO_TENANT_MOVE = """
+CREATE FUNCTION source_system_no_move() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.tenant_id IS DISTINCT FROM OLD.tenant_id THEN
+        RAISE EXCEPTION 'source_system % cannot move tenant (D-04)',
+            OLD.id USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    RETURN NEW;
+END;
+$$
+"""
+NO_SOURCE_MOVE = """
+CREATE FUNCTION source_profile_no_move() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.source_system_id IS DISTINCT FROM OLD.source_system_id THEN
+        RAISE EXCEPTION 'source_profile % cannot move to another source (D-04)',
+            OLD.id USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    RETURN NEW;
 END;
 $$
 """
@@ -153,7 +197,7 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['source_system_id'], ['source_system.id'], name=op.f('fk_source_profile_source_system_id_source_system')),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_source_profile'))
     )
-    op.create_index(op.f('ix_source_profile_source_system_id'), 'source_profile', ['source_system_id'], unique=False)
+    op.create_index(op.f('ix_source_profile_source_system_id'), 'source_profile', ['source_system_id'], unique=True)
     op.create_table('source_contract',
     sa.Column('source_profile_id', sa.UUID(), nullable=False),
     sa.Column('version', sa.Integer(), nullable=False),
@@ -186,6 +230,16 @@ def upgrade() -> None:
     op.execute(CONTRACT_GUARD)
     op.execute(NO_DELETE)
     op.execute(SAME_TENANT)
+    op.execute(NO_TENANT_MOVE)
+    op.execute(NO_SOURCE_MOVE)
+    op.execute(
+        "CREATE TRIGGER source_system_no_move BEFORE UPDATE ON source_system "
+        "FOR EACH ROW EXECUTE FUNCTION source_system_no_move()"
+    )
+    op.execute(
+        "CREATE TRIGGER source_profile_no_move BEFORE UPDATE ON source_profile "
+        "FOR EACH ROW EXECUTE FUNCTION source_profile_no_move()"
+    )
     op.execute(
         "CREATE TRIGGER source_contract_immutable BEFORE UPDATE OR DELETE ON source_contract "
         "FOR EACH ROW EXECUTE FUNCTION source_contract_guard()"
@@ -220,10 +274,14 @@ def downgrade() -> None:
     for table in NO_DELETE_TABLES:
         op.execute(f"DROP TRIGGER IF EXISTS {table}_no_truncate ON {table}")
         op.execute(f"DROP TRIGGER IF EXISTS {table}_no_delete ON {table}")
+    op.execute("DROP TRIGGER IF EXISTS source_profile_no_move ON source_profile")
+    op.execute("DROP TRIGGER IF EXISTS source_system_no_move ON source_system")
     op.execute("DROP TRIGGER IF EXISTS source_contract_same_tenant ON source_contract")
     op.execute("DROP TRIGGER IF EXISTS source_contract_no_truncate ON source_contract")
     op.execute("DROP TRIGGER IF EXISTS source_contract_immutable ON source_contract")
     for fn in (
+        "source_profile_no_move",
+        "source_system_no_move",
         "source_contract_same_tenant",
         "source_registration_no_delete",
         "source_contract_guard",

@@ -141,6 +141,14 @@ def test_sources_and_profiles_are_never_deleted_or_truncated(db: str, table: str
     assert sql(db, f"SELECT count(*) AS n FROM {table}")[0]["n"] == 1
 
 
+INSERT_CONTRACT_WITH_STATUS = (
+    "INSERT INTO source_contract (id, source_profile_id, version, status, schema_id,"
+    " expected_columns, business_key_columns, control_total_columns, content_sha256,"
+    " created_by) SELECT gen_random_uuid(), source_profile_id, 2, '{status}', schema_id, '[]',"
+    " '[]', '[]', repeat('a', 64), 'test' FROM source_contract"
+)
+
+
 @pytest.mark.parametrize(
     ("statement", "constraint"),
     [
@@ -151,8 +159,9 @@ def test_sources_and_profiles_are_never_deleted_or_truncated(db: str, table: str
         ("UPDATE source_profile SET delimiter = '#'", "ck_source_profile_delimiter"),
         ("UPDATE source_profile SET delimiter = NULL", "ck_source_profile_delimiter_format"),
         ("UPDATE source_profile SET sheet_name = 'Sheet1'", "ck_source_profile_sheet_name_format"),
-        ("UPDATE source_contract SET status = 'DRAFT'", "ck_source_contract_status"),
-        ("UPDATE source_contract SET status = 'approved'", "ck_source_contract_status"),
+        # On INSERT: on UPDATE the trigger refuses an unknown status first (D-06 table).
+        (INSERT_CONTRACT_WITH_STATUS.format(status="DRAFT"), "ck_source_contract_status"),
+        (INSERT_CONTRACT_WITH_STATUS.format(status="approved"), "ck_source_contract_status"),
     ],
 )
 def test_enum_columns_are_checked(db: str, statement: str, constraint: str) -> None:
@@ -186,16 +195,38 @@ def test_contract_cannot_target_another_tenants_schema(db: str) -> None:
         )
 
 
+SOURCE_TABLES = ("source_system", "source_profile", "source_contract")
+
+
+def source_rows(db: str) -> dict[str, list[Any]]:
+    """Every source row's identity and creation time: a row removed and re-inserted (even
+    with the same uuid5 ID) has a new created_at."""
+    return {
+        t: [tuple(r) for r in sql(db, f"SELECT id, created_at FROM {t} ORDER BY id")]  # noqa: S608
+        for t in SOURCE_TABLES
+    }
+
+
+def revision(db: str) -> str:
+    return str(sql(db, "SELECT version_num FROM alembic_version")[0]["version_num"])
+
+
 def test_downgrade_refuses_while_a_user_source_exists(
     api: TestClient, db: str, steward: dict[str, str]
 ) -> None:
     created = create_source(api, db, steward)
+    before = source_rows(db)
+    assert len(before["source_system"]) == 2
     try:
         with pytest.raises(Exception, match="source_system has rows"):
             command.downgrade(alembic_config(db), "0008")
+        # One transaction: nothing was downgraded, so nothing needs re-applying...
+        assert revision(db) == "0011"
+        # ...and nothing was removed, the seeded source included (same IDs, same rows).
+        assert source_rows(db) == before
     finally:
         command.upgrade(alembic_config(db), "head")
-    # Nothing was removed, the seeded source included (one transaction).
+    assert source_rows(db) == before
     codes = {r["code"] for r in sql(db, "SELECT code FROM source_system")}
     assert codes == {created["code"], "core_banking"}
 
@@ -556,20 +587,63 @@ def test_seed_downgrade_removes_only_its_rows(
     api: TestClient, db: str, steward: dict[str, str]
 ) -> None:
     cfg = alembic_config(db)
+    # A user's own source must survive the seed downgrade untouched.
+    user = create_source(api, db, steward)
+    user_rows = {
+        t: [r for r in rows if r not in _seed_rows(db)[t]] for t, rows in source_rows(db).items()
+    }
+    assert all(len(rows) == 1 for rows in user_rows.values())
+    seed_before = _seed_rows(db)
     command.downgrade(cfg, "0010")
     try:
-        assert sql(db, "SELECT count(*) AS n FROM source_system")[0]["n"] == 0
+        assert revision(db) == "0010"
+        after = source_rows(db)
+        assert after == user_rows  # the seed is gone, the user's rows are exactly as before
+        assert (
+            sql(
+                db,
+                "SELECT count(*) AS n FROM source_contract WHERE seeded_by = $1",
+                SOURCE_SEED_TAG,
+            )[0]["n"]
+            == 0
+        )
     finally:
         command.upgrade(cfg, "head")
     assert seeded_contract(db)["status"] == "PROVISIONAL"
+    reseeded = _seed_rows(db)
+    # Same uuid5 IDs, newly inserted rows.
+    assert {t: [r[0] for r in rows] for t, rows in reseeded.items()} == {
+        t: [r[0] for r in rows] for t, rows in seed_before.items()
+    }
+    got = api.get(f"{BASE}/{user['id']}", headers=steward)
+    assert got.status_code == 200 and got.json() == user
     # With a user's contract version on the seeded source, the seed downgrade refuses on the
     # foreign key instead of deleting user data.
-    seeded_id = api.get(BASE, headers=steward).json()["items"][0]["id"]
+    seeded_id = sql(db, "SELECT id FROM source_system WHERE seeded_by = $1", SOURCE_SEED_TAG)[0][
+        "id"
+    ]
     r = api.post(f"{BASE}/{seeded_id}/contracts", json=contract_body(db), headers=steward)
     assert r.status_code == 201
+    before = source_rows(db)
     try:
         with pytest.raises(Exception, match="ForeignKeyViolation|foreign key"):
             command.downgrade(cfg, "0010")
+        assert revision(db) == "0011"
+        assert source_rows(db) == before
     finally:
         command.upgrade(cfg, "head")
-    assert sql(db, "SELECT count(*) AS n FROM source_contract")[0]["n"] == 2
+    assert source_rows(db) == before
+
+
+def _seed_rows(db: str) -> dict[str, list[Any]]:
+    return {
+        t: [
+            tuple(r)
+            for r in sql(
+                db,
+                f"SELECT id, created_at FROM {t} WHERE seeded_by = $1 ORDER BY id",  # noqa: S608
+                SOURCE_SEED_TAG,
+            )
+        ]
+        for t in SOURCE_TABLES
+    }

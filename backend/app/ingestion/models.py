@@ -5,7 +5,8 @@ Source registration tables (BE-7.1, DI-01, Data Model §2): `source_system` →
 contracts are reached through it (D-04), as schema versions are through their definition.
 
 Nothing here is ever deleted (D-02): DB triggers reject DELETE and TRUNCATE on all three
-tables, and a contract's content is frozen once it is not PROVISIONAL (migration 0009).
+tables, a contract's content is frozen from creation in every status (D-24 §3), a source
+never moves tenant and a profile never moves source (migration 0009).
 """
 
 import uuid
@@ -79,8 +80,9 @@ class SourceProfile(AuditColumns, Base):
         CheckConstraint("format = 'XLSX' OR sheet_name IS NULL", name="sheet_name_format"),
     )
 
+    # One profile per source (Phase 7 review, deviation 4): unique.
     source_system_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("source_system.id"), index=True, nullable=False
+        UUID(as_uuid=True), ForeignKey("source_system.id"), index=True, unique=True, nullable=False
     )
     format: Mapped[str] = mapped_column(String(10), nullable=False)
     encoding: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -103,9 +105,10 @@ class SourceContract(AuditColumns, Base):
     """The expected shape of a source's files, targeting one canonical schema.
 
     Versioned: a new version supersedes the previous one, which is never edited. Content
-    (target schema, expected/business-key/control-total columns, hash, lineage) is frozen
-    once the contract is not PROVISIONAL, and SUPERSEDED is final (DB trigger, 0009). At
-    most one contract per profile is not SUPERSEDED (partial unique index).
+    (target schema, expected/business-key/control-total columns, hash, lineage, creator) is
+    frozen from creation in every status (D-24 §3); only `status` and `updated_at` change,
+    along CONTRACT_TRANSITIONS, and SUPERSEDED is final (DB trigger, 0009). At most one
+    contract per profile is not SUPERSEDED (partial unique index).
     """
 
     __tablename__ = "source_contract"
