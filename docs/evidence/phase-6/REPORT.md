@@ -8,7 +8,7 @@ Evidence:
 
 | Task | Done-when (verbatim) | Evidence |
 |---|---|---|
-| BE-6.1 | tests cover each ENV × DATA_CLASS combination. | `test_environment_guard.py::test_env_by_data_class` covers all 8 combinations: local and test accept synthetic and refuse client; staging and production accept both. `test_every_combination_is_covered` asserts the matrix is complete. Every response carries `X-Data-Class`, error envelopes included (200, 401, 404 tests), and the header is exposed to the browser through CORS. `/auth/config` reports `environment`. |
+| BE-6.1 | tests cover each ENV × DATA_CLASS combination. | `test_environment_guard.py::test_env_by_data_class` covers all 8 combinations: per D-14, only production accepts client data, and local, test and staging accept synthetic only. `test_every_combination_is_covered` asserts the matrix is complete. Every response carries `X-Data-Class`, error envelopes included (200, 401, 404 tests), and the header is exposed to the browser through CORS. `/auth/config` reports `environment`. |
 | BE-6.2 | the document exists and is referenced from ARCHITECTURE.md. | `docs/RETENTION.md` sets out retention, deletion and backup assumptions per artifact class: audit, schema registry, proposals, identity, classification, seed data, logs and local DBs. Every row names who must confirm it, and there is no numeric RPO/RTO (Arch §11). It is referenced from `docs/ARCHITECTURE.md` under "Environments, retention and backup". |
 | BE-6.3 | the suite runs in CI and the matrix table is printed in the test report. | `app/tests/test_ws1_verification.py` (marker `ws1`) covers:<br>• the route × role matrix for all 15 protected routes and 5 roles: 403 exactly where the role lacks the permission, no 5xx, and 401 without a token;<br>• cross-tenant isolation for lists, reads by id, writes and creation;<br>• breaking-change approval: 409 without analysis, 403 for self-approval, ACTIVE after a second person approves;<br>• audit completeness: every mutating route is listed, and each one emits its audit action under its correlation ID;<br>• a base → head migration round trip.<br>CI runs it as its own step, `pytest -m ws1 -v`, and a `pytest_terminal_summary` hook prints the matrix table (checks.txt). |
 | FE-6.1 | the banner reads "LOCAL · SYNTHETIC DATA" in local dev. | browser-phase6.json, with the backend in `ENV=local`: `login_banner` and `app_banner` are both "LOCAL · SYNTHETIC DATA", and the API's `X-Data-Class` is `synthetic`. Screenshots 01 (sign-in) and 02 (app shell). Unit tests: the label, client data in staging, and no banner in production. Playwright also checks the banner on every role's sign-in. |
@@ -16,7 +16,7 @@ Evidence:
 
 ## Design notes
 
-- **ENV × DATA_CLASS (open for decision, see follow-up 2).** The plan says "synthetic is required outside production" and "client data allowed in staging or production". I implemented the reading that satisfies both: local and test are synthetic only, and staging and production may hold either. The banner shows client data in red and synthetic data in amber.
+- **ENV × DATA_CLASS (decided: D-14, production only).** The plan text ("synthetic is required outside production", "refuse client unless staging or production") reads two ways. The first build allowed staging; the user decided on production only. The banner shows client data in red and synthetic data in amber.
 - **Matrix semantics.**
   - "Allowed" means the route's declared permission is held, or the route is open to any signed-in user.
   - An allowed role may still get 404, 409 or 422, because the matrix uses random ids and empty bodies.
@@ -31,7 +31,7 @@ The independent review ticked BE-6.1, BE-6.2 and FE-6.1. It left BE-6.3 and FE-6
 | # | Finding | Resolution |
 |---|---|---|
 | 1 | `DATA_CLASS` defaulted to `synthetic` everywhere, so a staging or production deployment that forgot it would falsely claim synthetic data. | `DATA_CLASS` is now required when ENV is staging or production (startup refuses otherwise, D-13). local and test still default to synthetic (tests). |
-| 2 | Whether staging may hold client data. | **Open: your decision.** The code currently allows it, but it is one line in `config.py` plus the test matrix. |
+| 2 | Whether staging may hold client data. | **Decided by the user: production only (D-14).** `DATA_CLASS=client` is now refused in staging. The test matrix has staging-client refused, and ARCHITECTURE.md and RETENTION.md are updated. |
 | 3 | The audit test could be bypassed by listing a route without exercising it. | The emit test records every route it drives and asserts that the set equals `AUDITED`. |
 | 4 | The matrix didn't prove the "2xx" side. | The matrix now uses real ids, so allowed roles get 200 on every GET. An allowed role passes only on 2xx, 404, 409 or 422, so any 401 or 403 fails. A denial must be `forbidden` and name the route's declared permission. Every role must reach at least one 2xx. The seeded roles must equal the roles tested. |
 | 5 | The banner overlapped the header on scroll. | The banner and header now sit in one sticky block (no overlap after scrolling; screenshot 03). The background is opaque: a tint over the surface colour. |

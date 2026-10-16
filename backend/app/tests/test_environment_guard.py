@@ -23,14 +23,14 @@ BASE: dict[str, dict[str, Any]] = {
     "staging": OIDC,
     "production": OIDC,
 }
-# ENV x DATA_CLASS: client data only in staging and production; local and test are synthetic.
+# ENV x DATA_CLASS (D-14): client data only in production; every other ENV is synthetic.
 MATRIX = [
     ("local", "synthetic", True),
     ("local", "client", False),
     ("test", "synthetic", True),
     ("test", "client", False),
     ("staging", "synthetic", True),
-    ("staging", "client", True),
+    ("staging", "client", False),
     ("production", "synthetic", True),
     ("production", "client", True),
 ]

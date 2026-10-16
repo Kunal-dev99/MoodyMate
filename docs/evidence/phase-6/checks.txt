@@ -132,3 +132,8 @@ tsc: exit 0
 $ npx playwright test (fresh DB copy)
   8 passed (11.1s)
 $ banner after scrolling (03-banner-after-scroll.png): banner y=0 h=25, header y=25 -> no overlap; opaque surface + tint; text rgb(26,26,26); role=region aria-label=Environment
+
+## D-14 (user decision: client data only in production)
+$ pytest -q app/tests/test_environment_guard.py   (staging-client now refused; written first and failing before the change)
+$ REQUIRE_DB=1 pytest -q app/tests
+260 passed in 106.44s (0:01:46)

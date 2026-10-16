@@ -79,11 +79,11 @@ class Settings(BaseSettings):
                     value = getattr(self, name)
                     if value and not value.startswith("https://"):
                         raise ValueError(f"{name} must use https:// when ENV={self.ENV}")
-        # BE-6.1 (DG-06): client data only where it may live; local and test hold
-        # synthetic data only. Checked last, so more specific errors surface first.
+        # BE-6.1 (DG-06), D-14: client data only in production; every other environment
+        # holds synthetic data only. Checked last, so more specific errors surface first.
         if self.DATA_CLASS is None and self.ENV in ("staging", "production"):
             raise ValueError(f"DATA_CLASS is required when ENV={self.ENV}")
-        if self.DATA_CLASS == "client" and self.ENV not in ("staging", "production"):
+        if self.DATA_CLASS == "client" and self.ENV != "production":  # D-14
             raise ValueError(f"DATA_CLASS=client is not allowed when ENV={self.ENV}")
         return self
 

@@ -170,6 +170,17 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
   from implicit settings.
 - **Reversal:** restore the defaults in `app/core/config.py`. Not recommended.
 
+## D-14 Client data only in production
+
+- **Status:** active (decided by the user 2026-10-16, Phase 6 review)
+- **Date:** 2026-10-16
+- **Context:** the Phase 6 plan text (BE-6.1) could be read two ways: "synthetic is required outside production" and "refuse client unless ENV is staging or production". The first build allowed client data in staging, and the independent review flagged that.
+- **Decision:**
+  1. `DATA_CLASS=client` is allowed only when `ENV=production`. local, test and staging hold synthetic data only, and startup refuses anything else.
+  2. `DATA_CLASS` must be set explicitly in staging and production, never defaulted (fail closed, like D-13).
+- **Consequences:** user-acceptance testing in staging uses synthetic or anonymised data. If staging ever needs real client data, that is a new decision with its own controls (masking, access, retention).
+- **Reversal:** change the one condition in `app/core/config.py` and the `MATRIX` in `test_environment_guard.py`. Not without a new decision.
+
 ---
 
 <!-- Never renumber existing IDs. New decisions are appended as D-05, D-06, … -->

@@ -18,7 +18,7 @@
 - **Migrations never drop governed data silently.**
   - The 0004 (audit), 0006 (registry) and 0008 (proposals) downgrades refuse while their tables hold data.
   - Dropping the audit trail needs an explicit `-x allow_audit_loss=true`.
-- **Environments are separated by data class (BE-6.1).** Only `staging` and `production` may hold client data. `local` and `test` are synthetic only, and every response says which (`X-Data-Class`).
+- **Environments are separated by data class (BE-6.1, D-14).** Only `production` may hold client data. `local`, `test` and `staging` are synthetic only, and every response says which (`X-Data-Class`).
 
 ## Per artifact class
 
