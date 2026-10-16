@@ -11,13 +11,18 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import authenticated, require_permission
+from app.core.auth import authenticated, get_principal, require_permission
 from app.core.classification import mask_model
 from app.core.errors import ApiError
 from app.core.principal import Principal
 from app.db.session import get_session
-from app.governance.constants import Permission
-from app.governance.models import SchemaDefinition, SchemaVersion, UserAccount
+from app.governance.constants import Permission, ProposalStatus
+from app.governance.models import (
+    SchemaChangeProposal,
+    SchemaDefinition,
+    SchemaVersion,
+    UserAccount,
+)
 from app.governance.schemas import (
     AuditEventOut,
     AuditEventPage,
@@ -25,9 +30,15 @@ from app.governance.schemas import (
     DevPersona,
     DevSessionRequest,
     DevSessionResponse,
+    ImpactAnalysis,
     Me,
     MyPermissions,
     OidcClientConfig,
+    ProposalApproval,
+    ProposalCreate,
+    ProposalList,
+    ProposalOut,
+    ProposalSubmit,
     SchemaDependent,
     SchemaDiffOut,
     SchemaFieldChange,
@@ -43,10 +54,14 @@ from app.governance.schemas import (
 from app.governance.service import (
     AuditFilters,
     AuditQueryService,
+    FieldSpec,
     IdentityService,
+    ProposedField,
+    SchemaChangeService,
     SchemaService,
     UserService,
     effective_version,
+    record_denial,
 )
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
@@ -298,3 +313,170 @@ async def diff_schema_versions(
         overall=result.overall,
         changes=[SchemaFieldChange(**vars(c)) for c in result.changes],
     )
+
+
+# --- Controlled schema change (BE-5.2 … BE-5.4) -------------------------------------------
+
+ProposalReader = SchemaReader
+Proposer = Annotated[Principal, Depends(require_permission(Permission.SCHEMA_PROPOSE))]
+Approver = Annotated[Principal, Depends(require_permission(Permission.SCHEMA_APPROVE))]
+
+
+async def schema_change_enabled(
+    request: Request,
+    principal: Annotated[Principal, Depends(get_principal)],
+    session: SessionDep,
+) -> None:
+    """Writes are off when SCHEMA_CHANGE_ENABLED is false: the registry is read-only. The
+    refusal is audited like any other denied request (BE-3.2)."""
+    if not request.app.state.settings.SCHEMA_CHANGE_ENABLED:
+        route = request.scope.get("route")
+        endpoint = getattr(route, "path", request.url.path)
+        await record_denial(
+            session,
+            principal,
+            f"{request.method} {endpoint}",
+            "endpoint",
+            endpoint,
+            "schema_change_disabled",
+        )
+        raise ApiError(
+            403, "schema_change_disabled", "Schema changes are switched off in this environment."
+        )
+
+
+ChangeEnabled = Annotated[None, Depends(schema_change_enabled)]
+
+
+async def _proposal_out(service: SchemaChangeService, p: SchemaChangeProposal) -> ProposalOut:
+    return ProposalOut(
+        id=p.id,
+        schema_id=p.schema_id,
+        schema_code=p.schema.code,
+        schema_name=p.schema.name,
+        status=p.status,
+        title=p.title,
+        rationale=p.rationale,
+        proposer=p.created_by,
+        proposer_user_id=p.proposer_user_id,
+        created_at=p.created_at,
+        base_version=_version_ref(p.base_version),
+        proposed_version=_version_ref(p.proposed_version),
+        proposed_fields=[
+            SchemaFieldOut.model_validate(f, from_attributes=True) for f in await service.fields(p)
+        ],
+        impact=ImpactAnalysis.model_validate(p.impact) if p.impact else None,
+        regression_evidence_ref=p.regression_evidence_ref,
+        submitted_at=p.submitted_at,
+        decided_by=p.decided_by,
+        decided_at=p.decided_at,
+        decision_comment=p.decision_comment,
+        reverts_proposal_id=p.reverts_proposal_id,
+    )
+
+
+@router.get("/schema-change-proposals", response_model=ProposalList, operation_id="listProposals")
+async def list_proposals(
+    principal: ProposalReader,
+    session: SessionDep,
+    status: ProposalStatus | None = None,
+    schema_id: uuid.UUID | None = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> ProposalList:
+    service = SchemaChangeService(session, principal)
+    items, total = await service.page(status, schema_id, limit, offset)
+    return ProposalList(items=[await _proposal_out(service, p) for p in items], total=total)
+
+
+@router.post(
+    "/schema-change-proposals",
+    response_model=ProposalOut,
+    status_code=201,
+    operation_id="createProposal",
+)
+async def create_proposal(
+    body: ProposalCreate, principal: Proposer, session: SessionDep, _: ChangeEnabled
+) -> ProposalOut:
+    service = SchemaChangeService(session, principal)
+    proposal = await service.create(
+        body.schema_id,
+        body.title,
+        body.rationale,
+        [
+            ProposedField(FieldSpec(**f.model_dump(exclude={"description"})), f.description)
+            for f in body.fields
+        ],
+    )
+    return await _proposal_out(service, proposal)
+
+
+@router.get(
+    "/schema-change-proposals/{proposal_id}", response_model=ProposalOut, operation_id="getProposal"
+)
+async def get_proposal(
+    proposal_id: uuid.UUID, principal: ProposalReader, session: SessionDep
+) -> ProposalOut:
+    service = SchemaChangeService(session, principal)
+    return await _proposal_out(service, await service.get(proposal_id))
+
+
+@router.post(
+    "/schema-change-proposals/{proposal_id}/impact-analysis",
+    response_model=ProposalOut,
+    operation_id="analyseProposal",
+)
+async def analyse_proposal(
+    proposal_id: uuid.UUID, principal: Proposer, session: SessionDep, _: ChangeEnabled
+) -> ProposalOut:
+    service = SchemaChangeService(session, principal)
+    return await _proposal_out(service, await service.analyse(proposal_id))
+
+
+@router.post(
+    "/schema-change-proposals/{proposal_id}/submit",
+    response_model=ProposalOut,
+    operation_id="submitProposal",
+)
+async def submit_proposal(
+    proposal_id: uuid.UUID,
+    body: ProposalSubmit,
+    principal: Proposer,
+    session: SessionDep,
+    _: ChangeEnabled,
+) -> ProposalOut:
+    service = SchemaChangeService(session, principal)
+    return await _proposal_out(
+        service, await service.submit(proposal_id, body.regression_evidence_ref)
+    )
+
+
+@router.post(
+    "/schema-change-proposals/{proposal_id}/approval",
+    response_model=ProposalOut,
+    operation_id="decideProposal",
+)
+async def decide_proposal(
+    proposal_id: uuid.UUID,
+    body: ProposalApproval,
+    principal: Approver,
+    session: SessionDep,
+    _: ChangeEnabled,
+) -> ProposalOut:
+    service = SchemaChangeService(session, principal)
+    return await _proposal_out(
+        service, await service.decide(proposal_id, body.decision, body.comment)
+    )
+
+
+@router.post(
+    "/schema-change-proposals/{proposal_id}/revert",
+    response_model=ProposalOut,
+    status_code=201,
+    operation_id="revertProposal",
+)
+async def revert_proposal(
+    proposal_id: uuid.UUID, principal: Proposer, session: SessionDep, _: ChangeEnabled
+) -> ProposalOut:
+    service = SchemaChangeService(session, principal)
+    return await _proposal_out(service, await service.revert(proposal_id))

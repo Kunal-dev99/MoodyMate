@@ -217,9 +217,10 @@ def changes(old: list[Any], new: list[Any]) -> set[tuple[str, str | None, str]]:
     return {(c.change, c.attribute, c.compatibility) for c in diff_fields(old, new).changes}
 
 
-def test_removing_a_decimal_bound_is_a_widening() -> None:
+def test_decimal_bounds_are_part_of_the_contract() -> None:
+    # Phase 5 review: a DECIMAL without precision/scale is not "wider" (fixed precision).
     assert changes([spec(**DEC, precision=10, scale=2)], [spec(**DEC)]) == {
-        ("MODIFIED", "precision_scale", "COMPATIBLE")
+        ("MODIFIED", "precision_scale", "BREAKING")
     }
     assert changes([spec(**DEC)], [spec(**DEC, precision=10, scale=2)]) == {
         ("MODIFIED", "precision_scale", "BREAKING")

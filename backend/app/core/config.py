@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     # BE-3.5: mask classified values the caller may not see. Off only in ENV=local.
     MASKING_ENABLED: bool = True
+    # Phase 5 (DG-05): schema change proposals. Off makes the registry read-only, which
+    # is the Phase 4 behaviour; reads of existing proposals still work.
+    SCHEMA_CHANGE_ENABLED: bool = True
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
 
     # D-09 dev mode: HS256 tokens signed with this local secret (local/test only).

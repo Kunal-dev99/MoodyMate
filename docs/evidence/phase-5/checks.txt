@@ -1,0 +1,92 @@
+# Phase 5 check output, captured 2026-10-16T07:00:17Z
+# worktree /home/user/MoodyMate-wt/ws1-phase5, branch feat/ws1-phase5 (from master ac5effd); DB copy moodymate_ws1_p5; tests on moodymate_test.
+# The first sections ran on the tree committed as 66d6a59; "Verification follow-ups" ran on the commit that adds it.
+
+## Backend
+$ REQUIRE_DB=1 pytest -v app/tests/test_schema_change.py  (written before the service and routes)
+app/tests/test_schema_change.py::test_create_proposal_creates_a_draft_version PASSED
+app/tests/test_schema_change.py::test_removal_reports_breaking_and_lists_seeded_dependents PASSED
+app/tests/test_schema_change.py::test_create_validates_the_contract PASSED
+app/tests/test_schema_change.py::test_proposing_needs_schema_propose PASSED
+app/tests/test_schema_change.py::test_submit_without_impact_analysis_is_409 PASSED
+app/tests/test_schema_change.py::test_approval_without_impact_analysis_is_409 PASSED
+app/tests/test_schema_change.py::test_proposer_cannot_approve_own_proposal PASSED
+app/tests/test_schema_change.py::test_approval_needs_schema_approve PASSED
+app/tests/test_schema_change.py::test_valid_approval_activates_new_version PASSED
+app/tests/test_schema_change.py::test_rejection_closes_the_proposal PASSED
+app/tests/test_schema_change.py::test_stale_proposal_is_superseded PASSED
+app/tests/test_schema_change.py::test_activation_rejects_a_tampered_contract_hash PASSED
+app/tests/test_schema_change.py::test_disabled_setting_makes_the_registry_read_only PASSED
+app/tests/test_schema_change.py::test_revert_reinstates_the_prior_contract_as_a_new_version PASSED
+app/tests/test_schema_change.py::test_only_an_applied_proposal_can_be_reverted PASSED
+app/tests/test_schema_change.py::test_list_filters_by_status PASSED
+============================= 16 passed in 14.58s ==============================
+$ REQUIRE_DB=1 pytest -q app/tests
+209 passed in 78.79s (0:01:18)
+$ ruff, format, mypy, export_openapi --check
+All checks passed!
+132 files already formatted
+Success: no issues found in 130 source files
+openapi.json is up to date
+
+## Migrations on the DB copy (holds the browser-run proposals)
+$ alembic downgrade 0007  (refused: proposals are governance records)
+INFO  [alembic.runtime.migration] Running downgrade 0008 -> 0007, Schema change proposals (BE-5.1, DG-05).
+asyncpg.exceptions.RaiseError: schema_change_proposal has rows; archive them before downgrading
+sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_dbapi.Error: <class 'asyncpg.exceptions.RaiseError'>: schema_change_proposal has rows; archive them before downgrading
+0008 (head)
+$ round trip 0007 <-> head on a fresh copy of moodymate_dev
+INFO  [alembic.runtime.migration] Running upgrade 0007 -> 0008, Schema change proposals (BE-5.1, DG-05).
+INFO  [alembic.runtime.migration] Running downgrade 0008 -> 0007, Schema change proposals (BE-5.1, DG-05).
+INFO  [alembic.runtime.migration] Running upgrade 0007 -> 0008, Schema change proposals (BE-5.1, DG-05).
+
+## Frontend
+ Test Files  6 passed (6)
+      Tests  46 passed (46)
+✔ No ESLint warnings or errors
+tsc: exit 0
+ ✓ Compiled successfully
+├ ○ /schemas/proposals                   2.28 kB         137 kB
+├ ƒ /schemas/proposals/[proposalId]      4.59 kB         140 kB
+└ ○ /schemas/proposals/new               6.22 kB         137 kB
+$ browser-phase5.mjs: see browser-phase5.json
+
+## Verification follow-ups (independent review of 66d6a59)
+$ REQUIRE_DB=1 pytest -v app/tests/test_schema_change_hardening.py  (written first; all failed before the fixes)
+app/tests/test_schema_change_hardening.py::test_dropping_a_decimal_bound_is_breaking[18-None] PASSED
+app/tests/test_schema_change_hardening.py::test_dropping_a_decimal_bound_is_breaking[None-None] PASSED
+app/tests/test_schema_change_hardening.py::test_dropping_a_decimal_bound_is_breaking[None-6] PASSED
+app/tests/test_schema_change_hardening.py::test_unbounded_size_on_other_types_is_still_a_widening PASSED
+app/tests/test_schema_change_hardening.py::test_decimal_fields_need_precision_and_scale[None-2] PASSED
+app/tests/test_schema_change_hardening.py::test_decimal_fields_need_precision_and_scale[10-None] PASSED
+app/tests/test_schema_change_hardening.py::test_decimal_fields_need_precision_and_scale[None-None] PASSED
+app/tests/test_schema_change_hardening.py::test_extension_eligible_must_be_explicit PASSED
+app/tests/test_schema_change_hardening.py::test_self_approval_attempt_is_audited PASSED
+app/tests/test_schema_change_hardening.py::test_submit_by_someone_else_is_audited PASSED
+app/tests/test_schema_change_hardening.py::test_switch_blocks_every_write_and_is_audited[impact-analysis] PASSED
+app/tests/test_schema_change_hardening.py::test_switch_blocks_every_write_and_is_audited[submit] PASSED
+app/tests/test_schema_change_hardening.py::test_switch_blocks_every_write_and_is_audited[approval] PASSED
+app/tests/test_schema_change_hardening.py::test_switch_blocks_every_write_and_is_audited[revert] PASSED
+app/tests/test_schema_change_hardening.py::test_applying_supersedes_other_open_proposals PASSED
+app/tests/test_schema_change_hardening.py::test_decided_proposals_cannot_be_edited[UPDATE schema_change_proposal SET status = 'SUBMITTED' WHERE id = $1] PASSED
+app/tests/test_schema_change_hardening.py::test_decided_proposals_cannot_be_edited[UPDATE schema_change_proposal SET decision_comment = 'edited' WHERE id = $1] PASSED
+app/tests/test_schema_change_hardening.py::test_decided_proposals_cannot_be_edited[DELETE FROM schema_change_proposal WHERE id = $1] PASSED
+app/tests/test_schema_change_hardening.py::test_open_proposals_cannot_be_deleted_or_truncated PASSED
+app/tests/test_schema_change_hardening.py::test_proposal_downgrade_refuses_while_proposals_exist PASSED
+app/tests/test_schema_change_hardening.py::test_an_applied_change_is_reverted_at_most_once PASSED
+app/tests/test_schema_change_hardening.py::test_dependents_are_deduplicated_with_all_paths PASSED
+============================= 22 passed in 17.25s ==============================
+$ REQUIRE_DB=1 pytest -q app/tests
+231 passed in 99.41s (0:01:39)
+$ ruff, format, mypy, export_openapi --check
+All checks passed!
+133 files already formatted
+Success: no issues found in 131 source files
+openapi.json is up to date
+$ DB copy rebuilt from moodymate_dev with the revised 0008, then the browser flow re-run
+$ frontend: npm test, lint, typecheck, build
+      Tests  47 passed (47)
+✔ No ESLint warnings or errors
+tsc: exit 0
+ ✓ Compiled successfully
+$ browser-phase5.mjs re-run: 5 distinct dependents (liquidity_gap once, both paths), active_hash_equals_original=true

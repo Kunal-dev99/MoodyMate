@@ -29,6 +29,7 @@ from app.governance.constants import (
     Compatibility,
     DependentType,
     FieldType,
+    ProposalStatus,
     SchemaVersionStatus,
     TenantStatus,
     UserStatus,
@@ -286,3 +287,50 @@ class SchemaDependency(AuditColumns, Base):
     description: Mapped[str | None] = mapped_column(String(500))
     provisional: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     seeded_by: Mapped[str | None] = mapped_column(String(100))
+
+
+class SchemaChangeProposal(ScopedModel, Base):
+    """A proposed new version of a schema (BE-5.1, Data Model §2). The proposed contract
+    lives in a DRAFT schema_version created with the proposal; approval activates it."""
+
+    __tablename__ = "schema_change_proposal"
+    __table_args__ = (CheckConstraint(_in("status", ProposalStatus), name="status"),)
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenant.id"), index=True, nullable=False
+    )
+    schema_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("schema_definition.id"), index=True, nullable=False
+    )
+    # The version in effect when proposed; approval requires it still to be ACTIVE.
+    base_version_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("schema_version.id"), nullable=False
+    )
+    proposed_version_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("schema_version.id"), unique=True, nullable=False
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    rationale: Mapped[str | None] = mapped_column(String(2000))
+    proposer_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    # Impact analysis result (diff, compatibility, affected dependents), when recorded.
+    impact: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    impact_analysed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    regression_evidence_ref: Mapped[str | None] = mapped_column(String(500))
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decided_by: Mapped[str | None] = mapped_column(String(255))
+    decided_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decision_comment: Mapped[str | None] = mapped_column(String(2000))
+    # Rollback reference: the applied proposal this one reverts (BE-5.4).
+    reverts_proposal_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("schema_change_proposal.id")
+    )
+
+    schema: Mapped[SchemaDefinition] = relationship(lazy="joined")
+    base_version: Mapped[SchemaVersion] = relationship(
+        foreign_keys=[base_version_id], lazy="joined"
+    )
+    proposed_version: Mapped[SchemaVersion] = relationship(
+        foreign_keys=[proposed_version_id], lazy="joined"
+    )

@@ -56,18 +56,25 @@ from alembic.config import Config  # noqa: E402
 
 from app.governance.constants import DEFAULT_TENANT_ID  # noqa: E402
 
-# Registry rows tests add. Some are no longer DRAFT, so the immutability triggers are
-# lifted for this one transaction, as the seed downgrade does (needs the table owner).
+# Registry rows and proposals tests add. Some versions are no longer DRAFT, so the
+# immutability triggers are lifted for this one transaction, as the seed downgrade does
+# (needs the table owner).
 _REGISTRY_CLEANUP = """
 BEGIN;
 ALTER TABLE schema_field DISABLE TRIGGER schema_field_immutable;
 ALTER TABLE schema_version DISABLE TRIGGER schema_version_immutable;
+ALTER TABLE schema_change_proposal DISABLE TRIGGER schema_change_proposal_immutable;
+DELETE FROM schema_change_proposal;
+-- Approvals in tests move seeded versions on: put them back as seeded.
+UPDATE schema_version SET status = CASE WHEN version = 2 THEN 'DRAFT' ELSE 'ACTIVE' END
+    WHERE seeded_by IS NOT NULL;
 DELETE FROM schema_dependency WHERE seeded_by IS NULL;
 DELETE FROM schema_field WHERE seeded_by IS NULL;
 DELETE FROM schema_version WHERE seeded_by IS NULL;
 DELETE FROM schema_definition WHERE seeded_by IS NULL;
 ALTER TABLE schema_field ENABLE TRIGGER schema_field_immutable;
 ALTER TABLE schema_version ENABLE TRIGGER schema_version_immutable;
+ALTER TABLE schema_change_proposal ENABLE TRIGGER schema_change_proposal_immutable;
 COMMIT;
 """
 
@@ -131,8 +138,8 @@ def migrated_db(database_url: str) -> str:
     cfg = alembic_config(database_url)
     try:
         clean(database_url)  # previous run's leftovers would block the seed downgrade
-    except asyncpg.UndefinedTableError:
-        pass
+    except (asyncpg.UndefinedTableError, asyncpg.UndefinedObjectError):
+        pass  # an older schema: the downgrade below starts from what is there
     command.downgrade(cfg, "base")
     command.upgrade(cfg, "head")
     return database_url

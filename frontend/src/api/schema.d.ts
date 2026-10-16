@@ -123,6 +123,109 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/schema-change-proposals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Proposals */
+        get: operations["listProposals"];
+        put?: never;
+        /** Create Proposal */
+        post: operations["createProposal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/schema-change-proposals/{proposal_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Proposal */
+        get: operations["getProposal"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/schema-change-proposals/{proposal_id}/approval": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Decide Proposal */
+        post: operations["decideProposal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/schema-change-proposals/{proposal_id}/impact-analysis": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Analyse Proposal */
+        post: operations["analyseProposal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/schema-change-proposals/{proposal_id}/revert": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revert Proposal */
+        post: operations["revertProposal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/schema-change-proposals/{proposal_id}/submit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Submit Proposal */
+        post: operations["submitProposal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/schemas": {
         parameters: {
             query?: never;
@@ -360,6 +463,48 @@ export interface components {
             /** Version */
             version: string;
         };
+        /** ImpactAnalysis */
+        ImpactAnalysis: {
+            /**
+             * Analysed At
+             * Format: date-time
+             */
+            analysed_at: string;
+            /** Base Sha256 */
+            base_sha256: string;
+            /** Changes */
+            changes: components["schemas"]["SchemaFieldChange"][];
+            /** Dependents */
+            dependents: components["schemas"]["ImpactDependent"][];
+            overall: components["schemas"]["Compatibility"] | null;
+            /** Proposed Sha256 */
+            proposed_sha256: string;
+        };
+        /** ImpactDependent */
+        ImpactDependent: {
+            /** Dependent Ref */
+            dependent_ref: string;
+            dependent_type: components["schemas"]["DependentType"];
+            /**
+             * Depth
+             * @description 1 for a direct dependent of the changed schema.
+             */
+            depth: number;
+            /** Description */
+            description: string | null;
+            /**
+             * Paths
+             * @description Every route that reaches it (it is listed once).
+             */
+            paths?: string[][];
+            /** Provisional */
+            provisional: boolean;
+            /**
+             * Via
+             * @description Shortest route: schema codes walked to reach it, from the changed one.
+             */
+            via: string[];
+        };
         /**
          * MaskedValue
          * @description Stands in for a value the caller may not see (FE renders it as 'masked by policy').
@@ -415,6 +560,107 @@ export interface components {
          * @enum {string}
          */
         Permission: "schema:read" | "schema:propose" | "schema:approve" | "audit:read" | "admin:read";
+        /** ProposalApproval */
+        ProposalApproval: {
+            /** Comment */
+            comment?: string | null;
+            decision: components["schemas"]["ProposalDecision"];
+        };
+        /** ProposalCreate */
+        ProposalCreate: {
+            /**
+             * Fields
+             * @description The full proposed contract, in order.
+             */
+            fields: components["schemas"]["SchemaFieldIn"][];
+            /** Rationale */
+            rationale?: string | null;
+            /**
+             * Schema Id
+             * Format: uuid
+             */
+            schema_id: string;
+            /** Title */
+            title: string;
+        };
+        /**
+         * ProposalDecision
+         * @enum {string}
+         */
+        ProposalDecision: "APPROVE" | "REJECT";
+        /** ProposalList */
+        ProposalList: {
+            /** Items */
+            items: components["schemas"]["ProposalOut"][];
+            /** Total */
+            total: number;
+        };
+        /** ProposalOut */
+        ProposalOut: {
+            base_version: components["schemas"]["SchemaVersionRef"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Decided At */
+            decided_at: string | null;
+            /** Decided By */
+            decided_by: string | null;
+            /** Decision Comment */
+            decision_comment: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            impact: components["schemas"]["ImpactAnalysis"] | null;
+            /** Proposed Fields */
+            proposed_fields: components["schemas"]["SchemaFieldOut"][];
+            proposed_version: components["schemas"]["SchemaVersionRef"];
+            /** Proposer */
+            proposer: string;
+            /**
+             * Proposer User Id
+             * Format: uuid
+             */
+            proposer_user_id: string;
+            /** Rationale */
+            rationale: string | null;
+            /** Regression Evidence Ref */
+            regression_evidence_ref: string | null;
+            /** Reverts Proposal Id */
+            reverts_proposal_id: string | null;
+            /** Schema Code */
+            schema_code: string;
+            /**
+             * Schema Id
+             * Format: uuid
+             */
+            schema_id: string;
+            /** Schema Name */
+            schema_name: string;
+            status: components["schemas"]["ProposalStatus"];
+            /** Submitted At */
+            submitted_at: string | null;
+            /** Title */
+            title: string;
+        };
+        /**
+         * ProposalStatus
+         * @description schema_change_proposal lifecycle (D-06). APPROVED and IN_REVIEW are reserved: an
+         *     approval applies the change in the same transaction, so it lands in APPLIED.
+         * @enum {string}
+         */
+        ProposalStatus: "DRAFT" | "SUBMITTED" | "IN_REVIEW" | "APPROVED" | "REJECTED" | "APPLIED" | "SUPERSEDED";
+        /** ProposalSubmit */
+        ProposalSubmit: {
+            /**
+             * Regression Evidence Ref
+             * @description Where the regression evidence lives.
+             */
+            regression_evidence_ref?: string | null;
+        };
         /**
          * Role
          * @enum {string}
@@ -467,6 +713,32 @@ export interface components {
             reason: string;
             /** To Value */
             to_value: unknown;
+        };
+        /** SchemaFieldIn */
+        SchemaFieldIn: {
+            /** Classification */
+            classification: string;
+            data_type: components["schemas"]["FieldType"];
+            /** Description */
+            description?: string | null;
+            /**
+             * Extension Eligible
+             * @description Explicit: an omitted value is never assumed.
+             */
+            extension_eligible: boolean;
+            /**
+             * Name
+             * @description snake_case field name.
+             */
+            name: string;
+            /** Precision */
+            precision?: number | null;
+            /** Required */
+            required: boolean;
+            /** Scale */
+            scale?: number | null;
+            /** Unit */
+            unit?: string | null;
         };
         /** SchemaFieldOut */
         SchemaFieldOut: {
@@ -881,6 +1153,299 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MyPermissions"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    listProposals: {
+        parameters: {
+            query?: {
+                status?: components["schemas"]["ProposalStatus"] | null;
+                schema_id?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProposalList"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    createProposal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProposalCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProposalOut"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    getProposal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProposalOut"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    decideProposal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProposalApproval"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProposalOut"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    analyseProposal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProposalOut"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    revertProposal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProposalOut"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    submitProposal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProposalSubmit"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProposalOut"];
                 };
             };
             /** @description Client error (standard envelope) */

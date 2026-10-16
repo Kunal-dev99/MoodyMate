@@ -8,7 +8,7 @@ import hashlib
 import json
 import uuid
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,9 +22,13 @@ from app.governance.constants import (
     COMPATIBILITY_RANK,
     DEFAULT_TENANT_ID,
     DEV_ISSUER,
+    PROPOSAL_TRANSITIONS,
     AuditOutcome,
     ClassificationCode,
     Compatibility,
+    FieldType,
+    ProposalDecision,
+    ProposalStatus,
     SchemaVersionStatus,
     TenantStatus,
     UserStatus,
@@ -32,13 +36,16 @@ from app.governance.constants import (
 from app.governance.models import (
     AuditEvent,
     RoleModel,
+    SchemaChangeProposal,
     SchemaDefinition,
+    SchemaField,
     SchemaVersion,
     UserAccount,
 )
 from app.governance.repository import (
     AuditRepository,
     IdentityRepository,
+    ProposalRepository,
     SchemaRepository,
     UserRepository,
 )
@@ -412,11 +419,24 @@ def _fits(old: int | None, new: int | None) -> bool:
 
 
 def _size_change(old: FieldSpec, new: FieldSpec) -> FieldChange | None:
-    """Precision/scale on any type; a missing bound is unbounded (widest)."""
+    """Precision/scale on any type. A missing bound is unbounded (widest), except on a
+    DECIMAL, where both bounds are part of the contract."""
     if (old.precision, old.scale) == (new.precision, new.scale):
         return None
     before = {"precision": old.precision, "scale": old.scale}
     after = {"precision": new.precision, "scale": new.scale}
+    if new.data_type == FieldType.DECIMAL and None in (new.precision, new.scale):
+        # Fixed-precision decimals (Arch non-negotiables): a missing bound is not "wider",
+        # it is undefined (Postgres NUMERIC(p) even means scale 0).
+        return FieldChange(
+            new.name,
+            "MODIFIED",
+            "precision_scale",
+            before,
+            after,
+            Compatibility.BREAKING,
+            "A decimal needs explicit precision and scale.",
+        )
     integer_digits = (
         None if old.precision is None else old.precision - (old.scale or 0),
         None if new.precision is None else new.precision - (new.scale or 0),
@@ -552,3 +572,445 @@ class SchemaService:
             [FieldSpec.from_row(f) for f in old.fields], [FieldSpec.from_row(f) for f in new.fields]
         )
         return schema, old, new, result
+
+
+# --- Controlled schema change (Phase 5, DG-05) ------------------------------------------
+
+
+def _public(*keys: str, **others: ClassificationCode) -> dict[str, str]:
+    return {**dict.fromkeys(keys, ClassificationCode.PUBLIC), **others}
+
+
+async def record_denial(
+    session: AsyncSession,
+    principal: Principal,
+    action: str,
+    resource_type: str,
+    resource_id: str | None,
+    reason: str,
+) -> None:
+    """Audit a refused attempt (BE-3.2) in its own session, as require_permission does: the
+    request's own work is rolled back first and nothing else is committed with it."""
+    await session.rollback()
+    async with AsyncSession(session.bind) as audit_session:
+        audit_by(
+            audit_session,
+            principal,
+            action,
+            resource_type,
+            outcome=AuditOutcome.DENIED,
+            resource_id=resource_id,
+            details={"reason": reason},
+            details_classification={"reason": ClassificationCode.PUBLIC},
+        )
+        await audit_session.commit()
+
+
+@dataclass(frozen=True)
+class ProposedField:
+    """One field of a proposed contract, as submitted (validated by the API schema)."""
+
+    spec: FieldSpec
+    description: str | None
+
+
+class SchemaChangeService:
+    """Propose → impact analysis → submit → maker-checker approval → activation (BE-5.x).
+
+    Every write is audited in the same transaction and committed here. Status moves follow
+    PROPOSAL_TRANSITIONS (D-06); version immutability is also enforced by DB triggers."""
+
+    def __init__(self, session: AsyncSession, principal: Principal) -> None:
+        self.session = session
+        self.principal = principal
+        self.repo = ProposalRepository(session, principal.scope)
+
+    # --- reads --------------------------------------------------------------------------
+
+    async def get(self, proposal_id: uuid.UUID) -> SchemaChangeProposal:
+        proposal = await self.repo.get(proposal_id)
+        if proposal is None:
+            raise ApiError(404, "not_found", "Proposal not found.")
+        return proposal
+
+    async def page(
+        self, status: str | None, schema_id: uuid.UUID | None, limit: int, offset: int
+    ) -> tuple[list[SchemaChangeProposal], int]:
+        return await self.repo.page_filtered(status, schema_id, limit, offset)
+
+    async def fields(self, proposal: SchemaChangeProposal) -> list[SchemaField]:
+        return await self.repo.fields(proposal.proposed_version_id)
+
+    # --- create ---------------------------------------------------------------------------
+
+    async def create(
+        self,
+        schema_id: uuid.UUID,
+        title: str,
+        rationale: str | None,
+        fields: list[ProposedField],
+        reverts: SchemaChangeProposal | None = None,
+    ) -> SchemaChangeProposal:
+        schema = await self.repo.lock_schema(schema_id)
+        if schema is None:
+            raise ApiError(404, "not_found", "Schema not found.")
+        base = effective_version(schema)
+        if base is None:
+            raise ApiError(409, "no_active_version", "The schema has no version in effect.")
+        names = [f.spec.name for f in fields]
+        duplicates = sorted({n for n in names if names.count(n) > 1})
+        if duplicates:
+            raise ApiError(
+                422, "duplicate_field", "Field names must be unique.", {"fields": duplicates}
+            )
+        known = await self.repo.classification_codes()
+        unknown = sorted({f.spec.classification for f in fields} - known)
+        if unknown:
+            raise ApiError(
+                422,
+                "unknown_classification",
+                "Unknown classification.",
+                {"classifications": unknown},
+            )
+        base_specs = [FieldSpec.from_row(f) for f in await self.repo.fields(base.id)]
+        proposed_specs = [f.spec for f in fields]
+        diff = diff_fields(base_specs, proposed_specs)
+        if diff.overall is None:
+            raise ApiError(422, "no_change", "The proposed contract equals the version in effect.")
+
+        version = SchemaVersion(
+            schema_id=schema.id,
+            version=await self.repo.next_version_number(schema.id),
+            status=SchemaVersionStatus.DRAFT,
+            compatibility=diff.overall,
+            content_sha256=contract_sha256(proposed_specs),
+            change_summary=title,
+            created_by=self.principal.actor,
+        )
+        self.repo.add(version)
+        await self.session.flush()
+        self.repo.add(
+            *(
+                SchemaField(
+                    schema_version_id=version.id,
+                    position=i,
+                    description=f.description,
+                    created_by=self.principal.actor,
+                    **{k: getattr(f.spec, k) for k in CONTRACT_KEYS},
+                )
+                for i, f in enumerate(fields, start=1)
+            )
+        )
+        proposal = SchemaChangeProposal(
+            tenant_id=self.principal.tenant_id,
+            schema_id=schema.id,
+            base_version_id=base.id,
+            proposed_version_id=version.id,
+            status=ProposalStatus.DRAFT,
+            title=title,
+            rationale=rationale,
+            proposer_user_id=self.principal.user_id,
+            reverts_proposal_id=reverts.id if reverts else None,
+            created_by=self.principal.actor,
+        )
+        self.repo.add(proposal)
+        await self.session.flush()
+        audit_by(
+            self.session,
+            self.principal,
+            "schema_change.revert" if reverts else "schema_change.create",
+            "schema_change_proposal",
+            resource_id=str(proposal.id),
+            details={
+                "schema": schema.code,
+                "base_version": base.version,
+                "proposed_version": version.version,
+                "compatibility": diff.overall,
+                "reverts": str(reverts.id) if reverts else None,
+            },
+            details_classification=_public(
+                "schema", "base_version", "proposed_version", "compatibility", "reverts"
+            ),
+        )
+        await self.session.commit()
+        return await self.get(proposal.id)
+
+    async def revert(self, proposal_id: uuid.UUID) -> SchemaChangeProposal:
+        """BE-5.4: a NEW proposal whose contract is the one the applied change replaced."""
+        applied = await self._locked(proposal_id)  # holds the schema lock from here on
+        if applied.status != ProposalStatus.APPLIED:
+            raise ApiError(409, "not_applied", "Only an applied change can be reverted.")
+        schema = await self.repo.lock_schema(applied.schema_id)
+        current = effective_version(schema) if schema else None
+        if current is None or current.id != applied.proposed_version_id:
+            raise ApiError(
+                409, "not_current", "The version this change created is no longer in effect."
+            )
+        if await self.repo.reverts_of(applied.id):
+            raise ApiError(409, "already_reverted", "This change already has a revert.")
+        previous = await self.repo.fields(applied.base_version_id)
+        return await self.create(
+            applied.schema_id,
+            f"Revert: {applied.title}"[:200],
+            f"Reinstates the contract of v{applied.base_version.version}.",
+            [ProposedField(FieldSpec.from_row(f), f.description) for f in previous],
+            reverts=applied,
+        )
+
+    # --- impact analysis and submit -------------------------------------------------------
+
+    async def _walk_dependents(self, schema: SchemaDefinition) -> list[dict[str, Any]]:
+        """Everything that depends on `schema`, directly or through dependent schemas."""
+        found: dict[tuple[str, str], dict[str, Any]] = {}
+        visited = {schema.id}
+        frontier = [(schema.id, [schema.code])]
+        depth = 0
+        while frontier:
+            depth += 1
+            paths = dict(frontier)
+            next_frontier: list[tuple[uuid.UUID, list[str]]] = []
+            for dep in await self.repo.dependencies_of(list(paths)):
+                via = paths[dep.schema_id]
+                key = (dep.dependent_type, dep.dependent_ref)
+                if key in found:
+                    found[key]["paths"].append(via)  # reached again by another route
+                else:
+                    found[key] = {
+                        "dependent_type": dep.dependent_type,
+                        "dependent_ref": dep.dependent_ref,
+                        "description": dep.description,
+                        "provisional": dep.provisional,
+                        "depth": depth,  # breadth-first: the shortest route
+                        "via": via,
+                        "paths": [via],
+                    }
+                target = dep.dependent_schema_id
+                if target is not None and target not in visited:
+                    visited.add(target)
+                    next_frontier.append((target, [*via, dep.dependent_ref]))
+            frontier = next_frontier
+        return list(found.values())
+
+    async def analyse(self, proposal_id: uuid.UUID) -> SchemaChangeProposal:
+        proposal = await self._locked(proposal_id)
+        self._require_status(proposal, ProposalStatus.DRAFT)
+        base_specs = [
+            FieldSpec.from_row(f) for f in await self.repo.fields(proposal.base_version_id)
+        ]
+        proposed_specs = [
+            FieldSpec.from_row(f) for f in await self.repo.fields(proposal.proposed_version_id)
+        ]
+        diff = diff_fields(base_specs, proposed_specs)
+        dependents = await self._walk_dependents(proposal.schema)
+        proposal.impact = {
+            "overall": diff.overall,
+            "changes": [vars(c) for c in diff.changes],
+            "dependents": dependents,
+            "base_sha256": contract_sha256(base_specs),
+            "proposed_sha256": contract_sha256(proposed_specs),
+            "analysed_at": datetime.now(UTC).isoformat(),
+        }
+        proposal.impact_analysed_at = datetime.now(UTC)
+        audit_by(
+            self.session,
+            self.principal,
+            "schema_change.impact_analysis",
+            "schema_change_proposal",
+            resource_id=str(proposal.id),
+            details={
+                "overall": diff.overall,
+                "changes": len(diff.changes),
+                "dependents": len(dependents),
+            },
+            details_classification=_public("overall", "changes", "dependents"),
+        )
+        await self.session.commit()
+        return await self.get(proposal.id)
+
+    async def submit(self, proposal_id: uuid.UUID, evidence: str | None) -> SchemaChangeProposal:
+        proposal = await self._locked(proposal_id)
+        if proposal.proposer_user_id != self.principal.user_id:
+            await record_denial(
+                self.session,
+                self.principal,
+                "schema_change.submit",
+                "schema_change_proposal",
+                str(proposal.id),
+                "not_proposer",
+            )
+            raise ApiError(403, "not_proposer", "Only the proposer can submit this proposal.")
+        self._require_status(proposal, ProposalStatus.DRAFT)
+        if proposal.impact is None:
+            raise ApiError(
+                409, "impact_analysis_required", "Run the impact analysis before submitting."
+            )
+        self._move(proposal, ProposalStatus.SUBMITTED)
+        proposal.submitted_at = datetime.now(UTC)
+        proposal.regression_evidence_ref = evidence
+        audit_by(
+            self.session,
+            self.principal,
+            "schema_change.submit",
+            "schema_change_proposal",
+            resource_id=str(proposal.id),
+            details={"overall": proposal.impact.get("overall"), "evidence": evidence},
+            details_classification=_public("overall", evidence=ClassificationCode.INTERNAL),
+        )
+        await self.session.commit()
+        return await self.get(proposal.id)
+
+    # --- decision -------------------------------------------------------------------------
+
+    async def decide(
+        self, proposal_id: uuid.UUID, decision: ProposalDecision, comment: str | None
+    ) -> SchemaChangeProposal:
+        proposal = await self._locked(proposal_id)
+        # Maker-checker (BE-5.3): the approver must be someone other than the proposer.
+        if proposal.proposer_user_id == self.principal.user_id:
+            await record_denial(
+                self.session,
+                self.principal,
+                "schema_change.approve"
+                if decision == ProposalDecision.APPROVE
+                else "schema_change.reject",
+                "schema_change_proposal",
+                str(proposal.id),
+                "self_approval",
+            )
+            raise ApiError(403, "self_approval", "You cannot decide on your own proposal.")
+        self._require_status(proposal, ProposalStatus.SUBMITTED)
+        if decision == ProposalDecision.REJECT:
+            if not comment:
+                raise ApiError(422, "comment_required", "Give a reason for the rejection.")
+            return await self._close(proposal, ProposalStatus.REJECTED, comment)
+        if proposal.impact is None:
+            raise ApiError(
+                409, "impact_analysis_required", "A recorded impact analysis is required."
+            )
+        schema = await self.repo.lock_schema(proposal.schema_id)
+        assert schema is not None  # the proposal is in this tenant, so is its schema
+        base = await self.repo.version(proposal.base_version_id)
+        proposed = await self.repo.version(proposal.proposed_version_id)
+        if base.status != SchemaVersionStatus.ACTIVE or effective_version(schema) != base:
+            # Applying a change supersedes every other open proposal on the schema, so this
+            # is only reachable through out-of-band edits. Refuse and change nothing.
+            raise ApiError(
+                409,
+                "stale_base_version",
+                "Another change took effect first. Propose again against the current version.",
+            )
+        specs = [FieldSpec.from_row(f) for f in await self.repo.fields(proposed.id)]
+        if contract_sha256(specs) not in {proposed.content_sha256} or (
+            proposal.impact.get("proposed_sha256") != proposed.content_sha256
+        ):
+            raise ApiError(
+                409,
+                "contract_changed",
+                "The proposed contract changed after it was analysed. Propose it again.",
+            )
+        # One transaction: deprecate the old version, activate the new one, record it all.
+        base.status = SchemaVersionStatus.DEPRECATED
+        proposed.status = SchemaVersionStatus.ACTIVE
+        proposed.effective_from = date.today()
+        self._record_decision(proposal, ProposalStatus.APPLIED, comment)
+        # Every other open proposal was made against the old version: close them now, in
+        # this transaction, rather than letting an approver find out later.
+        for other in await self.repo.open_for_schema(schema.id, exclude=proposal.id):
+            await self._end(other, ProposalStatus.SUPERSEDED, f"Superseded by {proposal.id}.")
+        overall = proposal.impact.get("overall")
+        audit_by(
+            self.session,
+            self.principal,
+            "schema_change.approve",
+            "schema_change_proposal",
+            resource_id=str(proposal.id),
+            approval_ref=str(proposal.id),
+            details={
+                "overall": overall,
+                "comment": comment,
+                "proposer": str(proposal.proposer_user_id),
+            },
+            details_classification=_public(
+                "overall", comment=ClassificationCode.INTERNAL, proposer=ClassificationCode.INTERNAL
+            ),
+        )
+        for action, version in (
+            ("schema_version.deprecate", base),
+            ("schema_version.activate", proposed),
+        ):
+            audit_by(
+                self.session,
+                self.principal,
+                action,
+                "schema_version",
+                resource_id=str(version.id),
+                approval_ref=str(proposal.id),
+                details={"schema": schema.code, "version": version.version},
+                details_classification=_public("schema", "version"),
+            )
+        await self.session.commit()
+        return await self.get(proposal.id)
+
+    async def _close(
+        self, proposal: SchemaChangeProposal, status: ProposalStatus, comment: str
+    ) -> SchemaChangeProposal:
+        await self._end(proposal, status, comment)
+        await self.session.commit()
+        return await self.get(proposal.id)
+
+    async def _end(
+        self, proposal: SchemaChangeProposal, status: ProposalStatus, comment: str
+    ) -> None:
+        """Reject or supersede: the proposal and its DRAFT version both end (D-06)."""
+        proposed = await self.repo.version(proposal.proposed_version_id)
+        proposed.status = SchemaVersionStatus.REJECTED
+        self._record_decision(proposal, status, comment)
+        audit_by(
+            self.session,
+            self.principal,
+            "schema_change.reject"
+            if status == ProposalStatus.REJECTED
+            else "schema_change.supersede",
+            "schema_change_proposal",
+            resource_id=str(proposal.id),
+            details={"comment": comment},
+            details_classification={"comment": ClassificationCode.INTERNAL},
+        )
+
+    # --- helpers ---------------------------------------------------------------------------
+
+    async def _locked(self, proposal_id: uuid.UUID) -> SchemaChangeProposal:
+        """Locks the proposal's schema, then the proposal: one order everywhere (create and
+        revert lock the schema too), so concurrent workflow actions cannot deadlock."""
+        found = await self.repo.get(proposal_id)
+        if found is None:
+            raise ApiError(404, "not_found", "Proposal not found.")
+        await self.repo.lock_schema(found.schema_id)
+        proposal = await self.repo.lock(proposal_id)
+        assert proposal is not None  # it existed in this tenant a moment ago; never deleted
+        return proposal
+
+    @staticmethod
+    def _require_status(proposal: SchemaChangeProposal, expected: ProposalStatus) -> None:
+        if proposal.status != expected:
+            raise ApiError(
+                409,
+                "invalid_status",
+                f"The proposal is {proposal.status}; this needs {expected}.",
+                {"status": proposal.status},
+            )
+
+    @staticmethod
+    def _move(proposal: SchemaChangeProposal, to: ProposalStatus) -> None:
+        if to not in PROPOSAL_TRANSITIONS[ProposalStatus(proposal.status)]:
+            raise ApiError(409, "invalid_status", f"Cannot move from {proposal.status} to {to}.")
+        proposal.status = to
+
+    def _record_decision(
+        self, proposal: SchemaChangeProposal, status: ProposalStatus, comment: str | None
+    ) -> None:
+        self._move(proposal, status)
+        proposal.decided_by = self.principal.actor
+        proposal.decided_by_user_id = self.principal.user_id
+        proposal.decided_at = datetime.now(UTC)
+        proposal.decision_comment = comment
