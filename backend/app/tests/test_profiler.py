@@ -450,3 +450,5 @@ def test_a_failed_profile_leaves_the_import_received_without_a_profile(
         [job] = sql(db, "SELECT id, status FROM import_job")
         assert job["status"] == "RECEIVED"
         assert sql(db, "SELECT count(*) AS n FROM data_profile_snapshot")[0]["n"] == 0
+        got = api.get(f"/api/v1/imports/{job['id']}/profile", headers=steward)
+        assert (got.status_code, got.json()["code"]) == (404, "profile_not_found")

@@ -5,12 +5,13 @@ Request/response models for source registration (BE-7.4, DI-01) and imports (BE-
 
 import uuid
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BaseModel, Field, StringConstraints, model_validator
 
 from app.core.classification import MaskedValue
 from app.core.text import SafeMultilineText, SafeText, single_line
+from app.governance.constants import FieldType
 from app.ingestion.constants import (
     ContractStatus,
     CsvDelimiter,
@@ -244,3 +245,91 @@ class ImportPage(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+# --- Phase 9: profiles (BE-9.3) -------------------------------------------------------------
+
+
+class TopValue(BaseModel):
+    value: str | MaskedValue = Field(
+        description="The value (first 100 characters), or masked by the column's " "classification."
+    )
+    count: int = Field(description="Rows holding the value.")
+    truncated: bool = Field(description="The value is longer than shown.")
+
+
+class ProfileSummary(BaseModel):
+    """Row facts (D-25): nothing is dropped and nothing is invented."""
+
+    blank_rows: int
+    rows_with_missing_cells: int
+    rows_with_extra_cells: int = Field(description="Rows with cells beyond the header.")
+    max_extra_cells: int
+    flag_counts: dict[str, int] = Field(description="Row flag code -> how many were raised.")
+
+
+class ColumnProfile(BaseModel):
+    """Observations of one source column. `min`, `max` and top values are data, masked by
+    `classification`; everything else is metadata. `in_contract`, `suggested_target_field`
+    and the candidate types are suggestions (`suggestion: true`): nothing is changed."""
+
+    name: str = Field(description="Column name exactly as in the file header.")
+    position: int = Field(description="1-based position in the header.")
+    classification: str = Field(
+        description="The mapped schema field's classification, else the source profile's "
+        "default (no mapping exists before Phase 10)."
+    )
+    value_count: int = Field(description="Non-empty values.")
+    null_count: int = Field(description="Empty: missing cell, JSON null, '' or only spaces.")
+    null_rate: str | None = Field(
+        description="null_count / rows as decimal text, 4 places (half-even); null when the "
+        "import has no rows."
+    )
+    distinct_count: int = Field(description="Distinct non-empty values, up to the cap.")
+    distinct_capped: bool = Field(description="More distinct values exist than were counted.")
+    candidate_types: list[FieldType] = Field(
+        description="Types every non-empty value fits, most specific first."
+    )
+    suggested_type: FieldType | None = Field(description="The first candidate type.")
+    min: str | MaskedValue | None = Field(description="Smallest number, date or timestamp.")
+    max: str | MaskedValue | None = Field(description="Largest number, date or timestamp.")
+    max_length: int | None = Field(description="Longest value, in characters.")
+    max_precision: int | None = Field(
+        description="NUMERIC precision that holds every value (numeric columns)."
+    )
+    max_scale: int | None = Field(description="Most decimal places (numeric columns).")
+    date_formats: dict[str, int] = Field(description="Date format -> values valid in it.")
+    currency_pattern_hits: dict[str, int] = Field(
+        description="ISO_4217_CODE (three capitals) and AMOUNT_WITH_CURRENCY counts."
+    )
+    top_values: list[TopValue] = Field(description="Most frequent first, then by value.")
+    top_values_exact: bool = Field(description="False when the distinct cap was reached.")
+    in_contract: bool = Field(description="The pinned source contract expects this column.")
+    suggested_target_field: str | None = Field(
+        description="The pinned schema version's field whose normalised name equals this "
+        "column's, if exactly one does."
+    )
+    suggestion: Literal[True] = Field(
+        default=True,
+        description="in_contract, suggested_target_field and the types are suggestions only.",
+    )
+
+
+class ImportProfile(BaseModel):
+    import_id: uuid.UUID
+    import_status: ImportStatus
+    snapshot_id: uuid.UUID
+    profiler_version: int
+    content_sha256: str = Field(
+        description="SHA-256 of the observations: the same records give the same hash."
+    )
+    profiled_at: datetime
+    row_count: int
+    column_count: int
+    source_contract_id: uuid.UUID
+    contract_version: int
+    schema_version_id: uuid.UUID = Field(description="The schema version the import pins.")
+    schema_code: str
+    schema_version: int
+    summary: ProfileSummary
+    columns: list[ColumnProfile] = Field(description="In file order.")
