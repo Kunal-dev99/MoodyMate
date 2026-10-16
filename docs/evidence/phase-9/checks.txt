@@ -1,0 +1,60 @@
+# Phase 9 checks — 2026-10-16T16:52:28Z — 07c437b
+$ ruff check . && ruff format --check .
+All checks passed!
+160 files already formatted
+$ mypy app scripts
+Success: no issues found in 160 source files
+$ pytest -q -m "not ws1"
+1003 passed, 8 deselected, 31 warnings in 514.00s (0:08:33)
+$ pytest -m ws1 -q
+GET /api/v1/imports                                                 import:read                200            200            200            200            200
+POST /api/v1/imports                                                import:write               403            422            403            403            403
+GET /api/v1/imports/{import_id}                                     import:read                200            200            200            200            200
+GET /api/v1/imports/{import_id}/profile                             import:read                200            200            200            200            200
+8 passed, 1003 deselected, 1 warning in 13.72s
+$ openapi --check
+openapi.json is up to date
+$ samples --check
+synthetic samples are up to date
+$ alembic round trip head -> 0012 -> head
+0013 (head)
+INFO  [alembic.runtime.migration] Running downgrade 0013 -> 0012, Field profiling (BE-9.1, DI-06): data_profile_snapshot, one per import.
+INFO  [alembic.runtime.migration] Running upgrade 0012 -> 0013, Field profiling (BE-9.1, DI-06): data_profile_snapshot, one per import.
+0013 (head)
+$ gen:api (no diff)
+(end diff)
+$ typecheck
+exit=0
+$ lint
+✔ No ESLint warnings or errors
+$ npm test
+ Test Files  12 passed (12)
+      Tests  106 passed (106)
+$ build
+ ✓ Compiled successfully
+├ ƒ /ingestion/imports/[importId]        6.83 kB         176 kB
+$ playwright
+  ✓   1 [chromium] › e2e/imports.spec.ts:63:5 › FE-8.1: data_steward uploads the synthetic CSV and lands on its status page (1.9s)
+  ✓   2 [chromium] › e2e/imports.spec.ts:119:5 › FE-8.2: the imports list shows the uploaded import with its status pill (1.1s)
+  ✓   3 [chromium] › e2e/imports.spec.ts:139:5 › FE-8.1: an oversize file is stopped client-side; bypassed, the backend 413 toast shows its correlation ID (3.4s)
+  ✓   4 [chromium] › e2e/imports.spec.ts:197:5 › FE-8.1: auditor sees the import and its audit timeline, and cannot upload (1.3s)
+  ✓   5 [chromium] › e2e/ingestion.spec.ts:27:5 › FE-7.1: data_steward sees the live workbench and the Register button (1.0s)
+  ✓   6 [chromium] › e2e/ingestion.spec.ts:43:5 › FE-7.1: auditor has no Register button, gets the 403 state and a backend 403 (1.0s)
+  ✓   7 [chromium] › e2e/ingestion.spec.ts:73:5 › FE-7.2: register a source, add contract v2, see the versions and the timeline (2.8s)
+  ✓   8 [chromium] › e2e/profile.spec.ts:32:5 › FE-9.1: data_steward uploads the extra-column fixture; the Profile tab shows Suggested types and the flagged column (1.9s)
+  ✓   9 [chromium] › e2e/profile.spec.ts:97:5 › FE-9.1: an auditor sees masked profile values as "masked" (1.1s)
+  ✓  10 [chromium] › e2e/smoke.spec.ts:16:7 › sign-in as Platform administrator (670ms)
+  ✓  11 [chromium] › e2e/smoke.spec.ts:16:7 › sign-in as Data steward (592ms)
+  ✓  12 [chromium] › e2e/smoke.spec.ts:16:7 › sign-in as Risk analyst (672ms)
+  ✓  13 [chromium] › e2e/smoke.spec.ts:16:7 › sign-in as Approver (638ms)
+  ✓  14 [chromium] › e2e/smoke.spec.ts:16:7 › sign-in as Auditor (598ms)
+  ✓  15 [chromium] › e2e/smoke.spec.ts:24:5 › a page the role may not use shows the 403 state (881ms)
+  ✓  16 [chromium] › e2e/smoke.spec.ts:32:5 › schema compare shows every change with its badge (978ms)
+  ✓  17 [chromium] › e2e/smoke.spec.ts:53:5 › proposal flow: steward proposes, approver approves (2.6s)
+  17 passed (27.8s)
+
+# After review fixes P9-1, P9-2
+$ mypy app scripts -> Success: no issues found in 160 source files
+$ openapi --check -> openapi.json is up to date
+$ pytest -q -m "not ws1" -> 1005 passed, 8 deselected, 31 warnings in 520.75s
+$ pytest -m ws1 -q -> 8 passed

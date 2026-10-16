@@ -6,12 +6,15 @@ in the caller's tenant; artifacts, batches and records only through an import jo
 """
 
 import uuid
+from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
-from sqlalchemy import Select, exists, func, insert, select
+from sqlalchemy import Row, Select, exists, func, insert, select
 
 from app.db.repository import ScopedRepository
 from app.ingestion.models import (
+    DataProfileSnapshot,
+    ImportBatch,
     ImportJob,
     SourceContract,
     SourceProfile,
@@ -121,6 +124,16 @@ class ImportRepository(ScopedRepository[ImportJob]):
         )
         return result.scalar_one_or_none()
 
+    async def lock(self, import_id: uuid.UUID) -> ImportJob | None:
+        """The import, locked for this transaction: one profiling run at a time."""
+        result = await self.session.execute(
+            self.scoped()
+            .where(ImportJob.id == import_id)
+            .with_for_update(of=ImportJob)
+            .execution_options(populate_existing=True)
+        )
+        return result.scalar_one_or_none()
+
     async def by_idempotency_key(self, actor: str, key: str) -> ImportJob | None:
         """D-21: a key is unique per tenant and actor."""
         result = await self.session.execute(
@@ -162,3 +175,35 @@ class ImportRepository(ScopedRepository[ImportJob]):
 
     async def flush(self) -> None:
         await self.session.flush()
+
+    # --- Phase 9: profiles (BE-9.1, BE-9.2) ----------------------------------------------------
+
+    async def record_partitions(
+        self, import_id: uuid.UUID, size: int
+    ) -> AsyncIterator[Sequence[Row[tuple[dict[str, str], list[str], list[dict[str, Any]]]]]]:
+        """An import's records (values, extras, flags) in file order, streamed from a
+        server-side cursor in partitions of `size` rows, so that memory does not grow with
+        the import. Scoped through the import's tenant."""
+        query = (
+            select(SourceRecord.raw_values, SourceRecord.extra_values, SourceRecord.flags)
+            .join(ImportBatch, ImportBatch.id == SourceRecord.batch_id)
+            .join(ImportJob, ImportJob.id == ImportBatch.import_job_id)
+            .where(ImportJob.id == import_id, ImportJob.tenant_id == self.scope.tenant_id)
+            .order_by(ImportBatch.batch_number, SourceRecord.ordinal)
+            .execution_options(yield_per=size)
+        )
+        result = await self.session.stream(query)
+        async for partition in result.partitions(size):
+            yield partition
+
+    async def snapshot(self, import_id: uuid.UUID) -> DataProfileSnapshot | None:
+        """The profile of an import of the caller's tenant (absent and foreign look alike)."""
+        result = await self.session.execute(
+            select(DataProfileSnapshot)
+            .join(ImportJob, ImportJob.id == DataProfileSnapshot.import_job_id)
+            .where(
+                DataProfileSnapshot.import_job_id == import_id,
+                ImportJob.tenant_id == self.scope.tenant_id,
+            )
+        )
+        return result.scalar_one_or_none()

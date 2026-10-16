@@ -7,3 +7,9 @@
  * The backend's own switch is INGESTION_ENABLED, which refuses new uploads (409).
  */
 export const IMPORTS_UI_ENABLED = process.env.NEXT_PUBLIC_IMPORTS_UI !== 'off'
+
+/**
+ * NEXT_PUBLIC_IMPORT_PROFILE_UI=off (FE-9.1): the import page shows its Phase 8 layout
+ * again (no Status/Profile tabs). The profile endpoint stays read-only either way.
+ */
+export const IMPORT_PROFILE_UI_ENABLED = process.env.NEXT_PUBLIC_IMPORT_PROFILE_UI !== 'off'

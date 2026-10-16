@@ -70,6 +70,9 @@ class Settings(BaseSettings):
     # Feature 02 (WS2): ingestion writes (sources, imports, mappings, dispositions). Off
     # makes WS2 read-only: writes answer 409 ingestion_disabled (audited), reads still work.
     INGESTION_ENABLED: bool = True
+    # Phase 9 (DI-06, D-02): profile each upload on receipt. Off gives the Phase 8
+    # behaviour back: uploads end RECEIVED with no profile.
+    IMPORT_PROFILING_ENABLED: bool = True
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
 
     # D-15: root of the write-once raw artifact store. Required outside local/test (D-13);

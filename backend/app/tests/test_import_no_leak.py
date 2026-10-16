@@ -80,6 +80,7 @@ def test_no_sentinel_in_logs_error_bodies_or_audit(
     caplog.set_level(logging.DEBUG)
     with TestClient(app) as api:
         steward = dev_token(api, "data_steward")
+        analyst = dev_token(api, "risk_analyst")
         sources = {fmt: source_for(api, db, steward, fmt) for fmt in ("XLSX", "JSON")}
         sources["CSV"] = seeded_source_id(db)
 
@@ -119,6 +120,15 @@ def test_no_sentinel_in_logs_error_bodies_or_audit(
             bodies.append(r.text)
         for i in json.loads(api.get(IMPORTS, headers=steward).text)["items"]:
             bodies.append(api.get(f"{IMPORTS}/{i['id']}", headers=steward).text)
+            # The profile shows column names (headers) and, to a cleared role, values; a
+            # role not cleared for the source's class sees neither values nor bounds.
+            masked = api.get(f"{IMPORTS}/{i['id']}/profile", headers=analyst).json()
+            assert masked["columns"] and all(
+                t["value"] == {"masked": True, "classification": "confidential"}
+                and c["min"] == c["max"] == t["value"]
+                for c in masked["columns"]
+                for t in c["top_values"]
+            )
         bodies.append(api.get(IMPORTS, headers=steward).text)
 
     # The fixture really is full of the sentinel, and it was stored as source records.
@@ -147,4 +157,9 @@ def test_no_sentinel_in_logs_error_bodies_or_audit(
     )
     assert {e["outcome"] for e in events} == {"SUCCESS", "DENIED"}
     assert len([e for e in events if e["action"] == "import.create"]) == len(correlations)
+    # Phase 9: the accepted uploads were profiled in the same requests (the profile holds
+    # the sentinel's columns and values), and the profile's audit holds none of them.
+    assert len([e for e in events if e["action"] == "import.profile"]) == 2
+    profiles = sql(db, "SELECT columns::text AS c FROM data_profile_snapshot")
+    assert profiles and all(S in p["c"] for p in profiles)
     assert all(S not in e["d"] for e in events)

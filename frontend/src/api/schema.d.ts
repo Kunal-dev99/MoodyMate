@@ -131,6 +131,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/imports/{import_id}/profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Import Profile
+         * @description The import's field profile (DI-06): per-column observations and read-only
+         *     suggestions. Values are masked by each column's classification; nothing is changed.
+         */
+        get: operations["getImportProfile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/me": {
         parameters: {
             query?: never;
@@ -506,6 +527,127 @@ export interface components {
             sheet_name: string | null;
         };
         /**
+         * ColumnProfile
+         * @description Observations of one source column. `min`, `max` and top values are data, masked by
+         *     `classification`; everything else is metadata. `in_contract`, `suggested_target_field`
+         *     and the candidate types are suggestions (`suggestion: true`): nothing is changed.
+         */
+        ColumnProfile: {
+            /**
+             * Candidate Types
+             * @description Types every non-empty value fits, most specific first.
+             */
+            candidate_types: components["schemas"]["FieldType"][];
+            /**
+             * Classification
+             * @description The mapped schema field's classification, else the source profile's default (no mapping exists before Phase 10).
+             */
+            classification: string;
+            /**
+             * Currency Pattern Hits
+             * @description ISO_4217_CODE (three capitals) and AMOUNT_WITH_CURRENCY counts.
+             */
+            currency_pattern_hits: {
+                [key: string]: number;
+            };
+            /**
+             * Date Formats
+             * @description Date format -> values valid in it.
+             */
+            date_formats: {
+                [key: string]: number;
+            };
+            /**
+             * Distinct Capped
+             * @description More distinct values exist than were counted.
+             */
+            distinct_capped: boolean;
+            /**
+             * Distinct Count
+             * @description Distinct non-empty values, up to the cap.
+             */
+            distinct_count: number;
+            /**
+             * In Contract
+             * @description The pinned source contract expects this column.
+             */
+            in_contract: boolean;
+            /**
+             * Max
+             * @description Largest number, date or timestamp.
+             */
+            max: string | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Max Length
+             * @description Longest value, in characters.
+             */
+            max_length: number | null;
+            /**
+             * Max Precision
+             * @description NUMERIC precision that holds every value (numeric columns).
+             */
+            max_precision: number | null;
+            /**
+             * Max Scale
+             * @description Most decimal places (numeric columns).
+             */
+            max_scale: number | null;
+            /**
+             * Min
+             * @description Smallest number, date or timestamp.
+             */
+            min: string | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Name
+             * @description Column name exactly as in the file header.
+             */
+            name: string;
+            /**
+             * Null Count
+             * @description Empty: missing cell, JSON null, '' or only spaces.
+             */
+            null_count: number;
+            /**
+             * Null Rate
+             * @description null_count / rows as decimal text, 4 places (half-even); null when the import has no rows.
+             */
+            null_rate: string | null;
+            /**
+             * Position
+             * @description 1-based position in the header.
+             */
+            position: number;
+            /**
+             * Suggested Target Field
+             * @description The pinned schema version's field whose normalised name equals this column's, if exactly one does.
+             */
+            suggested_target_field: string | null;
+            /** @description The first candidate type. */
+            suggested_type: components["schemas"]["FieldType"] | null;
+            /**
+             * Suggestion
+             * @description in_contract, suggested_target_field and the types are suggestions only.
+             * @default true
+             * @constant
+             */
+            suggestion: true;
+            /**
+             * Top Values
+             * @description Most frequent first, then by value.
+             */
+            top_values: components["schemas"]["TopValue"][];
+            /**
+             * Top Values Exact
+             * @description False when the distinct cap was reached.
+             */
+            top_values_exact: boolean;
+            /**
+             * Value Count
+             * @description Non-empty values.
+             */
+            value_count: number;
+        };
+        /**
          * Compatibility
          * @description How a version change affects consumers, least to most severe.
          * @enum {string}
@@ -832,6 +974,59 @@ export interface components {
             /** Total */
             total: number;
         };
+        /** ImportProfile */
+        ImportProfile: {
+            /** Column Count */
+            column_count: number;
+            /**
+             * Columns
+             * @description In file order.
+             */
+            columns: components["schemas"]["ColumnProfile"][];
+            /**
+             * Content Sha256
+             * @description SHA-256 of the observations: the same records give the same hash.
+             */
+            content_sha256: string;
+            /** Contract Version */
+            contract_version: number;
+            /**
+             * Import Id
+             * Format: uuid
+             */
+            import_id: string;
+            import_status: components["schemas"]["ImportStatus"];
+            /**
+             * Profiled At
+             * Format: date-time
+             */
+            profiled_at: string;
+            /** Profiler Version */
+            profiler_version: number;
+            /** Row Count */
+            row_count: number;
+            /** Schema Code */
+            schema_code: string;
+            /** Schema Version */
+            schema_version: number;
+            /**
+             * Schema Version Id
+             * Format: uuid
+             * @description The schema version the import pins.
+             */
+            schema_version_id: string;
+            /**
+             * Snapshot Id
+             * Format: uuid
+             */
+            snapshot_id: string;
+            /**
+             * Source Contract Id
+             * Format: uuid
+             */
+            source_contract_id: string;
+            summary: components["schemas"]["ProfileSummary"];
+        };
         /**
          * ImportStatus
          * @description Data Model §9 `import_job.status` plus QUARANTINED from Appendix B (D-06, D-21).
@@ -1018,6 +1213,30 @@ export interface components {
             provisional: boolean;
             /** Sheet Name */
             sheet_name: string | null;
+        };
+        /**
+         * ProfileSummary
+         * @description Row facts (D-25): nothing is dropped and nothing is invented.
+         */
+        ProfileSummary: {
+            /** Blank Rows */
+            blank_rows: number;
+            /**
+             * Flag Counts
+             * @description Row flag code -> how many were raised.
+             */
+            flag_counts: {
+                [key: string]: number;
+            };
+            /** Max Extra Cells */
+            max_extra_cells: number;
+            /**
+             * Rows With Extra Cells
+             * @description Rows with cells beyond the header.
+             */
+            rows_with_extra_cells: number;
+            /** Rows With Missing Cells */
+            rows_with_missing_cells: number;
         };
         /** ProposalApproval */
         ProposalApproval: {
@@ -1435,6 +1654,24 @@ export interface components {
              */
             provisional: boolean;
         };
+        /** TopValue */
+        TopValue: {
+            /**
+             * Count
+             * @description Rows holding the value.
+             */
+            count: number;
+            /**
+             * Truncated
+             * @description The value is longer than shown.
+             */
+            truncated: boolean;
+            /**
+             * Value
+             * @description The value (first 100 characters), or masked by the column's classification.
+             */
+            value: string | components["schemas"]["MaskedValue"];
+        };
         /** UserPage */
         UserPage: {
             /** Items */
@@ -1813,6 +2050,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ImportDetail"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    getImportProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                import_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportProfile"];
                 };
             };
             /** @description Client error (standard envelope) */

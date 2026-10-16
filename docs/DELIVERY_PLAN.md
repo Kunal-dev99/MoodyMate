@@ -836,19 +836,37 @@ code path deletes them (D-20).
 Goal: every received import is profiled deterministically, and the user sees candidate
 types and unknown columns as suggestions. Profiling never changes a schema or contract.
 
-- [ ] **BE-9.1** Migration plus model `data_profile_snapshot`, one per import. It holds
+- [x] **BE-9.1** Migration plus model `data_profile_snapshot`, one per import. It holds
   per-column observations: candidate types, null rate, distinct count (capped), min/max for
   numbers and dates, maximum length and precision/scale, date formats seen, currency-pattern
   hits, a capped list of top values, and a `content_sha256`. The table is append-only
   (trigger, TRUNCATE included).
   - *Done-when:* the round trip passes; a test proves UPDATE/DELETE/TRUNCATE raise; the
-    downgrade refusal is tested.
-- [ ] **BE-9.2** Deterministic profiler using Decimal arithmetic only. It runs
+    downgrade refusal is tested. — ✔ verified by code read at 07c437b (the pytest run in
+    `docs/evidence/phase-9/checks.txt` was still in progress; the pass result is as the engineer reported).
+    Migration `0013_data_profile_snapshot.py`: row trigger for UPDATE/DELETE and a statement trigger
+    for TRUNCATE, both on `data_profile_append_only()`, which reads no setting; the downgrade refuses
+    while any snapshot exists. Tests in `test_profile_tables.py`:
+    `::test_snapshot_rejects_update_and_delete` (5 statements, row unchanged),
+    `::test_snapshot_rejects_truncate`, `::test_no_session_setting_unlocks_the_trigger`,
+    `::test_profile_migration_round_trips_without_snapshots` and
+    `::test_downgrade_refuses_while_a_snapshot_exists` (still at head, rows unchanged).
+- [x] **BE-9.2** Deterministic profiler using Decimal arithmetic only. It runs
   synchronously after receipt (RECEIVED → PROFILING → RECEIVED, or MAPPING_REQUIRED when the
   source contract has no usable ACTIVE mapping, D-21).
   - *Done-when:* a golden-file test matches the profile of the synthetic CSV exactly, and
-    profiling the same artifact twice gives the same `content_sha256`.
-- [ ] **BE-9.3** `GET /imports/{import_id}/profile`:
+    profiling the same artifact twice gives the same `content_sha256`. — ✔ verified by code read
+    at 07c437b. `ingestion/service.py:719-785` (`profile()`: a locked, tenant-scoped job; RECEIVED →
+    PROFILING → MAPPING_REQUIRED/RECEIVED, each move flushed so the 0012 trigger checks it; records
+    streamed in 1,000-row partitions; the audit holds metadata only) and `:837-1164` (the profiler:
+    Decimal only; distinct values capped at 10,000; top values capped at 10 and truncated at 100 characters).
+    Tests in `test_profiler.py`: `::test_golden_profile_of_the_synthetic_csv` (the stored profile
+    equals `golden/instrument_profile.json`, and an independent CSV count agrees),
+    `::test_profiling_the_same_artifact_twice_gives_the_same_hash`, `::test_the_profiler_uses_no_float`
+    (AST plus output), `::test_profiling_ends_mapping_required_and_is_audited` and
+    `::test_a_usable_active_mapping_returns_the_import_to_received`. See the follow-up
+    on D-02 and on the retry after a profiling failure in the Phase 9 verification report.
+- [x] **BE-9.3** `GET /imports/{import_id}/profile`:
   - Top values are masked through `mask_mapping`. A column's class comes from its mapped
     `schema_field.classification`, otherwise from the source profile's
     `default_classification`.
@@ -857,12 +875,28 @@ types and unknown columns as suggestions. Profiling never changes a schema or co
   - *Done-when:* tests prove a confidential column's top values are masked for
     `risk_analyst` and clear for `data_steward`; the extra-column fixture reports
     `in_contract: false`; and the schema registry and contract hashes are unchanged after
-    profiling.
-- [ ] **FE-9.1** Profile tab: per-column table, the inferred type labelled "Suggested", a
+    profiling. — ✔ verified by code read at 07c437b. `ingestion/router.py:522-593` (`import:read`;
+    min, max and top values go through `mask_mapping` with the column's class, fail closed);
+    `service.py:787-809` (a scoped `get`, which gives the same 404). Tests in `test_import_profile.py`:
+    `::test_confidential_top_values_are_masked_by_clearance` (5 roles; sentinels absent for the
+    uncleared ones), `::test_the_column_class_is_the_source_default_when_not_mapped`,
+    `::test_the_extra_column_fixture_reports_in_contract_false`,
+    `::test_profiling_leaves_registry_and_contract_hashes_unchanged` (every registry row, not only the
+    hashes), `::test_without_import_read_is_403` and
+    `::test_cross_tenant_profile_is_the_same_404_as_a_random_id`. No mapping exists before Phase 10, so
+    the mapped-field-class branch is a stub (`mapped_classifications` returns `{}`). Phase 10 must test it.
+- [x] **FE-9.1** Profile tab: per-column table, the inferred type labelled "Suggested", a
   null-rate bar, `MaskedValue` for masked samples, and unknown columns flagged "Not in
   contract". The only schema action is a link to the existing Phase 5 "New proposal" page.
   - *Done-when:* a browser run on the extra-column fixture shows the Suggested labels and
-    the flagged column. A grep finds no profile code calling a mutating endpoint.
+    the flagged column. A grep finds no profile code calling a mutating endpoint. — ✔ verified by
+    code read at 07c437b (the Playwright 17/17 and vitest 106 results are as the engineer reported).
+    `e2e/profile.spec.ts`: the steward run on `instrument__unknown_extra_column.csv` asserts a
+    "Suggested: …" label on every row, exactly one "Not in contract" badge (on `legacy_flag`), and no
+    non-GET API request. The auditor run asserts that the count of `masked-value` elements equals the
+    count of masked values in the API response, and that the proposal link is hidden (it sits behind
+    `RequirePermission schema:propose`). The grep is in `profile.test.ts` ("profile code is
+    read-only", with a self-test). Both fetches are cancelled with an AbortController on unmount.
 
 *Reversibility:* additive table. Profiling is a pure function whose output is stored. If it
 is removed (downgrade), imports go RECEIVED → MAPPING_REQUIRED/RECEIVED with no profile, and
