@@ -52,6 +52,23 @@ Evidence:
   - `POST /schema-change-proposals/{id}/submit`: FE-5.1 needs a submit step, and its 409 is what the Done-when asks for.
   - `GET /schema-change-proposals`: the approver's queue.
 
+## Verification follow-ups
+
+The independent review verified all 6 tasks and found no maker-checker bypass, deadlock, version-number race or tenant leak. It reported 10 lower-severity defects. The fixes below are in `app/tests/test_schema_change_hardening.py`, each test written first and failing before its fix. The results are in checks.txt, in the "Verification follow-ups" section.
+
+| # | Finding | Resolution |
+|---|---|---|
+| 1 | A DECIMAL with no size passed as COMPATIBLE. | A DECIMAL needs both precision and scale (422). In the diff, a DECIMAL losing a bound is BREAKING; a missing bound on other types is still a widening. This replaces Phase 4's "a removed bound is a widening" for decimals, in line with the fixed-precision rule. |
+| 2 | Refused maker-checker attempts were not audited. | `self_approval`, `not_proposer` and `schema_change_disabled` are audited as DENIED, in their own session after rolling back the request, as `require_permission` does. The switch is tested on all 4 remaining write routes. |
+| 3 | A stale approval saved SUPERSEDED and then returned 409; other proposals were left open. | Applying a change supersedes every other DRAFT/SUBMITTED proposal on the schema in the same transaction. Their DRAFT versions become REJECTED. A later approve or analyse is a plain 409 that writes nothing. The stale-base guard is kept as a defence and writes nothing either. |
+| 4 | Proposals could be edited or deleted in the database. | A trigger makes decided proposals read-only and rejects any DELETE or TRUNCATE (tests). The downgrade refusal is tested. |
+| 5 | A revert raced a later change; an applied change could be reverted twice. | Every workflow action locks in the same order: schema, then proposal. Revert re-checks "still in effect" under that lock and allows one open or applied revert per change (409 `already_reverted`). |
+| 6 | Dependents were counted once per path. | Each dependent is listed once, with its shortest route and every path (`paths`). The UI shows all paths. |
+| 7 | The editor could mix schemas or lose edits. | A slower load for a previous schema is ignored. Switching schema asks before discarding edits. A failed load shows an error. |
+| 8 | Bad numeric input became null. | Non-digit input stays invalid, and the editor reports it along with the 1–38 ranges and missing DECIMAL bounds (unit tests). |
+| 9 | Omitting `extension_eligible` silently set false. | `extension_eligible` is now required (422 when omitted). |
+| 10 | Weaker controls around proposals. | **Open, needs a decision:** should a BREAKING proposal require regression evidence? Also open: a withdraw action for proposers, and de-duplicating repeated proposals. The UI already guards against double submission. |
+
 ## Not done / follow-ups
 
 - Proposals have no expiry or withdraw action. A proposal left in DRAFT stays there until a newer change supersedes it at approval time.

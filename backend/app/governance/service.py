@@ -26,6 +26,7 @@ from app.governance.constants import (
     AuditOutcome,
     ClassificationCode,
     Compatibility,
+    FieldType,
     ProposalDecision,
     ProposalStatus,
     SchemaVersionStatus,
@@ -418,11 +419,24 @@ def _fits(old: int | None, new: int | None) -> bool:
 
 
 def _size_change(old: FieldSpec, new: FieldSpec) -> FieldChange | None:
-    """Precision/scale on any type; a missing bound is unbounded (widest)."""
+    """Precision/scale on any type. A missing bound is unbounded (widest), except on a
+    DECIMAL, where both bounds are part of the contract."""
     if (old.precision, old.scale) == (new.precision, new.scale):
         return None
     before = {"precision": old.precision, "scale": old.scale}
     after = {"precision": new.precision, "scale": new.scale}
+    if new.data_type == FieldType.DECIMAL and None in (new.precision, new.scale):
+        # Fixed-precision decimals (Arch non-negotiables): a missing bound is not "wider",
+        # it is undefined (Postgres NUMERIC(p) even means scale 0).
+        return FieldChange(
+            new.name,
+            "MODIFIED",
+            "precision_scale",
+            before,
+            after,
+            Compatibility.BREAKING,
+            "A decimal needs explicit precision and scale.",
+        )
     integer_digits = (
         None if old.precision is None else old.precision - (old.scale or 0),
         None if new.precision is None else new.precision - (new.scale or 0),
@@ -567,6 +581,31 @@ def _public(*keys: str, **others: ClassificationCode) -> dict[str, str]:
     return {**dict.fromkeys(keys, ClassificationCode.PUBLIC), **others}
 
 
+async def record_denial(
+    session: AsyncSession,
+    principal: Principal,
+    action: str,
+    resource_type: str,
+    resource_id: str | None,
+    reason: str,
+) -> None:
+    """Audit a refused attempt (BE-3.2) in its own session, as require_permission does: the
+    request's own work is rolled back first and nothing else is committed with it."""
+    await session.rollback()
+    async with AsyncSession(session.bind) as audit_session:
+        audit_by(
+            audit_session,
+            principal,
+            action,
+            resource_type,
+            outcome=AuditOutcome.DENIED,
+            resource_id=resource_id,
+            details={"reason": reason},
+            details_classification={"reason": ClassificationCode.PUBLIC},
+        )
+        await audit_session.commit()
+
+
 @dataclass(frozen=True)
 class ProposedField:
     """One field of a proposed contract, as submitted (validated by the API schema)."""
@@ -698,14 +737,17 @@ class SchemaChangeService:
 
     async def revert(self, proposal_id: uuid.UUID) -> SchemaChangeProposal:
         """BE-5.4: a NEW proposal whose contract is the one the applied change replaced."""
-        applied = await self.get(proposal_id)
+        applied = await self._locked(proposal_id)  # holds the schema lock from here on
         if applied.status != ProposalStatus.APPLIED:
             raise ApiError(409, "not_applied", "Only an applied change can be reverted.")
-        current = effective_version(applied.schema)
+        schema = await self.repo.lock_schema(applied.schema_id)
+        current = effective_version(schema) if schema else None
         if current is None or current.id != applied.proposed_version_id:
             raise ApiError(
                 409, "not_current", "The version this change created is no longer in effect."
             )
+        if await self.repo.reverts_of(applied.id):
+            raise ApiError(409, "already_reverted", "This change already has a revert.")
         previous = await self.repo.fields(applied.base_version_id)
         return await self.create(
             applied.schema_id,
@@ -719,7 +761,7 @@ class SchemaChangeService:
 
     async def _walk_dependents(self, schema: SchemaDefinition) -> list[dict[str, Any]]:
         """Everything that depends on `schema`, directly or through dependent schemas."""
-        found: list[dict[str, Any]] = []
+        found: dict[tuple[str, str], dict[str, Any]] = {}
         visited = {schema.id}
         frontier = [(schema.id, [schema.code])]
         depth = 0
@@ -729,22 +771,25 @@ class SchemaChangeService:
             next_frontier: list[tuple[uuid.UUID, list[str]]] = []
             for dep in await self.repo.dependencies_of(list(paths)):
                 via = paths[dep.schema_id]
-                found.append(
-                    {
+                key = (dep.dependent_type, dep.dependent_ref)
+                if key in found:
+                    found[key]["paths"].append(via)  # reached again by another route
+                else:
+                    found[key] = {
                         "dependent_type": dep.dependent_type,
                         "dependent_ref": dep.dependent_ref,
                         "description": dep.description,
                         "provisional": dep.provisional,
-                        "depth": depth,
+                        "depth": depth,  # breadth-first: the shortest route
                         "via": via,
+                        "paths": [via],
                     }
-                )
                 target = dep.dependent_schema_id
                 if target is not None and target not in visited:
                     visited.add(target)
                     next_frontier.append((target, [*via, dep.dependent_ref]))
             frontier = next_frontier
-        return found
+        return list(found.values())
 
     async def analyse(self, proposal_id: uuid.UUID) -> SchemaChangeProposal:
         proposal = await self._locked(proposal_id)
@@ -785,6 +830,14 @@ class SchemaChangeService:
     async def submit(self, proposal_id: uuid.UUID, evidence: str | None) -> SchemaChangeProposal:
         proposal = await self._locked(proposal_id)
         if proposal.proposer_user_id != self.principal.user_id:
+            await record_denial(
+                self.session,
+                self.principal,
+                "schema_change.submit",
+                "schema_change_proposal",
+                str(proposal.id),
+                "not_proposer",
+            )
             raise ApiError(403, "not_proposer", "Only the proposer can submit this proposal.")
         self._require_status(proposal, ProposalStatus.DRAFT)
         if proposal.impact is None:
@@ -814,6 +867,16 @@ class SchemaChangeService:
         proposal = await self._locked(proposal_id)
         # Maker-checker (BE-5.3): the approver must be someone other than the proposer.
         if proposal.proposer_user_id == self.principal.user_id:
+            await record_denial(
+                self.session,
+                self.principal,
+                "schema_change.approve"
+                if decision == ProposalDecision.APPROVE
+                else "schema_change.reject",
+                "schema_change_proposal",
+                str(proposal.id),
+                "self_approval",
+            )
             raise ApiError(403, "self_approval", "You cannot decide on your own proposal.")
         self._require_status(proposal, ProposalStatus.SUBMITTED)
         if decision == ProposalDecision.REJECT:
@@ -829,9 +892,8 @@ class SchemaChangeService:
         base = await self.repo.version(proposal.base_version_id)
         proposed = await self.repo.version(proposal.proposed_version_id)
         if base.status != SchemaVersionStatus.ACTIVE or effective_version(schema) != base:
-            await self._close(
-                proposal, ProposalStatus.SUPERSEDED, "Base version is no longer in effect."
-            )
+            # Applying a change supersedes every other open proposal on the schema, so this
+            # is only reachable through out-of-band edits. Refuse and change nothing.
             raise ApiError(
                 409,
                 "stale_base_version",
@@ -851,6 +913,10 @@ class SchemaChangeService:
         proposed.status = SchemaVersionStatus.ACTIVE
         proposed.effective_from = date.today()
         self._record_decision(proposal, ProposalStatus.APPLIED, comment)
+        # Every other open proposal was made against the old version: close them now, in
+        # this transaction, rather than letting an approver find out later.
+        for other in await self.repo.open_for_schema(schema.id, exclude=proposal.id):
+            await self._end(other, ProposalStatus.SUPERSEDED, f"Superseded by {proposal.id}.")
         overall = proposal.impact.get("overall")
         audit_by(
             self.session,
@@ -888,6 +954,13 @@ class SchemaChangeService:
     async def _close(
         self, proposal: SchemaChangeProposal, status: ProposalStatus, comment: str
     ) -> SchemaChangeProposal:
+        await self._end(proposal, status, comment)
+        await self.session.commit()
+        return await self.get(proposal.id)
+
+    async def _end(
+        self, proposal: SchemaChangeProposal, status: ProposalStatus, comment: str
+    ) -> None:
         """Reject or supersede: the proposal and its DRAFT version both end (D-06)."""
         proposed = await self.repo.version(proposal.proposed_version_id)
         proposed.status = SchemaVersionStatus.REJECTED
@@ -903,15 +976,18 @@ class SchemaChangeService:
             details={"comment": comment},
             details_classification={"comment": ClassificationCode.INTERNAL},
         )
-        await self.session.commit()
-        return await self.get(proposal.id)
 
     # --- helpers ---------------------------------------------------------------------------
 
     async def _locked(self, proposal_id: uuid.UUID) -> SchemaChangeProposal:
-        proposal = await self.repo.lock(proposal_id)
-        if proposal is None:
+        """Locks the proposal's schema, then the proposal: one order everywhere (create and
+        revert lock the schema too), so concurrent workflow actions cannot deadlock."""
+        found = await self.repo.get(proposal_id)
+        if found is None:
             raise ApiError(404, "not_found", "Proposal not found.")
+        await self.repo.lock_schema(found.schema_id)
+        proposal = await self.repo.lock(proposal_id)
+        assert proposal is not None  # it existed in this tenant a moment ago; never deleted
         return proposal
 
     @staticmethod

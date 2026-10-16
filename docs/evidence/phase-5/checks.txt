@@ -1,6 +1,6 @@
 # Phase 5 check output, captured 2026-10-16T07:00:17Z
 # worktree /home/user/MoodyMate-wt/ws1-phase5, branch feat/ws1-phase5 (from master ac5effd); DB copy moodymate_ws1_p5; tests on moodymate_test.
-# Captured on the tree committed in the Phase 5 build commit.
+# The first sections ran on the tree committed as 66d6a59; "Verification follow-ups" ran on the commit that adds it.
 
 ## Backend
 $ REQUIRE_DB=1 pytest -v app/tests/test_schema_change.py  (written before the service and routes)
@@ -50,3 +50,43 @@ tsc: exit 0
 ├ ƒ /schemas/proposals/[proposalId]      4.59 kB         140 kB
 └ ○ /schemas/proposals/new               6.22 kB         137 kB
 $ browser-phase5.mjs: see browser-phase5.json
+
+## Verification follow-ups (independent review of 66d6a59)
+$ REQUIRE_DB=1 pytest -v app/tests/test_schema_change_hardening.py  (written first; all failed before the fixes)
+app/tests/test_schema_change_hardening.py::test_dropping_a_decimal_bound_is_breaking[18-None] PASSED
+app/tests/test_schema_change_hardening.py::test_dropping_a_decimal_bound_is_breaking[None-None] PASSED
+app/tests/test_schema_change_hardening.py::test_dropping_a_decimal_bound_is_breaking[None-6] PASSED
+app/tests/test_schema_change_hardening.py::test_unbounded_size_on_other_types_is_still_a_widening PASSED
+app/tests/test_schema_change_hardening.py::test_decimal_fields_need_precision_and_scale[None-2] PASSED
+app/tests/test_schema_change_hardening.py::test_decimal_fields_need_precision_and_scale[10-None] PASSED
+app/tests/test_schema_change_hardening.py::test_decimal_fields_need_precision_and_scale[None-None] PASSED
+app/tests/test_schema_change_hardening.py::test_extension_eligible_must_be_explicit PASSED
+app/tests/test_schema_change_hardening.py::test_self_approval_attempt_is_audited PASSED
+app/tests/test_schema_change_hardening.py::test_submit_by_someone_else_is_audited PASSED
+app/tests/test_schema_change_hardening.py::test_switch_blocks_every_write_and_is_audited[impact-analysis] PASSED
+app/tests/test_schema_change_hardening.py::test_switch_blocks_every_write_and_is_audited[submit] PASSED
+app/tests/test_schema_change_hardening.py::test_switch_blocks_every_write_and_is_audited[approval] PASSED
+app/tests/test_schema_change_hardening.py::test_switch_blocks_every_write_and_is_audited[revert] PASSED
+app/tests/test_schema_change_hardening.py::test_applying_supersedes_other_open_proposals PASSED
+app/tests/test_schema_change_hardening.py::test_decided_proposals_cannot_be_edited[UPDATE schema_change_proposal SET status = 'SUBMITTED' WHERE id = $1] PASSED
+app/tests/test_schema_change_hardening.py::test_decided_proposals_cannot_be_edited[UPDATE schema_change_proposal SET decision_comment = 'edited' WHERE id = $1] PASSED
+app/tests/test_schema_change_hardening.py::test_decided_proposals_cannot_be_edited[DELETE FROM schema_change_proposal WHERE id = $1] PASSED
+app/tests/test_schema_change_hardening.py::test_open_proposals_cannot_be_deleted_or_truncated PASSED
+app/tests/test_schema_change_hardening.py::test_proposal_downgrade_refuses_while_proposals_exist PASSED
+app/tests/test_schema_change_hardening.py::test_an_applied_change_is_reverted_at_most_once PASSED
+app/tests/test_schema_change_hardening.py::test_dependents_are_deduplicated_with_all_paths PASSED
+============================= 22 passed in 17.25s ==============================
+$ REQUIRE_DB=1 pytest -q app/tests
+231 passed in 99.41s (0:01:39)
+$ ruff, format, mypy, export_openapi --check
+All checks passed!
+133 files already formatted
+Success: no issues found in 131 source files
+openapi.json is up to date
+$ DB copy rebuilt from moodymate_dev with the revised 0008, then the browser flow re-run
+$ frontend: npm test, lint, typecheck, build
+      Tests  47 passed (47)
+✔ No ESLint warnings or errors
+tsc: exit 0
+ ✓ Compiled successfully
+$ browser-phase5.mjs re-run: 5 distinct dependents (liquidity_gap once, both paths), active_hash_equals_original=true

@@ -8,7 +8,7 @@
       "code": "impact_analysis_required",
       "message": "Run the impact analysis before submitting.",
       "details": null,
-      "correlation_id": "2399ab6c-c90a-4aa4-b9f3-27dbd8099257",
+      "correlation_id": "ec05a35a-5744-46b4-a3d1-c00973df3478",
       "retryable": false
     }
   },
@@ -18,15 +18,14 @@
     "MAPPING\ncore_banking_instrument (illustrative)\ndirect\n(illustrative)",
     "SCHEMA\ncashflow_event\ndirect\n(illustrative)",
     "SCHEMA\nposition\ndirect\n(illustrative)",
-    "MODULE\nliquidity_gap (illustrative)\nvia instrument → position\n(illustrative)",
-    "MODULE\nliquidity_gap (illustrative)\nvia instrument → cashflow_event\n(illustrative)",
+    "MODULE\nliquidity_gap (illustrative)\nvia instrument → position; via instrument → cashflow_event\n(illustrative)",
     "REPORT\nmaturity_ladder (illustrative)\nvia instrument → cashflow_event\n(illustrative)"
   ],
   "submit_enabled_after_analysis": true,
   "after_submit_status": "SUBMITTED",
   "proposer_sees": "Waiting for an approver. You cannot approve your own proposal.",
   "approver_queue": [
-    "Drop counterparty_id from instrument\tinstrument\tv1 → v3\tBreaking\tAwaiting approval\t10/16/2026, 6:59:58 AM"
+    "Drop counterparty_id from instrument\tinstrument\tv1 → v3\tBreaking\tAwaiting approval\t10/16/2026, 7:17:08 AM"
   ],
   "after_approval_status": "APPLIED",
   "versions_after_approval": [

@@ -16,7 +16,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.repository import DataScope, ScopedRepository
-from app.governance.constants import UserStatus
+from app.governance.constants import ProposalStatus, UserStatus
 from app.governance.models import (
     AccessPolicy,
     AuditEvent,
@@ -299,6 +299,35 @@ class ProposalRepository(ScopedRepository[SchemaChangeProposal]):
             )
         )
         return {row[0]: row[1] for row in result}
+
+    async def open_for_schema(
+        self, schema_id: uuid.UUID, exclude: uuid.UUID
+    ) -> list[SchemaChangeProposal]:
+        """DRAFT/SUBMITTED proposals on a schema, locked (caller holds the schema lock)."""
+        result = await self.session.execute(
+            self.scoped()
+            .where(
+                SchemaChangeProposal.schema_id == schema_id,
+                SchemaChangeProposal.id != exclude,
+                SchemaChangeProposal.status.in_([ProposalStatus.DRAFT, ProposalStatus.SUBMITTED]),
+            )
+            .order_by(SchemaChangeProposal.created_at)
+            .with_for_update(of=SchemaChangeProposal)
+            .execution_options(populate_existing=True)
+        )
+        return list(result.scalars().unique())
+
+    async def reverts_of(self, proposal_id: uuid.UUID) -> list[SchemaChangeProposal]:
+        """Reverts of an applied change that are open or applied (not rejected/superseded)."""
+        result = await self.session.execute(
+            self.scoped().where(
+                SchemaChangeProposal.reverts_proposal_id == proposal_id,
+                SchemaChangeProposal.status.in_(
+                    [ProposalStatus.DRAFT, ProposalStatus.SUBMITTED, ProposalStatus.APPLIED]
+                ),
+            )
+        )
+        return list(result.scalars().unique())
 
     def add(self, *rows: object) -> None:
         self.session.add_all(rows)

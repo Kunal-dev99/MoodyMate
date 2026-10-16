@@ -38,4 +38,11 @@ describe('schema change proposals (FE-5.1)', () => {
     expect(draftProblems([{ ...ok, precision: 4, scale: 6 }])).toEqual(['amount: scale cannot exceed precision.'])
     expect(draftProblems([])).toEqual(['Add at least one field.'])
   })
+  it('requires decimal bounds and whole numbers in range', () => {
+    const dec = { ...emptyField(), name: 'amount', data_type: 'DECIMAL' as const }
+    expect(draftProblems([{ ...dec, precision: 18, scale: 6 }])).toEqual([])
+    expect(draftProblems([{ ...dec, precision: 18 }])).toEqual(['amount: a DECIMAL needs both precision and scale.'])
+    expect(draftProblems([{ ...dec, precision: Number.NaN, scale: 2 }])[0]).toContain('whole numbers')
+    expect(draftProblems([{ ...dec, precision: 40, scale: 2 }])).toEqual(['amount: precision must be 1–38.'])
+  })
 })

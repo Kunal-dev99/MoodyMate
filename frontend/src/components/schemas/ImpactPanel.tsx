@@ -50,7 +50,7 @@ export function ImpactPanel({ impact }: { impact: Impact }) {
           <ul className="space-y-1">
             {impact.dependents.map((d) => (
               <li
-                key={`${d.dependent_type}:${d.dependent_ref}:${d.via.join('>')}`}
+                key={`${d.dependent_type}:${d.dependent_ref}`}
                 className="flex flex-wrap items-center gap-2 text-sm"
                 data-testid="impact-dependent"
               >
@@ -59,7 +59,9 @@ export function ImpactPanel({ impact }: { impact: Impact }) {
                   {d.dependent_ref}
                 </Badge>
                 <span className="text-xs text-muted-foreground">
-                  {d.depth === 1 ? 'direct' : `via ${d.via.join(' → ')}`}
+                  {d.depth === 1
+                    ? 'direct'
+                    : (d.paths?.length ? d.paths : [d.via]).map((p) => `via ${p.join(' → ')}`).join('; ')}
                 </span>
                 {d.provisional && <span className="text-xs text-muted-foreground">(illustrative)</span>}
               </li>

@@ -19,7 +19,8 @@ const TYPES: Schemas['FieldType'][] = ['STRING', 'INTEGER', 'DECIMAL', 'BOOLEAN'
 const CLASSIFICATIONS = ['public', 'internal', 'confidential', 'restricted']
 const selectClass = 'h-8 rounded-md border border-input bg-background px-1 text-sm'
 
-const toInt = (v: string): number | null => (v.trim() === '' ? null : Number.parseInt(v, 10))
+/** Empty → null; anything but digits → NaN, which draftProblems reports (never silently null). */
+const toInt = (v: string): number | null => (v.trim() === '' ? null : /^\d+$/.test(v.trim()) ? Number(v.trim()) : Number.NaN)
 
 function Editor() {
   const router = useRouter()
@@ -31,6 +32,7 @@ function Editor() {
   const [fields, setFields] = useState<FieldIn[] | null>(null)
   const [baseVersion, setBaseVersion] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
+  const [loadFailed, setLoadFailed] = useState(false)
 
   useEffect(() => {
     call(() => api.GET('/api/v1/schemas'))
@@ -44,9 +46,13 @@ function Editor() {
   // Start from the contract in effect: the proposal is the full new contract.
   useEffect(() => {
     if (!schemaId) return
+    // A slower response for a previously selected schema must never fill this editor.
+    let current = true
     setFields(null)
+    setLoadFailed(false)
     call(() => api.GET('/api/v1/schemas/{schema_id}/versions', { params: { path: { schema_id: schemaId } } }))
       .then((data) => {
+        if (!current) return
         const effective = data.schema.effective_version?.version
         const base = data.items.find((v) => v.version === effective)
         setBaseVersion(effective ?? null)
@@ -64,11 +70,27 @@ function Editor() {
           })),
         )
       })
-      .catch((err: unknown) => toastApiError(err, 'Could not load the schema'))
+      .catch((err: unknown) => {
+        if (!current) return
+        setLoadFailed(true)
+        toastApiError(err, 'Could not load the schema')
+      })
+    return () => {
+      current = false
+    }
   }, [schemaId])
 
-  const update = (i: number, patch: Partial<FieldIn>) =>
+  const [dirty, setDirty] = useState(false)
+  const chooseSchema = (id: string) => {
+    if (dirty && !window.confirm('Switching schema discards your edits to this contract. Continue?')) return
+    setDirty(false)
+    setSchemaId(id)
+  }
+
+  const update = (i: number, patch: Partial<FieldIn>) => {
+    setDirty(true)
     setFields((fs) => fs && fs.map((f, j) => (j === i ? { ...f, ...patch } : f)))
+  }
 
   const problems = fields ? draftProblems(fields) : []
   const ready = !!fields && problems.length === 0 && title.trim().length >= 3 && baseVersion != null
@@ -99,7 +121,7 @@ function Editor() {
           <label className="text-sm font-medium" htmlFor="schema">
             Schema
           </label>
-          <select id="schema" className="h-9 rounded-md border border-input bg-background px-2 text-sm" value={schemaId} onChange={(e) => setSchemaId(e.target.value)}>
+          <select id="schema" className="h-9 rounded-md border border-input bg-background px-2 text-sm" value={schemaId} onChange={(e) => chooseSchema(e.target.value)}>
             {schemas.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name} ({s.code})
@@ -121,13 +143,18 @@ function Editor() {
         title={`Proposed contract${baseVersion != null ? ` (starting from v${baseVersion})` : ''}`}
         description="Edit the full contract. The impact analysis compares it with the version in effect."
         headerRight={
-          <Button size="sm" variant="outline" onClick={() => setFields((fs) => [...(fs ?? []), emptyField()])} disabled={!fields}>
+          <Button size="sm" variant="outline" onClick={() => {
+              setDirty(true)
+              setFields((fs) => [...(fs ?? []), emptyField()])
+            }} disabled={!fields}>
             <Plus className="mr-1 h-3.5 w-3.5" />
             Add field
           </Button>
         }
       >
-        {!fields ? (
+        {loadFailed ? (
+          <p className="text-sm text-destructive">The schema could not be loaded. Choose it again to retry.</p>
+        ) : !fields ? (
           <LoadingBlock rows={6} />
         ) : (
           <Table>
@@ -158,10 +185,10 @@ function Editor() {
                     </select>
                   </TableCell>
                   <TableCell>
-                    <Input className="h-8 w-16" inputMode="numeric" aria-label={`${f.name} precision`} value={f.precision ?? ''} onChange={(e) => update(i, { precision: toInt(e.target.value) })} />
+                    <Input className="h-8 w-16" inputMode="numeric" aria-label={`${f.name} precision`} value={f.precision == null || Number.isNaN(f.precision) ? '' : f.precision} onChange={(e) => update(i, { precision: toInt(e.target.value) })} />
                   </TableCell>
                   <TableCell>
-                    <Input className="h-8 w-16" inputMode="numeric" aria-label={`${f.name} scale`} value={f.scale ?? ''} onChange={(e) => update(i, { scale: toInt(e.target.value) })} />
+                    <Input className="h-8 w-16" inputMode="numeric" aria-label={`${f.name} scale`} value={f.scale == null || Number.isNaN(f.scale) ? '' : f.scale} onChange={(e) => update(i, { scale: toInt(e.target.value) })} />
                   </TableCell>
                   <TableCell>
                     <Input className="h-8 w-24" aria-label={`${f.name} unit`} value={f.unit ?? ''} onChange={(e) => update(i, { unit: e.target.value || null })} />
@@ -180,7 +207,10 @@ function Editor() {
                     <input type="checkbox" aria-label={`${f.name} extension eligible`} checked={f.extension_eligible ?? false} onChange={(e) => update(i, { extension_eligible: e.target.checked })} />
                   </TableCell>
                   <TableCell>
-                    <Button size="sm" variant="ghost" aria-label={`Remove ${f.name || 'field'}`} onClick={() => setFields((fs) => fs && fs.filter((_, j) => j !== i))}>
+                    <Button size="sm" variant="ghost" aria-label={`Remove ${f.name || 'field'}`} onClick={() => {
+                        setDirty(true)
+                        setFields((fs) => fs && fs.filter((_, j) => j !== i))
+                      }}>
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
                   </TableCell>

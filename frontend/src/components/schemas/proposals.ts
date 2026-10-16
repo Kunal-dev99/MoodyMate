@@ -51,6 +51,11 @@ export function draftProblems(fields: FieldIn[]): string[] {
     if (!NAME.test(f.name)) problems.push(`${label}: use lower_snake_case, starting with a letter.`)
     if (seen.has(f.name)) problems.push(`${label}: duplicate field name.`)
     seen.add(f.name)
+    if (Number.isNaN(f.precision) || Number.isNaN(f.scale)) problems.push(`${label}: precision and scale must be whole numbers.`)
+    if (f.precision != null && (f.precision < 1 || f.precision > 38)) problems.push(`${label}: precision must be 1–38.`)
+    if (f.scale != null && (f.scale < 0 || f.scale > 38)) problems.push(`${label}: scale must be 0–38.`)
+    if (f.data_type === 'DECIMAL' && (f.precision == null || f.scale == null))
+      problems.push(`${label}: a DECIMAL needs both precision and scale.`)
     if (f.scale != null && f.precision != null && f.scale > f.precision)
       problems.push(`${label}: scale cannot exceed precision.`)
   }

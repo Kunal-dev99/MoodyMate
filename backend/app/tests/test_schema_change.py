@@ -282,9 +282,10 @@ def test_stale_proposal_is_superseded(
         ).status_code
         == 200
     )
-    r = api.post(f"{BASE}/{second['id']}/approval", json={"decision": "APPROVE"}, headers=approver)
-    assert r.status_code == 409 and r.json()["code"] == "stale_base_version"
+    # Applying the first supersedes the second at once; approving it is then a plain 409.
     assert api.get(f"{BASE}/{second['id']}", headers=approver).json()["status"] == "SUPERSEDED"
+    r = api.post(f"{BASE}/{second['id']}/approval", json={"decision": "APPROVE"}, headers=approver)
+    assert r.status_code == 409 and r.json()["code"] == "invalid_status"
 
 
 def test_activation_rejects_a_tampered_contract_hash(

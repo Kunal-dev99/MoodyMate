@@ -11,7 +11,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import authenticated, require_permission
+from app.core.auth import authenticated, get_principal, require_permission
 from app.core.classification import mask_model
 from app.core.errors import ApiError
 from app.core.principal import Principal
@@ -61,6 +61,7 @@ from app.governance.service import (
     SchemaService,
     UserService,
     effective_version,
+    record_denial,
 )
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
@@ -321,9 +322,24 @@ Proposer = Annotated[Principal, Depends(require_permission(Permission.SCHEMA_PRO
 Approver = Annotated[Principal, Depends(require_permission(Permission.SCHEMA_APPROVE))]
 
 
-def schema_change_enabled(request: Request) -> None:
-    """Writes are off when SCHEMA_CHANGE_ENABLED is false: the registry is read-only."""
+async def schema_change_enabled(
+    request: Request,
+    principal: Annotated[Principal, Depends(get_principal)],
+    session: SessionDep,
+) -> None:
+    """Writes are off when SCHEMA_CHANGE_ENABLED is false: the registry is read-only. The
+    refusal is audited like any other denied request (BE-3.2)."""
     if not request.app.state.settings.SCHEMA_CHANGE_ENABLED:
+        route = request.scope.get("route")
+        endpoint = getattr(route, "path", request.url.path)
+        await record_denial(
+            session,
+            principal,
+            f"{request.method} {endpoint}",
+            "endpoint",
+            endpoint,
+            "schema_change_disabled",
+        )
         raise ApiError(
             403, "schema_change_disabled", "Schema changes are switched off in this environment."
         )

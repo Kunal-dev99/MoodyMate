@@ -492,11 +492,16 @@ export interface components {
             depth: number;
             /** Description */
             description: string | null;
+            /**
+             * Paths
+             * @description Every route that reaches it (it is listed once).
+             */
+            paths?: string[][];
             /** Provisional */
             provisional: boolean;
             /**
              * Via
-             * @description Schema codes walked to reach it, starting with the changed one.
+             * @description Shortest route: schema codes walked to reach it, from the changed one.
              */
             via: string[];
         };
@@ -718,7 +723,7 @@ export interface components {
             description?: string | null;
             /**
              * Extension Eligible
-             * @default false
+             * @description Explicit: an omitted value is never assumed.
              */
             extension_eligible: boolean;
             /**

@@ -445,12 +445,23 @@
             ],
             "title": "Description"
           },
+          "paths": {
+            "description": "Every route that reaches it (it is listed once).",
+            "items": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "Paths",
+            "type": "array"
+          },
           "provisional": {
             "title": "Provisional",
             "type": "boolean"
           },
           "via": {
-            "description": "Schema codes walked to reach it, starting with the changed one.",
+            "description": "Shortest route: schema codes walked to reach it, from the changed one.",
             "items": {
               "type": "string"
             },
@@ -1062,7 +1073,7 @@
             "title": "Description"
           },
           "extension_eligible": {
-            "default": false,
+            "description": "Explicit: an omitted value is never assumed.",
             "title": "Extension Eligible",
             "type": "boolean"
           },
@@ -1119,7 +1130,8 @@
           "name",
           "data_type",
           "required",
-          "classification"
+          "classification",
+          "extension_eligible"
         ],
         "title": "SchemaFieldIn",
         "type": "object"

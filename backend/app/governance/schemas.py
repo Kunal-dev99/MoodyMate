@@ -203,11 +203,13 @@ class SchemaFieldIn(BaseModel):
     precision: int | None = Field(default=None, ge=1, le=38)
     scale: int | None = Field(default=None, ge=0, le=38)
     classification: str = Field(min_length=1, max_length=50)
-    extension_eligible: bool = False
+    extension_eligible: bool = Field(description="Explicit: an omitted value is never assumed.")
     description: str | None = Field(default=None, max_length=1000)
 
     @model_validator(mode="after")
-    def _scale_within_precision(self) -> "SchemaFieldIn":
+    def _sizes(self) -> "SchemaFieldIn":
+        if self.data_type == FieldType.DECIMAL and (self.precision is None or self.scale is None):
+            raise ValueError("a DECIMAL needs both precision and scale")
         if self.scale is not None and self.precision is not None and self.scale > self.precision:
             raise ValueError("scale cannot exceed precision")
         return self
@@ -240,7 +242,10 @@ class ImpactDependent(BaseModel):
     provisional: bool
     depth: int = Field(description="1 for a direct dependent of the changed schema.")
     via: list[str] = Field(
-        description="Schema codes walked to reach it, starting with the changed one."
+        description="Shortest route: schema codes walked to reach it, from the changed one."
+    )
+    paths: list[list[str]] = Field(
+        default_factory=list, description="Every route that reaches it (it is listed once)."
     )
 
 
