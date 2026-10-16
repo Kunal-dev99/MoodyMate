@@ -139,6 +139,32 @@ ALTER TABLE data_profile_snapshot ENABLE TRIGGER data_profile_snapshot_append_on
 COMMIT;
 """
 
+# Mappings (Phase 10) reference imports, contracts and schemas: removed first.
+_MAPPING_CLEANUP = """
+BEGIN;
+ALTER TABLE import_job DISABLE TRIGGER import_job_immutable;
+ALTER TABLE import_job DISABLE TRIGGER import_job_mapping_pin;
+ALTER TABLE mapping_version DISABLE TRIGGER mapping_version_immutable;
+ALTER TABLE mapping_version DISABLE TRIGGER mapping_version_checks;
+ALTER TABLE mapping_rule DISABLE TRIGGER mapping_rule_immutable;
+ALTER TABLE mapping_validation DISABLE TRIGGER mapping_validation_append_only;
+ALTER TABLE field_mapping DISABLE TRIGGER field_mapping_immutable;
+UPDATE import_job SET mapping_version_id = NULL WHERE mapping_version_id IS NOT NULL;
+UPDATE mapping_version SET last_validation_id = NULL WHERE last_validation_id IS NOT NULL;
+DELETE FROM mapping_validation;
+DELETE FROM mapping_rule;
+DELETE FROM mapping_version;
+DELETE FROM field_mapping;
+ALTER TABLE import_job ENABLE TRIGGER import_job_immutable;
+ALTER TABLE import_job ENABLE TRIGGER import_job_mapping_pin;
+ALTER TABLE mapping_version ENABLE TRIGGER mapping_version_immutable;
+ALTER TABLE mapping_version ENABLE TRIGGER mapping_version_checks;
+ALTER TABLE mapping_rule ENABLE TRIGGER mapping_rule_immutable;
+ALTER TABLE mapping_validation ENABLE TRIGGER mapping_validation_append_only;
+ALTER TABLE field_mapping ENABLE TRIGGER field_mapping_immutable;
+COMMIT;
+"""
+
 # Deletes everything that is not seed data (D-11), children first.
 _CLEANUP = [
     "DELETE FROM user_role",
@@ -146,6 +172,7 @@ _CLEANUP = [
     "DELETE FROM role_permission WHERE seeded_by IS NULL",
     "DELETE FROM role WHERE seeded_by IS NULL",
     "DELETE FROM permission WHERE seeded_by IS NULL",
+    _MAPPING_CLEANUP,
     _PROFILE_CLEANUP,
     _IMPORT_CLEANUP,
     _INGESTION_CLEANUP,
@@ -191,10 +218,10 @@ def script(url: str, statements: str) -> None:
 
 def clean(url: str) -> None:
     for statement in _CLEANUP:
-        if statement in (_INGESTION_CLEANUP, _IMPORT_CLEANUP, _PROFILE_CLEANUP):
+        if statement in (_INGESTION_CLEANUP, _IMPORT_CLEANUP, _PROFILE_CLEANUP, _MAPPING_CLEANUP):
             try:
                 script(url, statement)
-            except asyncpg.UndefinedTableError:
+            except (asyncpg.UndefinedTableError, asyncpg.UndefinedObjectError):
                 pass  # an older schema (session start): nothing of that phase to clean
         elif statement is _REGISTRY_CLEANUP:
             script(url, statement)
