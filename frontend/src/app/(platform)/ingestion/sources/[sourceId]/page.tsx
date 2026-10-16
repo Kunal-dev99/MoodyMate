@@ -17,6 +17,7 @@ import { PageSection } from '@/components/common/PageSection'
 import { toastApiError } from '@/components/common/api-error-toast'
 import { ContractEditor } from '@/components/ingestion/ContractEditor'
 import { ContractStatusPill } from '@/components/ingestion/ContractStatusPill'
+import { MappingsTab } from '@/components/ingestion/MappingsTab'
 import {
   SOURCE_KINDS,
   contractProblems,
@@ -32,7 +33,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { IMPORTS_UI_ENABLED } from '@/config/features'
+import { IMPORTS_UI_ENABLED, MAPPING_UI_ENABLED } from '@/config/features'
 
 type State = { kind: 'loading' } | { kind: 'ready'; source: SourceDetail } | LoadFailure
 
@@ -274,6 +275,14 @@ export default function SourceDetailPage() {
             </TableBody>
           </Table>
         </PageSection>
+
+        {MAPPING_UI_ENABLED && (
+          <RequirePermission permission="mapping:read" fallback={null}>
+            <div data-testid="source-mappings">
+              <MappingsTab sourceId={source.id} />
+            </div>
+          </RequirePermission>
+        )}
 
         <RequirePermission permission="source:manage" fallback={null}>
           <PageSection icon={GitBranchPlus} title="New contract version">

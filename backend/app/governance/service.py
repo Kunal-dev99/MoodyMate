@@ -26,6 +26,7 @@ from app.governance.constants import (
     AuditOutcome,
     ClassificationCode,
     Compatibility,
+    DependentType,
     FieldType,
     ProposalDecision,
     ProposalStatus,
@@ -547,10 +548,32 @@ class SchemaService:
     """Read-only schema registry (BE-4.3). Rows are tenant-scoped through the definition."""
 
     def __init__(self, session: AsyncSession, principal: Principal) -> None:
+        self.principal = principal
         self.repo = SchemaRepository(session, principal.scope)
 
     async def list_schemas(self) -> list[SchemaDefinition]:
         return await self.repo.list_all()
+
+    async def lock_schema(self, schema_id: uuid.UUID) -> SchemaDefinition:
+        """The schema locked for the caller's transaction (404 outside the tenant)."""
+        schema = await self.repo.lock(schema_id)
+        if schema is None:
+            raise ApiError(404, "not_found", "Schema not found.")
+        return schema
+
+    async def register_dependent(
+        self,
+        schema_id: uuid.UUID,
+        dependent_type: DependentType,
+        dependent_ref: str,
+        description: str | None,
+    ) -> bool:
+        """Upsert a `schema_dependency` row in the caller's transaction (D-18 §6), so Phase 5
+        impact analysis lists the dependent. True when it was new. Not committed here."""
+        await self.get_schema(schema_id)  # 404 outside the tenant
+        return await self.repo.add_dependency(
+            schema_id, dependent_type, dependent_ref, description, self.principal.actor
+        )
 
     async def get_schema(self, schema_id: uuid.UUID) -> SchemaDefinition:
         schema = await self.repo.get(schema_id)

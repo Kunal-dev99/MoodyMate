@@ -1,0 +1,53 @@
+"""Mapping transforms (BE-10.2, D-19): the closed allowlist and the engine that applies a
+rule to one cell. A module sub-package like `ingestion/adapters` (D-25 §2): the allowlist is
+the pluggable part, and adding a transform needs code, tests and an appended decision."""
+
+from app.mapping.transforms.engine import (
+    COMPATIBLE,
+    ENGINE_PARTS,
+    TRANSFORMS,
+    DateFormat,
+    MapValuesParams,
+    NoParams,
+    OnMissing,
+    Outcome,
+    Output,
+    ParseBooleanParams,
+    ParseDateParams,
+    ParseDecimalParams,
+    ScaleParams,
+    TargetField,
+    Transform,
+    TransformError,
+    ValueFailure,
+    ValueParams,
+    apply,
+    compile_transform,
+    fit,
+    plain_decimal,
+)
+
+__all__ = [
+    "COMPATIBLE",
+    "ENGINE_PARTS",
+    "TRANSFORMS",
+    "DateFormat",
+    "MapValuesParams",
+    "NoParams",
+    "OnMissing",
+    "Outcome",
+    "Output",
+    "ParseBooleanParams",
+    "ParseDateParams",
+    "ParseDecimalParams",
+    "ScaleParams",
+    "TargetField",
+    "Transform",
+    "TransformError",
+    "ValueFailure",
+    "ValueParams",
+    "apply",
+    "compile_transform",
+    "fit",
+    "plain_decimal",
+]

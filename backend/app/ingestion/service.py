@@ -14,12 +14,13 @@ import hashlib
 import json
 import re
 import uuid
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import AsyncIterator, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime
 from decimal import ROUND_HALF_EVEN, Context, Decimal, localcontext
 from typing import Any, NoReturn
 
+from sqlalchemy import Row
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
@@ -164,6 +165,19 @@ class SourceService:
     async def schema_codes(self) -> dict[uuid.UUID, str]:
         """Codes of the caller's schemas, to name each contract's target."""
         return {s.id: s.code for s in await self.schemas.list_schemas()}
+
+    async def get_contract(self, contract_id: uuid.UUID) -> tuple[SourceSystem, SourceContract]:
+        """A contract of the caller's tenant with its source (404 alike for absent and
+        foreign, D-04). For the mapping module (BE-10.3)."""
+        source_id = await self.repo.contract_source(contract_id)
+        if source_id is None:
+            raise ApiError(404, "not_found", "Source contract not found.")
+        source = await self.get(source_id)
+        return source, next(c for c in profile_of(source).contracts if c.id == contract_id)
+
+    async def contract_labels(self, ids: set[uuid.UUID]) -> dict[uuid.UUID, tuple[str, int]]:
+        """Contract id -> (source code, contract version), within the caller's tenant."""
+        return await self.repo.contract_labels(ids)
 
     # --- writes ---------------------------------------------------------------------------
 
@@ -554,10 +568,16 @@ class ImportService:
         fingerprint = request_sha256(spec, file_sha)
         replay = await self._replay(spec.idempotency_key, fingerprint)
         if replay is not None:
-            if policy.profiling and replay.status == ImportStatus.RECEIVED:
+            replay_id = replay.id  # profile() may roll back, which expires `replay`
+            if (
+                policy.profiling
+                and replay.status == ImportStatus.RECEIVED
+                and await self.repo.snapshot(replay_id) is None
+            ):
                 # A profiling run that failed earlier is retried by replaying the upload.
-                await self.profile(replay.id)
-                return await self.get(replay.id), False
+                # (A profiled import is also RECEIVED once a usable mapping exists.)
+                await self.profile(replay_id)
+                return await self.get(replay_id), False
             return replay, False
 
         try:
@@ -711,17 +731,36 @@ class ImportService:
     # --- profiling (BE-9.2, D-21) ------------------------------------------------------------
 
     async def has_usable_mapping(self, job: ImportJob) -> bool:
-        """D-21: whether the import's source contract has a usable ACTIVE mapping version
-        (for the schema version the import pins). Mappings arrive in Phase 10 (BE-10.1);
-        until then none can exist, so this is always False and every profiled import ends
-        MAPPING_REQUIRED. Phase 10 replaces this body with that lookup."""
-        return False
+        """D-21: whether the import's source contract has a usable ACTIVE mapping version,
+        one pinned to the schema version the import pins (D-18 §4). Asked of the mapping
+        service (imported here, not at module level: mapping depends on ingestion)."""
+        from app.mapping.service import MappingService
+
+        found = await MappingService(self.session, self.principal).usable_version(
+            job.source_contract_id, job.schema_version_id
+        )
+        return found is not None
 
     async def mapped_classifications(self, job: ImportJob) -> dict[str, str]:
-        """Column -> the classification of the schema field its usable ACTIVE mapping
-        targets (BE-9.3). No mapping exists before Phase 10, so no column is mapped yet and
-        every column takes the source profile's default classification."""
-        return {}
+        """Column -> the classification of the schema field its mapping targets (BE-9.3,
+        P9-3): the version the import pinned (D-18 §5), else its usable ACTIVE version.
+        Unmapped and PRESERVEd columns keep the source profile's default."""
+        from app.mapping.service import MappingService
+
+        return await MappingService(self.session, self.principal).column_classifications(
+            job.source_contract_id, job.schema_version_id, job.mapping_version_id
+        )
+
+    async def snapshot(self, job: ImportJob) -> DataProfileSnapshot | None:
+        """The stored profile of an import already reached through this scope."""
+        return await self.repo.snapshot(job.id)
+
+    def record_partitions(
+        self, job: ImportJob, size: int
+    ) -> AsyncIterator[Sequence[Row[tuple[dict[str, str], list[str], list[dict[str, Any]]]]]]:
+        """An import's records (values, extras, flags) in file order, streamed in bounded
+        partitions (for the mapping dry run, BE-10.4). Scoped through the import."""
+        return self.repo.record_partitions(job.id, size)
 
     async def profile(self, import_id: uuid.UUID) -> DataProfileSnapshot:
         """Profile a RECEIVED import: RECEIVED -> PROFILING -> RECEIVED when a usable ACTIVE
@@ -807,6 +846,7 @@ class ImportService:
             job=job,
             snapshot=snapshot,
             contract_version=contract.version,
+            schema_id=schema.id,
             schema_code=schema.code,
             schema_version=version.version,
             expected_columns=frozenset(c["name"] for c in contract.expected_columns),
@@ -1193,6 +1233,7 @@ class ProfileView:
     job: ImportJob
     snapshot: DataProfileSnapshot
     contract_version: int
+    schema_id: uuid.UUID
     schema_code: str
     schema_version: int
     expected_columns: frozenset[str]

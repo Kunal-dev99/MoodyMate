@@ -12,6 +12,7 @@ from app.core.config import Settings
 from app.core.errors import ERROR_RESPONSES
 from app.governance import router as governance
 from app.ingestion import router as ingestion
+from app.mapping import router as mapping
 
 
 def build_api_router(settings: Settings) -> APIRouter:
@@ -20,6 +21,7 @@ def build_api_router(settings: Settings) -> APIRouter:
     api_router.include_router(governance.auth_router)
     api_router.include_router(governance.router)
     api_router.include_router(ingestion.router)
+    api_router.include_router(mapping.router)
     if settings.dev_sessions_enabled:
         api_router.include_router(governance.dev_router)
     return api_router

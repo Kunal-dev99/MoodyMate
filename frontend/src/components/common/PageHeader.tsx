@@ -28,6 +28,7 @@ const ROUTE_LABELS: Record<string, string> = {
   ingestion: 'Ingestion Workbench',
   sources: 'Sources',
   imports: 'Imports',
+  mappings: 'Mappings',
   domain: 'Financial Domain',
   calculations: 'Calculations',
   scenarios: 'Reconciliation & Scenarios',

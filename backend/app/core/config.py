@@ -73,6 +73,10 @@ class Settings(BaseSettings):
     # Phase 9 (DI-06, D-02): profile each upload on receipt. Off gives the Phase 8
     # behaviour back: uploads end RECEIVED with no profile.
     IMPORT_PROFILING_ENABLED: bool = True
+    # Phase 10 (DI-03, D-02): mapping writes (create, version, validate, submit, approve).
+    # Off freezes mappings at their ACTIVE versions: writes answer 409
+    # mapping_change_disabled (audited), reads and imports using ACTIVE versions still work.
+    MAPPING_CHANGE_ENABLED: bool = True
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
 
     # D-15: root of the write-once raw artifact store. Required outside local/test (D-13);

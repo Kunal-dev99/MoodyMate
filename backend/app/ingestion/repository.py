@@ -83,6 +83,28 @@ class SourceRepository(ScopedRepository[SourceSystem]):
         )
         return list(result.scalars())
 
+    async def contract_source(self, contract_id: uuid.UUID) -> uuid.UUID | None:
+        """The source of a contract of the caller's tenant (absent and foreign: None)."""
+        found: uuid.UUID | None = await self.session.scalar(
+            select(SourceSystem.id)
+            .join(SourceProfile, SourceProfile.source_system_id == SourceSystem.id)
+            .join(SourceContract, SourceContract.source_profile_id == SourceProfile.id)
+            .where(SourceSystem.tenant_id == self.scope.tenant_id, SourceContract.id == contract_id)
+        )
+        return found
+
+    async def contract_labels(self, ids: set[uuid.UUID]) -> dict[uuid.UUID, tuple[str, int]]:
+        """Contract id -> (source code, contract version), for the caller's tenant only."""
+        if not ids:
+            return {}
+        result = await self.session.execute(
+            select(SourceContract.id, SourceSystem.code, SourceContract.version)
+            .join(SourceProfile, SourceProfile.id == SourceContract.source_profile_id)
+            .join(SourceSystem, SourceSystem.id == SourceProfile.source_system_id)
+            .where(SourceSystem.tenant_id == self.scope.tenant_id, SourceContract.id.in_(ids))
+        )
+        return {row.id: (row.code, row.version) for row in result}
+
     def add(self, *rows: object) -> None:
         self.session.add_all(rows)
 

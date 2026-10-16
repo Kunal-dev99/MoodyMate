@@ -72,6 +72,50 @@ def fill(path: str, ids: dict[str, str] | None = None) -> str:
     return path + ("?from=1&to=2" if path.endswith("/diff") and ids else "")
 
 
+# Phase 10: a clean CSV for the seeded core_banking contract and a mapping that validates ok.
+WS1_CSV = (
+    b"instrument_id,instrument_type,currency,notional\nI-1,BOND,EUR,100.00\nI-2,LOAN,USD,250.50\n"
+)
+
+
+def _rule(source: str, target: str, code: str = "COPY") -> dict[str, Any]:
+    return {
+        "source_column": source,
+        "target_field": target,
+        "transform": {"code": code, "params": {}},
+    }
+
+
+WS1_RULES = [
+    _rule("instrument_id", "instrument_id"),
+    _rule("instrument_type", "instrument_type"),
+    _rule("currency", "currency"),
+    _rule("notional", "notional", "PARSE_DECIMAL"),
+]
+
+
+def ws1_mapping_body(db: str, rules: list[dict[str, Any]]) -> dict[str, Any]:
+    contract = sql(
+        db,
+        "SELECT c.id FROM source_contract c"
+        " JOIN source_profile p ON p.id = c.source_profile_id"
+        " JOIN source_system s ON s.id = p.source_system_id"
+        " WHERE s.code = 'core_banking' AND c.status <> 'SUPERSEDED'",
+    )[0]["id"]
+    return {
+        "code": "ws1_check",
+        "name": "WS1 check",
+        "source_contract_id": str(contract),
+        "rules": rules,
+    }
+
+
+def ws1_mapping(api: TestClient, db: str, headers: dict[str, str]) -> Any:
+    r = api.post("/api/v1/mappings", json=ws1_mapping_body(db, WS1_RULES), headers=headers)
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
 # --- 1. Authorization matrix ---------------------------------------------------------------------
 
 
@@ -94,6 +138,7 @@ def test_route_by_role_authorization_matrix(api: TestClient, db: str) -> None:
         "user_id": api.get("/api/v1/me", headers=dev_token(api, "auditor")).json()["user_id"],
         "source_id": seeded_source_id(db),
         "import_id": imported.json()["id"],
+        "mapping_id": ws1_mapping(api, db, steward)["id"],
     }
     tokens = {role: dev_token(api, role) for role in ROLES}
     failures = []
@@ -244,6 +289,11 @@ AUDITED = {
     "POST /api/v1/sources": "source.create",
     "POST /api/v1/sources/{source_id}/contracts": "source_contract.create",
     "POST /api/v1/imports": "import.create",
+    "POST /api/v1/mappings": "mapping.create",
+    "POST /api/v1/mappings/{mapping_id}/versions": "mapping_version.create",
+    "POST /api/v1/imports/{import_id}/mappings/validate": "mapping.validate",
+    "POST /api/v1/mappings/{mapping_id}/versions/{version}/submit": "mapping_version.submit",
+    "POST /api/v1/mappings/{mapping_id}/versions/{version}/approval": "mapping.approve",
 }
 
 
@@ -305,6 +355,36 @@ def test_every_mutating_route_is_listed_and_emits_an_audit_event(api: TestClient
     r = upload(api, steward, source["id"], b"Instrument ID\nA\n", cid=correlation)
     assert r.status_code == 201, r.text
     check("POST /api/v1/imports", correlation)
+    # Phase 10: create, a second version, validate it against a clean import, submit, approve.
+    m = call("POST /api/v1/mappings", steward, body=ws1_mapping_body(db, WS1_RULES[:-1]))
+    v2 = call(
+        "POST /api/v1/mappings/{mapping_id}/versions",
+        steward,
+        f"/api/v1/mappings/{m['id']}/versions",
+        {"rules": WS1_RULES},
+    )
+    clean_import = upload(api, steward, seeded_source_id(db), WS1_CSV)
+    assert clean_import.status_code == 201, clean_import.text
+    validated = call(
+        "POST /api/v1/imports/{import_id}/mappings/validate",
+        steward,
+        f"/api/v1/imports/{clean_import.json()['id']}/mappings/validate",
+        {"mapping_version_id": v2["id"]},
+    )
+    assert validated["ok"], validated
+    versions = f"/api/v1/mappings/{m['id']}/versions/2"
+    call(
+        "POST /api/v1/mappings/{mapping_id}/versions/{version}/submit",
+        steward,
+        f"{versions}/submit",
+        {},
+    )
+    call(
+        "POST /api/v1/mappings/{mapping_id}/versions/{version}/approval",
+        approver,
+        f"{versions}/approval",
+        {"decision": "APPROVE"},
+    )
     # Every listed route was exercised here: listing a route without driving it fails.
     assert called == set(AUDITED)
 

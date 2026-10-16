@@ -131,6 +131,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/imports/{import_id}/mappings/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Validate Import Mapping
+         * @description Dry run: apply a mapping version to every row of this import and report counts per
+         *     rule and issues (never values). Stores the result; writes no canonical rows.
+         */
+        post: operations["validateImportMapping"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/imports/{import_id}/profile": {
         parameters: {
             query?: never;
@@ -146,6 +167,114 @@ export interface paths {
         get: operations["getImportProfile"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mappings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Mappings
+         * @description Mappings by code; filter by source and target schema.
+         */
+        get: operations["listMappings"];
+        put?: never;
+        /**
+         * Create Mapping
+         * @description A mapping for a source contract with DRAFT version 1, pinned to the target schema's
+         *     ACTIVE version (D-18).
+         */
+        post: operations["createMapping"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mappings/{mapping_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Mapping
+         * @description The mapping with every version and its rules.
+         */
+        get: operations["getMapping"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mappings/{mapping_id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Mapping Version
+         * @description The next DRAFT version, pinned to the target schema's ACTIVE version now. Earlier
+         *     versions are never edited.
+         */
+        post: operations["createMappingVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mappings/{mapping_id}/versions/{version}/approval": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decide Mapping Version
+         * @description APPROVE activates the version and deprecates the previous ACTIVE one; REJECT ends
+         *     it (a comment is required). The author cannot decide (403 self_approval).
+         */
+        post: operations["decideMappingVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mappings/{mapping_id}/versions/{version}/submit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit Mapping Version
+         * @description DRAFT -> IN_REVIEW. The author only; needs an ok dry run of this version (409
+         *     mapping_validation_required otherwise).
+         */
+        post: operations["submitMappingVersion"];
         delete?: never;
         options?: never;
         head?: never;
@@ -430,6 +559,15 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** ApprovalIn */
+        ApprovalIn: {
+            /**
+             * Comment
+             * @description Required to REJECT.
+             */
+            comment?: string | null;
+            decision: components["schemas"]["ProposalDecision"];
+        };
         /** ArtifactOut */
         ArtifactOut: {
             /**
@@ -526,6 +664,13 @@ export interface components {
             /** Sheet Name */
             sheet_name: string | null;
         };
+        /**
+         * ColumnPolicy
+         * @description D-23 `mapping_rule.column_policy`: a source column is mapped to a target field, or
+         *     preserved as it is (never dropped).
+         * @enum {string}
+         */
+        ColumnPolicy: "MAP" | "PRESERVE";
         /**
          * ColumnProfile
          * @description Observations of one source column. `min`, `max` and top values are data, masked by
@@ -653,6 +798,15 @@ export interface components {
          * @enum {string}
          */
         Compatibility: "ADDITIVE" | "COMPATIBLE" | "BREAKING";
+        /** ConstantTransform */
+        ConstantTransform: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "CONSTANT";
+            params: components["schemas"]["ValueParams"];
+        };
         /** ContractColumn */
         ContractColumn: {
             /**
@@ -736,6 +890,15 @@ export interface components {
          * @enum {string}
          */
         ContractStatus: "PROVISIONAL" | "IN_REVIEW" | "APPROVED" | "SUPERSEDED";
+        /** CopyTransform */
+        CopyTransform: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "COPY";
+            params?: components["schemas"]["NoParams"];
+        };
         /**
          * CsvDelimiter
          * @description D-16: the delimiters a CSV source profile may name.
@@ -748,6 +911,21 @@ export interface components {
          * @enum {string}
          */
         DataClass: "synthetic" | "client";
+        /**
+         * DateFormat
+         * @description PARSE_DATE formats: fixed layouts, parsed by position (no regex, no strptime).
+         * @enum {string}
+         */
+        DateFormat: "YYYY-MM-DD" | "YYYY/MM/DD" | "DD/MM/YYYY" | "MM/DD/YYYY" | "DD.MM.YYYY" | "DD-MM-YYYY" | "YYYYMMDD";
+        /** DefaultTransform */
+        DefaultTransform: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "DEFAULT";
+            params: components["schemas"]["ValueParams"];
+        };
         /**
          * DependentType
          * @enum {string}
@@ -920,6 +1098,11 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /**
+             * Mapping Version Id
+             * @description The mapping version the import is validated with (D-18 §5); empty until validation (Phase 11).
+             */
+            mapping_version_id?: string | null;
             /** Retry Of Import Id */
             retry_of_import_id: string | null;
             /**
@@ -1007,6 +1190,12 @@ export interface components {
             row_count: number;
             /** Schema Code */
             schema_code: string;
+            /**
+             * Schema Id
+             * Format: uuid
+             * @description The target schema (the contract's).
+             */
+            schema_id: string;
             /** Schema Version */
             schema_version: number;
             /**
@@ -1065,6 +1254,11 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /**
+             * Mapping Version Id
+             * @description The mapping version the import is validated with (D-18 §5); empty until validation (Phase 11).
+             */
+            mapping_version_id?: string | null;
             /** Retry Of Import Id */
             retry_of_import_id: string | null;
             /**
@@ -1109,6 +1303,316 @@ export interface components {
             updated_at: string;
         };
         /**
+         * IssueCode
+         * @description Dry-run issue codes. An issue names rules, fields and columns, never a value.
+         * @enum {string}
+         */
+        IssueCode: "required_field_unmapped" | "unknown_target_field" | "source_column_missing" | "transform_target_incompatible" | "profile_type_mismatch" | "transform_failed" | "column_without_policy" | "duplicate_business_key" | "missing_business_key";
+        /**
+         * IssueSeverity
+         * @enum {string}
+         */
+        IssueSeverity: "BLOCKER" | "ERROR" | "WARNING";
+        /** LowerTransform */
+        LowerTransform: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "LOWER";
+            params?: components["schemas"]["NoParams"];
+        };
+        /** MapValuesParams */
+        MapValuesParams: {
+            /** @default ERROR */
+            on_missing: components["schemas"]["OnMissing"];
+            /**
+             * Table
+             * @description Exact source text -> target text (case- and space-sensitive).
+             */
+            table: {
+                [key: string]: string;
+            };
+        };
+        /** MapValuesTransform */
+        MapValuesTransform: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "MAP_VALUES";
+            params: components["schemas"]["MapValuesParams"];
+        };
+        /**
+         * MappingCreate
+         * @description A mapping for one source contract, with DRAFT version 1.
+         */
+        MappingCreate: {
+            /** Change Summary */
+            change_summary?: string | null;
+            /**
+             * Code
+             * @description Unique in your tenant; lower_snake_case.
+             */
+            code: string;
+            /** Description */
+            description?: string | null;
+            /** Name */
+            name: string;
+            /** Rules */
+            rules?: components["schemas"]["RuleIn"][];
+            /**
+             * Schema Id
+             * @description Must be the contract's target schema; defaults to it.
+             */
+            schema_id?: string | null;
+            /**
+             * Source Contract Id
+             * Format: uuid
+             * @description The (current) contract it maps.
+             */
+            source_contract_id: string;
+        };
+        /** MappingDetail */
+        MappingDetail: {
+            /**
+             * Active Version
+             * @description The ACTIVE version's number, if any.
+             */
+            active_version: number | null;
+            /** Code */
+            code: string;
+            /** Contract Version */
+            contract_version: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by: string;
+            /** Description */
+            description: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Latest Version */
+            latest_version: number;
+            /** Name */
+            name: string;
+            /** Schema Code */
+            schema_code: string;
+            /**
+             * Schema Id
+             * Format: uuid
+             */
+            schema_id: string;
+            /** Source Code */
+            source_code: string;
+            /**
+             * Source Contract Id
+             * Format: uuid
+             */
+            source_contract_id: string;
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+            /** Version Count */
+            version_count: number;
+            /**
+             * Versions
+             * @description Oldest first.
+             */
+            versions: components["schemas"]["MappingVersionOut"][];
+        };
+        /** MappingPage */
+        MappingPage: {
+            /** Items */
+            items: components["schemas"]["MappingSummary"][];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /** Total */
+            total: number;
+        };
+        /** MappingSummary */
+        MappingSummary: {
+            /**
+             * Active Version
+             * @description The ACTIVE version's number, if any.
+             */
+            active_version: number | null;
+            /** Code */
+            code: string;
+            /** Contract Version */
+            contract_version: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by: string;
+            /** Description */
+            description: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Latest Version */
+            latest_version: number;
+            /** Name */
+            name: string;
+            /** Schema Code */
+            schema_code: string;
+            /**
+             * Schema Id
+             * Format: uuid
+             */
+            schema_id: string;
+            /** Source Code */
+            source_code: string;
+            /**
+             * Source Contract Id
+             * Format: uuid
+             */
+            source_contract_id: string;
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+            /** Version Count */
+            version_count: number;
+        };
+        /** MappingValidationOut */
+        MappingValidationOut: {
+            /** Blocker Count */
+            blocker_count: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by: string;
+            /** Error Count */
+            error_count: number;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Import Id
+             * Format: uuid
+             */
+            import_id: string;
+            /** Issues */
+            issues: components["schemas"]["ValidationIssue"][];
+            /**
+             * Mapping Id
+             * Format: uuid
+             */
+            mapping_id: string;
+            /** Mapping Sha256 */
+            mapping_sha256: string;
+            /**
+             * Mapping Version Id
+             * Format: uuid
+             */
+            mapping_version_id: string;
+            /**
+             * Ok
+             * @description OK or WARNINGS: the version may be submitted.
+             */
+            ok: boolean;
+            outcome: components["schemas"]["ValidationOutcome"];
+            /** Row Count */
+            row_count: number;
+            /** Rule Results */
+            rule_results: components["schemas"]["RuleResult"][];
+            /** Version */
+            version: number;
+            /** Warning Count */
+            warning_count: number;
+        };
+        /**
+         * MappingVersionIn
+         * @description The next DRAFT version: its rules, pinned to the target's ACTIVE schema version.
+         */
+        MappingVersionIn: {
+            /** Change Summary */
+            change_summary?: string | null;
+            /** Rules */
+            rules?: components["schemas"]["RuleIn"][];
+        };
+        /** MappingVersionOut */
+        MappingVersionOut: {
+            /** Author */
+            author: string;
+            /**
+             * Author User Id
+             * Format: uuid
+             */
+            author_user_id: string;
+            /** Change Summary */
+            change_summary: string | null;
+            /** Content Sha256 */
+            content_sha256: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Decided At */
+            decided_at: string | null;
+            /** Decided By */
+            decided_by: string | null;
+            /** Decision Comment */
+            decision_comment: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            last_validation: components["schemas"]["ValidationRef"] | null;
+            /**
+             * Mapping Id
+             * Format: uuid
+             */
+            mapping_id: string;
+            /** Rules */
+            rules: components["schemas"]["RuleOut"][];
+            /**
+             * Schema Version
+             * @description The pinned schema version's number.
+             */
+            schema_version: number | null;
+            /**
+             * Schema Version Id
+             * Format: uuid
+             */
+            schema_version_id: string;
+            status: components["schemas"]["MappingVersionStatus"];
+            /** Submitted At */
+            submitted_at: string | null;
+            /** Version */
+            version: number;
+        };
+        /**
+         * MappingVersionStatus
+         * @description D-06/D-23: `mapping_version.status` is the `schema_version` set.
+         * @enum {string}
+         */
+        MappingVersionStatus: "DRAFT" | "IN_REVIEW" | "APPROVED" | "ACTIVE" | "DEPRECATED" | "RETIRED" | "REJECTED";
+        /**
          * MaskedValue
          * @description Stands in for a value the caller may not see (FE renders it as 'masked by policy').
          */
@@ -1149,6 +1653,17 @@ export interface components {
             /** Permissions */
             permissions: components["schemas"]["Permission"][];
         };
+        /**
+         * NoParams
+         * @description COPY, TRIM, UPPER and LOWER take no parameters.
+         */
+        NoParams: Record<string, never>;
+        /**
+         * NullPolicy
+         * @description What a rule does with an empty source value (missing cell, JSON null, only spaces).
+         * @enum {string}
+         */
+        NullPolicy: "ALLOW_NULL" | "REJECT_NULL" | "USE_DEFAULT";
         /** OidcClientConfig */
         OidcClientConfig: {
             /** Client Id */
@@ -1157,6 +1672,66 @@ export interface components {
             issuer: string;
             /** Scopes */
             scopes: string;
+        };
+        /**
+         * OnMissing
+         * @enum {string}
+         */
+        OnMissing: "ERROR" | "NULL" | "KEEP";
+        /** ParseBooleanParams */
+        ParseBooleanParams: {
+            /** False Values */
+            false_values: string[];
+            /** True Values */
+            true_values: string[];
+        };
+        /** ParseBooleanTransform */
+        ParseBooleanTransform: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "PARSE_BOOLEAN";
+            params: components["schemas"]["ParseBooleanParams"];
+        };
+        /** ParseDateParams */
+        ParseDateParams: {
+            format: components["schemas"]["DateFormat"];
+        };
+        /** ParseDateTransform */
+        ParseDateTransform: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "PARSE_DATE";
+            params: components["schemas"]["ParseDateParams"];
+        };
+        /** ParseDecimalParams */
+        ParseDecimalParams: {
+            /**
+             * Decimal Sep
+             * @description Decimal separator.
+             * @default .
+             * @enum {string}
+             */
+            decimal_sep: "." | ",";
+            /**
+             * Thousands Sep
+             * @description Digit-group separator; groups of three digits only.
+             * @default
+             * @enum {string}
+             */
+            thousands_sep: "" | "," | "." | " " | "'";
+        };
+        /** ParseDecimalTransform */
+        ParseDecimalTransform: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "PARSE_DECIMAL";
+            params?: components["schemas"]["ParseDecimalParams"];
         };
         /**
          * Permission
@@ -1351,6 +1926,101 @@ export interface components {
          * @enum {string}
          */
         Role: "platform_admin" | "data_steward" | "risk_analyst" | "approver" | "auditor";
+        /**
+         * RuleIn
+         * @description One rule. MAP: `source_column` (none for CONSTANT) → `target_field` through
+         *     `transform`. PRESERVE: `source_column` is kept as it is, with no target and COPY.
+         */
+        RuleIn: {
+            /** @default MAP */
+            column_policy: components["schemas"]["ColumnPolicy"];
+            /**
+             * Default Value
+             * @description Required with USE_DEFAULT (and only then).
+             */
+            default_value?: string | null;
+            /** @default ALLOW_NULL */
+            null_policy: components["schemas"]["NullPolicy"];
+            /**
+             * Source Column
+             * @description Exactly as in the file header; absent only for CONSTANT.
+             */
+            source_column?: string | null;
+            /**
+             * Target Field
+             * @description A field of the pinned schema version; absent for PRESERVE.
+             */
+            target_field?: string | null;
+            /** Transform */
+            transform?: components["schemas"]["CopyTransform"] | components["schemas"]["TrimTransform"] | components["schemas"]["UpperTransform"] | components["schemas"]["LowerTransform"] | components["schemas"]["ParseDecimalTransform"] | components["schemas"]["ScaleTransform"] | components["schemas"]["ParseDateTransform"] | components["schemas"]["ParseBooleanTransform"] | components["schemas"]["MapValuesTransform"] | components["schemas"]["DefaultTransform"] | components["schemas"]["ConstantTransform"];
+        };
+        /** RuleOut */
+        RuleOut: {
+            column_policy: components["schemas"]["ColumnPolicy"];
+            /** Default Value */
+            default_value: string | null;
+            null_policy: components["schemas"]["NullPolicy"];
+            /** Position */
+            position: number;
+            /** Source Column */
+            source_column: string | null;
+            /** Target Field */
+            target_field: string | null;
+            transform: components["schemas"]["TransformOut"];
+        };
+        /**
+         * RuleResult
+         * @description One rule over every row: counts only.
+         */
+        RuleResult: {
+            column_policy: components["schemas"]["ColumnPolicy"];
+            /**
+             * Empty
+             * @description Rows left empty (allowed by the null policy).
+             */
+            empty: number;
+            /** Failed */
+            failed: number;
+            /**
+             * Failures
+             * @description Failure reason code -> rows.
+             */
+            failures: {
+                [key: string]: number;
+            };
+            /**
+             * Mapped
+             * @description Rows with a value for the target.
+             */
+            mapped: number;
+            /** Position */
+            position: number;
+            /** Rows */
+            rows: number;
+            /** Source Column */
+            source_column: string | null;
+            /** Target Field */
+            target_field: string | null;
+            target_type: components["schemas"]["FieldType"] | null;
+            transform: components["schemas"]["TransformCode"];
+        };
+        /** ScaleParams */
+        ScaleParams: {
+            /**
+             * Power Of Ten
+             * @description The plain decimal is multiplied by 10^power_of_ten, exactly.
+             */
+            power_of_ten: number;
+        };
+        /** ScaleTransform */
+        ScaleTransform: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "SCALE";
+            params: components["schemas"]["ScaleParams"];
+        };
         /** SchemaDependent */
         SchemaDependent: {
             /** Dependent Ref */
@@ -1654,6 +2324,11 @@ export interface components {
              */
             provisional: boolean;
         };
+        /** SubmitIn */
+        SubmitIn: {
+            /** Comment */
+            comment?: string | null;
+        };
         /** TopValue */
         TopValue: {
             /**
@@ -1671,6 +2346,38 @@ export interface components {
              * @description The value (first 100 characters), or masked by the column's classification.
              */
             value: string | components["schemas"]["MaskedValue"];
+        };
+        /**
+         * TransformCode
+         * @description D-19: the closed allowlist. Adding one needs code, tests and an appended decision.
+         * @enum {string}
+         */
+        TransformCode: "COPY" | "TRIM" | "UPPER" | "LOWER" | "PARSE_DECIMAL" | "SCALE" | "PARSE_DATE" | "PARSE_BOOLEAN" | "MAP_VALUES" | "DEFAULT" | "CONSTANT";
+        /** TransformOut */
+        TransformOut: {
+            code: components["schemas"]["TransformCode"];
+            /** Params */
+            params: {
+                [key: string]: unknown;
+            };
+        };
+        /** TrimTransform */
+        TrimTransform: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "TRIM";
+            params?: components["schemas"]["NoParams"];
+        };
+        /** UpperTransform */
+        UpperTransform: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "UPPER";
+            params?: components["schemas"]["NoParams"];
         };
         /** UserPage */
         UserPage: {
@@ -1703,6 +2410,80 @@ export interface components {
             roles: components["schemas"]["Role"][];
             /** Status */
             status: string;
+        };
+        /** ValidateIn */
+        ValidateIn: {
+            /**
+             * Mapping Version Id
+             * Format: uuid
+             */
+            mapping_version_id: string;
+        };
+        /**
+         * ValidationIssue
+         * @description What is wrong, where (rule, field, column) and how often. Never a source value.
+         */
+        ValidationIssue: {
+            code: components["schemas"]["IssueCode"];
+            /**
+             * Count
+             * @description Rows affected, for row-level issues.
+             */
+            count?: number | null;
+            /** Message */
+            message: string;
+            /**
+             * Reasons
+             * @description Failure reason code -> rows, for transform_failed.
+             */
+            reasons?: {
+                [key: string]: number;
+            } | null;
+            /** Rule Position */
+            rule_position?: number | null;
+            severity: components["schemas"]["IssueSeverity"];
+            /** Source Column */
+            source_column?: string | null;
+            /** Target Field */
+            target_field?: string | null;
+        };
+        /**
+         * ValidationOutcome
+         * @description A dry-run validation's result. OK and WARNINGS are `ok` (the version may be
+         *     submitted); FAILED has at least one BLOCKER or ERROR.
+         * @enum {string}
+         */
+        ValidationOutcome: "OK" | "WARNINGS" | "FAILED";
+        /** ValidationRef */
+        ValidationRef: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Import Id
+             * Format: uuid
+             */
+            import_id: string;
+            /** Mapping Sha256 */
+            mapping_sha256: string;
+            /** Ok */
+            ok: boolean;
+            outcome: components["schemas"]["ValidationOutcome"];
+        };
+        /**
+         * ValueParams
+         * @description DEFAULT(value) and CONSTANT(value).
+         */
+        ValueParams: {
+            /** Value */
+            value: string;
         };
     };
     responses: never;
@@ -2072,6 +2853,50 @@ export interface operations {
             };
         };
     };
+    validateImportMapping: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                import_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ValidateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MappingValidationOut"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     getImportProfile: {
         parameters: {
             query?: never;
@@ -2090,6 +2915,265 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ImportProfile"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    listMappings: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                source_id?: string | null;
+                schema_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MappingPage"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    createMapping: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MappingCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MappingDetail"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    getMapping: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mapping_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MappingDetail"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    createMappingVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mapping_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MappingVersionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MappingVersionOut"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    decideMappingVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mapping_id: string;
+                version: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApprovalIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MappingVersionOut"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    submitMappingVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mapping_id: string;
+                version: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubmitIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MappingVersionOut"];
                 };
             };
             /** @description Client error (standard envelope) */
