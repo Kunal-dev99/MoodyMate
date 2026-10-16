@@ -3,12 +3,14 @@
 import { useParams } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Database, FileCode2, GitBranchPlus, ListChecks, ScrollText } from 'lucide-react'
-import { api, call, ApiError } from '@/api/client'
+import { api, call } from '@/api/client'
 import { AuditTimeline } from '@/components/audit/AuditTimeline'
 import { Forbidden } from '@/components/auth/Forbidden'
 import { RequirePermission } from '@/components/auth/RequirePermission'
 import { EmptyState } from '@/components/common/EmptyState'
+import { LoadFailed } from '@/components/common/LoadFailed'
 import { LoadingBlock } from '@/components/common/LoadingBlock'
+import { startLoad, type LoadFailure } from '@/components/common/load'
 import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
 import { toastApiError } from '@/components/common/api-error-toast'
@@ -30,7 +32,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 
-type State = { kind: 'loading' } | { kind: 'ready'; source: SourceDetail } | { kind: 'error'; status: number; cid: string | null }
+type State = { kind: 'loading' } | { kind: 'ready'; source: SourceDetail } | LoadFailure
 
 function ContractColumns({ c }: { c: Contract }) {
   const keys = new Set(c.business_key_columns)
@@ -121,16 +123,12 @@ export default function SourceDetailPage() {
 
   const load = useCallback(() => {
     // A newer load (or another source) cancels the previous one; a late answer never lands.
-    request.current?.abort()
-    const controller = new AbortController()
-    request.current = controller
-    call(() => api.GET('/api/v1/sources/{source_id}', { params: { path: { source_id: sourceId } }, signal: controller.signal }))
-      .then((source) => !controller.signal.aborted && setState({ kind: 'ready', source }))
-      .catch((err: unknown) => {
-        if (controller.signal.aborted) return
-        if (err instanceof ApiError) setState({ kind: 'error', status: err.status, cid: err.correlationId })
-        else toastApiError(err, 'Could not load the source')
-      })
+    // A network or server failure ends in a retryable error state, never an endless loading block.
+    request.current = startLoad(
+      (signal) => call(() => api.GET('/api/v1/sources/{source_id}', { params: { path: { source_id: sourceId } }, signal })),
+      { onReady: (source) => setState({ kind: 'ready', source }), onFailure: setState, failureTitle: 'Could not load the source' },
+      request.current,
+    )
   }, [sourceId])
 
   useEffect(() => {
@@ -139,8 +137,22 @@ export default function SourceDetailPage() {
     return () => request.current?.abort()
   }, [load])
 
-  if (state.kind === 'error') {
-    if (state.status === 403) return <Forbidden permission="source:read" correlationId={state.cid} />
+  if (state.kind === 'forbidden') return <Forbidden permission="source:read" correlationId={state.cid} />
+  if (state.kind === 'failed')
+    return (
+      <div className="p-6">
+        <LoadFailed
+          icon={Database}
+          title="The source could not be loaded"
+          cid={state.cid}
+          onRetry={() => {
+            setState({ kind: 'loading' })
+            load()
+          }}
+        />
+      </div>
+    )
+  if (state.kind === 'not_found') {
     return (
       <div className="p-6">
         <EmptyState

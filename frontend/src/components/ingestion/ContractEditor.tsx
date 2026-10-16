@@ -1,10 +1,13 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
+import { FileStack, Plus, Trash2 } from 'lucide-react'
 import { api, call, type Schemas } from '@/api/client'
+import { Forbidden } from '@/components/auth/Forbidden'
+import { LoadFailed } from '@/components/common/LoadFailed'
 import { LoadingBlock } from '@/components/common/LoadingBlock'
 import { toastApiError } from '@/components/common/api-error-toast'
+import { startLoad, type LoadFailure } from '@/components/common/load'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -28,17 +31,21 @@ export function ContractEditor({
   showChangeSummary?: boolean
 }) {
   const [schemas, setSchemas] = useState<Schemas['SchemaSummary'][] | null>(null)
+  const [schemasFailed, setSchemasFailed] = useState<LoadFailure | null>(null)
+  // Bumped by "Try again" to re-run the schema list load.
+  const [schemasAttempt, setSchemasAttempt] = useState(0)
   const [copying, setCopying] = useState(false)
 
   useEffect(() => {
-    let current = true
-    call(() => api.GET('/api/v1/schemas'))
-      .then((list) => current && setSchemas(list.items))
-      .catch((err: unknown) => current && toastApiError(err, 'Could not load schemas'))
-    return () => {
-      current = false
-    }
-  }, [])
+    // Leaving (or retrying) cancels the request; a failure ends in an error state, not a
+    // loading block that never resolves.
+    const request = startLoad((signal) => call(() => api.GET('/api/v1/schemas', { signal })), {
+      onReady: (list) => setSchemas(list.items),
+      onFailure: setSchemasFailed,
+      failureTitle: 'Could not load schemas',
+    })
+    return () => request.abort()
+  }, [schemasAttempt])
 
   // The latest draft, for the async copy below (props change between renders).
   const latest = useRef(draft)
@@ -81,6 +88,19 @@ export function ContractEditor({
       })
   }
 
+  if (schemasFailed?.kind === 'forbidden') return <Forbidden permission="schema:read" correlationId={schemasFailed.cid} />
+  if (schemasFailed)
+    return (
+      <LoadFailed
+        icon={FileStack}
+        title="Target schemas could not be loaded"
+        cid={schemasFailed.cid}
+        onRetry={() => {
+          setSchemasFailed(null)
+          setSchemasAttempt((n) => n + 1)
+        }}
+      />
+    )
   if (!schemas) return <LoadingBlock rows={4} />
 
   return (
