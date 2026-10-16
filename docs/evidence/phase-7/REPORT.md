@@ -49,7 +49,7 @@ fixed or decided before Phase 8.
 
 | ID | Severity | Where | Failure | Fix (test first) |
 |---|---|---|---|---|
-| D1 | MAJOR, needs a user decision | `0009` guard | PROVISIONAL contract content (columns, schema, hash, supersedes) can be rewritten by UPDATE. MVP contracts stay PROVISIONAL, so an import pinned in BE-8.1 could have its contract changed under it. | New migration 0012 freezes content in every status (only `status` and `updated_at` change). `test_provisional_contract_content_is_frozen` |
+| D1 | MAJOR, needs a user decision | `0009` guard | PROVISIONAL contract content (columns, schema, hash, supersedes) can be rewritten by UPDATE. MVP contracts stay PROVISIONAL, so an import pinned in BE-8.1 could have its contract changed under it. | Migration 0009 is amended in place (never released, D-24) to freeze content in every status (only `status` and `updated_at` change). `test_provisional_contract_content_is_frozen` |
 | D2 | MAJOR | `schemas.py` ProfileIn | `profile.provisional: false` is stored as sent, so one steward can mark a source client-approved. | Remove the field from create; it is always true. `test_registrant_cannot_mark_a_profile_approved` |
 | D3 | MAJOR, plan wording | `service.py` | These business-rule refusals are not audited: `unsupported_source_kind`, `unknown_classification`, `no_active_version`, `duplicate_code`, `no_change`, `invalid_status`. | Audit each one, or narrow the constraint. `test_business_refusals_are_audited` |
 | D4 | MINOR | `router.py` | The switch is an opt-in dependency, so a future WS2 write route could forget it. | Structural test `test_every_ws2_write_route_honours_ingestion_enabled` |
@@ -98,3 +98,29 @@ supersedes an APPROVED one. A future contract-approval flow will need to revisit
 - Contract review and approval actions, and clearing a profile's provisional flag.
 - Editing or archiving sources and profiles.
 - A least-privilege runtime DB role.
+
+## Fixes after the review (2026-10-16)
+
+The user decided the open points as D-24. Each fix was written test first; the full re-run
+is in `checks-after-fixes.txt` (at `dbeb58f`).
+
+| ID | Status | Proof |
+|---|---|---|
+| D1, D6 | Fixed: contract content frozen from creation in every status; `id`/`created_by`/`created_at` frozen; status moves only along `CONTRACT_TRANSITIONS` in the trigger (0009 amended in place, D-24) | `test_source_contract_guards.py` |
+| D2 | Fixed: `provisional` removed from the create body; a sent value is ignored and the profile is always provisional | `test_registrant_cannot_mark_a_profile_approved`, `test_create_body_has_no_provisional_field` |
+| D3 | Fixed: every refused WS2 write is audited with its reason code (D-24 §4); malformed bodies are not | `test_business_refusals_are_audited` (9 cases), `test_invalid_status_refusal_is_audited`, `test_malformed_bodies_are_not_audited` |
+| D4 | Fixed | `test_every_ws2_write_route_honours_ingestion_enabled` |
+| D5 | Fixed: `source_system_no_move` and `source_profile_no_move` triggers | `test_sources_cannot_move_tenant` |
+| D7 | Fixed: uuid5 seed IDs | `test_seed_ids_are_stable`; the IDs are identical across the round trip |
+| D8 | Fixed: `SafeText`, `SafeMultilineText`, `SheetName` (`app/core/text.py`) | `test_create_refuses_unsafe_text` (27 cases), `test_contract_route_refuses_unsafe_text` |
+| D9 | Fixed (tested) | `test_concurrent_new_versions_serialise` (4 real concurrent apps) |
+| D10 | Fixed: shared `startLoad` plus `LoadFailed` "Try again" state | `components/common/__tests__/load.test.ts` (6 tests) |
+| D11 | Fixed | strengthened `test_downgrade_refuses_while_a_user_source_exists` and `test_seed_downgrade_removes_only_its_rows` |
+| D12 | Fixed: `EXISTS` filter inside the paged query | `test_page_total_matches_items_with_a_profile_less_source` |
+| D13 | Fixed: full Playwright list re-captured | `checks-after-fixes.txt` (11/11, FE-7.1 tests listed by name) |
+| Deviation 4 | Fixed: unique `ix_source_profile_source_system_id` | `test_a_source_has_at_most_one_profile` |
+
+**Follow-up for a later phase.** `/schemas` and `/schemas/proposals/new` have the same
+endless-loading defect as D10 (Feature 01 pages). They should move to `startLoad`/`LoadFailed`.
+**Note.** Any DB copy that ran the original 0009–0011 must be downgraded to 0008 and upgraded
+again.

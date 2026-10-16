@@ -474,8 +474,9 @@ phase, and the Ingestion Workbench goes live, read-only for everyone else.
     expected columns, business-key columns, control-total columns, `content_sha256` and
     `supersedes_id`.
 
-  Contracts are immutable once they are not PROVISIONAL. A new contract version supersedes
-  the old one, which is not edited. CHECK constraints cover every enum column. A trigger
+  Contract content is frozen from creation, in every status (D-24 §3, amended at the Phase 7
+  review). Only `status` and `updated_at` change, along `CONTRACT_TRANSITIONS`. A new
+  contract version supersedes the old one, which is not edited. CHECK constraints cover every enum column. A trigger
   blocks UPDATE of contract content and DELETE/TRUNCATE. The downgrade refuses while user
   rows exist.
   - *Done-when:* the round trip passes, and tests prove the trigger rejects an
