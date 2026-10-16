@@ -439,8 +439,9 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
      `unsupported_source_kind`). Malformed request bodies (422 `validation_error`) are not.
   5. **data_steward keeps no `audit:read`.** Source history stays with auditors
      (segregation of duties).
-- **Consequences:** the Phase 8 CSV and JSON adapters implement points 1–2. Phase 7 gets
-  follow-up migration 0012 for point 3, and a shared refusal-audit helper for point 4.
+- **Consequences:** the Phase 8 CSV and JSON adapters implement points 1–2. Phase 7's unreleased
+  migrations (0009–0011, never merged or deployed) are amended in place for point 3, and
+  a shared refusal-audit helper covers point 4.
 - **Reversal:** a new decision. Points 3 and 4 only ever tighten controls.
 
 ---
