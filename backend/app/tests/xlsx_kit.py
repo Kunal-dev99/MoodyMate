@@ -149,3 +149,12 @@ def table(header: list[str], *rows: list[str]) -> bytes:
     """A workbook of inline strings: a header row and data rows."""
     cells: list[list[Cell]] = [[("s", v) for v in r] for r in (header, *rows)]
     return xlsx(cells)
+
+
+def rewrite(data: bytes, member: str, content: bytes) -> bytes:
+    """The workbook `data` with one part replaced by `content` (to break it on purpose)."""
+    out = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(data)) as src, zipfile.ZipFile(out, "w") as dst:
+        for info in src.infolist():
+            dst.writestr(info.filename, content if info.filename == member else src.read(info))
+    return out.getvalue()
