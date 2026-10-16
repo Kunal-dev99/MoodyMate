@@ -9,6 +9,10 @@ from fastapi.testclient import TestClient
 from app.core.config import Settings
 from app.main import create_app
 
+# Tests build their own Settings: a developer's backend/.env (copied from .env.example,
+# which sets DATA_CLASS, AUTH_MODE, ...) must not leak into them.
+Settings.model_config["env_file"] = None
+
 # Never the live dev DB (D-03): tests use their own database.
 TEST_DATABASE_URL = os.environ.get(
     "TEST_DATABASE_URL",
