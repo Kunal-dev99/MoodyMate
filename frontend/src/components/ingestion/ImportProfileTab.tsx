@@ -6,7 +6,6 @@ import { BarChart3, FilePlus2, Info, TableProperties } from 'lucide-react'
 import { api, call } from '@/api/client'
 import { Forbidden } from '@/components/auth/Forbidden'
 import { RequirePermission } from '@/components/auth/RequirePermission'
-import { useCurrentSession } from '@/components/auth/SessionProvider'
 import { EmptyState } from '@/components/common/EmptyState'
 import { LoadFailed } from '@/components/common/LoadFailed'
 import { LoadingBlock } from '@/components/common/LoadingBlock'
@@ -55,30 +54,8 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
-/**
- * The schema's id for the proposal link (the profile names the schema by code). Best
- * effort, read-only: without schema:read or on any failure the link opens the page
- * without a schema chosen.
- */
-function useSchemaId(code: string): string | null {
-  const { has } = useCurrentSession()
-  const canRead = has('schema:read')
-  const [id, setId] = useState<string | null>(null)
-  useEffect(() => {
-    if (!canRead) return
-    const controller = new AbortController()
-    call(() => api.GET('/api/v1/schemas', { signal: controller.signal }))
-      .then((list) => {
-        if (!controller.signal.aborted) setId(list.items.find((s) => s.code === code)?.id ?? null)
-      })
-      .catch(() => undefined)
-    return () => controller.abort()
-  }, [canRead, code])
-  return id
-}
-
-function ProposalLink({ schemaCode }: { schemaCode: string }) {
-  const schemaId = useSchemaId(schemaCode)
+/** The Phase 5 "New proposal" link, with the import's target schema chosen (ImportProfile.schema_id). */
+function ProposalLink({ schemaId }: { schemaId: string }) {
   return (
     <Button asChild size="sm" variant="outline">
       <Link href={proposalHref(schemaId)} data-testid="profile-new-proposal">
@@ -229,7 +206,7 @@ function ProfileView({ profile: p }: { profile: ImportProfile }) {
         description="Types, contract matches and target fields are suggestions only: nothing is changed from here."
         actions={
           <RequirePermission permission="schema:propose" fallback={null}>
-            <ProposalLink schemaCode={p.schema_code} />
+            <ProposalLink schemaId={p.schema_id} />
           </RequirePermission>
         }
       >
