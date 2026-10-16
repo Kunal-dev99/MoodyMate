@@ -1,10 +1,12 @@
 'use client'
 
+import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { useEffect, useMemo, useState } from 'react'
 import { FileStack, GitCompare, ListTree } from 'lucide-react'
 import { api, call, ApiError, type Schemas } from '@/api/client'
 import { Forbidden } from '@/components/auth/Forbidden'
+import { useCurrentSession } from '@/components/auth/SessionProvider'
 import { EmptyState } from '@/components/common/EmptyState'
 import { LoadingBlock } from '@/components/common/LoadingBlock'
 import { PageHeader } from '@/components/common/PageHeader'
@@ -21,6 +23,7 @@ import {
   type Field,
 } from '@/components/schemas/registry'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
 
@@ -51,6 +54,7 @@ function FieldCell({ field, changes }: { field?: Field; changes: Change[] }) {
 
 /** Schema detail and version compare (FE-4.2). */
 export default function SchemaDetailPage() {
+  const { has } = useCurrentSession()
   const { schemaId } = useParams<{ schemaId: string }>()
   const [state, setState] = useState<State>({ kind: 'loading' })
   const [selected, setSelected] = useState<number | null>(null)
@@ -130,6 +134,11 @@ export default function SchemaDetailPage() {
           <div className="flex items-center gap-2">
             {schema.provisional && <Badge variant="warning">Provisional</Badge>}
             <StatusPill status={schema.status} />
+            {has('schema:propose') && schema.effective_version && (
+              <Button asChild size="sm">
+                <Link href={`/schemas/proposals/new?schema=${schema.id}`}>Propose change</Link>
+              </Button>
+            )}
           </div>
         }
       />

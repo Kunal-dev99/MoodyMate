@@ -130,3 +130,38 @@ class DependentType(StrEnum):
 
 
 SCHEMA_SEED_TAG = "0007_schema_seed"
+
+
+# --- Controlled schema change (Phase 5, DG-05) ------------------------------------------
+
+
+class ProposalStatus(StrEnum):
+    """schema_change_proposal lifecycle (D-06). APPROVED and IN_REVIEW are reserved: an
+    approval applies the change in the same transaction, so it lands in APPLIED."""
+
+    DRAFT = "DRAFT"
+    SUBMITTED = "SUBMITTED"
+    IN_REVIEW = "IN_REVIEW"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    APPLIED = "APPLIED"
+    SUPERSEDED = "SUPERSEDED"
+
+
+class ProposalDecision(StrEnum):
+    APPROVE = "APPROVE"
+    REJECT = "REJECT"
+
+
+# D-06 transition table: status -> statuses it may move to. Enforced by the service.
+PROPOSAL_TRANSITIONS: dict[ProposalStatus, frozenset[ProposalStatus]] = {
+    ProposalStatus.DRAFT: frozenset({ProposalStatus.SUBMITTED, ProposalStatus.SUPERSEDED}),
+    ProposalStatus.SUBMITTED: frozenset(
+        {ProposalStatus.APPLIED, ProposalStatus.REJECTED, ProposalStatus.SUPERSEDED}
+    ),
+    ProposalStatus.IN_REVIEW: frozenset(),
+    ProposalStatus.APPROVED: frozenset(),
+    ProposalStatus.REJECTED: frozenset(),
+    ProposalStatus.APPLIED: frozenset(),
+    ProposalStatus.SUPERSEDED: frozenset(),
+}

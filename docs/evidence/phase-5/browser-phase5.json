@@ -1,0 +1,45 @@
+{
+  "editor_rows_after_remove": 8,
+  "submit_disabled_before_analysis": true,
+  "impact_missing_shown": true,
+  "backend_submit_before_analysis": {
+    "status": 409,
+    "body": {
+      "code": "impact_analysis_required",
+      "message": "Run the impact analysis before submitting.",
+      "details": null,
+      "correlation_id": "2399ab6c-c90a-4aa4-b9f3-27dbd8099257",
+      "retryable": false
+    }
+  },
+  "impact_overall": "BREAKING",
+  "impact_overall_class": "inline-flex items-center rounded-sm border px-2 py-0.5 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 border-transparent bg-destructive text-destructive-foreground hover:bg-destructive/85",
+  "impact_dependents": [
+    "MAPPING\ncore_banking_instrument (illustrative)\ndirect\n(illustrative)",
+    "SCHEMA\ncashflow_event\ndirect\n(illustrative)",
+    "SCHEMA\nposition\ndirect\n(illustrative)",
+    "MODULE\nliquidity_gap (illustrative)\nvia instrument → position\n(illustrative)",
+    "MODULE\nliquidity_gap (illustrative)\nvia instrument → cashflow_event\n(illustrative)",
+    "REPORT\nmaturity_ladder (illustrative)\nvia instrument → cashflow_event\n(illustrative)"
+  ],
+  "submit_enabled_after_analysis": true,
+  "after_submit_status": "SUBMITTED",
+  "proposer_sees": "Waiting for an approver. You cannot approve your own proposal.",
+  "approver_queue": [
+    "Drop counterparty_id from instrument\tinstrument\tv1 → v3\tBreaking\tAwaiting approval\t10/16/2026, 6:59:58 AM"
+  ],
+  "after_approval_status": "APPLIED",
+  "versions_after_approval": [
+    "v1 DEPRECATED",
+    "v2 DRAFT",
+    "v3 ACTIVE"
+  ],
+  "revert_impact": "ADDITIVE",
+  "versions_after_revert": [
+    "v1 DEPRECATED",
+    "v2 DRAFT",
+    "v3 DEPRECATED",
+    "v4 ACTIVE"
+  ],
+  "active_hash_equals_original": true
+}

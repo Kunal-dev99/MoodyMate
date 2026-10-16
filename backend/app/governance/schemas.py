@@ -7,7 +7,7 @@ import uuid
 from datetime import date, datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.core.classification import Classification, MaskedValue
 from app.governance.constants import (
@@ -16,6 +16,8 @@ from app.governance.constants import (
     DependentType,
     FieldType,
     Permission,
+    ProposalDecision,
+    ProposalStatus,
     Role,
     SchemaVersionStatus,
 )
@@ -186,3 +188,94 @@ class SchemaDiffOut(BaseModel):
     to_version: SchemaVersionRef
     overall: Compatibility | None = Field(description="Most severe change; null if identical.")
     changes: list[SchemaFieldChange]
+
+
+# --- Controlled schema change (Phase 5) -----------------------------------------------------
+
+FIELD_NAME = r"^[a-z][a-z0-9_]{0,99}$"
+
+
+class SchemaFieldIn(BaseModel):
+    name: str = Field(pattern=FIELD_NAME, description="snake_case field name.")
+    data_type: FieldType
+    required: bool
+    unit: str | None = Field(default=None, max_length=50)
+    precision: int | None = Field(default=None, ge=1, le=38)
+    scale: int | None = Field(default=None, ge=0, le=38)
+    classification: str = Field(min_length=1, max_length=50)
+    extension_eligible: bool = False
+    description: str | None = Field(default=None, max_length=1000)
+
+    @model_validator(mode="after")
+    def _scale_within_precision(self) -> "SchemaFieldIn":
+        if self.scale is not None and self.precision is not None and self.scale > self.precision:
+            raise ValueError("scale cannot exceed precision")
+        return self
+
+
+class ProposalCreate(BaseModel):
+    schema_id: uuid.UUID
+    title: str = Field(min_length=3, max_length=200)
+    rationale: str | None = Field(default=None, max_length=2000)
+    fields: list[SchemaFieldIn] = Field(
+        min_length=1, max_length=500, description="The full proposed contract, in order."
+    )
+
+
+class ProposalSubmit(BaseModel):
+    regression_evidence_ref: str | None = Field(
+        default=None, max_length=500, description="Where the regression evidence lives."
+    )
+
+
+class ProposalApproval(BaseModel):
+    decision: ProposalDecision
+    comment: str | None = Field(default=None, max_length=2000)
+
+
+class ImpactDependent(BaseModel):
+    dependent_type: DependentType
+    dependent_ref: str
+    description: str | None
+    provisional: bool
+    depth: int = Field(description="1 for a direct dependent of the changed schema.")
+    via: list[str] = Field(
+        description="Schema codes walked to reach it, starting with the changed one."
+    )
+
+
+class ImpactAnalysis(BaseModel):
+    overall: Compatibility | None
+    changes: list[SchemaFieldChange]
+    dependents: list[ImpactDependent]
+    base_sha256: str
+    proposed_sha256: str
+    analysed_at: datetime
+
+
+class ProposalOut(BaseModel):
+    id: uuid.UUID
+    schema_id: uuid.UUID
+    schema_code: str
+    schema_name: str
+    status: ProposalStatus
+    title: str
+    rationale: str | None
+    proposer: str
+    proposer_user_id: uuid.UUID
+    created_at: datetime
+    base_version: SchemaVersionRef
+    proposed_version: SchemaVersionRef
+    proposed_fields: list[SchemaFieldOut]
+    impact: ImpactAnalysis | None
+    regression_evidence_ref: str | None
+    submitted_at: datetime | None
+    decided_by: str | None
+    decided_at: datetime | None
+    decision_comment: str | None
+    reverts_proposal_id: uuid.UUID | None
+
+
+class ProposalList(BaseModel):
+    items: list[ProposalOut]
+    total: int

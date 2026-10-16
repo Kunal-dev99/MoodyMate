@@ -369,6 +369,106 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "ImpactAnalysis": {
+        "properties": {
+          "analysed_at": {
+            "format": "date-time",
+            "title": "Analysed At",
+            "type": "string"
+          },
+          "base_sha256": {
+            "title": "Base Sha256",
+            "type": "string"
+          },
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/SchemaFieldChange"
+            },
+            "title": "Changes",
+            "type": "array"
+          },
+          "dependents": {
+            "items": {
+              "$ref": "#/components/schemas/ImpactDependent"
+            },
+            "title": "Dependents",
+            "type": "array"
+          },
+          "overall": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Compatibility"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "proposed_sha256": {
+            "title": "Proposed Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "overall",
+          "changes",
+          "dependents",
+          "base_sha256",
+          "proposed_sha256",
+          "analysed_at"
+        ],
+        "title": "ImpactAnalysis",
+        "type": "object"
+      },
+      "ImpactDependent": {
+        "properties": {
+          "dependent_ref": {
+            "title": "Dependent Ref",
+            "type": "string"
+          },
+          "dependent_type": {
+            "$ref": "#/components/schemas/DependentType"
+          },
+          "depth": {
+            "description": "1 for a direct dependent of the changed schema.",
+            "title": "Depth",
+            "type": "integer"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "provisional": {
+            "title": "Provisional",
+            "type": "boolean"
+          },
+          "via": {
+            "description": "Schema codes walked to reach it, starting with the changed one.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Via",
+            "type": "array"
+          }
+        },
+        "required": [
+          "dependent_type",
+          "dependent_ref",
+          "description",
+          "provisional",
+          "depth",
+          "via"
+        ],
+        "title": "ImpactDependent",
+        "type": "object"
+      },
       "MaskedValue": {
         "description": "Stands in for a value the caller may not see (FE renders it as 'masked by policy').",
         "properties": {
@@ -484,6 +584,306 @@
         ],
         "title": "Permission",
         "type": "string"
+      },
+      "ProposalApproval": {
+        "properties": {
+          "comment": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/ProposalDecision"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "ProposalApproval",
+        "type": "object"
+      },
+      "ProposalCreate": {
+        "properties": {
+          "fields": {
+            "description": "The full proposed contract, in order.",
+            "items": {
+              "$ref": "#/components/schemas/SchemaFieldIn"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "title": "Fields",
+            "type": "array"
+          },
+          "rationale": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rationale"
+          },
+          "schema_id": {
+            "format": "uuid",
+            "title": "Schema Id",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 3,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_id",
+          "title",
+          "fields"
+        ],
+        "title": "ProposalCreate",
+        "type": "object"
+      },
+      "ProposalDecision": {
+        "enum": [
+          "APPROVE",
+          "REJECT"
+        ],
+        "title": "ProposalDecision",
+        "type": "string"
+      },
+      "ProposalList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProposalOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "ProposalList",
+        "type": "object"
+      },
+      "ProposalOut": {
+        "properties": {
+          "base_version": {
+            "$ref": "#/components/schemas/SchemaVersionRef"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "decided_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided By"
+          },
+          "decision_comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Comment"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "impact": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ImpactAnalysis"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "proposed_fields": {
+            "items": {
+              "$ref": "#/components/schemas/SchemaFieldOut"
+            },
+            "title": "Proposed Fields",
+            "type": "array"
+          },
+          "proposed_version": {
+            "$ref": "#/components/schemas/SchemaVersionRef"
+          },
+          "proposer": {
+            "title": "Proposer",
+            "type": "string"
+          },
+          "proposer_user_id": {
+            "format": "uuid",
+            "title": "Proposer User Id",
+            "type": "string"
+          },
+          "rationale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rationale"
+          },
+          "regression_evidence_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Regression Evidence Ref"
+          },
+          "reverts_proposal_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reverts Proposal Id"
+          },
+          "schema_code": {
+            "title": "Schema Code",
+            "type": "string"
+          },
+          "schema_id": {
+            "format": "uuid",
+            "title": "Schema Id",
+            "type": "string"
+          },
+          "schema_name": {
+            "title": "Schema Name",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ProposalStatus"
+          },
+          "submitted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Submitted At"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "schema_id",
+          "schema_code",
+          "schema_name",
+          "status",
+          "title",
+          "rationale",
+          "proposer",
+          "proposer_user_id",
+          "created_at",
+          "base_version",
+          "proposed_version",
+          "proposed_fields",
+          "impact",
+          "regression_evidence_ref",
+          "submitted_at",
+          "decided_by",
+          "decided_at",
+          "decision_comment",
+          "reverts_proposal_id"
+        ],
+        "title": "ProposalOut",
+        "type": "object"
+      },
+      "ProposalStatus": {
+        "description": "schema_change_proposal lifecycle (D-06). APPROVED and IN_REVIEW are reserved: an\napproval applies the change in the same transaction, so it lands in APPLIED.",
+        "enum": [
+          "DRAFT",
+          "SUBMITTED",
+          "IN_REVIEW",
+          "APPROVED",
+          "REJECTED",
+          "APPLIED",
+          "SUPERSEDED"
+        ],
+        "title": "ProposalStatus",
+        "type": "string"
+      },
+      "ProposalSubmit": {
+        "properties": {
+          "regression_evidence_ref": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the regression evidence lives.",
+            "title": "Regression Evidence Ref"
+          }
+        },
+        "title": "ProposalSubmit",
+        "type": "object"
       },
       "Role": {
         "enum": [
@@ -636,6 +1036,92 @@
           "reason"
         ],
         "title": "SchemaFieldChange",
+        "type": "object"
+      },
+      "SchemaFieldIn": {
+        "properties": {
+          "classification": {
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Classification",
+            "type": "string"
+          },
+          "data_type": {
+            "$ref": "#/components/schemas/FieldType"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "extension_eligible": {
+            "default": false,
+            "title": "Extension Eligible",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "snake_case field name.",
+            "pattern": "^[a-z][a-z0-9_]{0,99}$",
+            "title": "Name",
+            "type": "string"
+          },
+          "precision": {
+            "anyOf": [
+              {
+                "maximum": 38.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Precision"
+          },
+          "required": {
+            "title": "Required",
+            "type": "boolean"
+          },
+          "scale": {
+            "anyOf": [
+              {
+                "maximum": 38.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scale"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "maxLength": 50,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          }
+        },
+        "required": [
+          "name",
+          "data_type",
+          "required",
+          "classification"
+        ],
+        "title": "SchemaFieldIn",
         "type": "object"
       },
       "SchemaFieldOut": {
@@ -1547,6 +2033,474 @@
           }
         ],
         "summary": "My Permissions",
+        "tags": [
+          "identity"
+        ]
+      }
+    },
+    "/api/v1/schema-change-proposals": {
+      "get": {
+        "operationId": "listProposals",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ProposalStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "schema_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Schema Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProposalList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Proposals",
+        "tags": [
+          "identity"
+        ]
+      },
+      "post": {
+        "operationId": "createProposal",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProposalCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProposalOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Proposal",
+        "tags": [
+          "identity"
+        ]
+      }
+    },
+    "/api/v1/schema-change-proposals/{proposal_id}": {
+      "get": {
+        "operationId": "getProposal",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Proposal Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProposalOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Proposal",
+        "tags": [
+          "identity"
+        ]
+      }
+    },
+    "/api/v1/schema-change-proposals/{proposal_id}/approval": {
+      "post": {
+        "operationId": "decideProposal",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Proposal Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProposalApproval"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProposalOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Decide Proposal",
+        "tags": [
+          "identity"
+        ]
+      }
+    },
+    "/api/v1/schema-change-proposals/{proposal_id}/impact-analysis": {
+      "post": {
+        "operationId": "analyseProposal",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Proposal Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProposalOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Analyse Proposal",
+        "tags": [
+          "identity"
+        ]
+      }
+    },
+    "/api/v1/schema-change-proposals/{proposal_id}/revert": {
+      "post": {
+        "operationId": "revertProposal",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Proposal Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProposalOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Revert Proposal",
+        "tags": [
+          "identity"
+        ]
+      }
+    },
+    "/api/v1/schema-change-proposals/{proposal_id}/submit": {
+      "post": {
+        "operationId": "submitProposal",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Proposal Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProposalSubmit"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProposalOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Submit Proposal",
         "tags": [
           "identity"
         ]

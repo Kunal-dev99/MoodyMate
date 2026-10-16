@@ -12,6 +12,7 @@ import { PageSection } from '@/components/common/PageSection'
 import { toastApiError } from '@/components/common/api-error-toast'
 import { StatusPill } from '@/components/schemas/StatusPill'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 
 type State =
@@ -37,6 +38,11 @@ export default function SchemaCataloguePage() {
       <PageHeader
         title="Schema catalogue"
         description="Versioned canonical schemas: owner, lifecycle status, the version in effect and what depends on each."
+        actions={
+          <Button asChild size="sm" variant="outline">
+            <Link href="/schemas/proposals">Change proposals</Link>
+          </Button>
+        }
       />
       <div className="px-6 pb-6">
         {state.kind === 'forbidden' ? (

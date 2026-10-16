@@ -41,7 +41,7 @@ export const mainWorkspaces: Workspace[] = [
     href: '/schemas',
     label: 'Source & Schemas',
     icon: FileStack,
-    description: 'Schema catalogue, versions and compare. Change proposals arrive in Phase 5.',
+    description: 'Schema catalogue, versions, compare and controlled change proposals.',
     permission: 'schema:read',
   },
   {

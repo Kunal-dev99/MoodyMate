@@ -22,7 +22,11 @@ from app.governance.models import (
     AuditEvent,
     DataClassification,
     RoleModel,
+    SchemaChangeProposal,
     SchemaDefinition,
+    SchemaDependency,
+    SchemaField,
+    SchemaVersion,
     Tenant,
     UserAccount,
     UserRole,
@@ -204,3 +208,97 @@ class SchemaRepository(ScopedRepository[SchemaDefinition]):
     async def list_all(self) -> list[SchemaDefinition]:
         result = await self.session.execute(self.scoped().order_by(SchemaDefinition.code))
         return list(result.scalars())
+
+
+class ProposalRepository(ScopedRepository[SchemaChangeProposal]):
+    """Schema change proposals and the registry writes they make (BE-5.x), tenant-scoped."""
+
+    model = SchemaChangeProposal
+
+    async def page_filtered(
+        self, status: str | None, schema_id: uuid.UUID | None, limit: int, offset: int
+    ) -> tuple[list[SchemaChangeProposal], int]:
+        stmt = self.scoped()
+        if status is not None:
+            stmt = stmt.where(SchemaChangeProposal.status == status)
+        if schema_id is not None:
+            stmt = stmt.where(SchemaChangeProposal.schema_id == schema_id)
+        total = await self.session.scalar(select(func.count()).select_from(stmt.subquery()))
+        result = await self.session.execute(
+            stmt.order_by(SchemaChangeProposal.created_at.desc(), SchemaChangeProposal.id)
+            .limit(limit)
+            .offset(offset)
+        )
+        return list(result.scalars().unique()), int(total or 0)
+
+    async def lock(self, proposal_id: uuid.UUID) -> SchemaChangeProposal | None:
+        result = await self.session.execute(
+            self.scoped()
+            .where(SchemaChangeProposal.id == proposal_id)
+            .with_for_update(of=SchemaChangeProposal)
+            .execution_options(populate_existing=True)
+        )
+        return result.scalars().unique().one_or_none()
+
+    async def lock_schema(self, schema_id: uuid.UUID) -> SchemaDefinition | None:
+        """Serialises version numbering and activation per schema."""
+        result = await self.session.execute(
+            select(SchemaDefinition)
+            .where(
+                SchemaDefinition.id == schema_id,
+                SchemaDefinition.tenant_id == self.scope.tenant_id,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return result.scalar_one_or_none()
+
+    async def version(self, version_id: uuid.UUID) -> SchemaVersion:
+        result = await self.session.execute(
+            select(SchemaVersion)
+            .where(SchemaVersion.id == version_id)
+            .execution_options(populate_existing=True)
+        )
+        return result.scalar_one()
+
+    async def fields(self, version_id: uuid.UUID) -> list[SchemaField]:
+        result = await self.session.execute(
+            select(SchemaField)
+            .where(SchemaField.schema_version_id == version_id)
+            .order_by(SchemaField.position)
+            .execution_options(populate_existing=True)
+        )
+        return list(result.scalars())
+
+    async def next_version_number(self, schema_id: uuid.UUID) -> int:
+        current = await self.session.scalar(
+            select(func.max(SchemaVersion.version)).where(SchemaVersion.schema_id == schema_id)
+        )
+        return int(current or 0) + 1
+
+    async def classification_codes(self) -> set[str]:
+        return set((await self.session.execute(select(DataClassification.code))).scalars())
+
+    async def dependencies_of(self, schema_ids: list[uuid.UUID]) -> list[SchemaDependency]:
+        result = await self.session.execute(
+            select(SchemaDependency)
+            .join(SchemaDefinition, SchemaDefinition.id == SchemaDependency.schema_id)
+            .where(
+                SchemaDependency.schema_id.in_(schema_ids),
+                SchemaDefinition.tenant_id == self.scope.tenant_id,
+            )
+            .order_by(SchemaDependency.dependent_type, SchemaDependency.dependent_ref)
+        )
+        return list(result.scalars())
+
+    async def schema_codes(self, schema_ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
+        result = await self.session.execute(
+            select(SchemaDefinition.id, SchemaDefinition.code).where(
+                SchemaDefinition.id.in_(schema_ids),
+                SchemaDefinition.tenant_id == self.scope.tenant_id,
+            )
+        )
+        return {row[0]: row[1] for row in result}
+
+    def add(self, *rows: object) -> None:
+        self.session.add_all(rows)
