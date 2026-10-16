@@ -12,7 +12,7 @@ Conventions (see proposed D-08):
 
 ## Feature 01 — WS1 Data Governance, Security & Platform Foundation
 
-Kickoff: `docs/prompts/kickoffs/01-ws1-foundation.md` · Status: **APPROVED 2026-10-15 — Phase 1 merged (PR #2); Phase 2 merged (PR #3); Phase 2 hardening merged (PR #4); PR #6 merged (Phase 2 hardening complete); Phase 3 merged (PR #7); Phase 4 built — verification pending**
+Kickoff: `docs/prompts/kickoffs/01-ws1-foundation.md` · Status: **APPROVED 2026-10-15 — Phase 1 merged (PR #2); Phase 2 merged (PR #3); Phase 2 hardening merged (PR #4); PR #6 merged (Phase 2 hardening complete); Phase 3 merged (PR #7); Phase 4 built — verification recorded**
 
 Constraining decisions: D-01…D-12 (all active).
 
@@ -232,28 +232,28 @@ and logs.
 Goal: versioned canonical schemas with owners, lifecycle and compatibility, which later
 workstreams bind to.
 
-- [ ] **BE-4.1** Tables `schema_definition`, `schema_version` (immutable; content SHA-256;
+- [x] **BE-4.1** Tables `schema_definition`, `schema_version` (immutable; content SHA-256;
   status per D-06), `schema_field` (type, required, unit, scale, classification,
   extension eligibility), `schema_dependency`, with a tested downgrade.
   - *Done-when:* the round trip passes; a test proves an UPDATE to an ACTIVE version's
-    contract is rejected (DB trigger or service guard plus test).
-- [ ] **BE-4.2** Seed PROVISIONAL synthetic schemas `instrument`, `position`,
+    contract is rejected (DB trigger or service guard plus test). — ✔ verified (commit 9684d9c): tables at backend/app/db/migrations/versions/0006_schema_registry_tables.py:87-161. Row triggers at 0006:30-82, created at :163-172. They reject any change to `schema_id`/`version`/`content_sha256`, any return to DRAFT, and any DELETE of a non-DRAFT version, plus any field INSERT/UPDATE/DELETE on a non-DRAFT version (both the OLD and the NEW version are checked, so a field cannot be moved into or out of one). The seed-removal setting is NULL-safe (`coalesce`, :36, :65). `test_schema_registry.py::test_active_version_contract_cannot_change` (:34-67) runs 8 statements against seeded `instrument` v1 (ACTIVE). Each must raise `InsufficientPrivilegeError` "immutable" and leave the row unchanged, and all 8 PASSED (checks.txt:6-13). `test_status_can_still_move_forward` and `test_draft_version_fields_are_editable` PASSED (checks.txt:14-15). Round trip head→0005→head on the DB copy (checks.txt:48-53), and `test_migrations.py::test_round_trip_upgrade_downgrade_upgrade` is in the 172-pass suite (checks.txt:41). The downgrade refuses while `schema_definition` has rows (0006:177-181). That works online (a DO block in the migration transaction) and in the `--sql` script (checks.txt:54-55); the refusal itself has no test. ⚠ open follow-ups (beyond the Done-when; see the 2026-10-16 Phase 4 verification report): (a) there is no `BEFORE TRUNCATE` trigger, so `TRUNCATE schema_field` or `TRUNCATE schema_definition CASCADE` wipes ACTIVE contracts. Phase 3 blocked TRUNCATE on `audit_event` (0004:90). (b) `moodymate.schema_seed_removal` is a custom setting that any session may `SET`, so `SET moodymate.schema_seed_removal='on'` lets anyone delete the seeded ACTIVE versions. (c) the field trigger reads the version status without a row lock (0006:62,72). A field insert that races a DRAFT→ACTIVE update can therefore commit into an ACTIVE version. (d) on non-DRAFT versions, `effective_from`, `compatibility` and `seeded_by` are still mutable, and any non-DRAFT status can move to any other (REJECTED→ACTIVE). (e) there are no CHECK constraints on `status`, `data_type`, `compatibility` or `dependent_type`, and `classification` has no FK. (f) nothing checks that `content_sha256` matches the fields when a version leaves DRAFT.
+- [x] **BE-4.2** Seed PROVISIONAL synthetic schemas `instrument`, `position`,
   `cashflow_event` from Data Model §4, explicitly labelled illustrative.
   - *Done-when:* `GET /schemas` lists three schemas, each with status and a
-    `provisional: true` marker.
-- [ ] **BE-4.3** `GET /api/v1/schemas`, `GET /schemas/{id}/versions`,
+    `provisional: true` marker. — ✔ verified: the seed is at backend/app/db/migrations/versions/0007_schema_seed.py:58-142. Every definition is `provisional=true` and its description ends "ILLUSTRATIVE seed from Data Model §4; not client-approved." (:30, :175). Every row is tagged `0007_schema_seed`, and the downgrade deletes only tagged rows (:241-247, D-11). `test_schema_registry.py::test_list_schemas` (:134-153) calls `GET /api/v1/schemas` as `risk_analyst` and asserts exactly the 3 codes, `total == 3`, and for each `provisional is True`, status ACTIVE, effective v1, an owner and "ILLUSTRATIVE". It is PASSED (checks.txt:18). `::test_seed_is_tagged_and_provisional` is PASSED (checks.txt:17). Route at backend/app/governance/router.py:247-251, response model at schemas.py:122-140. The seed contents after upgrade are at checks.txt:56-60.
+- [x] **BE-4.3** `GET /api/v1/schemas`, `GET /schemas/{id}/versions`,
   `GET /schemas/{id}/diff?from=&to=`, requiring `schema:read`. The diff classifies each
   change as `ADDITIVE | COMPATIBLE | BREAKING`.
   - *Done-when:* diff tests cover an added optional field (additive), a widened scale
     (compatible), and a removed field, a newly required field and a type change
-    (breaking).
-- [ ] **FE-4.1** Schema catalogue: owner, status pill, effective version, dependents.
+    (breaking). — ✔ verified: all three routes declare `schema:read` (router.py:211, :247-300). Reads are tenant-scoped through `SchemaRepository` → `ScopedRepository.scoped/get` (governance/repository.py:198-206, db/repository.py:32-37). Versions are reachable only through a scoped definition, and an absent or foreign schema gets the same 404 (service.py:529-534). Rules are at service.py:408-505. `test_change_classification` (test_schema_registry.py:262-307) has the 5 required cases: optional add → ADDITIVE (case 0), widened scale 9,4→11,6 → COMPATIBLE (case 7), removed → BREAKING (case 2), newly required → BREAKING (case 3) and STRING→DATE → BREAKING (case 5). It also has 8 more. All 13 PASSED (checks.txt:24-36). The seeded fixture is checked end to end over HTTP by `::test_seeded_diff_fixture` (:200-223, checks.txt:22). 404s: `::test_unknown_and_foreign_schemas_are_not_found` and `::test_diff_rejects_unknown_versions` (checks.txt:21, :23). `SchemaVersionList.schema_` is published as `schema` in backend/openapi.json:837-843 (`export_openapi --check` passes, checks.txt:46). Caveats (not Done-when gaps): a DECIMAL that drops its precision/scale (10,2 → NULL,NULL) is reported BREAKING "narrowed" (service.py:413-436). Precision/scale changes on non-DECIMAL types and field reordering are not reported, so the diff says "Identical" while the content hashes differ. A classification raise counts as COMPATIBLE, which domain owners should confirm.
+- [x] **FE-4.1** Schema catalogue: owner, status pill, effective version, dependents.
   - *Done-when:* the catalogue shows the three seeded schemas with platform status pills
-    (not the bundle's draft/published set).
-- [ ] **FE-4.2** Schema detail and version compare: side-by-side diff with a
+    (not the bundle's draft/published set). — ✔ verified: frontend/src/app/(platform)/schemas/page.tsx:66-121 renders the owner, a `StatusPill` for the summary status and the latest version, the effective version with its date, and the dependents. `StatusPill` (components/schemas/StatusPill.tsx:5-16) emits `data-status` from the platform enum. `STATUS_STYLE` is a `Record<SchemaVersionStatus, …>` that covers all 7 D-06 statuses (components/schemas/registry.ts:12-20), and registry.test.ts:20-26 asserts the full set (40 FE tests passed, checks.txt:64-65). browser-phase4.json shows `catalogue_codes` = the 3 seeded codes, `status_values` ACTIVE/DRAFT only, `status_values_all_platform: true`, `provisional_badges: 3` and `nav_has_schemas: true`. Screenshot 01 shows Active/Draft pills on all 3 rows. Note: the pills reuse bundle CSS classes (`status-published`, `status-testing`) for styling, but the labels and values are the platform set. IN_REVIEW/DEPRECATED and DRAFT/RETIRED have the same colour.
+- [x] **FE-4.2** Schema detail and version compare: side-by-side diff with a
   classification badge per change.
   - *Done-when:* comparing two seeded versions renders every change from the BE-4.3
-    fixture with the correct badge.
+    fixture with the correct badge. — ✔ verified: frontend/src/app/(platform)/schemas/[schemaId]/page.tsx:179-289 renders the compare selectors, a change list with one `CompatibilityBadge` per change (:228-248) and the side-by-side table (:251-285). browser-phase4.json `diff_changes` has the 5 changes of `test_seeded_diff_fixture` with these badges: legacy_book_code and product_family BREAKING, interest_rate COMPATIBLE, maturity_date BREAKING, rating_category ADDITIVE. It also shows `ui_matches_api_fixture: true`, `diff_overall: "BREAKING"`, `side_by_side_rows: 10` and `identical_when_same_version: true`. Screenshot 02 matches. ⚠ open follow-up (not a Done-when gap): the diff effect (:67-77) has no cancellation or response check. If the compare versions change quickly, a slow earlier response can land after a later one, and the page then shows the old diff's changes and overall badge under the new from/to columns. A failed diff also leaves the loading block shown indefinitely.
 
 *Reversibility:* additive tables; seed downgrade removes only migration-tagged rows.
 Nothing consumes the registry yet.

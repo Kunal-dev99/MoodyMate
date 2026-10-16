@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { Field } from '@/components/schemas/registry'
-import { COMPATIBILITY_STYLE, STATUS_STYLE, alignFields, typeLabel, valueLabel } from '@/components/schemas/registry'
+import {
+  COMPATIBILITY_STYLE,
+  STATUS_STYLE,
+  alignFields,
+  defaultComparison,
+  isDiffFor,
+  typeLabel,
+  valueLabel,
+} from '@/components/schemas/registry'
 
 const field = (name: string, extra: Partial<Field> = {}): Field => ({
   position: 1,
@@ -44,5 +52,15 @@ describe('schema registry display (FE-4.1, FE-4.2)', () => {
     expect(valueLabel({ precision: 9, scale: 4 })).toBe('precision=9, scale=4')
     expect(valueLabel(null)).toBe('—')
     expect(valueLabel(true)).toBe('true')
+  })
+  it('compares effective with latest, or with the version before when they match', () => {
+    const vs = [{ version: 1 }, { version: 2 }, { version: 3 }]
+    expect(defaultComparison(1, 3, vs)).toEqual({ from: 1, to: 3 })
+    expect(defaultComparison(3, 3, vs)).toEqual({ from: 2, to: 3 })
+  })
+  it('recognises a diff response that belongs to an earlier selection', () => {
+    const diff = { from_version: { version: 1 }, to_version: { version: 2 } }
+    expect(isDiffFor(diff, { from: 1, to: 2 })).toBe(true)
+    expect(isDiffFor(diff, { from: 2, to: 2 })).toBe(false)
   })
 })

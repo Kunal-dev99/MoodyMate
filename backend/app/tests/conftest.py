@@ -56,6 +56,21 @@ from alembic.config import Config  # noqa: E402
 
 from app.governance.constants import DEFAULT_TENANT_ID  # noqa: E402
 
+# Registry rows tests add. Some are no longer DRAFT, so the immutability triggers are
+# lifted for this one transaction, as the seed downgrade does (needs the table owner).
+_REGISTRY_CLEANUP = """
+BEGIN;
+ALTER TABLE schema_field DISABLE TRIGGER schema_field_immutable;
+ALTER TABLE schema_version DISABLE TRIGGER schema_version_immutable;
+DELETE FROM schema_dependency WHERE seeded_by IS NULL;
+DELETE FROM schema_field WHERE seeded_by IS NULL;
+DELETE FROM schema_version WHERE seeded_by IS NULL;
+DELETE FROM schema_definition WHERE seeded_by IS NULL;
+ALTER TABLE schema_field ENABLE TRIGGER schema_field_immutable;
+ALTER TABLE schema_version ENABLE TRIGGER schema_version_immutable;
+COMMIT;
+"""
+
 # Deletes everything that is not seed data (D-11), children first.
 _CLEANUP = [
     "DELETE FROM user_role",
@@ -63,11 +78,7 @@ _CLEANUP = [
     "DELETE FROM role_permission WHERE seeded_by IS NULL",
     "DELETE FROM role WHERE seeded_by IS NULL",
     "DELETE FROM permission WHERE seeded_by IS NULL",
-    # Registry rows tests add (never on non-DRAFT versions: those are immutable).
-    "DELETE FROM schema_dependency WHERE seeded_by IS NULL",
-    "DELETE FROM schema_field WHERE seeded_by IS NULL",
-    "DELETE FROM schema_version WHERE seeded_by IS NULL",
-    "DELETE FROM schema_definition WHERE seeded_by IS NULL",
+    _REGISTRY_CLEANUP,
     "DELETE FROM tenant WHERE seeded_by IS NULL",
 ]
 
@@ -94,9 +105,25 @@ def sql(url: str, statement: str, *args: Any) -> list[Any]:
     return asyncio.run(run())
 
 
+def script(url: str, statements: str) -> None:
+    """Run a multi-statement script directly with asyncpg."""
+
+    async def run() -> None:
+        conn = await asyncpg.connect(url.replace("+asyncpg", ""))
+        try:
+            await conn.execute(statements)
+        finally:
+            await conn.close()
+
+    asyncio.run(run())
+
+
 def clean(url: str) -> None:
     for statement in _CLEANUP:
-        sql(url, statement)
+        if statement is _REGISTRY_CLEANUP:
+            script(url, statement)
+        else:
+            sql(url, statement)
 
 
 @pytest.fixture(scope="session")

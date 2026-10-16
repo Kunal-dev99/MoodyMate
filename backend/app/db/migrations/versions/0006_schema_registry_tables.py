@@ -1,9 +1,11 @@
 """Schema registry tables (BE-4.1, DG-01).
 
 A schema_version is immutable once it leaves DRAFT: triggers reject any change to its
-contract (version, schema, content hash, fields) and its deletion. Only the status may
-move on, and never back to DRAFT. The one exception is removing rows a seed migration
-inserted (D-11), which that migration's downgrade enables for its own transaction.
+contract (version, schema, content hash, compatibility, fields), its effective date once
+ACTIVE, and its deletion. Only the status may move on: never back to DRAFT, and never out
+of REJECTED or RETIRED. TRUNCATE is rejected on every registry table. A seed migration's
+downgrade (D-11) disables the row triggers for its own transaction, which needs the
+table owner: a session setting is not enough.
 
 Revision ID: 0006
 Revises: 0005
@@ -23,53 +25,55 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
-# A seed downgrade sets this (SET LOCAL) to remove the rows it inserted (D-11). Unset, it
-# reads as NULL, hence coalesce: a NULL condition must never let a delete through.
-SEED_REMOVAL_SETTING = "moodymate.schema_seed_removal"
+FROZEN_ONCE_ACTIVE = "('ACTIVE', 'DEPRECATED', 'RETIRED', 'REJECTED')"
 
 VERSION_GUARD = f"""
 CREATE FUNCTION schema_version_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-    IF TG_OP = 'DELETE' THEN
-        IF OLD.status <> 'DRAFT' AND NOT (
-            OLD.seeded_by IS NOT NULL
-            AND coalesce(current_setting('{SEED_REMOVAL_SETTING}', true), '') = 'on'
-        ) THEN
-            RAISE EXCEPTION 'schema_version % is % and immutable (BE-4.1): DELETE rejected',
-                OLD.id, OLD.status USING ERRCODE = 'insufficient_privilege';
-        END IF;
-        RETURN OLD;
+    IF OLD.status = 'DRAFT' THEN
+        RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
     END IF;
-    IF OLD.status <> 'DRAFT' AND (
-        (NEW.schema_id, NEW.version, NEW.content_sha256)
-            IS DISTINCT FROM (OLD.schema_id, OLD.version, OLD.content_sha256)
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION 'schema_version % is % and immutable (BE-4.1): DELETE rejected',
+            OLD.id, OLD.status USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    IF (NEW.schema_id, NEW.version, NEW.content_sha256, NEW.compatibility, NEW.seeded_by)
+            IS DISTINCT FROM
+            (OLD.schema_id, OLD.version, OLD.content_sha256, OLD.compatibility, OLD.seeded_by)
         OR NEW.status = 'DRAFT'
-    ) THEN
+        OR (OLD.status IN {FROZEN_ONCE_ACTIVE}
+            AND NEW.effective_from IS DISTINCT FROM OLD.effective_from)
+    THEN
         RAISE EXCEPTION 'schema_version % is % and immutable (BE-4.1): contract change rejected',
             OLD.id, OLD.status USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    IF OLD.status IN ('REJECTED', 'RETIRED') AND NEW.status <> OLD.status THEN
+        RAISE EXCEPTION 'schema_version % is %, which is final (D-06)', OLD.id, OLD.status
+            USING ERRCODE = 'insufficient_privilege';
     END IF;
     RETURN NEW;
 END;
 $$
 """
 
-FIELD_GUARD = f"""
+# FOR SHARE: a field write locks its version row, so a concurrent status change waits
+# for it (and then sees the field) instead of activating a version mid-edit.
+FIELD_GUARD = """
 CREATE FUNCTION schema_field_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE
     version_status text;
 BEGIN
     IF TG_OP IN ('UPDATE', 'DELETE') THEN
-        SELECT status INTO version_status FROM schema_version WHERE id = OLD.schema_version_id;
-        IF version_status <> 'DRAFT' AND NOT (
-            TG_OP = 'DELETE' AND OLD.seeded_by IS NOT NULL
-            AND coalesce(current_setting('{SEED_REMOVAL_SETTING}', true), '') = 'on'
-        ) THEN
+        SELECT status INTO version_status FROM schema_version
+            WHERE id = OLD.schema_version_id FOR SHARE;
+        IF version_status <> 'DRAFT' THEN
             RAISE EXCEPTION 'fields of a % schema_version are immutable (BE-4.1): % rejected',
                 version_status, TG_OP USING ERRCODE = 'insufficient_privilege';
         END IF;
     END IF;
     IF TG_OP IN ('INSERT', 'UPDATE') THEN
-        SELECT status INTO version_status FROM schema_version WHERE id = NEW.schema_version_id;
+        SELECT status INTO version_status FROM schema_version
+            WHERE id = NEW.schema_version_id FOR SHARE;
         IF version_status <> 'DRAFT' THEN
             RAISE EXCEPTION 'fields of a % schema_version are immutable (BE-4.1): % rejected',
                 version_status, TG_OP USING ERRCODE = 'insufficient_privilege';
@@ -80,6 +84,58 @@ BEGIN
 END;
 $$
 """
+
+TRUNCATE_GUARD = """
+CREATE FUNCTION schema_registry_no_truncate() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION '% is part of the immutable schema registry (BE-4.1): TRUNCATE rejected',
+        TG_TABLE_NAME USING ERRCODE = 'insufficient_privilege';
+END;
+$$
+"""
+
+# D-04: a dependency never links schemas of two tenants.
+DEPENDENCY_GUARD = """
+CREATE FUNCTION schema_dependency_same_tenant() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.dependent_schema_id IS NOT NULL AND (
+        SELECT tenant_id FROM schema_definition WHERE id = NEW.dependent_schema_id
+    ) IS DISTINCT FROM (
+        SELECT tenant_id FROM schema_definition WHERE id = NEW.schema_id
+    ) THEN
+        RAISE EXCEPTION 'schema_dependency must stay within one tenant (D-04)'
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    RETURN NEW;
+END;
+$$
+"""
+
+CHECKS = [
+    (
+        "schema_version",
+        "status",
+        "status IN ('DRAFT', 'IN_REVIEW', 'APPROVED', 'ACTIVE', 'DEPRECATED', 'RETIRED',"
+        " 'REJECTED')",
+    ),
+    (
+        "schema_version",
+        "compatibility",
+        "compatibility IS NULL OR compatibility IN ('ADDITIVE', 'COMPATIBLE', 'BREAKING')",
+    ),
+    (
+        "schema_field",
+        "data_type",
+        "data_type IN ('STRING', 'INTEGER', 'DECIMAL', 'BOOLEAN', 'DATE', 'TIMESTAMP')",
+    ),
+    (
+        "schema_dependency",
+        "dependent_type",
+        "dependent_type IN ('SCHEMA', 'MAPPING', 'RULE', 'MODULE', 'REPORT', 'INTEGRATION')",
+    ),
+]
+
+TRUNCATE_TABLES = ("schema_field", "schema_version", "schema_definition", "schema_dependency")
 
 
 def upgrade() -> None:
@@ -160,8 +216,21 @@ def upgrade() -> None:
     )
     op.create_index(op.f('ix_schema_field_schema_version_id'), 'schema_field', ['schema_version_id'], unique=False)
     # ### end Alembic commands ###
+    # Enumerated columns (D-06) and the classification code (BE-3.4), so a bad value can
+    # never be frozen into an immutable version.
+    for table, name, condition in CHECKS:
+        op.create_check_constraint(op.f(f"ck_{table}_{name}"), table, condition)
+    op.create_foreign_key(
+        op.f("fk_schema_field_classification_data_classification"),
+        "schema_field",
+        "data_classification",
+        ["classification"],
+        ["code"],
+    )
     op.execute(VERSION_GUARD)
     op.execute(FIELD_GUARD)
+    op.execute(TRUNCATE_GUARD)
+    op.execute(DEPENDENCY_GUARD)
     op.execute(
         "CREATE TRIGGER schema_version_immutable BEFORE UPDATE OR DELETE ON schema_version "
         "FOR EACH ROW EXECUTE FUNCTION schema_version_guard()"
@@ -170,6 +239,15 @@ def upgrade() -> None:
         "CREATE TRIGGER schema_field_immutable BEFORE INSERT OR UPDATE OR DELETE ON schema_field "
         "FOR EACH ROW EXECUTE FUNCTION schema_field_guard()"
     )
+    op.execute(
+        "CREATE TRIGGER schema_dependency_same_tenant BEFORE INSERT OR UPDATE "
+        "ON schema_dependency FOR EACH ROW EXECUTE FUNCTION schema_dependency_same_tenant()"
+    )
+    for table in TRUNCATE_TABLES:
+        op.execute(
+            f"CREATE TRIGGER {table}_no_truncate BEFORE TRUNCATE ON {table} "
+            "FOR EACH STATEMENT EXECUTE FUNCTION schema_registry_no_truncate()"
+        )
 
 
 def downgrade() -> None:
@@ -179,10 +257,18 @@ def downgrade() -> None:
         "'schema_definition has rows; downgrade 0007 first, and archive any schemas "
         "created since'; END IF; END $$"
     )
+    for table in TRUNCATE_TABLES:
+        op.execute(f"DROP TRIGGER IF EXISTS {table}_no_truncate ON {table}")
+    op.execute("DROP TRIGGER IF EXISTS schema_dependency_same_tenant ON schema_dependency")
     op.execute("DROP TRIGGER IF EXISTS schema_field_immutable ON schema_field")
     op.execute("DROP TRIGGER IF EXISTS schema_version_immutable ON schema_version")
-    op.execute("DROP FUNCTION IF EXISTS schema_field_guard()")
-    op.execute("DROP FUNCTION IF EXISTS schema_version_guard()")
+    for fn in (
+        "schema_dependency_same_tenant",
+        "schema_registry_no_truncate",
+        "schema_field_guard",
+        "schema_version_guard",
+    ):
+        op.execute(f"DROP FUNCTION IF EXISTS {fn}()")
     # ### commands auto generated by Alembic - please adjust! ###
     op.drop_index(op.f('ix_schema_field_schema_version_id'), table_name='schema_field')
     op.drop_table('schema_field')

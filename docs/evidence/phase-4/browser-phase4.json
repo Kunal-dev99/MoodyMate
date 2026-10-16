@@ -37,7 +37,7 @@
     {
       "field": "interest_rate",
       "badge": "COMPATIBLE",
-      "text": "Compatible\ninterest_rate\nMODIFIED · SCALE\nprecision=9, scale=4 → precision=11, scale=6\nPrecision/scale widened: every existing value still fits."
+      "text": "Compatible\ninterest_rate\nMODIFIED · PRECISION_SCALE\nprecision=9, scale=4 → precision=11, scale=6\nPrecision/scale widened: every existing value still fits."
     },
     {
       "field": "maturity_date",

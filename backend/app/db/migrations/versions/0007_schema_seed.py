@@ -141,6 +141,11 @@ DEPENDENCIES = [
     ("cashflow_event", "REPORT", "maturity_ladder (illustrative)", None, "WS4 report."),
 ]
 
+TRIGGERS = [
+    ("schema_field", "schema_field_immutable"),
+    ("schema_version", "schema_version_immutable"),
+]
+
 CONTRACT_KEYS = (
     "name",
     "data_type",
@@ -155,7 +160,8 @@ CONTRACT_KEYS = (
 
 def contract_sha256(fields: list[dict[str, Any]]) -> str:
     """Frozen copy of app.governance.service.contract_sha256 (a test keeps them equal)."""
-    canonical = [{k: fld[k] for k in CONTRACT_KEYS} for fld in fields]
+    ordered = sorted(fields, key=lambda fld: fld["name"])  # field order is not contract
+    canonical = [{k: fld[k] for k in CONTRACT_KEYS} for fld in ordered]
     payload = json.dumps(canonical, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode()).hexdigest()
 
@@ -239,9 +245,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Only rows this migration inserted (D-11), children first. The immutability triggers
-    # allow deleting seeded rows only while this setting is on, in this transaction.
-    op.execute("SET LOCAL moodymate.schema_seed_removal = 'on'")
+    # Only rows this migration inserted (D-11), children first. Seeded versions are not
+    # DRAFT, so the immutability triggers would refuse: disable them for this transaction
+    # only (needs the table owner, which the migration role is).
+    for table, trigger in TRIGGERS:
+        op.execute(f"ALTER TABLE {table} DISABLE TRIGGER {trigger}")
     for table in ("schema_dependency", "schema_field", "schema_version", "schema_definition"):
         op.execute(sa.text(f"DELETE FROM {table} WHERE seeded_by = :tag").bindparams(tag=TAG))  # noqa: S608
-    op.execute("SET LOCAL moodymate.schema_seed_removal = 'off'")
+    for table, trigger in TRIGGERS:
+        op.execute(f"ALTER TABLE {table} ENABLE TRIGGER {trigger}")

@@ -12,7 +12,14 @@ import { PageSection } from '@/components/common/PageSection'
 import { toastApiError } from '@/components/common/api-error-toast'
 import { CompatibilityBadge } from '@/components/schemas/CompatibilityBadge'
 import { StatusPill } from '@/components/schemas/StatusPill'
-import { alignFields, typeLabel, valueLabel, type Field } from '@/components/schemas/registry'
+import {
+  alignFields,
+  defaultComparison,
+  isDiffFor,
+  typeLabel,
+  valueLabel,
+  type Field,
+} from '@/components/schemas/registry'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
@@ -29,7 +36,7 @@ function FieldCell({ field, changes }: { field?: Field; changes: Change[] }) {
   const changed = new Set(changes.map((c) => c.attribute))
   return (
     <TableCell className="text-sm">
-      <span className={cn('font-mono', (changed.has('data_type') || changed.has('scale') || changed.has('unit')) && 'font-semibold')}>
+      <span className={cn('font-mono', (changed.has('data_type') || changed.has('precision_scale') || changed.has('unit')) && 'font-semibold')}>
         {typeLabel(field)}
       </span>
       <span className={cn('ml-2 text-xs', changed.has('required') ? 'font-semibold' : 'text-muted-foreground')}>
@@ -49,14 +56,18 @@ export default function SchemaDetailPage() {
   const [selected, setSelected] = useState<number | null>(null)
   const [compare, setCompare] = useState<{ from: number; to: number } | null>(null)
   const [diff, setDiff] = useState<Diff | null>(null)
+  const [diffFailed, setDiffFailed] = useState(false)
 
   useEffect(() => {
     call(() => api.GET('/api/v1/schemas/{schema_id}/versions', { params: { path: { schema_id: schemaId } } }))
       .then((data) => {
         setState({ kind: 'ready', data })
-        const effective = data.schema.effective_version?.version ?? data.schema.latest_version.version
+        const latest = data.schema.latest_version.version
+        const effective = data.schema.effective_version?.version ?? latest
         setSelected(effective)
-        if (data.items.length > 1) setCompare({ from: effective, to: data.schema.latest_version.version })
+        // Compare what is in effect with what comes next; if that is the same version,
+        // compare it with the one before.
+        if (data.items.length > 1) setCompare(defaultComparison(effective, latest, data.items))
       })
       .catch((err: unknown) => {
         if (err instanceof ApiError) setState({ kind: 'error', status: err.status, cid: err.correlationId })
@@ -66,14 +77,26 @@ export default function SchemaDetailPage() {
 
   useEffect(() => {
     if (!compare) return
+    // A slower response for an earlier selection must never replace the current one.
+    let current = true
     setDiff(null)
+    setDiffFailed(false)
     call(() =>
       api.GET('/api/v1/schemas/{schema_id}/diff', {
         params: { path: { schema_id: schemaId }, query: { from: compare.from, to: compare.to } },
       }),
     )
-      .then(setDiff)
-      .catch((err: unknown) => toastApiError(err, 'Could not compare versions'))
+      .then((result) => {
+        if (current && isDiffFor(result, compare)) setDiff(result)
+      })
+      .catch((err: unknown) => {
+        if (!current) return
+        setDiffFailed(true)
+        toastApiError(err, 'Could not compare versions')
+      })
+    return () => {
+      current = false
+    }
   }, [compare, schemaId])
 
   const byVersion = useMemo(
@@ -220,7 +243,11 @@ export default function SchemaDetailPage() {
                 )}
               </div>
 
-              {!diff ? (
+              {diffFailed ? (
+                <p className="text-sm text-destructive" data-testid="diff-error">
+                  The comparison could not be loaded. Change the selection to try again.
+                </p>
+              ) : !diff ? (
                 <LoadingBlock rows={4} />
               ) : (
                 <>

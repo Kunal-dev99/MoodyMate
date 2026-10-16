@@ -211,7 +211,7 @@ def test_seeded_diff_fixture(api: TestClient, db: str) -> None:
     got = {(c["field"], c["change"], c["attribute"], c["compatibility"]) for c in body["changes"]}
     assert got == {
         ("rating_category", "ADDED", None, "ADDITIVE"),
-        ("interest_rate", "MODIFIED", "scale", "COMPATIBLE"),
+        ("interest_rate", "MODIFIED", "precision_scale", "COMPATIBLE"),
         ("legacy_book_code", "REMOVED", None, "BREAKING"),
         ("product_family", "MODIFIED", "required", "BREAKING"),
         ("maturity_date", "MODIFIED", "data_type", "BREAKING"),
@@ -272,22 +272,22 @@ DEC = {"data_type": "DECIMAL"}
         (
             [spec(**DEC, precision=9, scale=4)],
             [spec(**DEC, precision=11, scale=6)],
-            ("MODIFIED", "scale", "COMPATIBLE"),
+            ("MODIFIED", "precision_scale", "COMPATIBLE"),
         ),
         (
             [spec(**DEC, precision=9, scale=4)],
             [spec(**DEC, precision=12, scale=4)],
-            ("MODIFIED", "scale", "COMPATIBLE"),
+            ("MODIFIED", "precision_scale", "COMPATIBLE"),
         ),
         (
             [spec(**DEC, precision=9, scale=4)],
             [spec(**DEC, precision=9, scale=2)],
-            ("MODIFIED", "scale", "BREAKING"),
+            ("MODIFIED", "precision_scale", "BREAKING"),
         ),
         (
             [spec(**DEC, precision=9, scale=4)],
             [spec(**DEC, precision=9, scale=6)],  # fewer integer digits
-            ("MODIFIED", "scale", "BREAKING"),
+            ("MODIFIED", "precision_scale", "BREAKING"),
         ),
         (
             [spec()],

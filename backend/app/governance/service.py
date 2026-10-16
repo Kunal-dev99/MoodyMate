@@ -25,7 +25,6 @@ from app.governance.constants import (
     AuditOutcome,
     ClassificationCode,
     Compatibility,
-    FieldType,
     SchemaVersionStatus,
     TenantStatus,
     UserStatus,
@@ -381,9 +380,11 @@ class FieldSpec:
 
 
 def contract_sha256(fields: list[FieldSpec]) -> str:
-    """Content hash of a version's contract, in field order. Migration 0007 holds a frozen
-    copy of this algorithm; test_schema_registry keeps the two equal."""
-    canonical = [{k: getattr(f, k) for k in CONTRACT_KEYS} for f in fields]
+    """Content hash of a version's contract. Fields are hashed by name, so reordering them
+    is not a contract change (the diff agrees). Migration 0007 holds a frozen copy of this
+    algorithm; test_schema_registry keeps the two equal."""
+    ordered = sorted(fields, key=lambda f: f.name)
+    canonical = [{k: getattr(f, k) for k in CONTRACT_KEYS} for f in ordered]
     payload = json.dumps(canonical, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode()).hexdigest()
 
@@ -405,21 +406,26 @@ class SchemaDiff:
     overall: Compatibility | None  # None: the contracts are identical
 
 
-def _decimal_change(old: FieldSpec, new: FieldSpec) -> FieldChange | None:
+def _fits(old: int | None, new: int | None) -> bool:
+    """Does a size bound `new` hold everything `old` held? None means unbounded."""
+    return new is None or (old is not None and new >= old)
+
+
+def _size_change(old: FieldSpec, new: FieldSpec) -> FieldChange | None:
+    """Precision/scale on any type; a missing bound is unbounded (widest)."""
     if (old.precision, old.scale) == (new.precision, new.scale):
         return None
     before = {"precision": old.precision, "scale": old.scale}
     after = {"precision": new.precision, "scale": new.scale}
-    widened = (
-        None not in (old.precision, old.scale, new.precision, new.scale)
-        and new.scale >= old.scale  # type: ignore[operator]
-        and new.precision - new.scale >= old.precision - old.scale  # type: ignore[operator]
+    integer_digits = (
+        None if old.precision is None else old.precision - (old.scale or 0),
+        None if new.precision is None else new.precision - (new.scale or 0),
     )
-    if widened:
+    if _fits(old.scale, new.scale) and _fits(*integer_digits):
         return FieldChange(
             new.name,
             "MODIFIED",
-            "scale",
+            "precision_scale",
             before,
             after,
             Compatibility.COMPATIBLE,
@@ -428,7 +434,7 @@ def _decimal_change(old: FieldSpec, new: FieldSpec) -> FieldChange | None:
     return FieldChange(
         new.name,
         "MODIFIED",
-        "scale",
+        "precision_scale",
         before,
         after,
         Compatibility.BREAKING,
@@ -452,8 +458,8 @@ def _field_changes(old: FieldSpec, new: FieldSpec) -> list[FieldChange]:
             Compatibility.BREAKING,
             "Type changed: existing values and consumers may fail.",
         )
-    elif new.data_type == FieldType.DECIMAL and (decimal := _decimal_change(old, new)):
-        changes.append(decimal)
+    if size := _size_change(old, new):
+        changes.append(size)
     if old.required != new.required:
         if new.required:
             add("required", Compatibility.BREAKING, "Now required: existing records may lack it.")

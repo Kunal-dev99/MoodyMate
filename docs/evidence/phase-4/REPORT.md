@@ -17,10 +17,8 @@ Evidence:
 
 ## Design notes
 
-- **Immutability is enforced in the database.** A seed downgrade may remove its own tagged rows only by setting `moodymate.schema_seed_removal` (`SET LOCAL`) in its own transaction.
-  - A NULL-handling bug in that guard let seeded rows be deleted. `test_active_version_contract_cannot_change` found it during the build, and it was fixed with `coalesce` before this report.
-  - The same database-owner caveat as Phase 3 applies: the owner can disable the triggers.
-- **Content hash:** SHA-256 of the canonical JSON of each field's contract attributes, in order. Descriptions are excluded because they are documentation, but they are still frozen with the version.
+- **Immutability is enforced in the database.** A seed downgrade removes its own tagged rows by disabling the row triggers inside its own transaction, which needs the table owner. (The first build used a session setting for this; the review showed any session could set it, so it was replaced. See the follow-ups below.) The same database-owner caveat as Phase 3 applies.
+- **Content hash:** SHA-256 of the canonical JSON of each field's contract attributes, sorted by field name, so reordering fields does not change it. Descriptions are excluded because they are documentation, but they are still frozen with the version.
 - **Diff rules:**
   - Adding an optional field is ADDITIVE.
   - Adding a required field, removing a field, a type change, a unit change, a newly required field, or a narrower precision or scale is BREAKING.
@@ -30,6 +28,25 @@ Evidence:
 - **Reads are not audited.** Every role holds `schema:read` and the registry holds no classified values, so these are not privileged reads. Phase 5 writes (proposals and approvals) will be audited.
 - **No masking needed.** Field metadata carries a classification *code*, not classified values, so these responses have no classified fields to mask.
 - **0006 downgrade** refuses while `schema_definition` has rows. 0007's downgrade removes the seed first; anything left is user data. The offline `--sql` script carries the same guard.
+
+## Verification follow-ups
+
+The independent review verified all 5 tasks and reported 9 defects. Each fix below had its test written first, and all 21 new tests in `app/tests/test_schema_registry_hardening.py` failed before the fixes. The results are in checks.txt, in the "Verification follow-ups" section.
+
+| # | Finding | Resolution |
+|---|---|---|
+| 1 | TRUNCATE bypassed immutability. | Statement-level TRUNCATE triggers on all four registry tables (test). |
+| 2 | Any session could set the seed-removal setting. | The setting is gone. The 0007 downgrade and the test cleanup lift the row triggers with `ALTER TABLE … DISABLE TRIGGER` inside their own transaction, which needs the owner. `seeded_by` is frozen after DRAFT. Test: setting the old variable unlocks nothing. |
+| 3 | A field insert could race with activation. | The field trigger locks its version row (`FOR SHARE`). Test: activation waits on an open field insert (lock timeout). |
+| 4 | No hash check at activation. | **Deferred to Phase 5.** Phase 4 has no write path; the status transitions in BE-5.3 must recompute the hash and reject a mismatch. |
+| 5 | No CHECK constraints, which risked a 500. | CHECK constraints on `status`, `compatibility`, `data_type` and `dependent_type`, plus an FK from `classification` to `data_classification.code` (tests). |
+| 6 | Mutable metadata; terminal statuses could be revived. | `compatibility` and `seeded_by` are frozen after DRAFT, and `effective_from` once ACTIVE or later. REJECTED and RETIRED are final (tests). The full D-06 transition table comes with Phase 5. |
+| 7 | Stale compare responses; endless loading on error. | Stale responses are ignored, both by an effect cleanup flag and by matching from/to (`isDiffFor`). A failure shows an error state. "From" defaults to the previous version when the effective version is the latest (unit tests). |
+| 8 | Diff edge cases. | A missing precision or scale bound counts as unbounded, so removing a bound is a widening and adding one is breaking. Size changes are reported on every type and are no longer hidden by a type change. The attribute is now `precision_scale`. Field order is excluded from both the hash and the diff (tests). Raising a classification still counts as COMPATIBLE, pending confirmation from the client's domain owners. |
+| 9 | A dependency could point at another tenant's schema. | A trigger rejects cross-tenant dependencies (test). |
+| — | No test for the 0006 refusal. | `test_registry_downgrade_refuses_while_user_schemas_exist`. |
+
+Not changed: IN_REVIEW and DEPRECATED (and DRAFT and RETIRED) share a colour family. Their labels always differ, and the design system has five status styles.
 
 ## Not done / follow-ups
 

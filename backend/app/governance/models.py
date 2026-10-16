@@ -6,10 +6,12 @@ users are identity-provider subjects (Arch §10, D-09).
 
 import uuid
 from datetime import date, datetime
+from enum import StrEnum
 from typing import Any
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     ForeignKey,
@@ -23,7 +25,14 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import AuditColumns, Base, ScopedModel
-from app.governance.constants import TenantStatus, UserStatus
+from app.governance.constants import (
+    Compatibility,
+    DependentType,
+    FieldType,
+    SchemaVersionStatus,
+    TenantStatus,
+    UserStatus,
+)
 
 
 class Tenant(AuditColumns, Base):
@@ -167,6 +176,11 @@ class AccessPolicy(AuditColumns, Base):
     seeded_by: Mapped[str | None] = mapped_column(String(100))
 
 
+def _in(column: str, values: type[StrEnum]) -> str:
+    """CHECK expression limiting a column to an enum's values."""
+    return f"{column} IN ({', '.join(repr(v.value) for v in values)})"
+
+
 class SchemaDefinition(ScopedModel, Base):
     """A logical contract such as instrument or position (BE-4.1, Data Model §2)."""
 
@@ -198,7 +212,13 @@ class SchemaVersion(AuditColumns, Base):
     longer change; only the status moves (enforced by DB triggers, migration 0006)."""
 
     __tablename__ = "schema_version"
-    __table_args__ = (UniqueConstraint("schema_id", "version"),)
+    __table_args__ = (
+        UniqueConstraint("schema_id", "version"),
+        CheckConstraint(_in("status", SchemaVersionStatus), name="status"),
+        CheckConstraint(
+            f"compatibility IS NULL OR {_in('compatibility', Compatibility)}", name="compatibility"
+        ),
+    )
 
     schema_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("schema_definition.id"), index=True, nullable=False
@@ -220,7 +240,10 @@ class SchemaVersion(AuditColumns, Base):
 
 class SchemaField(AuditColumns, Base):
     __tablename__ = "schema_field"
-    __table_args__ = (UniqueConstraint("schema_version_id", "name"),)
+    __table_args__ = (
+        UniqueConstraint("schema_version_id", "name"),
+        CheckConstraint(_in("data_type", FieldType), name="data_type"),
+    )
 
     schema_version_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("schema_version.id"), index=True, nullable=False
@@ -233,7 +256,9 @@ class SchemaField(AuditColumns, Base):
     precision: Mapped[int | None] = mapped_column(Integer)
     scale: Mapped[int | None] = mapped_column(Integer)
     # A data_classification code (BE-3.4): the sensitivity of values in this field.
-    classification: Mapped[str] = mapped_column(String(50), nullable=False)
+    classification: Mapped[str] = mapped_column(
+        String(50), ForeignKey("data_classification.code"), nullable=False
+    )
     extension_eligible: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     description: Mapped[str | None] = mapped_column(String(1000))
     seeded_by: Mapped[str | None] = mapped_column(String(100))
@@ -244,7 +269,10 @@ class SchemaDependency(AuditColumns, Base):
     WS2–WS4 exist, dependents are seeded illustrations used by impact analysis."""
 
     __tablename__ = "schema_dependency"
-    __table_args__ = (UniqueConstraint("schema_id", "dependent_type", "dependent_ref"),)
+    __table_args__ = (
+        UniqueConstraint("schema_id", "dependent_type", "dependent_ref"),
+        CheckConstraint(_in("dependent_type", DependentType), name="dependent_type"),
+    )
 
     schema_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("schema_definition.id"), index=True, nullable=False

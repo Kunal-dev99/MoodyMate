@@ -58,3 +58,22 @@ export function valueLabel(value: unknown): string {
       .join(', ')
   return String(value)
 }
+
+/** Default compare: effective → latest, or the version before when they are the same. */
+export function defaultComparison(
+  effective: number,
+  latest: number,
+  versions: { version: number }[],
+): { from: number; to: number } {
+  if (effective !== latest) return { from: effective, to: latest }
+  const earlier = versions.map((v) => v.version).filter((v) => v < latest)
+  return { from: earlier.length ? Math.max(...earlier) : latest, to: latest }
+}
+
+/** Is this diff response for the selection now on screen (stale-response guard)? */
+export function isDiffFor(
+  diff: { from_version: { version: number }; to_version: { version: number } },
+  selection: { from: number; to: number },
+): boolean {
+  return diff.from_version.version === selection.from && diff.to_version.version === selection.to
+}
