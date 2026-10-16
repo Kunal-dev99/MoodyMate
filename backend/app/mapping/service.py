@@ -863,8 +863,11 @@ class MappingService:
         )
         self.repo.add(validation)
         await self.repo.flush()
-        if version.status == MappingVersionStatus.DRAFT:
-            version.last_validation_id = validation.id  # frozen once the draft is submitted
+        # Review P10-1: re-read the version under its row lock, so a submit that committed
+        # meanwhile is seen (a submitted version's pointer is frozen; the run still stands).
+        locked = await self.repo.version_of(version.field_mapping_id, version.version)
+        if locked is not None and locked.status == MappingVersionStatus.DRAFT:
+            locked.last_validation_id = validation.id  # frozen once the draft is submitted
             await self.repo.flush()
         details: dict[str, Any] = {
             "import_id": str(job.id),

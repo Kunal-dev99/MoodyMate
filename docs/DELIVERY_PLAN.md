@@ -908,7 +908,7 @@ Goal: a steward builds a versioned, immutable mapping from source columns to the
 one pinned schema version, using allowlisted deterministic transforms. The mapping is
 dry-run validated against a real import, and a different person activates it.
 
-- [ ] **BE-10.1** Migration plus models in `mapping`:
+- [x] **BE-10.1** Migration plus models in `mapping`:
   - `field_mapping`: code, `source_contract_id`, target `schema_id`.
   - `mapping_version`: status as `schema_version` (D-06), pinned `schema_version_id`,
     `content_sha256`, author, decision columns, `last_validation` reference.
@@ -920,20 +920,43 @@ dry-run validated against a real import, and a different person activates it.
   session-settable bypass. CHECKs cover the enums.
   - *Done-when:* the round trip passes; tests prove a rule INSERT/UPDATE/DELETE on an ACTIVE
     version, `TRUNCATE mapping_rule` and `SET`-based bypass attempts all fail; the downgrade
-    refusal is tested.
-- [ ] **BE-10.2** Transform engine (D-19): a closed allowlist of pure, deterministic
+    refusal is tested. — ✔ verified by code read at 0d7b07a. `db/migrations/versions/0014_mapping_tables.py`
+    (guards `:73-268`, no `current_setting`; TRUNCATE refused on all four tables; enum CHECKs `:352-411`;
+    `import_job_mapping_pin` `:244-268` writes once, only an ACTIVE version of the import's own
+    contract and schema version; downgrade refuses while `field_mapping` has rows `:435-439`).
+    `test_mappings.py::test_non_draft_versions_and_rules_are_immutable_in_the_database` (rule
+    INSERT/UPDATE/DELETE on an ACTIVE version, version/mapping/validation edits, INSERT as ACTIVE,
+    TRUNCATE CASCADE on each table, `set_config`/`SET LOCAL` bypass, rows unchanged, downgrade
+    refusal). Round trip: `test_ws1_verification.py::test_migration_round_trip_and_downgrade_guards`
+    (head → base → head) and the reported 0014↔0013 run. Follow-ups P10-2 (status moves without a
+    decision are not refused in the DB) and the pin trigger having no test yet (Phase 11 must cover it).
+- [x] **BE-10.2** Transform engine (D-19): a closed allowlist of pure, deterministic
   functions with JSON-schema-validated params. There is no eval, no expressions and no
   regex.
   - *Done-when:* every allowlisted transform has unit tests, including Decimal results that
     never pass through a float; an unknown transform code or bad params gets 422; and a test
-    asserts that the allowlist equals the D-19 list.
-- [ ] **BE-10.3** `GET /mappings` (filter by source and schema), `GET /mappings/{mapping_id}`
+    asserts that the allowlist equals the D-19 list. — ✔ verified by code read at 0d7b07a.
+    `mapping/transforms/engine.py` (strict pydantic param models with `extra="forbid"`, validated in
+    JSON strict mode `:313-337`; hand-written parsers, ASCII digits only, no exponent/NaN `:174-256`;
+    Decimal in a context that traps Inexact, fitting refuses rather than rounds `:362-404`; reason codes
+    never carry the value). `test_mappings.py::test_transform_allowlist` (all 11 transforms with
+    Decimal results compared by type and value, failure reasons without the value, NUMERIC(20,2)
+    fit, source scan for float/regex/eval/strptime, allowlist == D-19 set, 7 bad definitions refused
+    by the engine and by `POST /mappings` with 422 and nothing written).
+- [x] **BE-10.3** `GET /mappings` (filter by source and schema), `GET /mappings/{mapping_id}`
   (versions and rules), `POST /mappings` (definition plus DRAFT v1 pinned to the target's
   ACTIVE schema version) and `POST /mappings/{mapping_id}/versions` (the next DRAFT).
   - *Done-when:* tests cover create/list/get; a new version leaves the previous version's
     rules and hash unchanged; there is a cross-tenant 404; `risk_analyst` `POST` gets 403
-    with a DENIED event.
-- [ ] **BE-10.4** `POST /imports/{import_id}/mappings/validate` (body: `mapping_version_id`).
+    with a DENIED event. — ✔ verified by code read at 0d7b07a. `mapping/router.py:189-263`
+    (`mapping:read` / `mapping:propose`); `mapping/service.py:676-801` (v1 pinned to the ACTIVE schema
+    version; each refusal audited DENIED through `_refuse` `:502-514`; the next DRAFT never touches
+    earlier rows); `mapping/repository.py` (every query tenant-scoped). `test_mappings.py::test_create_list_get_and_versions`
+    (create/list with source and schema filters/get; v1 row and rules byte-equal after v2;
+    `no_change`, `unknown_target_field`, `duplicate_code`, `contract_already_mapped` with one DENIED
+    each; foreign id body equal to a random id's; foreign writes 404; `risk_analyst` 403 with one DENIED).
+    Deviation accepted: a draft "edit" is a new DRAFT version (no in-place edit endpoint).
+- [x] **BE-10.4** `POST /imports/{import_id}/mappings/validate` (body: `mapping_version_id`).
   It is a dry run. It checks:
   - every required target field is mapped;
   - the profile's types are compatible with the targets;
@@ -945,8 +968,16 @@ dry-run validated against a real import, and a different person activates it.
   - *Done-when:* tests prove an unmapped required field gives a BLOCKER, an unmapped column
     with no policy gives an issue, and a valid mapping returns `ok` with per-rule counts.
     The `canonical_record` count is unchanged, and the issue texts contain no sentinel
-    values.
-- [ ] **BE-10.5** Submit and approval:
+    values. — ✔ verified by code read at 0d7b07a. `mapping/service.py:193-412` (the dry run keeps
+    counts, reason codes and names only; business keys as hashes) and `:805-919` (scoped import and
+    version, contract and schema-version pairing, profile required; it writes only the
+    `mapping_validation` row, the DRAFT's `last_validation_id` and the `mapping.validate` audit).
+    `test_mappings.py::test_validate_dry_run` (BLOCKER `required_field_unmapped`, ERROR
+    `column_without_policy`, per-rule counts on the clean import, sentinel absent from the response and
+    from the stored `issues`/`rule_results`, import status and `source_record` count unchanged).
+    `canonical_record` does not exist until Phase 11; no code path here can write it, and BE-11.x
+    must assert the count. Follow-up P10-1 (a race with submit gives an unaudited 500).
+- [x] **BE-10.5** Submit and approval:
   - `…/versions/{version}/submit` needs the author, `mapping:propose` and a recorded `ok`
     validation for that version.
   - `…/approval` (APPROVE/REJECT) needs `mapping:approve`, and the approver must not be the
@@ -964,11 +995,26 @@ dry-run validated against a real import, and a different person activates it.
     - the Phase 5 `impact-analysis` on the target schema then listing this mapping as a
       dependent;
     - an approval after the schema version was deprecated returning 409.
-- [ ] **BE-10.6** Setting `MAPPING_CHANGE_ENABLED` (default `true`). When it is off, mapping
+
+    — ✔ verified by code read at 0d7b07a. `mapping/service.py:1003-1041` (submit: author only, DRAFT,
+    an ok validation whose hash equals the version's and the rules' recomputed hash, pinned schema
+    version ACTIVE) and `:1043-1115` (approval: `mapping:approve`, author refused before any status check,
+    schema locked, ACTIVE re-checked, previous ACTIVE DEPRECATED and flushed before the activation,
+    `register_dependent` upsert, every event in one commit). `test_mappings.py::test_submit_and_maker_checker_approval`
+    (409 `mapping_validation_required` with one DENIED; `not_author` 403; `self_approval` 403 with
+    exactly one DENIED `mapping.approve`; v2 ACTIVE, v1 DEPRECATED with its hash unchanged, the three
+    events on one correlation ID; impact analysis lists `MAPPING core_instrument`; 409
+    `schema_version_not_active` after the Phase 5 approval, audited; the Phase 9 seams: RECEIVED after
+    activation and the profile classified by the mapped field).
+- [x] **BE-10.6** Setting `MAPPING_CHANGE_ENABLED` (default `true`). When it is off, mapping
   writes get 409 `mapping_change_disabled` (audited) and reads and existing ACTIVE versions
   keep working.
   - *Done-when:* a test with it off gets 409 plus a DENIED event on `POST /mappings`, and
-    200 on `GET /mappings`.
+    200 on `GET /mappings`. — ✔ verified by code read at 0d7b07a. `core/config.py:79` (default
+    `True`); `mapping/router.py:55-94` (the switch, after the permission, audited DENIED) on all five
+    writes. `test_mappings.py::test_mapping_change_switch` (409 plus one DENIED on `POST /mappings`,
+    200 on `GET /mappings`, the version and validate routes refused too, `risk_analyst` still gets
+    403, nothing written). Writes also sit behind `INGESTION_ENABLED` (accepted).
 - [ ] **FE-10.1** Mapping workbench grid:
   - columns: source column, profiled type, target field, transform plus params, required,
     policy;

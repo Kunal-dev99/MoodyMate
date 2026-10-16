@@ -267,6 +267,31 @@ def test_non_draft_versions_and_rules_are_immutable_in_the_database(
         with pytest.raises(IMMUTABLE, match="TRUNCATE|append-only"):
             sql(mdb, f"TRUNCATE {table} CASCADE")
 
+    # Review P10-2: no status move skips maker-checker in SQL either. A DRAFT cannot be moved
+    # to review unsubmitted or unvalidated, nor decided without a decision or by its author.
+    draft = mapi.post(
+        f"{MAPPINGS}/{mapping['id']}/versions",
+        json={"rules": [rule("currency", "currency"), *FULL_RULES[:2], *FULL_RULES[3:]]},
+        headers=steward,
+    ).json()["id"]
+    for statement in (
+        "UPDATE mapping_version SET status = 'IN_REVIEW', last_validation_id = NULL"
+        " WHERE id = $1",
+        "UPDATE mapping_version SET status = 'IN_REVIEW', submitted_at = now() WHERE id = $1",
+    ):
+        with pytest.raises(IMMUTABLE):
+            sql(mdb, statement, draft)
+    # Validated (ok) and submitted, but decided by its own author: refused.
+    assert validate(mapi, steward, imported["id"], draft).json()["ok"]
+    with pytest.raises(IMMUTABLE, match="author"):
+        script(
+            mdb,
+            "BEGIN; ALTER TABLE mapping_version DISABLE TRIGGER mapping_version_immutable;"
+            f" UPDATE mapping_version SET status = 'ACTIVE', submitted_at = now(),"
+            f" decided_at = now(), decided_by = 'self', decided_by_user_id = author_user_id"
+            f" WHERE id = '{draft}'; COMMIT;",
+        )
+
     # No session setting unlocks a trigger: none reads one, and plausible ones change nothing.
     for fn in ("mapping_rule_guard", "mapping_version_guard", "field_mapping_guard"):
         body = sql(mdb, f"SELECT pg_get_functiondef('{fn}'::regproc) AS src")[0]["src"]
@@ -295,7 +320,10 @@ def test_non_draft_versions_and_rules_are_immutable_in_the_database(
         with pytest.raises(Exception, match="field_mapping has rows"):
             command.downgrade(alembic_config(mdb), "0013")
         assert sql(mdb, "SELECT version_num FROM alembic_version")[0]["version_num"] == head
-        assert sql(mdb, "SELECT count(*) AS n FROM mapping_rule")[0]["n"] == len(rules_before)
+        rules_now = sql(
+            mdb, "SELECT count(*) AS n FROM mapping_rule WHERE mapping_version_id = $1", vid
+        )
+        assert rules_now[0]["n"] == len(rules_before)
     finally:
         command.upgrade(alembic_config(mdb), "head")
 

@@ -177,6 +177,24 @@ BEGIN
         RAISE EXCEPTION 'mapping_version may only reference its own validation'
             USING ERRCODE = 'insufficient_privilege';
     END IF;
+    -- Review P10-2: maker-checker holds in SQL too. Out of DRAFT means submitted after a
+    -- validation; a decided status needs a decision, never by the version's author.
+    IF NEW.status <> 'DRAFT'
+        AND (NEW.submitted_at IS NULL OR NEW.last_validation_id IS NULL)
+    THEN
+        RAISE EXCEPTION 'mapping_version % must be submitted after a validation (D-18)',
+            NEW.id USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    IF NEW.status IN ('APPROVED', 'ACTIVE', 'REJECTED', 'DEPRECATED', 'RETIRED')
+        AND NEW.decided_at IS NULL
+    THEN
+        RAISE EXCEPTION 'mapping_version % needs a recorded decision for %', NEW.id,
+            NEW.status USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    IF NEW.decided_by_user_id IS NOT NULL AND NEW.decided_by_user_id = NEW.author_user_id THEN
+        RAISE EXCEPTION 'mapping_version % cannot be decided by its author (D-18)', NEW.id
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
     RETURN NEW;
 END;
 $$
