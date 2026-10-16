@@ -10,8 +10,11 @@ rem    1. Python 3.12   - offers to install it with winget if it is missing
 rem    2. backend\.venv - creates the virtual environment
 rem    3. Packages      - pip install -e ".[dev]"; re-runs when pyproject.toml changes
 rem    4. backend\.env  - copied from .env.example on first run (ENV=local, dev sign-in)
-rem    5. PostgreSQL    - starts the docker compose "db" service if nothing listens
-rem                       on localhost:5432, then waits until it accepts connections
+rem    5. PostgreSQL    - signs in with DATABASE_URL from backend\.env. Starts the docker
+rem                       compose "db" service if nothing listens on its port. If another
+rem                       database holds the port, offers to move MoodyMate's to a free
+rem                       port; if MoodyMate's own container has stale credentials,
+rem                       offers to reset it (local development data only)
 rem    6. Migrations    - alembic upgrade head (tables and seed data)
 rem    7. Starts uvicorn with auto-reload on http://127.0.0.1:<port>
 rem ===========================================================================
@@ -121,18 +124,39 @@ if exist "%BACKEND%\.env" (
   echo Created backend\.env from .env.example: ENV=local, dev sign-in, local database.
 )
 
+rem ENV is required (D-13). backend\.env normally sets it; default to local only when
+rem neither the window nor .env does, so an edited .env is never overridden.
+if not defined ENV findstr /b /c:"ENV=" "%BACKEND%\.env" >nul 2>&1 || set "ENV=local"
+
 rem ---------------------------------------------------------------------------
 echo.
-echo [5/7] PostgreSQL on localhost:5432
+echo [5/7] PostgreSQL
 rem ---------------------------------------------------------------------------
-call :db_up
-if not errorlevel 1 (
-  echo PostgreSQL is accepting connections.
-  goto :migrate
+rem The port comes from DATABASE_URL in backend\.env, read the same way the app reads it.
+rem The relative python path avoids for /f quoting trouble with spaces in the repo path.
+set "DBPORT="
+pushd "%BACKEND%"
+for /f "delims=" %%P in ('.venv\Scripts\python.exe -m scripts.db_check --port') do set "DBPORT=%%P"
+popd
+if not defined DBPORT (
+  echo [error] Could not read DATABASE_URL from backend\.env - see the message above.
+  goto :fail
 )
+
+:db_check
+call :db_login
+if "%DBCODE%"=="0" goto :migrate
+if "%DBCODE%"=="1" goto :db_start
+if "%DBCODE%"=="2" goto :db_conflict
+if "%DBCODE%"=="3" goto :db_conflict
+echo [error] Unexpected database error - see the message above.
+goto :fail
+
+:db_start
+rem Nothing listens on the port: start MoodyMate's own database container there.
 where docker >nul 2>&1
 if errorlevel 1 (
-  echo [error] Nothing is listening on localhost:5432 and Docker is not installed.
+  echo [error] No database is running on port %DBPORT% and Docker is not installed.
   echo Either install Docker Desktop ^(https://www.docker.com/products/docker-desktop/^)
   echo or run PostgreSQL 16 yourself with user/password moodymate and database moodymate_dev.
   goto :fail
@@ -143,34 +167,87 @@ if errorlevel 1 (
   echo then run this script again.
   goto :fail
 )
-echo Starting the database container ^(docker compose up -d db^) ...
+echo Starting MoodyMate's database container on port %DBPORT% ^(docker compose up -d db^) ...
+set "MOODYMATE_DB_PORT=%DBPORT%"
 pushd "%ROOT%"
 docker compose up -d db
 set "DOCKERR=!errorlevel!"
 popd
 if not "!DOCKERR!"=="0" (
-  echo [error] docker compose could not start the database.
+  echo [error] docker compose could not start the database. Check: docker compose logs db
   goto :fail
 )
-echo Waiting for PostgreSQL to accept connections ...
+echo Waiting for PostgreSQL to accept MoodyMate's sign-in ...
 for /l %%N in (1,1,30) do (
-  call :db_up
-  if not errorlevel 1 goto :db_ready
+  call :db_login quiet
+  if "!DBCODE!"=="0" goto :db_ready
+  if "!DBCODE!"=="2" goto :db_conflict
+  if "!DBCODE!"=="3" goto :db_conflict
   timeout /t 2 /nobreak >nul
 )
 echo [error] PostgreSQL did not become ready within 60 seconds. Check: docker compose logs db
 goto :fail
 :db_ready
 echo PostgreSQL is ready.
+goto :migrate
+
+:db_conflict
+rem Something answers on the port but refuses MoodyMate's user, password or database.
+rem Either another PostgreSQL holds the port, or MoodyMate's container keeps data that
+rem was created with other credentials. Find out which before offering a fix.
+set "OWNERPID="
+set "OWNER="
+for /f "tokens=5" %%P in ('netstat -ano ^| findstr /r /c:":%DBPORT% .*LISTENING"') do if not defined OWNERPID set "OWNERPID=%%P"
+if defined OWNERPID for /f "tokens=1 delims=," %%N in ('tasklist /FI "PID eq %OWNERPID%" /FO CSV /NH') do set "OWNER=%%~N"
+if not defined OWNER set "OWNER=an unknown program"
+set "OURS="
+where docker >nul 2>&1 && docker info >nul 2>&1 && call :ours_running
+echo.
+if /i "%OWNER%"=="postgres.exe" goto :db_other
+if not defined OURS goto :db_other
+
+echo MoodyMate's database container is running, but its stored data was created with a
+echo different user, password or database name than backend\.env expects.
+echo Resetting deletes MoodyMate's LOCAL development database and creates it again;
+echo the migrations then reload the seed data. Nothing outside this container is touched.
+choice /C YN /M "Reset MoodyMate's local database"
+if errorlevel 2 goto :db_manual
+pushd "%ROOT%"
+docker compose down -v
+popd
+goto :db_start
+
+:db_other
+echo Port %DBPORT% is used by another database ^(%OWNER%, PID %OWNERPID%^),
+echo not MoodyMate's. It does not accept the user and password in backend\.env.
+echo MoodyMate can run its own database in Docker on a free port instead. This only
+echo changes the port in DATABASE_URL in backend\.env; the other database is not touched.
+choice /C YN /M "Run MoodyMate's database on a free port"
+if errorlevel 2 goto :db_manual
+set "NEWPORT="
+pushd "%BACKEND%"
+for /f "delims=" %%P in ('.venv\Scripts\python.exe -m scripts.db_check --move-port') do set "NEWPORT=%%P"
+popd
+if not defined NEWPORT (
+  echo [error] Could not update backend\.env - see the message above.
+  goto :fail
+)
+set "DBPORT=%NEWPORT%"
+echo backend\.env now points at port %DBPORT%.
+goto :db_check
+
+:db_manual
+echo To fix it yourself, either:
+echo   - set DATABASE_URL in backend\.env to the user, password, port and database of a
+echo     PostgreSQL 16 you control, or
+echo   - stop the other database on port %DBPORT% and run this script again.
+goto :fail
 
 :migrate
 rem ---------------------------------------------------------------------------
 echo.
 echo [6/7] Database migrations
 rem ---------------------------------------------------------------------------
-rem ENV is required (D-13). backend\.env normally sets it; default to local only when
-rem neither the window nor .env does, so an edited .env is never overridden.
-if not defined ENV findstr /b /c:"ENV=" "%BACKEND%\.env" >nul 2>&1 || set "ENV=local"
 pushd "%BACKEND%"
 "%VPY%" -m alembic upgrade head
 set "MIGERR=!errorlevel!"
@@ -212,10 +289,25 @@ set "CAND=%ProgramFiles%\Python312\python.exe"
 if exist "%CAND%" (set "PY="%CAND%"" & exit /b 0)
 exit /b 1
 
-:db_up
-rem errorlevel 0 when something accepts TCP connections on localhost:5432.
-"%VPY%" -c "import socket,sys; s=socket.socket(); s.settimeout(2); sys.exit(s.connect_ex(('127.0.0.1',5432)))" >nul 2>&1
-exit /b %errorlevel%
+:db_login
+rem Sets DBCODE from scripts.db_check: 0 signed in, 1 nothing listening, 2 sign-in
+rem refused, 3 database missing, 4 other. "quiet" hides the one-line diagnosis.
+pushd "%BACKEND%"
+if "%~1"=="quiet" (
+  "%VPY%" -m scripts.db_check >nul 2>&1
+) else (
+  "%VPY%" -m scripts.db_check
+)
+set "DBCODE=%errorlevel%"
+popd
+exit /b 0
+
+:ours_running
+rem Sets OURS when MoodyMate's own compose "db" container is running.
+pushd "%ROOT%"
+for /f %%C in ('docker compose ps --status running -q db 2^>nul') do set "OURS=%%C"
+popd
+exit /b 0
 
 :pip_failed
 echo [error] Package installation failed. Check your internet connection and the messages above.
