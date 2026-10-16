@@ -7,8 +7,9 @@ import uuid
 from datetime import datetime
 from typing import Annotated
 
-from pydantic import BaseModel, Field, StringConstraints, model_validator
+from pydantic import AfterValidator, BaseModel, Field, StringConstraints, model_validator
 
+from app.core.text import SafeMultilineText, SafeText, single_line
 from app.ingestion.constants import (
     ContractStatus,
     CsvDelimiter,
@@ -18,8 +19,17 @@ from app.ingestion.constants import (
 )
 
 CODE = r"^[a-z][a-z0-9_]{0,99}$"
-# A source column name as it appears in the file header: any visible text, bounded.
-ColumnName = Annotated[str, StringConstraints(min_length=1, max_length=200, strip_whitespace=True)]
+# A source column name as it appears in the file header: visible text on one line, bounded
+# (D8: no control characters, so no NUL, tab or line break).
+ColumnName = Annotated[SafeText, Field(max_length=200)]
+# An XLSX sheet name: safe one-line text without the characters Excel forbids (D8). The
+# pattern sits in the string constraints so the OpenAPI contract shows it.
+SHEET_NAME = r"^[^\[\]:*?/\\]+$"
+SheetName = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=31, pattern=SHEET_NAME),
+    AfterValidator(single_line),
+]
 
 
 class ContractColumn(BaseModel):
@@ -41,7 +51,7 @@ class ContractIn(BaseModel):
     control_total_columns: list[ColumnName] = Field(
         default_factory=list, max_length=20, description="Columns summed for reconciliation."
     )
-    change_summary: str | None = Field(default=None, max_length=1000)
+    change_summary: SafeMultilineText | None = Field(default=None, max_length=1000)
 
     @model_validator(mode="after")
     def _columns(self) -> "ContractIn":
@@ -62,22 +72,26 @@ class ContractIn(BaseModel):
 
 
 class ProfileIn(BaseModel):
+    """A new source's profile. Always provisional on create (D2): only the client's approval,
+    a later action, clears it. The API ignores unknown body fields, so a `provisional` sent
+    here has no effect."""
+
     format: SourceFormat
     encoding: SourceEncoding = SourceEncoding.UTF_8
     delimiter: CsvDelimiter | None = Field(
         default=None, description="CSV only; defaults to ',' for CSV."
     )
-    sheet_name: str | None = Field(
-        default=None, min_length=1, max_length=31, description="XLSX only; else the first sheet."
+    sheet_name: SheetName | None = Field(
+        default=None,
+        description="XLSX only; else the first sheet. Excel forbids [ ] : * ? / \\.",
     )
-    cadence: str | None = Field(default=None, max_length=100, description="e.g. 'daily'.")
-    owner: str = Field(min_length=1, max_length=200)
+    cadence: SafeText | None = Field(default=None, max_length=100, description="e.g. 'daily'.")
+    owner: SafeText = Field(max_length=200)
     default_classification: str = Field(
         min_length=1,
         max_length=50,
         description="Classification of values in columns no mapping has classified (D-20).",
     )
-    provisional: bool = True
 
     @model_validator(mode="after")
     def _format_options(self) -> "ProfileIn":
@@ -90,8 +104,8 @@ class ProfileIn(BaseModel):
 
 class SourceCreate(BaseModel):
     code: str = Field(pattern=CODE, description="snake_case, unique in your tenant.")
-    name: str = Field(min_length=1, max_length=200)
-    description: str | None = Field(default=None, max_length=1000)
+    name: SafeText = Field(max_length=200)
+    description: SafeMultilineText | None = Field(default=None, max_length=1000)
     kind: SourceKind = Field(
         default=SourceKind.FILE_DROP, description="Only FILE_DROP is usable in the MVP (D-23)."
     )

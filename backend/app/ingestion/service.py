@@ -1,15 +1,17 @@
 """ingestion.service
 
 Source registration (BE-7.4, DI-01): a source system, its profile and versioned source
-contracts. Every write is audited in the same transaction and committed here (D-10).
-Target schemas are checked through the governance service, never its repository.
+contracts. Every write is audited in the same transaction and committed here (D-10). Every
+refused write is audited too, as DENIED with its reason code (D-24 §4), through
+`record_denial` after a rollback. Target schemas are checked through the governance
+service, never its repository.
 """
 
 import hashlib
 import json
 import uuid
 from dataclasses import asdict, dataclass
-from typing import Any
+from typing import Any, NoReturn
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,6 +24,7 @@ from app.governance.service import (
     audit_by,
     effective_version,
     known_classifications,
+    record_denial,
 )
 from app.ingestion.constants import (
     CONTRACT_TRANSITIONS,
@@ -55,7 +58,6 @@ class ProfileSpec:
     cadence: str | None
     owner: str
     default_classification: str
-    provisional: bool
 
 
 def contract_sha256(
@@ -99,6 +101,11 @@ def profile_of(source: SourceSystem) -> SourceProfile:
     return source.profiles[0]
 
 
+# Audit actions of the two writes; a refusal is recorded under the same action, DENIED.
+CREATE_SOURCE = "source.create"
+CREATE_CONTRACT = "source_contract.create"
+
+
 def _public(*keys: str) -> dict[str, str]:
     return dict.fromkeys(keys, ClassificationCode.PUBLIC)
 
@@ -113,9 +120,8 @@ class SourceService:
     # --- reads --------------------------------------------------------------------------
 
     async def page(self, limit: int, offset: int) -> tuple[list[SourceSystem], int]:
-        sources, total = await self.repo.page_by_code(limit, offset)
-        # A source is registered with its profile in one transaction; skip none-yet rows.
-        return [s for s in sources if s.profiles], total
+        """Sources with a profile (the query filters, so `total` matches the items)."""
+        return await self.repo.page_by_code(limit, offset)
 
     async def get(self, source_id: uuid.UUID) -> SourceSystem:
         source = await self.repo.fresh(source_id)
@@ -130,15 +136,38 @@ class SourceService:
 
     # --- writes ---------------------------------------------------------------------------
 
-    async def _target_schema(self, schema_id: uuid.UUID) -> str:
+    async def _refuse(
+        self, action: str, resource_id: uuid.UUID | None, error: ApiError
+    ) -> NoReturn:
+        """Roll back, audit the refusal (DENIED, reason = the error code) and raise it."""
+        await record_denial(
+            self.session,
+            self.principal,
+            action,
+            "source_system",
+            str(resource_id) if resource_id else None,
+            error.code,
+        )
+        raise error
+
+    async def _target_schema(
+        self, schema_id: uuid.UUID, action: str, resource_id: uuid.UUID | None
+    ) -> str:
         """The target must exist in the caller's tenant and have an ACTIVE version."""
-        schema = await self.schemas.get_schema(schema_id)  # 404 outside the tenant
+        try:
+            schema = await self.schemas.get_schema(schema_id)  # 404 outside the tenant
+        except ApiError as exc:
+            await self._refuse(action, resource_id, exc)
         if effective_version(schema) is None:
-            raise ApiError(
-                409,
-                "no_active_version",
-                "The target schema has no ACTIVE version.",
-                {"schema_id": str(schema_id)},
+            await self._refuse(
+                action,
+                resource_id,
+                ApiError(
+                    409,
+                    "no_active_version",
+                    "The target schema has no ACTIVE version.",
+                    {"schema_id": str(schema_id)},
+                ),
             )
         return schema.code
 
@@ -151,24 +180,33 @@ class SourceService:
         profile: ProfileSpec,
         contract: ContractSpec,
     ) -> SourceSystem:
-        """System, profile and contract v1 in one transaction (audited `source.create`)."""
+        """System, profile and contract v1 in one transaction (audited `source.create`).
+        The profile is always provisional (D2): the registrant cannot approve it."""
         if kind not in USABLE_SOURCE_KINDS:
-            raise ApiError(
-                422,
-                "unsupported_source_kind",
-                "Only FILE_DROP sources can be registered in this release.",
-                {"kind": kind},
+            await self._refuse(
+                CREATE_SOURCE,
+                None,
+                ApiError(
+                    422,
+                    "unsupported_source_kind",
+                    "Only FILE_DROP sources can be registered in this release.",
+                    {"kind": kind},
+                ),
             )
         if profile.default_classification not in await known_classifications(self.session):
-            raise ApiError(
-                422,
-                "unknown_classification",
-                "Unknown classification.",
-                {"classification": profile.default_classification},
+            await self._refuse(
+                CREATE_SOURCE,
+                None,
+                ApiError(
+                    422,
+                    "unknown_classification",
+                    "Unknown classification.",
+                    {"classification": profile.default_classification},
+                ),
             )
-        schema_code = await self._target_schema(contract.schema_id)
+        schema_code = await self._target_schema(contract.schema_id, CREATE_SOURCE, None)
         if await self.repo.code_taken(code):
-            raise ApiError(409, "duplicate_code", "A source with this code exists.", {"code": code})
+            await self._refuse(CREATE_SOURCE, None, _duplicate(code))
 
         actor = self.principal.actor
         source = SourceSystem(
@@ -184,7 +222,9 @@ class SourceService:
         values = asdict(profile)
         if profile.format == SourceFormat.CSV and profile.delimiter is None:
             values["delimiter"] = CsvDelimiter.COMMA
-        prof = SourceProfile(source_system_id=source.id, created_by=actor, **values)
+        prof = SourceProfile(
+            source_system_id=source.id, created_by=actor, provisional=True, **values
+        )
         self.repo.add(prof)
         await self.repo.flush()
         sha = spec_sha256(contract)
@@ -194,7 +234,7 @@ class SourceService:
         audit_by(
             self.session,
             self.principal,
-            "source.create",
+            CREATE_SOURCE,
             "source_system",
             resource_id=str(source.id),
             details={
@@ -223,18 +263,29 @@ class SourceService:
         """The next version, PROVISIONAL; the current one becomes SUPERSEDED, unedited."""
         source = await self.repo.lock(source_id)
         if source is None or not source.profiles:
-            raise ApiError(404, "not_found", "Source not found.")
-        schema_code = await self._target_schema(contract.schema_id)
+            # The requested id is audited: absent and foreign look the same (D-04).
+            await self._refuse(
+                CREATE_CONTRACT, source_id, ApiError(404, "not_found", "Source not found.")
+            )
+        schema_code = await self._target_schema(contract.schema_id, CREATE_CONTRACT, source.id)
         prof = profile_of(source)
         contracts = await self.repo.contracts(prof.id)
         current = current_contract(contracts)
         sha = spec_sha256(contract)
         if current is not None and current.content_sha256 == sha:
-            raise ApiError(422, "no_change", "The contract equals the current version.")
+            await self._refuse(
+                CREATE_CONTRACT,
+                source.id,
+                ApiError(422, "no_change", "The contract equals the current version."),
+            )
         if current is not None:
             to = ContractStatus.SUPERSEDED
             if to not in CONTRACT_TRANSITIONS[ContractStatus(current.status)]:
-                raise ApiError(409, "invalid_status", f"Cannot supersede a {current.status}.")
+                await self._refuse(
+                    CREATE_CONTRACT,
+                    source.id,
+                    ApiError(409, "invalid_status", f"Cannot supersede a {current.status}."),
+                )
             current.status = to
             await self.repo.flush()  # before the insert: one current version per profile
         version = max((c.version for c in contracts), default=0) + 1
@@ -246,7 +297,7 @@ class SourceService:
         audit_by(
             self.session,
             self.principal,
-            "source_contract.create",
+            CREATE_CONTRACT,
             "source_system",
             resource_id=str(source.id),
             details={
@@ -307,8 +358,9 @@ class SourceService:
         """A concurrent registration of the same code loses on the unique constraint."""
         try:
             await self.repo.flush()
-        except IntegrityError as exc:
-            await self.session.rollback()
-            raise ApiError(
-                409, "duplicate_code", "A source with this code exists.", {"code": code}
-            ) from exc
+        except IntegrityError:
+            await self._refuse(CREATE_SOURCE, None, _duplicate(code))
+
+
+def _duplicate(code: str) -> ApiError:
+    return ApiError(409, "duplicate_code", "A source with this code exists.", {"code": code})

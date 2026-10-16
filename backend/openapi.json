@@ -223,6 +223,7 @@
             "anyOf": [
               {
                 "maxLength": 1000,
+                "minLength": 1,
                 "type": "string"
               },
               {
@@ -844,11 +845,13 @@
         "type": "string"
       },
       "ProfileIn": {
+        "description": "A new source's profile. Always provisional on create (D2): only the client's approval,\na later action, clears it. The API ignores unknown body fields, so a `provisional` sent\nhere has no effect.",
         "properties": {
           "cadence": {
             "anyOf": [
               {
                 "maxLength": 100,
+                "minLength": 1,
                 "type": "string"
               },
               {
@@ -889,23 +892,19 @@
             "title": "Owner",
             "type": "string"
           },
-          "provisional": {
-            "default": true,
-            "title": "Provisional",
-            "type": "boolean"
-          },
           "sheet_name": {
             "anyOf": [
               {
                 "maxLength": 31,
                 "minLength": 1,
+                "pattern": "^[^\\[\\]:*?/\\\\]+$",
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "XLSX only; else the first sheet.",
+            "description": "XLSX only; else the first sheet. Excel forbids [ ] : * ? / \\.",
             "title": "Sheet Name"
           }
         },
@@ -1880,6 +1879,7 @@
             "anyOf": [
               {
                 "maxLength": 1000,
+                "minLength": 1,
                 "type": "string"
               },
               {

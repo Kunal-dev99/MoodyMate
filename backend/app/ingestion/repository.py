@@ -7,21 +7,31 @@ in the caller's tenant.
 
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import Select, exists, func, select
 
 from app.db.repository import ScopedRepository
-from app.ingestion.models import SourceContract, SourceSystem
+from app.ingestion.models import SourceContract, SourceProfile, SourceSystem
 
 
 class SourceRepository(ScopedRepository[SourceSystem]):
     model = SourceSystem
 
+    def _with_profile(self) -> Select[tuple[SourceSystem]]:
+        """Scoped sources that have a profile. A source is registered with its profile in one
+        transaction; the filter sits in the query so LIMIT and COUNT agree (D12)."""
+        return self.scoped().where(
+            exists().where(SourceProfile.source_system_id == SourceSystem.id)
+        )
+
     async def page_by_code(self, limit: int, offset: int) -> tuple[list[SourceSystem], int]:
         total = await self.session.scalar(
-            select(func.count()).select_from(self.scoped().subquery())
+            select(func.count()).select_from(self._with_profile().subquery())
         )
         result = await self.session.execute(
-            self.scoped().order_by(SourceSystem.code, SourceSystem.id).limit(limit).offset(offset)
+            self._with_profile()
+            .order_by(SourceSystem.code, SourceSystem.id)
+            .limit(limit)
+            .offset(offset)
         )
         return list(result.scalars()), int(total or 0)
 

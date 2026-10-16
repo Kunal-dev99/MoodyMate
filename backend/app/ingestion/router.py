@@ -157,7 +157,6 @@ async def create_source(
             cadence=p.cadence,
             owner=p.owner,
             default_classification=p.default_classification,
-            provisional=p.provisional,
         ),
         _contract_spec(body.contract),
     )
