@@ -574,6 +574,12 @@ class SchemaService:
         return schema, old, new, result
 
 
+async def known_classifications(session: AsyncSession) -> frozenset[str]:
+    """Every data_classification code (BE-3.4). Global, not tenant data. For modules that
+    store a classification code and must refuse unknown ones before the FK does."""
+    return await IdentityRepository(session).all_classifications()
+
+
 # --- Controlled schema change (Phase 5, DG-05) ------------------------------------------
 
 
