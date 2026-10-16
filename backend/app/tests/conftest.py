@@ -58,16 +58,6 @@ def database_url() -> str:
     return TEST_DATABASE_URL
 
 
-@pytest.fixture
-def settings() -> Settings:
-    return Settings(ENV="test", DATABASE_URL="postgresql+asyncpg://nobody:x@127.0.0.1:1/none")
-
-
-@pytest.fixture
-def client(settings: Settings) -> TestClient:
-    return TestClient(create_app(settings))
-
-
 # --- Phase 2: migrated database, cleanup and helpers -----------------------------------
 
 from collections.abc import Iterator  # noqa: E402
