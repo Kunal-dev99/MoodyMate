@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     # Phase 5 (DG-05): schema change proposals. Off makes the registry read-only, which
     # is the Phase 4 behaviour; reads of existing proposals still work.
     SCHEMA_CHANGE_ENABLED: bool = True
+    # Feature 02 (WS2): ingestion writes (sources, imports, mappings, dispositions). Off
+    # makes WS2 read-only: writes answer 409 ingestion_disabled (audited), reads still work.
+    INGESTION_ENABLED: bool = True
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
 
     # D-09 dev mode: HS256 tokens signed with this local secret (local/test only).

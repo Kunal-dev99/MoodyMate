@@ -33,3 +33,37 @@ def test_admin_endpoints_forbidden_without_admin_read(api: TestClient, role: Rol
 def test_me_requires_authentication(api: TestClient) -> None:
     assert api.get("/api/v1/me").status_code == 401
     assert api.get("/api/v1/me/permissions").status_code == 401
+
+
+@pytest.mark.parametrize(
+    ("role", "ws2"),
+    [
+        ("platform_admin", {"source:read", "import:read", "mapping:read"}),
+        (
+            "data_steward",
+            {
+                "source:read",
+                "source:manage",
+                "import:read",
+                "import:write",
+                "mapping:read",
+                "mapping:propose",
+                "quarantine:read",
+                "quality:review",
+            },
+        ),
+        ("risk_analyst", {"source:read", "import:read", "mapping:read"}),
+        (
+            "approver",
+            {"source:read", "import:read", "mapping:read", "mapping:approve", "quarantine:read"},
+        ),
+        ("auditor", {"source:read", "import:read", "mapping:read", "quarantine:read"}),
+    ],
+)
+def test_ws2_permissions_per_role(api: TestClient, role: str, ws2: set[str]) -> None:
+    """BE-7.2: the Feature 02 matrix, written out from the plan (not from constants)."""
+    perms = set(
+        api.get("/api/v1/me/permissions", headers=dev_token(api, role)).json()["permissions"]
+    )
+    ws2_codes = {"source:", "import:", "mapping:", "quarantine:", "quality:"}
+    assert {p for p in perms if any(p.startswith(c) for c in ws2_codes)} == ws2
