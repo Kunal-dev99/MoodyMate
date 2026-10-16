@@ -254,6 +254,221 @@
         "title": "BatchOut",
         "type": "object"
       },
+      "ColumnProfile": {
+        "description": "Observations of one source column. `min`, `max` and top values are data, masked by\n`classification`; everything else is metadata. `in_contract`, `suggested_target_field`\nand the candidate types are suggestions (`suggestion: true`): nothing is changed.",
+        "properties": {
+          "candidate_types": {
+            "description": "Types every non-empty value fits, most specific first.",
+            "items": {
+              "$ref": "#/components/schemas/FieldType"
+            },
+            "title": "Candidate Types",
+            "type": "array"
+          },
+          "classification": {
+            "description": "The mapped schema field's classification, else the source profile's default (no mapping exists before Phase 10).",
+            "title": "Classification",
+            "type": "string"
+          },
+          "currency_pattern_hits": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "ISO_4217_CODE (three capitals) and AMOUNT_WITH_CURRENCY counts.",
+            "title": "Currency Pattern Hits",
+            "type": "object"
+          },
+          "date_formats": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Date format -> values valid in it.",
+            "title": "Date Formats",
+            "type": "object"
+          },
+          "distinct_capped": {
+            "description": "More distinct values exist than were counted.",
+            "title": "Distinct Capped",
+            "type": "boolean"
+          },
+          "distinct_count": {
+            "description": "Distinct non-empty values, up to the cap.",
+            "title": "Distinct Count",
+            "type": "integer"
+          },
+          "in_contract": {
+            "description": "The pinned source contract expects this column.",
+            "title": "In Contract",
+            "type": "boolean"
+          },
+          "max": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Largest number, date or timestamp.",
+            "title": "Max"
+          },
+          "max_length": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Longest value, in characters.",
+            "title": "Max Length"
+          },
+          "max_precision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "NUMERIC precision that holds every value (numeric columns).",
+            "title": "Max Precision"
+          },
+          "max_scale": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Most decimal places (numeric columns).",
+            "title": "Max Scale"
+          },
+          "min": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Smallest number, date or timestamp.",
+            "title": "Min"
+          },
+          "name": {
+            "description": "Column name exactly as in the file header.",
+            "title": "Name",
+            "type": "string"
+          },
+          "null_count": {
+            "description": "Empty: missing cell, JSON null, '' or only spaces.",
+            "title": "Null Count",
+            "type": "integer"
+          },
+          "null_rate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null_count / rows as decimal text, 4 places (half-even); null when the import has no rows.",
+            "title": "Null Rate"
+          },
+          "position": {
+            "description": "1-based position in the header.",
+            "title": "Position",
+            "type": "integer"
+          },
+          "suggested_target_field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The pinned schema version's field whose normalised name equals this column's, if exactly one does.",
+            "title": "Suggested Target Field"
+          },
+          "suggested_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FieldType"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The first candidate type."
+          },
+          "suggestion": {
+            "const": true,
+            "default": true,
+            "description": "in_contract, suggested_target_field and the types are suggestions only.",
+            "title": "Suggestion",
+            "type": "boolean"
+          },
+          "top_values": {
+            "description": "Most frequent first, then by value.",
+            "items": {
+              "$ref": "#/components/schemas/TopValue"
+            },
+            "title": "Top Values",
+            "type": "array"
+          },
+          "top_values_exact": {
+            "description": "False when the distinct cap was reached.",
+            "title": "Top Values Exact",
+            "type": "boolean"
+          },
+          "value_count": {
+            "description": "Non-empty values.",
+            "title": "Value Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "position",
+          "classification",
+          "value_count",
+          "null_count",
+          "null_rate",
+          "distinct_count",
+          "distinct_capped",
+          "candidate_types",
+          "suggested_type",
+          "min",
+          "max",
+          "max_length",
+          "max_precision",
+          "max_scale",
+          "date_formats",
+          "currency_pattern_hits",
+          "top_values",
+          "top_values_exact",
+          "in_contract",
+          "suggested_target_field"
+        ],
+        "title": "ColumnProfile",
+        "type": "object"
+      },
       "Compatibility": {
         "description": "How a version change affects consumers, least to most severe.",
         "enum": [
@@ -1034,6 +1249,98 @@
         "title": "ImportPage",
         "type": "object"
       },
+      "ImportProfile": {
+        "properties": {
+          "column_count": {
+            "title": "Column Count",
+            "type": "integer"
+          },
+          "columns": {
+            "description": "In file order.",
+            "items": {
+              "$ref": "#/components/schemas/ColumnProfile"
+            },
+            "title": "Columns",
+            "type": "array"
+          },
+          "content_sha256": {
+            "description": "SHA-256 of the observations: the same records give the same hash.",
+            "title": "Content Sha256",
+            "type": "string"
+          },
+          "contract_version": {
+            "title": "Contract Version",
+            "type": "integer"
+          },
+          "import_id": {
+            "format": "uuid",
+            "title": "Import Id",
+            "type": "string"
+          },
+          "import_status": {
+            "$ref": "#/components/schemas/ImportStatus"
+          },
+          "profiled_at": {
+            "format": "date-time",
+            "title": "Profiled At",
+            "type": "string"
+          },
+          "profiler_version": {
+            "title": "Profiler Version",
+            "type": "integer"
+          },
+          "row_count": {
+            "title": "Row Count",
+            "type": "integer"
+          },
+          "schema_code": {
+            "title": "Schema Code",
+            "type": "string"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "schema_version_id": {
+            "description": "The schema version the import pins.",
+            "format": "uuid",
+            "title": "Schema Version Id",
+            "type": "string"
+          },
+          "snapshot_id": {
+            "format": "uuid",
+            "title": "Snapshot Id",
+            "type": "string"
+          },
+          "source_contract_id": {
+            "format": "uuid",
+            "title": "Source Contract Id",
+            "type": "string"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/ProfileSummary"
+          }
+        },
+        "required": [
+          "import_id",
+          "import_status",
+          "snapshot_id",
+          "profiler_version",
+          "content_sha256",
+          "profiled_at",
+          "row_count",
+          "column_count",
+          "source_contract_id",
+          "contract_version",
+          "schema_version_id",
+          "schema_code",
+          "schema_version",
+          "summary",
+          "columns"
+        ],
+        "title": "ImportProfile",
+        "type": "object"
+      },
       "ImportStatus": {
         "description": "Data Model \u00a79 `import_job.status` plus QUARANTINED from Appendix B (D-06, D-21).\nAppendix B's `uploaded` is RECEIVED and `ready` is COMPLETED.",
         "enum": [
@@ -1503,6 +1810,45 @@
           "provisional"
         ],
         "title": "ProfileOut",
+        "type": "object"
+      },
+      "ProfileSummary": {
+        "description": "Row facts (D-25): nothing is dropped and nothing is invented.",
+        "properties": {
+          "blank_rows": {
+            "title": "Blank Rows",
+            "type": "integer"
+          },
+          "flag_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Row flag code -> how many were raised.",
+            "title": "Flag Counts",
+            "type": "object"
+          },
+          "max_extra_cells": {
+            "title": "Max Extra Cells",
+            "type": "integer"
+          },
+          "rows_with_extra_cells": {
+            "description": "Rows with cells beyond the header.",
+            "title": "Rows With Extra Cells",
+            "type": "integer"
+          },
+          "rows_with_missing_cells": {
+            "title": "Rows With Missing Cells",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "blank_rows",
+          "rows_with_missing_cells",
+          "rows_with_extra_cells",
+          "max_extra_cells",
+          "flag_counts"
+        ],
+        "title": "ProfileSummary",
         "type": "object"
       },
       "ProposalApproval": {
@@ -2662,6 +3008,39 @@
         "title": "SourceSummary",
         "type": "object"
       },
+      "TopValue": {
+        "properties": {
+          "count": {
+            "description": "Rows holding the value.",
+            "title": "Count",
+            "type": "integer"
+          },
+          "truncated": {
+            "description": "The value is longer than shown.",
+            "title": "Truncated",
+            "type": "boolean"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "description": "The value (first 100 characters), or masked by the column's classification.",
+            "title": "Value"
+          }
+        },
+        "required": [
+          "value",
+          "count",
+          "truncated"
+        ],
+        "title": "TopValue",
+        "type": "object"
+      },
       "UserPage": {
         "properties": {
           "items": {
@@ -3416,6 +3795,65 @@
           }
         ],
         "summary": "Get Import",
+        "tags": [
+          "ingestion"
+        ]
+      }
+    },
+    "/api/v1/imports/{import_id}/profile": {
+      "get": {
+        "description": "The import's field profile (DI-06): per-column observations and read-only\nsuggestions. Values are masked by each column's classification; nothing is changed.",
+        "operationId": "getImportProfile",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "import_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Import Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportProfile"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Import Profile",
         "tags": [
           "ingestion"
         ]

@@ -126,6 +126,11 @@ def test_route_by_role_authorization_matrix(api: TestClient, db: str) -> None:
     assert not failures, "\n".join(failures)
     # Every role really uses the routes it may use, not only gets past the check.
     assert all(successes.values()), successes
+    # BE-9.3: the profile route is in the matrix, declared import:read, and every seeded role
+    # (all hold import:read) reads the real import's profile.
+    [profile] = [r for r in WS1_MATRIX if r["route"] == "GET /api/v1/imports/{import_id}/profile"]
+    assert profile["permission"] == "import:read"
+    assert all(profile[role] == 200 for role in ROLES), profile
     assert len(WS1_MATRIX) >= 12
 
 
@@ -170,6 +175,7 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
     assert api.get("/api/v1/imports", headers=outsider).json()["total"] == 0
     for path in (
         f"/api/v1/imports/{here_import}",
+        f"/api/v1/imports/{here_import}/profile",
         f"/api/v1/sources/{here_source}",
         f"/api/v1/users/{here_user}",
         f"/api/v1/schemas/{instrument}/versions",

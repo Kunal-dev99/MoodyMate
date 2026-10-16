@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useParams, useSearchParams } from 'next/navigation'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { FileCheck2, FileUp, Layers, Pin, ScrollText } from 'lucide-react'
 import { api, call } from '@/api/client'
@@ -15,12 +15,14 @@ import { MaskedValue, isMasked } from '@/components/common/MaskedValue'
 import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
 import { startLoad, type LoadFailure } from '@/components/common/load'
+import { ImportProfileTab } from '@/components/ingestion/ImportProfileTab'
 import { ImportStatusPill } from '@/components/ingestion/ImportStatusPill'
 import { ImportsPlanned } from '@/components/ingestion/ImportsTab'
 import { formatBytes, type ImportDetail } from '@/components/ingestion/imports'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { IMPORTS_UI_ENABLED } from '@/config/features'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { IMPORT_PROFILE_UI_ENABLED, IMPORTS_UI_ENABLED } from '@/config/features'
 
 type State = { kind: 'loading' } | { kind: 'ready'; job: ImportDetail } | LoadFailure
 
@@ -35,6 +37,41 @@ function Field({ label, children, testId }: { label: string; children: ReactNode
       <dt className="text-muted-foreground">{label}</dt>
       <dd data-testid={testId}>{children}</dd>
     </>
+  )
+}
+
+/**
+ * FE-9.1: Status and Profile tabs, with the open one in `?tab=` so a link can open the
+ * profile. Behind IMPORT_PROFILE_UI_ENABLED: off, the page is the Phase 8 layout.
+ */
+function ImportTabs({ importId, status }: { importId: string; status: ReactNode }) {
+  const router = useRouter()
+  const params = useSearchParams()
+  const tab = params.get('tab') === 'profile' ? 'profile' : 'status'
+  const select = (value: string) => {
+    const next = new URLSearchParams(params.toString())
+    if (value === 'profile') next.set('tab', 'profile')
+    else next.delete('tab')
+    const query = next.toString()
+    router.replace(`/ingestion/imports/${importId}${query ? `?${query}` : ''}`, { scroll: false })
+  }
+  return (
+    <Tabs value={tab} onValueChange={select}>
+      <TabsList>
+        <TabsTrigger value="status" data-testid="import-tab-status">
+          Status
+        </TabsTrigger>
+        <TabsTrigger value="profile" data-testid="import-tab-profile">
+          Profile
+        </TabsTrigger>
+      </TabsList>
+      <TabsContent value="status" className="mt-4 space-y-4">
+        {status}
+      </TabsContent>
+      <TabsContent value="profile" className="mt-4">
+        <ImportProfileTab importId={importId} />
+      </TabsContent>
+    </Tabs>
   )
 }
 
@@ -92,6 +129,134 @@ function ImportView({ importId }: { importId: string }) {
   const a = job.artifact
   const totals = job.control_totals ? Object.entries(job.control_totals) : []
 
+  const sections = (
+    <>
+      <PageSection icon={FileCheck2} title="3. Status" description="Status as reported by the server.">
+        <dl className="grid grid-cols-[200px_1fr] gap-y-1 text-sm" data-testid="import-summary">
+          <Field label="Import ID">
+            <span className="font-mono text-xs" data-testid="import-id">
+              {job.id}
+            </span>
+          </Field>
+          <Field label="Status">
+            <ImportStatusPill status={job.status} />
+          </Field>
+          <Field label="Rows read" testId="import-row-count">
+            <span className="font-mono">{job.row_count}</span>
+          </Field>
+          <Field label="Expected rows">
+            <span className="font-mono">{job.expected_row_count ?? '—'}</span>
+          </Field>
+          <Field label="SHA-256">
+            <span className="break-all font-mono text-xs" data-testid="import-sha256">
+              {a.sha256}
+            </span>
+          </Field>
+          <Field label="File">
+            {a.original_filename ?? '—'}{' '}
+            <span className="text-muted-foreground">
+              · {formatBytes(a.size_bytes)} · <span className="font-mono">{a.detected_mime}</span>
+            </span>
+          </Field>
+          <Field label="Format">
+            <span className="font-mono">{job.format}</span>
+          </Field>
+          <Field label="Classification">{a.classification}</Field>
+          <Field label="Raw file">
+            <span className="font-mono text-xs">{a.retention_state}</span>
+            <span className="text-muted-foreground"> · write-once, never deleted</span>
+          </Field>
+          <Field label="Data class">
+            <span className="font-mono">{job.data_class}</span>
+            {job.synthetic_attested && <span className="text-muted-foreground"> · attested synthetic by the uploader</span>}
+            {job.synthetic_marker && <span className="text-muted-foreground"> · file carries the synthetic marker</span>}
+          </Field>
+          {job.retry_of_import_id && (
+            <Field label="Retry of">
+              <Link href={`/ingestion/imports/${job.retry_of_import_id}`} className="font-mono text-xs text-primary hover:underline">
+                {job.retry_of_import_id}
+              </Link>
+            </Field>
+          )}
+          <Field label="Uploaded">
+            <span className="font-mono text-xs">
+              {job.created_by} · {new Date(job.created_at).toLocaleString()}
+            </span>
+          </Field>
+          <Field label="Correlation ID">
+            <span className="font-mono text-xs">{job.correlation_id ?? '—'}</span>
+          </Field>
+        </dl>
+      </PageSection>
+
+      <PageSection icon={Pin} title="Pinned versions" description="Fixed at upload: later contract or schema changes do not alter this import.">
+        <dl className="grid grid-cols-[200px_1fr] gap-y-1 text-sm" data-testid="import-pins">
+          <Field label="Source">
+            <Link href={`/ingestion/sources/${job.source_id}`} className="font-mono text-primary hover:underline">
+              {job.source_code}
+            </Link>
+          </Field>
+          <Field label="Source contract">
+            <span className="font-mono">{job.contract_version != null ? `v${job.contract_version}` : '—'}</span>{' '}
+            <span className="font-mono text-xs text-muted-foreground">{job.source_contract_id}</span>
+          </Field>
+          <Field label="Schema version" testId="import-schema-version">
+            <span className="font-mono">{job.schema_code ? `${job.schema_code} v${job.schema_version}` : '—'}</span>{' '}
+            <span className="font-mono text-xs text-muted-foreground">{job.schema_version_id}</span>
+          </Field>
+        </dl>
+      </PageSection>
+
+      {totals.length > 0 && (
+        <PageSection icon={FileCheck2} title="Declared control totals" description="As declared at upload; checked against the file in a later phase.">
+          <dl className="grid grid-cols-[200px_1fr] gap-y-1 text-sm" data-testid="import-control-totals">
+            {totals.map(([column, value]) => (
+              <Field key={column} label={column}>
+                {isMasked(value) ? <MaskedValue value={value} /> : <span className="font-mono">{value}</span>}
+              </Field>
+            ))}
+          </dl>
+        </PageSection>
+      )}
+
+      <PageSection icon={Layers} title="Batches">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Batch</TableHead>
+              <TableHead>Sheet</TableHead>
+              <TableHead className="text-right">Rows</TableHead>
+              <TableHead className="text-right">Columns</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {job.batches.map((b) => (
+              <TableRow key={b.batch_number} data-testid="import-batch">
+                <TableCell className="font-mono text-sm">{b.batch_number}</TableCell>
+                <TableCell className="text-sm">{b.sheet_name ?? '—'}</TableCell>
+                <TableCell className="text-right font-mono text-sm">{b.row_count}</TableCell>
+                <TableCell className="text-right font-mono text-sm">{b.column_count}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </PageSection>
+
+      <PageSection icon={ScrollText} title="Audit history" description="Every event for this import, newest first.">
+        <RequirePermission
+          permission="audit:read"
+          fallback={
+            <p className="text-sm text-muted-foreground" data-testid="audit-unavailable">
+              The audit history needs the <code className="font-mono">audit:read</code> permission.
+            </p>
+          }
+        >
+          <AuditTimeline resourceType="import_job" resourceId={job.id} showFilters={false} />
+        </RequirePermission>
+      </PageSection>
+    </>
+  )
+
   return (
     <>
       <PageHeader
@@ -113,129 +278,7 @@ function ImportView({ importId }: { importId: string }) {
           </p>
         )}
 
-        <PageSection icon={FileCheck2} title="3. Status" description="Status as reported by the server.">
-          <dl className="grid grid-cols-[200px_1fr] gap-y-1 text-sm" data-testid="import-summary">
-            <Field label="Import ID">
-              <span className="font-mono text-xs" data-testid="import-id">
-                {job.id}
-              </span>
-            </Field>
-            <Field label="Status">
-              <ImportStatusPill status={job.status} />
-            </Field>
-            <Field label="Rows read" testId="import-row-count">
-              <span className="font-mono">{job.row_count}</span>
-            </Field>
-            <Field label="Expected rows">
-              <span className="font-mono">{job.expected_row_count ?? '—'}</span>
-            </Field>
-            <Field label="SHA-256">
-              <span className="break-all font-mono text-xs" data-testid="import-sha256">
-                {a.sha256}
-              </span>
-            </Field>
-            <Field label="File">
-              {a.original_filename ?? '—'}{' '}
-              <span className="text-muted-foreground">
-                · {formatBytes(a.size_bytes)} · <span className="font-mono">{a.detected_mime}</span>
-              </span>
-            </Field>
-            <Field label="Format">
-              <span className="font-mono">{job.format}</span>
-            </Field>
-            <Field label="Classification">{a.classification}</Field>
-            <Field label="Raw file">
-              <span className="font-mono text-xs">{a.retention_state}</span>
-              <span className="text-muted-foreground"> · write-once, never deleted</span>
-            </Field>
-            <Field label="Data class">
-              <span className="font-mono">{job.data_class}</span>
-              {job.synthetic_attested && <span className="text-muted-foreground"> · attested synthetic by the uploader</span>}
-              {job.synthetic_marker && <span className="text-muted-foreground"> · file carries the synthetic marker</span>}
-            </Field>
-            {job.retry_of_import_id && (
-              <Field label="Retry of">
-                <Link href={`/ingestion/imports/${job.retry_of_import_id}`} className="font-mono text-xs text-primary hover:underline">
-                  {job.retry_of_import_id}
-                </Link>
-              </Field>
-            )}
-            <Field label="Uploaded">
-              <span className="font-mono text-xs">
-                {job.created_by} · {new Date(job.created_at).toLocaleString()}
-              </span>
-            </Field>
-            <Field label="Correlation ID">
-              <span className="font-mono text-xs">{job.correlation_id ?? '—'}</span>
-            </Field>
-          </dl>
-        </PageSection>
-
-        <PageSection icon={Pin} title="Pinned versions" description="Fixed at upload: later contract or schema changes do not alter this import.">
-          <dl className="grid grid-cols-[200px_1fr] gap-y-1 text-sm" data-testid="import-pins">
-            <Field label="Source">
-              <Link href={`/ingestion/sources/${job.source_id}`} className="font-mono text-primary hover:underline">
-                {job.source_code}
-              </Link>
-            </Field>
-            <Field label="Source contract">
-              <span className="font-mono">{job.contract_version != null ? `v${job.contract_version}` : '—'}</span>{' '}
-              <span className="font-mono text-xs text-muted-foreground">{job.source_contract_id}</span>
-            </Field>
-            <Field label="Schema version" testId="import-schema-version">
-              <span className="font-mono">{job.schema_code ? `${job.schema_code} v${job.schema_version}` : '—'}</span>{' '}
-              <span className="font-mono text-xs text-muted-foreground">{job.schema_version_id}</span>
-            </Field>
-          </dl>
-        </PageSection>
-
-        {totals.length > 0 && (
-          <PageSection icon={FileCheck2} title="Declared control totals" description="As declared at upload; checked against the file in a later phase.">
-            <dl className="grid grid-cols-[200px_1fr] gap-y-1 text-sm" data-testid="import-control-totals">
-              {totals.map(([column, value]) => (
-                <Field key={column} label={column}>
-                  {isMasked(value) ? <MaskedValue value={value} /> : <span className="font-mono">{value}</span>}
-                </Field>
-              ))}
-            </dl>
-          </PageSection>
-        )}
-
-        <PageSection icon={Layers} title="Batches">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Batch</TableHead>
-                <TableHead>Sheet</TableHead>
-                <TableHead className="text-right">Rows</TableHead>
-                <TableHead className="text-right">Columns</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {job.batches.map((b) => (
-                <TableRow key={b.batch_number} data-testid="import-batch">
-                  <TableCell className="font-mono text-sm">{b.batch_number}</TableCell>
-                  <TableCell className="text-sm">{b.sheet_name ?? '—'}</TableCell>
-                  <TableCell className="text-right font-mono text-sm">{b.row_count}</TableCell>
-                  <TableCell className="text-right font-mono text-sm">{b.column_count}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </PageSection>
-
-        <PageSection icon={ScrollText} title="Audit history" description="Every event for this import, newest first.">
-          <RequirePermission
-            permission="audit:read"
-            fallback={
-              <p className="text-sm text-muted-foreground" data-testid="audit-unavailable">
-                The audit history needs the <code className="font-mono">audit:read</code> permission.
-              </p>
-            }
-          >
-            <AuditTimeline resourceType="import_job" resourceId={job.id} showFilters={false} />
-          </RequirePermission>
-        </PageSection>
+        {IMPORT_PROFILE_UI_ENABLED ? <ImportTabs importId={job.id} status={sections} /> : sections}
       </div>
     </>
   )

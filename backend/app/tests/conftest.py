@@ -139,6 +139,16 @@ ALTER TABLE import_job ENABLE TRIGGER import_job_immutable;
 COMMIT;
 """
 
+# Profiles of those imports (Phase 9), append-only likewise. Its own statement, before the
+# import cleanup, so a schema without this table (0012) still has its imports cleaned.
+_PROFILE_CLEANUP = """
+BEGIN;
+ALTER TABLE data_profile_snapshot DISABLE TRIGGER data_profile_snapshot_append_only;
+DELETE FROM data_profile_snapshot;
+ALTER TABLE data_profile_snapshot ENABLE TRIGGER data_profile_snapshot_append_only;
+COMMIT;
+"""
+
 # Deletes everything that is not seed data (D-11), children first.
 _CLEANUP = [
     "DELETE FROM user_role",
@@ -146,6 +156,7 @@ _CLEANUP = [
     "DELETE FROM role_permission WHERE seeded_by IS NULL",
     "DELETE FROM role WHERE seeded_by IS NULL",
     "DELETE FROM permission WHERE seeded_by IS NULL",
+    _PROFILE_CLEANUP,
     _IMPORT_CLEANUP,
     _INGESTION_CLEANUP,
     _REGISTRY_CLEANUP,
@@ -190,7 +201,7 @@ def script(url: str, statements: str) -> None:
 
 def clean(url: str) -> None:
     for statement in _CLEANUP:
-        if statement is _INGESTION_CLEANUP or statement is _IMPORT_CLEANUP:
+        if statement in (_INGESTION_CLEANUP, _IMPORT_CLEANUP, _PROFILE_CLEANUP):
             try:
                 script(url, statement)
             except asyncpg.UndefinedTableError:

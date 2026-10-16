@@ -6,7 +6,9 @@ import { expect, test, type Page, type Route } from '@playwright/test'
 /**
  * Feature 02 Phase 8 browser checks against the real stack (backend ENV=test, synthetic).
  * FE-8.1: data_steward uploads the synthetic instrument CSV with the attestation and lands
- *         on the import's page showing RECEIVED, the row count and the SHA-256 from the API.
+ *         on the import's page showing its status, the row count and the SHA-256 from the API.
+ *         Since BE-9.2 every upload is profiled on receipt and, with no mapping before
+ *         Phase 10, ends MAPPING_REQUIRED (D-21); that is the status shown.
  *         With the client-side size check bypassed, the backend's 413 toast shows its
  *         correlation ID.
  * FE-8.2: the imports list shows the uploaded import with its ImportStatusPill.
@@ -58,7 +60,7 @@ test.describe.configure({ mode: 'serial' })
 
 let importId = ''
 
-test('FE-8.1: data_steward uploads the synthetic CSV and lands on its RECEIVED status page', async ({ page }) => {
+test('FE-8.1: data_steward uploads the synthetic CSV and lands on its status page', async ({ page }) => {
   await signIn(page, 'Data steward')
   await startWizard(page)
 
@@ -86,7 +88,7 @@ test('FE-8.1: data_steward uploads the synthetic CSV and lands on its RECEIVED s
 
   expect(response.status()).toBe(201)
   const created = await response.json()
-  expect(created.status).toBe('RECEIVED')
+  expect(created.status).toBe('MAPPING_REQUIRED')
   expect(created.row_count).toBe(SAMPLE_ROWS)
   expect(created.artifact.sha256).toBe(SAMPLE_SHA256)
   expect(created.synthetic_attested).toBe(true)
@@ -98,8 +100,8 @@ test('FE-8.1: data_steward uploads the synthetic CSV and lands on its RECEIVED s
   // The status page shows what the API returned.
   await page.waitForURL(`**/ingestion/imports/${importId}`)
   const summary = page.getByTestId('import-summary')
-  await expect(summary.getByTestId('import-status')).toHaveText('Received')
-  await expect(summary.getByTestId('import-status')).toHaveAttribute('data-status', 'RECEIVED')
+  await expect(summary.getByTestId('import-status')).toHaveText('Mapping required')
+  await expect(summary.getByTestId('import-status')).toHaveAttribute('data-status', 'MAPPING_REQUIRED')
   await expect(page.getByTestId('import-row-count')).toHaveText(String(created.row_count))
   await expect(page.getByTestId('import-sha256')).toHaveText(created.artifact.sha256)
   await expect(page.getByTestId('import-id')).toHaveText(importId)
@@ -122,8 +124,8 @@ test('FE-8.2: the imports list shows the uploaded import with its status pill', 
   await page.waitForURL('**/ingestion?tab=imports')
   const row = page.locator(`[data-testid="import-row"][data-id="${importId}"]`)
   await expect(row).toBeVisible()
-  await expect(row).toHaveAttribute('data-status', 'RECEIVED')
-  await expect(row.getByTestId('import-status')).toHaveText('Received')
+  await expect(row).toHaveAttribute('data-status', 'MAPPING_REQUIRED')
+  await expect(row.getByTestId('import-status')).toHaveText('Mapping required')
   await expect(row).toContainText('core_banking')
   await expect(row).toContainText('instrument.csv')
   await expect(row).toContainText(SAMPLE_SHA256.slice(0, 12))
@@ -200,7 +202,7 @@ test('FE-8.1: auditor sees the import and its audit timeline, and cannot upload'
   await expect(page.getByTestId('new-import')).toHaveCount(0)
 
   await page.goto(`/ingestion/imports/${importId}`)
-  await expect(page.getByTestId('import-summary').getByTestId('import-status')).toHaveAttribute('data-status', 'RECEIVED')
+  await expect(page.getByTestId('import-summary').getByTestId('import-status')).toHaveAttribute('data-status', 'MAPPING_REQUIRED')
   await expect(page.getByTestId('import-sha256')).toHaveText(SAMPLE_SHA256)
   const event = page.getByTestId('audit-event').filter({ hasText: 'import.create' })
   await expect(event).toHaveCount(1)

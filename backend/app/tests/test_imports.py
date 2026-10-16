@@ -1,7 +1,8 @@
 """BE-8.4 (D-15, D-16, D-21, D-24 §4): POST /imports (multipart), GET /imports and
 GET /imports/{import_id}. One upload is stored, parsed into source_record rows and RECEIVED
 in one transaction; the byte limit is enforced while streaming; Idempotency-Key replays;
-the synthetic attestation is required; every refused write is audited with its reason."""
+the synthetic attestation is required; every refused write is audited with its reason.
+Profiling (Phase 9) follows in the same request: see test_profiler.py."""
 
 import asyncio
 import hashlib
@@ -125,7 +126,9 @@ def test_each_format_reaches_received_with_one_record_per_data_row(
     r = upload(api, steward, source, data, filename=SAMPLES[fmt], cid=correlation)
     assert r.status_code == 201, r.text
     body = r.json()
-    assert body["status"] == "RECEIVED"
+    # The upload sets RECEIVED (the import.create event below records it); profiling then
+    # runs synchronously and, with no mapping before Phase 10, ends MAPPING_REQUIRED (D-21).
+    assert body["status"] == "MAPPING_REQUIRED"
     assert body["row_count"] == 25  # the samples' data rows (marker and header excluded)
     assert body["format"] == fmt and body["source_id"] == source
     assert body["synthetic_attested"] is True and body["synthetic_marker"] is True
@@ -169,7 +172,8 @@ def test_each_format_reaches_received_with_one_record_per_data_row(
     assert FilesystemArtifactStore(artifact_dir).get(ref) == data
     assert stored_files(artifact_dir) == [artifact_dir / ref]
 
-    [event] = events(db, correlation)
+    [event, profiled] = sorted(events(db, correlation), key=lambda e: e["action"])
+    assert (profiled["action"], profiled["outcome"]) == ("import.profile", "SUCCESS")
     assert (event["action"], event["outcome"], event["resource_id"]) == (
         "import.create",
         "SUCCESS",
@@ -744,8 +748,10 @@ def test_list_filters_by_source_and_status_newest_first(
     assert [i["id"] for i in page["items"]] == [c["id"], b["id"], a["id"]]
     by_source = api.get(IMPORTS, params={"source_id": seeded}, headers=steward).json()
     assert [i["id"] for i in by_source["items"]] == [c["id"], a["id"]] and by_source["total"] == 2
+    profiled = api.get(IMPORTS, params={"status": "MAPPING_REQUIRED"}, headers=steward).json()
+    assert profiled["total"] == 3
     received = api.get(IMPORTS, params={"status": "RECEIVED"}, headers=steward).json()
-    assert received["total"] == 3
+    assert received["total"] == 0
     failed = api.get(IMPORTS, params={"status": "FAILED"}, headers=steward).json()
     assert failed == {"items": [], "total": 0, "limit": 50, "offset": 0}
     paged = api.get(IMPORTS, params={"limit": 1, "offset": 1}, headers=steward).json()

@@ -1,7 +1,8 @@
 """ingestion.router
 
-Source registration (BE-7.4) and import (BE-8.4) endpoints. Every route declares its
-permission (D-04, the Feature 02 endpoint table); tenant scope comes from the principal.
+Source registration (BE-7.4), import (BE-8.4) and import profile (BE-9.3) endpoints. Every
+route declares its permission (D-04, the Feature 02 endpoint table); tenant scope comes from
+the principal.
 Writes are refused with 409 `ingestion_disabled` (audited) while INGESTION_ENABLED is off
 (BE-7.3).
 
@@ -38,18 +39,22 @@ from app.ingestion.models import ImportJob, SourceContract, SourceSystem
 from app.ingestion.schemas import (
     ArtifactOut,
     BatchOut,
+    ColumnProfile,
     ContractColumn,
     ContractIn,
     ContractOut,
     ImportDetail,
     ImportForm,
     ImportPage,
+    ImportProfile,
     ImportSummary,
     ProfileOut,
+    ProfileSummary,
     SourceCreate,
     SourceDetail,
     SourcePage,
     SourceSummary,
+    TopValue,
 )
 from app.ingestion.service import (
     ContractSpec,
@@ -57,6 +62,7 @@ from app.ingestion.service import (
     ImportPolicy,
     ImportService,
     ProfileSpec,
+    ProfileView,
     SourceService,
     UploadSpec,
     current_contract,
@@ -472,7 +478,12 @@ async def create_import(
             expected_row_count=form.expected_row_count,
             control_totals=form.control_totals,
         ),
-        ImportPolicy(settings.data_class, limits, request.app.state.artifact_store),
+        ImportPolicy(
+            settings.data_class,
+            limits,
+            request.app.state.artifact_store,
+            settings.IMPORT_PROFILING_ENABLED,
+        ),
     )
     if not created:
         response.status_code = 200
@@ -508,3 +519,80 @@ async def get_import(
     service = ImportService(session, principal)
     job = await service.get(import_id)
     return _import_detail(job, await service.labels([job]), principal)
+
+
+# --- Phase 9: the import's profile (BE-9.3) -----------------------------------------------------
+
+
+def _column_profile(
+    column: dict[str, Any], view: ProfileView, clear: frozenset[str]
+) -> ColumnProfile:
+    """One stored column observation as the caller may see it: its values (min, max, top
+    values) masked through mask_mapping by the column's classification (BE-3.5)."""
+    name = column["name"]
+    code = view.classification(name)
+    bounds = mask_mapping(
+        {"min": column["min"], "max": column["max"]}, {"min": code, "max": code}, clear
+    )
+    tops = [
+        TopValue(
+            value=mask_mapping({"value": top["value"]}, {"value": code}, clear)["value"],
+            count=top["count"],
+            truncated=top["truncated"],
+        )
+        for top in column["top_values"]
+    ]
+    types = column["candidate_types"]
+    return ColumnProfile(
+        name=name,
+        position=column["position"],
+        classification=code,
+        value_count=column["value_count"],
+        null_count=column["null_count"],
+        null_rate=column["null_rate"],
+        distinct_count=column["distinct_count"],
+        distinct_capped=column["distinct_capped"],
+        candidate_types=types,
+        suggested_type=types[0] if types else None,
+        min=bounds["min"],
+        max=bounds["max"],
+        max_length=column["max_length"],
+        max_precision=column["max_precision"],
+        max_scale=column["max_scale"],
+        date_formats=column["date_formats"],
+        currency_pattern_hits=column["currency_pattern_hits"],
+        top_values=tops,
+        top_values_exact=column["top_values_exact"],
+        in_contract=view.in_contract(name),
+        suggested_target_field=view.suggested_target(name),
+    )
+
+
+@router.get(
+    "/imports/{import_id}/profile", response_model=ImportProfile, operation_id="getImportProfile"
+)
+async def get_import_profile(
+    import_id: uuid.UUID, principal: ImportReader, session: SessionDep
+) -> ImportProfile:
+    """The import's field profile (DI-06): per-column observations and read-only
+    suggestions. Values are masked by each column's classification; nothing is changed."""
+    view = await ImportService(session, principal).profile_view(import_id)
+    snap, job = view.snapshot, view.job
+    clear = principal.clear_classifications
+    return ImportProfile(
+        import_id=job.id,
+        import_status=ImportStatus(job.status),
+        snapshot_id=snap.id,
+        profiler_version=snap.profiler_version,
+        content_sha256=snap.content_sha256,
+        profiled_at=snap.created_at,
+        row_count=snap.row_count,
+        column_count=snap.column_count,
+        source_contract_id=job.source_contract_id,
+        contract_version=view.contract_version,
+        schema_version_id=job.schema_version_id,
+        schema_code=view.schema_code,
+        schema_version=view.schema_version,
+        summary=ProfileSummary.model_validate(snap.summary),
+        columns=[_column_profile(c, view, clear) for c in snap.columns],
+    )
