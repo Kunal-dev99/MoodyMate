@@ -183,7 +183,7 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
 
 ## D-15 Raw artifact storage before object storage exists
 
-- **Status:** proposed (Feature 02, 2026-10-16). Awaiting user decision.
+- **Status:** active (approved by the user 2026-10-16, Feature 02 plan)
 - **Date:** 2026-10-16
 - **Context:** WS2 must keep every uploaded file as an immutable raw artifact (Arch §6.1
   step 2, Data Model `import_artifact`). No object storage exists yet (D-12), and hosting is
@@ -211,7 +211,7 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
 
 ## D-16 Upload bounds, accepted formats and the synthetic-data attestation
 
-- **Status:** proposed (Feature 02, 2026-10-16). Awaiting user decision.
+- **Status:** active (approved by the user 2026-10-16, Feature 02 plan)
 - **Date:** 2026-10-16
 - **Question:** which limits and formats does the MVP accept, and how does an upload honour
   D-14?
@@ -242,7 +242,7 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
 
 ## D-17 XLSX parsing library
 
-- **Status:** proposed (Feature 02, 2026-10-16). Awaiting user decision.
+- **Status:** active (approved by the user 2026-10-16, Feature 02 plan)
 - **Date:** 2026-10-16
 - **Question:** which library reads XLSX safely without breaking fixed-precision rules?
 - **Options:**
@@ -263,7 +263,7 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
 
 ## D-18 Mapping versions and their binding to schema versions
 
-- **Status:** proposed (Feature 02, 2026-10-16). Awaiting user decision.
+- **Status:** active (approved by the user 2026-10-16, Feature 02 plan)
 - **Date:** 2026-10-16
 - **Context:** Data Model §2 says "the canonical model and source mapping are versioned
   separately" and "each import records the exact mapping version applied". Arch §10 asks
@@ -293,7 +293,7 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
 
 ## D-19 Mapping transforms are a closed allowlist
 
-- **Status:** proposed (Feature 02, 2026-10-16). Awaiting user decision.
+- **Status:** active (approved by the user 2026-10-16, Feature 02 plan)
 - **Date:** 2026-10-16
 - **Question:** what may a mapping rule do to a value?
 - **Recommended:**
@@ -309,7 +309,7 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
 
 ## D-20 Quarantine, rejected rows, retry and retention
 
-- **Status:** proposed (Feature 02, 2026-10-16). Awaiting user decision.
+- **Status:** active (approved by the user 2026-10-16, Feature 02 plan)
 - **Date:** 2026-10-16
 - **Question:** how are invalid rows held, corrected and retained?
 - **Recommended:**
@@ -343,7 +343,7 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
 
 ## D-21 Import processing model, idempotency and status set
 
-- **Status:** proposed (Feature 02, 2026-10-16). Awaiting user decision.
+- **Status:** active (approved by the user 2026-10-16, Feature 02 plan)
 - **Date:** 2026-10-16
 - **Question:** is import processing synchronous or job-based, and which statuses does
   `import_job` use?
@@ -369,7 +369,7 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
 
 ## D-22 Canonical records and the import as the MVP dataset snapshot
 
-- **Status:** proposed (Feature 02, 2026-10-16). Awaiting user decision.
+- **Status:** active (approved by the user 2026-10-16, Feature 02 plan)
 - **Date:** 2026-10-16
 - **Question:** where do accepted records go before the WS3 domain tables exist, and what
   will a calculation run pin?
@@ -390,7 +390,7 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
 
 ## D-23 WS2 enums not defined in Data Model §9
 
-- **Status:** proposed (Feature 02, 2026-10-16). Awaiting user decision.
+- **Status:** active (approved by the user 2026-10-16, Feature 02 plan)
 - **Date:** 2026-10-16
 - **Question:** what values do the WS2 status/type columns that the data model leaves open
   take? All are UPPERCASE per D-06, CHECK-constrained, and each lifecycle has a transition
