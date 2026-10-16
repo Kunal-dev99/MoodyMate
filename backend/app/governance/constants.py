@@ -14,6 +14,16 @@ class Permission(StrEnum):
     SCHEMA_APPROVE = "schema:approve"
     AUDIT_READ = "audit:read"
     ADMIN_READ = "admin:read"
+    # WS2 ingestion (BE-7.2, Feature 02 matrix; seeded by migration 0010).
+    SOURCE_READ = "source:read"
+    SOURCE_MANAGE = "source:manage"
+    IMPORT_READ = "import:read"
+    IMPORT_WRITE = "import:write"
+    MAPPING_READ = "mapping:read"
+    MAPPING_PROPOSE = "mapping:propose"
+    MAPPING_APPROVE = "mapping:approve"
+    QUARANTINE_READ = "quarantine:read"
+    QUALITY_REVIEW = "quality:review"
 
 
 class Role(StrEnum):
@@ -37,7 +47,7 @@ class TenantStatus(StrEnum):
 # docs/DELIVERY_PLAN.md "Role → permission matrix (seed, BE-2.2)". platform_admin
 # deliberately lacks schema:approve (segregation of duties). The seed migration holds a
 # frozen copy; test_identity_seed asserts the database matches this table.
-ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
+WS1_ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
     Role.PLATFORM_ADMIN: frozenset(
         {Permission.SCHEMA_READ, Permission.AUDIT_READ, Permission.ADMIN_READ}
     ),
@@ -45,6 +55,52 @@ ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
     Role.RISK_ANALYST: frozenset({Permission.SCHEMA_READ}),
     Role.APPROVER: frozenset({Permission.SCHEMA_READ, Permission.SCHEMA_APPROVE}),
     Role.AUDITOR: frozenset({Permission.SCHEMA_READ, Permission.AUDIT_READ}),
+}
+
+# docs/DELIVERY_PLAN.md Feature 02 "Role → permission matrix additions (seed, BE-7.2;
+# PROVISIONAL, D-11)", seeded by migration 0010 (frozen copy there). platform_admin reads
+# WS2 but sees no quarantine; only data_steward writes; only approver activates mappings.
+WS2_ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
+    Role.PLATFORM_ADMIN: frozenset(
+        {Permission.SOURCE_READ, Permission.IMPORT_READ, Permission.MAPPING_READ}
+    ),
+    Role.DATA_STEWARD: frozenset(
+        {
+            Permission.SOURCE_READ,
+            Permission.SOURCE_MANAGE,
+            Permission.IMPORT_READ,
+            Permission.IMPORT_WRITE,
+            Permission.MAPPING_READ,
+            Permission.MAPPING_PROPOSE,
+            Permission.QUARANTINE_READ,
+            Permission.QUALITY_REVIEW,
+        }
+    ),
+    Role.RISK_ANALYST: frozenset(
+        {Permission.SOURCE_READ, Permission.IMPORT_READ, Permission.MAPPING_READ}
+    ),
+    Role.APPROVER: frozenset(
+        {
+            Permission.SOURCE_READ,
+            Permission.IMPORT_READ,
+            Permission.MAPPING_READ,
+            Permission.MAPPING_APPROVE,
+            Permission.QUARANTINE_READ,
+        }
+    ),
+    Role.AUDITOR: frozenset(
+        {
+            Permission.SOURCE_READ,
+            Permission.IMPORT_READ,
+            Permission.MAPPING_READ,
+            Permission.QUARANTINE_READ,
+        }
+    ),
+}
+
+# The full seeded matrix (0003 + 0010). Authorization reads the database, not this table.
+ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
+    role: WS1_ROLE_PERMISSIONS[role] | WS2_ROLE_PERMISSIONS[role] for role in Role
 }
 
 DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-4000-8000-000000000001")
