@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from app.core.config import Settings
 from app.core.tokens import DevTokens
-from app.governance.constants import DEV_ISSUER
+from app.governance.constants import DEFAULT_TENANT_ID, DEV_ISSUER
 from app.main import create_app
 from app.tests.conftest import dev_token, insert_user, sql
 from app.tests.test_schema_registry import schema_id
@@ -20,9 +20,11 @@ pytestmark = pytest.mark.db
 BASE = "/api/v1/schema-change-proposals"
 
 
-def token_for(db: str, subject: str, roles: tuple[str, ...]) -> dict[str, str]:
+def token_for(
+    db: str, subject: str, roles: tuple[str, ...], tenant_id: Any = DEFAULT_TENANT_ID
+) -> dict[str, str]:
     """A dev token for a user with exactly these roles (dev personas hold one role each)."""
-    insert_user(db, DEV_ISSUER, subject, roles=roles)
+    insert_user(db, DEV_ISSUER, subject, roles=roles, tenant_id=tenant_id)
     settings = Settings(ENV="test")
     token = DevTokens(settings.AUTH_DEV_SECRET, settings.AUTH_DEV_TOKEN_TTL_MINUTES).issue(
         subject, f"{subject}@example.test", subject

@@ -29,8 +29,16 @@ class OidcClientConfig(BaseModel):
     scopes: str
 
 
+class EnvironmentInfo(BaseModel):
+    """Shown on every page outside production (FE-6.1)."""
+
+    env: Literal["local", "test", "staging", "production"]
+    data_class: Literal["synthetic", "client"]
+
+
 class AuthConfig(BaseModel):
     mode: Literal["oidc", "dev"]
+    environment: EnvironmentInfo
     dev_sessions: bool = Field(description="True when the dev sign-in endpoints are available.")
     oidc: OidcClientConfig | None = None
 

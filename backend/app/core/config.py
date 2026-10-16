@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _guard_auth(self) -> "Settings":
         local = self.ENV in LOCAL_ENVS
+        # BE-6.1 (DG-06): client data only where it may live; local and test hold
+        # synthetic data only.
+        if self.DATA_CLASS == "client" and self.ENV not in ("staging", "production"):
+            raise ValueError(f"DATA_CLASS=client is not allowed when ENV={self.ENV}")
         if not self.MASKING_ENABLED and self.ENV != "local":
             raise ValueError(f"MASKING_ENABLED=false is not allowed when ENV={self.ENV}")
         if self.AUTH_MODE == "dev":

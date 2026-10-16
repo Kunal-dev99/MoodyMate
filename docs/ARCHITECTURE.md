@@ -81,6 +81,11 @@ switchable off).
 - No claim of regulatory certification or Moody's parity. Domain experts approve formulas,
   golden cases and tolerances.
 
+## Environments, retention and backup
+
+- **Environment guard (BE-6.1):** `DATA_CLASS=client` is allowed only when `ENV` is `staging` or `production`. `local` and `test` are synthetic only, and every response carries `X-Data-Class`.
+- **Retention, deletion and backup:** provisional assumptions per artifact class are in [`docs/RETENTION.md`](RETENTION.md). They need client confirmation, and no numeric RPO/RTO is set (Arch §11).
+
 ## Open contract conflicts (resolve via a decision before coding)
 
 1. Endpoint naming between the Architecture doc §9 and the WS plans: `datasets/imports` vs

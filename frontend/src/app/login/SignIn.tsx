@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Image from 'next/image'
+import { EnvironmentBanner } from '@/components/layout/EnvironmentBanner'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { KeyRound, LogIn, ServerCrash } from 'lucide-react'
 import { api, call, ApiError, type Schemas } from '@/api/client'
@@ -60,7 +61,9 @@ export function SignIn() {
   }
 
   return (
-    <div className="min-h-screen bg-background px-6 py-16">
+    <div className="min-h-screen bg-background">
+      {config && <EnvironmentBanner environment={config.environment} />}
+      <div className="px-6 py-16">
       <div className="mx-auto max-w-3xl space-y-6">
         <div className="flex items-center gap-3">
           <div className="flex items-center justify-center rounded-md bg-[#15171A] px-3 py-1.5 shadow-sm">
@@ -133,6 +136,7 @@ export function SignIn() {
             </CardContent>
           </Card>
         )}
+      </div>
       </div>
     </div>
   )

@@ -15,6 +15,7 @@ from app.api.v1.router import build_api_router
 from app.core.auth import enforce_declared_permission
 from app.core.config import Settings, get_settings
 from app.core.correlation import HEADER, CorrelationIdMiddleware
+from app.core.environment import DATA_CLASS_HEADER, DataClassHeaderMiddleware
 from app.core.errors import register_error_handlers
 from app.core.logging import configure_logging
 from app.core.tokens import build_verifier
@@ -49,11 +50,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # CORS headers; otherwise a browser on another origin blocks it and loses the
     # correlation ID.
     app.add_middleware(CorrelationIdMiddleware)
+    # Outside CorrelationIdMiddleware, so the 500 envelope it produces carries it too.
+    app.add_middleware(DataClassHeaderMiddleware, data_class=settings.DATA_CLASS)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.CORS_ORIGINS,
         allow_methods=["*"],
         allow_headers=["*"],
-        expose_headers=[HEADER],
+        expose_headers=[HEADER, DATA_CLASS_HEADER],
     )
     return app

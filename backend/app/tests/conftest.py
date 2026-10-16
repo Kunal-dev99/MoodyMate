@@ -1,5 +1,6 @@
 import asyncio
 import os
+from typing import Any
 
 import asyncpg
 import pytest
@@ -27,6 +28,23 @@ def _db_reachable(url: str) -> bool:
     return asyncio.run(probe())
 
 
+# BE-6.3: rows of the route x role matrix, printed at the end of the test report.
+WS1_MATRIX: list[dict[str, Any]] = []
+
+
+def pytest_terminal_summary(terminalreporter: Any) -> None:
+    if not WS1_MATRIX:
+        return
+    roles = [k for k in WS1_MATRIX[0] if k not in ("route", "permission")]
+    width = max(len(r["route"]) for r in WS1_MATRIX)
+    tr = terminalreporter
+    tr.section("WS1 authorization matrix (route x role, HTTP status; 403 = denied)")
+    tr.write_line(f"{'route':<{width}}  {'permission':<15} " + " ".join(f"{r:>14}" for r in roles))
+    for row in WS1_MATRIX:
+        cells = " ".join(f"{row[r]:>14}" for r in roles)
+        tr.write_line(f"{row['route']:<{width}}  {row['permission']:<15} {cells}")
+
+
 @pytest.fixture(scope="session")
 def database_url() -> str:
     if not _db_reachable(TEST_DATABASE_URL):
@@ -49,7 +67,6 @@ def client(settings: Settings) -> TestClient:
 # --- Phase 2: migrated database, cleanup and helpers -----------------------------------
 
 from collections.abc import Iterator  # noqa: E402
-from typing import Any  # noqa: E402
 
 from alembic import command  # noqa: E402
 from alembic.config import Config  # noqa: E402
