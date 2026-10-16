@@ -50,8 +50,16 @@ def _unauthorized(code: str, message: str, error: str | None = None) -> ApiError
 
 
 @asynccontextmanager
-async def _audit_session(request: Request) -> AsyncIterator[AsyncSession]:
-    """A separate session that commits only the denial's audit row."""
+async def _audit_session(
+    request: Request, request_session: AsyncSession
+) -> AsyncIterator[AsyncSession]:
+    """A separate session that commits only the denial's audit row.
+
+    The request is being refused, so its own session is rolled back first: nothing it
+    holds is committed, and its connection goes back to the pool before a second one is
+    taken (otherwise concurrent denials could exhaust the pool waiting on each other).
+    """
+    await request_session.rollback()
     db: Database = request.app.state.db
     async with db.sessionmaker() as session:
         yield session
@@ -93,7 +101,7 @@ async def get_principal(
         )
     except AccountDenied as exc:
         # BE-3.2: a known but disabled/suspended account leaves a trace on every attempt.
-        async with _audit_session(request) as audit_session:
+        async with _audit_session(request, session) as audit_session:
             audit(
                 audit_session,
                 tenant_id=exc.tenant_id,
@@ -118,13 +126,14 @@ def require_permission(permission: str) -> PrincipalDependency:
     async def dependency(
         request: Request,
         principal: Annotated[Principal, Depends(get_principal)],
+        session: Annotated[AsyncSession, Depends(get_session)],
     ) -> Principal:
         if permission != AUTHENTICATED and permission not in principal.permissions:
             # BE-3.2: denied requests are audited, in their own session so that nothing
             # else pending in the request's session is committed by a refusal.
             route = request.scope.get("route")
             endpoint = getattr(route, "path", request.url.path)
-            async with _audit_session(request) as audit_session:
+            async with _audit_session(request, session) as audit_session:
                 audit_by(
                     audit_session,
                     principal,

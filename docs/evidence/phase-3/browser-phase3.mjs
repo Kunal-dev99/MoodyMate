@@ -71,6 +71,13 @@ const outcomes = await p.getByTestId('audit-event').locator('div').first().allIn
 r.filtered_all_denied = (await p.getByTestId('audit-event').allInnerTexts()).every((t) => t.startsWith('DENIED'))
 r.pager_text = await p.getByText(/\d+–\d+ of \d+/).innerText()
 await p.screenshot({ path: `${OUT}/03-filter-denied.png`, fullPage: true })
+// 5b. Exactly one page of matches (20 user.read events): Older must not lead to an empty page
+await p.getByLabel('Filter by outcome').selectOption('')
+await p.getByLabel('Filter by action').fill('user.read')
+await p.getByRole('button', { name: 'Apply' }).click()
+await p.getByText(/of 20$/).waitFor()
+r.exact_page_pager = await p.getByText(/\d+–\d+ of \d+/).innerText()
+r.exact_page_older_disabled = await p.getByRole('button', { name: 'Older' }).isDisabled()
 await p.close()
 // 6. platform_admin (clearance confidential) sees the same detail in clear
 p = await as('platform_admin', 'Platform administrator')

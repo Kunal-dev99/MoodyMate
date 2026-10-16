@@ -101,13 +101,15 @@ def _audit_loss_allowed() -> bool:
 
 
 def downgrade() -> None:
-    # D-10: dropping audit_event would destroy the trail the triggers protect. Refuse while
-    # it holds rows unless the operator opts in explicitly.
-    rows = op.get_bind().execute(sa.text("SELECT count(*) FROM audit_event")).scalar_one()
-    if rows and not _audit_loss_allowed():
-        raise RuntimeError(
-            f"audit_event has rows ({rows}); refusing to drop the audit trail. Archive it, "
-            "then re-run with -x allow_audit_loss=true."
+    # D-10: dropping audit_event would destroy the trail the triggers protect. Lock it so
+    # no row can be committed after the check, then refuse while it holds rows unless the
+    # operator opts in. Plain SQL, so `alembic downgrade --sql` scripts carry the guard too.
+    op.execute("LOCK TABLE audit_event IN ACCESS EXCLUSIVE MODE")
+    if not _audit_loss_allowed():
+        op.execute(
+            "DO $$ BEGIN IF EXISTS (SELECT 1 FROM audit_event) THEN RAISE EXCEPTION "
+            "'audit_event has rows; refusing to drop the audit trail. Archive it, then "
+            "re-run with -x allow_audit_loss=true.'; END IF; END $$"
         )
     op.execute("DROP TRIGGER IF EXISTS audit_event_no_truncate ON audit_event")
     op.execute("DROP TRIGGER IF EXISTS audit_event_no_update_delete ON audit_event")

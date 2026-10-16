@@ -1,5 +1,7 @@
 # Phase 3 check output — captured 2026-10-16T05:21:48Z
-# worktree /home/user/MoodyMate-wt/ws1-phase3, branch feat/ws1-phase3 (from master 6b047d7) + uncommitted Phase 3 changes
+# worktree /home/user/MoodyMate-wt/ws1-phase3, branch feat/ws1-phase3 (from master 6b047d7).
+# The first section ran on the Phase 3 tree before commit e02e723 (no later edits before that commit).
+# "Verification follow-ups" ran on the tree committed as 9be31f5; "Re-verification follow-ups" on the commit that adds it.
 
 ## Backend — run WITHOUT ENV set
 $ ruff check . && ruff format --check . && mypy app scripts
@@ -128,3 +130,39 @@ tsc: exit 0
  ✓ Compiled successfully
 ├ ○ /audit                               5.02 kB         157 kB
 $ browser-phase3.mjs (adds keyset paging): see browser-phase3.json, page2_repeats_page1=false
+
+## Re-verification follow-ups (N1-N6 and the minor gaps)
+$ REQUIRE_DB=1 pytest -v app/tests/test_audit_hardening.py  (6 new tests written first; each failed before its fix)
+app/tests/test_audit_hardening.py::test_audit_rejects_details_without_a_classification PASSED
+app/tests/test_audit_hardening.py::test_unclassified_stored_details_are_masked PASSED
+app/tests/test_audit_hardening.py::test_downgrade_refuses_while_audit_rows_exist PASSED
+app/tests/test_audit_hardening.py::test_downgrade_guard_works_offline PASSED
+app/tests/test_audit_hardening.py::test_database_errors_do_not_log_bound_values PASSED
+app/tests/test_audit_hardening.py::test_keyset_paging_does_not_repeat_rows_despite_self_audit PASSED
+app/tests/test_audit_hardening.py::test_unknown_or_foreign_before_cursor_is_rejected PASSED
+app/tests/test_audit_hardening.py::test_resource_id_filter PASSED
+app/tests/test_audit_hardening.py::test_filters_are_length_bounded PASSED
+app/tests/test_audit_hardening.py::test_disabled_account_denial_is_audited PASSED
+app/tests/test_audit_hardening.py::test_denied_audit_does_not_commit_pending_request_work PASSED
+app/tests/test_audit_hardening.py::test_mask_model_walks_containers_and_masks_none PASSED
+app/tests/test_audit_hardening.py::test_user_directory_email_is_confidential PASSED
+app/tests/test_audit_hardening.py::test_denials_do_not_exhaust_a_one_connection_pool PASSED
+app/tests/test_audit_hardening.py::test_mask_model_handles_optional_tuple_and_dict_shapes PASSED
+app/tests/test_audit_hardening.py::test_mask_model_keeps_namedtuples_working PASSED
+app/tests/test_audit_hardening.py::test_keyset_read_records_its_cursor PASSED
+app/tests/test_audit_hardening.py::test_log_formatter_keeps_grouped_exceptions_without_values PASSED
+============================== 18 passed in 6.03s ==============================
+$ REQUIRE_DB=1 pytest -q app/tests
+139 passed in 34.81s
+$ ruff check . && ruff format --check . && mypy app && export_openapi --check
+All checks passed!
+129 files already formatted
+Success: no issues found in 127 source files
+openapi.json is up to date
+$ frontend: npm test, lint, typecheck, build
+      Tests  36 passed (36)
+✔ No ESLint warnings or errors
+tsc: exit 0
+ ✓ Compiled successfully
+├ ○ /audit                               5.12 kB         157 kB
+$ browser-phase3.mjs: page2_repeats_page1=false; exact_page_pager "1–20 of 20" with exact_page_older_disabled=true

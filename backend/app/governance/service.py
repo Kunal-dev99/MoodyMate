@@ -303,11 +303,19 @@ class AuditQueryService:
             self.principal,
             "audit.read",
             "audit",
-            details={"filters": used, "limit": limit, "offset": offset, "returned": len(events)},
+            details={
+                "filters": used,
+                "limit": limit,
+                "offset": offset,
+                "before": str(before) if before else None,
+                "returned": len(events),
+            },
             details_classification={
                 # Filter values are typed by the reader and may name people or records.
                 "filters": ClassificationCode.INTERNAL,
-                **dict.fromkeys(("limit", "offset", "returned"), ClassificationCode.PUBLIC),
+                **dict.fromkeys(
+                    ("limit", "offset", "before", "returned"), ClassificationCode.PUBLIC
+                ),
             },
         )
         await self.session.commit()

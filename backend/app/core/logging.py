@@ -106,7 +106,12 @@ def format_exception(exc: BaseException) -> str:
         name = f"{type(item).__module__}.{type(item).__qualname__}"
         message = _exception_message(item)
         out.append(f"Traceback (most recent call last):\n{frames}{name}: {message}")
-    return "\n\nDuring handling, another exception occurred:\n\n".join(out)
+    text = "\n\nDuring handling, another exception occurred:\n\n".join(out)
+    if isinstance(exc, BaseExceptionGroup):
+        # Keep each grouped exception's diagnostics (same withholding rules apply).
+        for i, sub in enumerate(exc.exceptions, 1):
+            text += f"\n\n[group member {i}]\n" + format_exception(sub)
+    return text
 
 
 class JsonFormatter(logging.Formatter):

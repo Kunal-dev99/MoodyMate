@@ -11,6 +11,7 @@ import { toastApiError } from '@/components/common/api-error-toast'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { cursorsFor, pageView, type Paging } from './paging'
 
 type Page = Schemas['AuditEventPage']
 type Event = Schemas['AuditEventOut']
@@ -113,10 +114,14 @@ export function AuditTimeline({
   const [applied, setApplied] = useState<Filters>(filters)
   // Keyset paging (`before` = last id of the previous page): stable even though every
   // read appends an audit.read event at the top. Each entry is the cursor of one page.
-  const [cursors, setCursors] = useState<string[]>([])
+  // Cursors are tied to the scope (resource + applied filters): navigating to another
+  // resource or changing filters starts again at the newest page.
+  const scope = JSON.stringify([resourceType ?? '', resourceId ?? '', applied])
+  const [paging, setPaging] = useState<Paging>({ scope, cursors: [] })
+  const cursors = cursorsFor(paging, scope)
   const before = cursors.at(-1)
   // The page on screen and its position, set together so the range label never runs ahead.
-  const [page, setPage] = useState<(Page & { index: number }) | null>(null)
+  const [page, setPage] = useState<(Page & { index: number; hasOlder: boolean }) | null>(null)
   const [forbidden, setForbidden] = useState<string | null | false>(false)
   const [loading, setLoading] = useState(true)
 
@@ -127,7 +132,7 @@ export function AuditTimeline({
         api.GET('/api/v1/audit-events', {
           params: {
             query: {
-              limit: PAGE_SIZE,
+              limit: PAGE_SIZE + 1, // one extra row says whether an older page exists
               before,
               resource_type: resourceType,
               resource_id: resourceId,
@@ -138,7 +143,8 @@ export function AuditTimeline({
           },
         }),
       )
-      setPage({ ...result, index: cursors.length })
+      const { shown, hasOlder } = pageView(result.items, PAGE_SIZE)
+      setPage({ ...result, items: shown, index: cursors.length, hasOlder })
     } catch (err) {
       if (err instanceof ApiError && err.status === 403) setForbidden(err.correlationId)
       else toastApiError(err, 'Could not load the audit trail')
@@ -154,7 +160,7 @@ export function AuditTimeline({
   if (forbidden !== false) return <Forbidden permission="audit:read" correlationId={forbidden} />
 
   const apply = () => {
-    setCursors([])
+    setPaging({ scope: '', cursors: [] }) // Apply always returns to the newest page
     setApplied(filters)
   }
 
@@ -220,7 +226,7 @@ export function AuditTimeline({
                 variant="outline"
                 size="sm"
                 disabled={cursors.length === 0 || loading}
-                onClick={() => setCursors(cursors.slice(0, -1))}
+                onClick={() => setPaging({ scope, cursors: cursors.slice(0, -1) })}
               >
                 <ChevronLeft className="h-3.5 w-3.5" />
                 Newer
@@ -228,8 +234,8 @@ export function AuditTimeline({
               <Button
                 variant="outline"
                 size="sm"
-                disabled={page.items.length < PAGE_SIZE || loading}
-                onClick={() => setCursors([...cursors, page.items[page.items.length - 1].id])}
+                disabled={!page.hasOlder || loading}
+                onClick={() => setPaging({ scope, cursors: [...cursors, page.items[page.items.length - 1].id] })}
               >
                 Older
                 <ChevronRight className="h-3.5 w-3.5" />

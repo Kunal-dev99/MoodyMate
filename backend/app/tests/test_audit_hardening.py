@@ -84,11 +84,28 @@ def test_downgrade_refuses_while_audit_rows_exist(db: str) -> None:
     cfg = alembic_config(db)
     cfg.attributes.pop("allow_audit_loss", None)
     try:
-        with pytest.raises(RuntimeError, match="audit_event has rows"):
+        with pytest.raises(Exception, match="refusing to drop the audit trail"):
             command.downgrade(cfg, "0003")
     finally:
         command.upgrade(alembic_config(db), "head")
     assert sql(db, "SELECT count(*) AS n FROM audit_event WHERE action = 'test.keep'")[0]["n"] >= 1
+
+
+def test_downgrade_guard_works_offline() -> None:
+    """`alembic downgrade --sql` (a script for a DBA) carries the guard instead of failing."""
+    import io
+
+    from alembic.config import Config
+
+    buf = io.StringIO()
+    cfg = Config("alembic.ini", output_buffer=buf)
+    cfg.set_main_option("sqlalchemy.url", "postgresql+asyncpg://x:y@localhost/none")
+    cfg.attributes["skip_logging"] = True
+    command.downgrade(cfg, "0004:0003", sql=True)
+    script = buf.getvalue()
+    assert "LOCK TABLE audit_event IN ACCESS EXCLUSIVE MODE" in script
+    assert "refusing to drop the audit trail" in script
+    assert script.index("LOCK TABLE audit_event") < script.index("DROP TABLE audit_event")
 
 
 # --- Defect 3: database errors do not echo bound parameters ---------------------------------
@@ -259,3 +276,90 @@ def test_user_directory_email_is_confidential() -> None:
     )
     assert mask_model(user, CLEAR_INTERNAL).email == MaskedValue(classification="confidential")
     assert mask_model(user, CLEAR_INTERNAL | {"confidential"}).email == "pat@example.test"
+
+
+# --- Re-verification: N1 denial audit must not need a second pooled connection ------------
+
+
+def test_denials_do_not_exhaust_a_one_connection_pool(db: str) -> None:
+    """The request session releases its connection before the denial is audited, so a
+    refusal never waits on the pool (with one connection it would otherwise time out)."""
+    with TestClient(create_app(Settings(ENV="test", DATABASE_URL=db))) as c:
+        headers = dev_token(c, "risk_analyst")
+        c.app.state.db = Database(db, pool_size=1, max_overflow=0, pool_timeout=2)  # type: ignore[attr-defined]
+        try:
+            r = c.get("/api/v1/users", headers=headers)
+        finally:
+            asyncio.run(c.app.state.db.dispose())  # type: ignore[attr-defined]
+    assert r.status_code == 403, r.text
+
+
+# --- Re-verification: N3 masking finds markers in every container and optional shape ------
+
+
+class Shapes(BaseModel):
+    opt: Annotated[str, Classification("restricted")] | None
+    opt_list: list[Annotated[str | MaskedValue, Classification("restricted")]] | None
+    tup: tuple[Annotated[str | MaskedValue, Classification("restricted")], ...]
+    by_key: dict[str, Annotated[str | MaskedValue, Classification("restricted")]]
+    nested_opt: list[Inner] | None
+
+
+def test_mask_model_handles_optional_tuple_and_dict_shapes() -> None:
+    model = Shapes(
+        opt="o",
+        opt_list=["l"],
+        tup=("t",),
+        by_key={"k": "d"},
+        nested_opt=[Inner(secret="n")],
+    )
+    out = mask_model(model, CLEAR_INTERNAL)
+    hidden = MaskedValue(classification="restricted")
+    assert out.opt == hidden  # type: ignore[comparison-overlap]
+    assert out.opt_list == [hidden]
+    assert out.tup == (hidden,)
+    assert out.by_key == {"k": hidden}
+    assert out.nested_opt is not None and out.nested_opt[0].secret == hidden
+    dumped = out.model_dump_json()
+    for raw in ('"o"', '"l"', '"t"', '"d"', '"n"'):
+        assert raw not in dumped
+    assert mask_model(model, CLEAR_INTERNAL | {"confidential", "restricted"}) == model
+
+
+def test_mask_model_keeps_namedtuples_working() -> None:
+    from typing import NamedTuple
+
+    class Pair(NamedTuple):
+        a: str
+        b: str
+
+    class WithPair(BaseModel):
+        pair: Pair
+
+    model = WithPair(pair=Pair("x", "y"))
+    assert mask_model(model, CLEAR_INTERNAL).pair == Pair("x", "y")
+
+
+def test_keyset_read_records_its_cursor(api: TestClient, db: str) -> None:
+    auditor = dev_token(api, "auditor")
+    first = api.get("/api/v1/audit-events", params={"limit": 1}, headers=auditor).json()
+    before = first["items"][0]["id"]
+    c = cid()
+    api.get(
+        "/api/v1/audit-events",
+        params={"limit": 1, "before": before},
+        headers={**auditor, "X-Correlation-ID": c},
+    )
+    [e] = events(db, c)
+    assert json.loads(e["details"])["before"] == before
+
+
+def test_log_formatter_keeps_grouped_exceptions_without_values() -> None:
+    from app.core.logging import format_exception
+
+    marker = uuid.uuid4().hex  # not in the source line the traceback prints
+    try:
+        raise ExceptionGroup("tasks", [ValueError(marker), LookupError("second")])
+    except ExceptionGroup as group:
+        text = format_exception(group)
+    assert marker in text and "LookupError" in text

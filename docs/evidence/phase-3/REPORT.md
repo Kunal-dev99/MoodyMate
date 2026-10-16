@@ -42,6 +42,23 @@ The independent review verified 6 of 7 tasks, left BE-3.3 open (no `resource_id`
 | 9 | Frontend rough edges. | Nested objects and arrays in details render masked markers as `MaskedValue`; an empty classification shows as "unclassified". The range label now follows the page actually shown. |
 | 10 | Evidence caveats. | The 0003 wording above is corrected. checks.txt now records the committed tree. |
 
+## Re-verification follow-ups
+
+The second review verified BE-3.3 (so all 7 Phase 3 tasks are now verified), confirmed most fixes, and found new issues in them. Each fix below had its test written first, and each test failed before its fix.
+
+| # | Finding | Resolution |
+|---|---|---|
+| N1 | A denial held the request's connection while taking a second one, so concurrent denials could exhaust the pool (500s, no audit). | The request session is rolled back, releasing its connection, before the denial's audit session opens. Test: a one-connection pool still returns 403. |
+| N2 | The downgrade guard counted rows without a lock, and failed in `--sql` mode. | `LOCK TABLE audit_event IN ACCESS EXCLUSIVE MODE`, then a SQL `DO` block that raises if rows exist. It runs online and appears in offline scripts (test). |
+| N3 | `mask_model` missed Optional, tuple, set and dict-value markers, and NamedTuples gave a 500. | Masking now follows each field's type annotation, including markers inside `Optional`/`Union`, element and value types, and fixed tuples. NamedTuples are rebuilt correctly. `MaskedValue` is frozen, so it can sit in a set. |
+| N4 | With exactly one page of matches, "Older" led to an empty page with no way back. | The timeline asks for one extra row to decide whether "Older" exists. Browser: 20 matches give "1–20 of 20" with Older disabled. |
+| N5 | The paging cursor survived a change of resource. | Cursors are keyed to the scope (resource and applied filters) and are dropped when it changes. |
+| N6 | Grouped exceptions lost their members in logs. | The formatter walks exception groups, with the same rules for withholding database messages. |
+| — | `audit.read` did not record the `before` cursor. | It is recorded now (test). `total` stays the count across all pages by design. |
+| 10 | checks.txt did not name the commits. | Its header now states which tree each section ran on. |
+
+Not changed: pydantic `ValidationError` text can include `input_value` if logged. Request validation errors are returned as a 422 envelope and are not logged with inputs today. A Phase 4 service that logs a `ValidationError` must not log it raw.
+
 ## Not done / follow-ups
 
 - **Audit retention or archival is not implemented.** Deleting audit rows needs a deliberate, owner-level procedure; see `docs/RETENTION.md` in Phase 6.

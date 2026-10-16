@@ -13,9 +13,10 @@ are PROVISIONAL (D-11) and seeded by migration 0005.
 """
 
 from collections.abc import Mapping
-from typing import Annotated, Any, Literal, TypeVar, get_args, get_origin
+from types import UnionType
+from typing import Annotated, Any, Literal, TypeVar, Union, get_args, get_origin
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 # Logs have no viewer to check, so only the two lowest classifications may appear in them.
 LOG_CLEAR = frozenset({"public", "internal"})
@@ -35,6 +36,8 @@ class Classification:
 
 class MaskedValue(BaseModel):
     """Stands in for a value the caller may not see (FE renders it as 'masked by policy')."""
+
+    model_config = ConfigDict(frozen=True)  # hashable, so it can stand in inside a set
 
     masked: Literal[True] = True
     classification: str = Field(description="Classification code of the hidden value.")
@@ -61,26 +64,57 @@ def _marker(metadata: list[Any]) -> Classification | None:
     return next((m for m in metadata if isinstance(m, Classification)), None)
 
 
-def _element_marker(annotation: Any) -> Classification | None:
-    """Marker on the element type of `list[Annotated[..., Classification(...)]]`."""
-    if get_origin(annotation) in (list, tuple, set, frozenset):
-        for arg in get_args(annotation):
+def _union_args(annotation: Any) -> tuple[Any, ...] | None:
+    return get_args(annotation) if get_origin(annotation) in (Union, UnionType) else None
+
+
+def _mask(value: Any, annotation: Any, clear: frozenset[str]) -> Any:
+    """Mask `value` as declared by `annotation`: markers may sit on the field, inside an
+    Optional/Union, or on the element/value type of a list, tuple, set or dict."""
+    if get_origin(annotation) is Annotated:
+        inner, *metadata = get_args(annotation)
+        marker = _marker(metadata)
+        if marker is not None and marker.code not in clear:
+            # A classified None is masked too, so absence is not revealed.
+            return MaskedValue(classification=marker.code)
+        return _mask(value, inner, clear)
+    union = _union_args(annotation)
+    if union is not None:
+        for arg in union:
             if get_origin(arg) is Annotated:
                 marker = _marker(list(get_args(arg)[1:]))
-                if marker is not None:
-                    return marker
-    return None
-
-
-def _mask_nested(value: Any, clear: frozenset[str]) -> Any:
-    """Walk containers so models nested anywhere in a field are masked too."""
+                if marker is not None and marker.code not in clear:
+                    return MaskedValue(classification=marker.code)
+        if value is None:
+            return None
+        # Recurse with the union arm that matches the value's container shape, if any.
+        for arg in union:
+            if arg is type(None):
+                continue
+            masked = _mask(value, arg, clear)
+            if masked is not value:
+                return masked
+        return _mask_by_value(value, clear)
     if isinstance(value, BaseModel):
         return mask_model(value, clear)
-    if isinstance(value, list | tuple):
-        return type(value)(_mask_nested(v, clear) for v in value)
+    origin, args = get_origin(annotation), get_args(annotation)
     if isinstance(value, dict):
-        return {k: _mask_nested(v, clear) for k, v in value.items()}
+        value_type = args[1] if origin is dict and len(args) == 2 else Any
+        return {k: _mask(v, value_type, clear) for k, v in value.items()}
+    if isinstance(value, list | tuple | set | frozenset):
+        if origin is tuple and args and args[-1] is not Ellipsis:
+            types = list(args)  # fixed-length tuple: one type per position
+        else:
+            types = [args[0] if args else Any] * len(value)
+        items = [_mask(v, t, clear) for v, t in zip(value, types, strict=False)]
+        if hasattr(type(value), "_fields"):  # NamedTuple
+            return type(value)(*items)
+        return type(value)(items)
     return value
+
+
+def _mask_by_value(value: Any, clear: frozenset[str]) -> Any:
+    return _mask(value, Any, clear)
 
 
 def mask_model(model: M, clear: frozenset[str]) -> M:
@@ -93,15 +127,12 @@ def mask_model(model: M, clear: frozenset[str]) -> M:
     for name, field in type(model).model_fields.items():
         value = getattr(model, name)
         marker = _marker(field.metadata)
-        element = _element_marker(field.annotation)
         if marker is not None and marker.code not in clear:
             updates[name] = MaskedValue(classification=marker.code)
-        elif element is not None and element.code not in clear and isinstance(value, list):
-            updates[name] = [MaskedValue(classification=element.code) for _ in value]
-        elif isinstance(value, BaseModel | list | tuple | dict):
-            masked = _mask_nested(value, clear)
-            if masked != value:
-                updates[name] = masked
+            continue
+        masked = _mask(value, field.annotation, clear)
+        if masked != value or type(masked) is not type(value):
+            updates[name] = masked
     return model.model_copy(update=updates) if updates else model
 
 
