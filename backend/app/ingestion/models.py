@@ -14,6 +14,9 @@ never moves tenant and a profile never moves source (migration 0009).
 Imports (migration 0012): `import_artifact`, `import_batch` and `source_record` are
 append-only; an `import_job` is never deleted, its content is frozen and only its status
 moves, along IMPORT_TRANSITIONS. TRUNCATE is refused on all four.
+
+Profiles (migration 0013): `data_profile_snapshot`, one per import, append-only and reached
+only through a scoped import.
 """
 
 import uuid
@@ -289,3 +292,45 @@ class SourceRecord(AuditColumns, Base):
     extra_values: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
     flags: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
     row_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+# --- Phase 9: field profiling (BE-9.1) ------------------------------------------------------
+
+
+class DataProfileSnapshot(AuditColumns, Base):
+    """The profile of one import (DI-06): deterministic per-column observations of its
+    source records, as the profiler (`PROFILER_VERSION`) computed them. Append-only (DB
+    trigger, TRUNCATE included, migration 0013); reached only through a scoped import.
+
+    `summary` holds row-level facts (blank rows, rows with missing or extra cells, flag
+    counts); `columns` one observation object per header column, in file order. Counts,
+    rates, lengths, precision and scale are integers or decimal text, never floats.
+    `content_sha256` hashes the profiler version, summary and columns (not ids or times),
+    so the same records always give the same hash. Profiling never changes a schema or a
+    contract: suggestions are computed on read (BE-9.3)."""
+
+    __tablename__ = "data_profile_snapshot"
+    __table_args__ = (
+        CheckConstraint("profiler_version >= 1", name="profiler_version"),
+        CheckConstraint("row_count >= 0", name="row_count"),
+        # One observation per column. CASE: jsonb_array_length raises on a non-array, which
+        # the `columns` CHECK refuses on its own.
+        CheckConstraint(
+            "CASE WHEN jsonb_typeof(columns) = 'array'"
+            " THEN column_count = jsonb_array_length(columns) ELSE true END",
+            name="column_count",
+        ),
+        CheckConstraint("jsonb_typeof(columns) = 'array'", name="columns"),
+        CheckConstraint("jsonb_typeof(summary) = 'object'", name="summary"),
+        CheckConstraint("content_sha256 ~ '^[0-9a-f]{64}$'", name="content_sha256"),
+    )
+
+    import_job_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("import_job.id"), unique=True, index=True, nullable=False
+    )
+    profiler_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    row_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    column_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    summary: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    columns: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
+    content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
