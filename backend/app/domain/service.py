@@ -552,6 +552,10 @@ class DomainService:
         """Every schema version of the tenant with its fields' types and classifications."""
         return await self._pins()
 
+    async def instrument_type_codes(self) -> list[str]:
+        """The tenant's instrument type vocabulary (a rule parameter key vocabulary)."""
+        return [t.code for t in await self.repo.instrument_types()]
+
     async def projected_import_ids(self) -> list[uuid.UUID]:
         """The tenant's projected imports (the GET /imports `projected` filter)."""
         return await self.repo.projected_import_ids()

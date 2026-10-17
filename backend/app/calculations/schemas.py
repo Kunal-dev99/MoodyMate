@@ -108,6 +108,20 @@ class RunCreate(BaseModel):
     reporting_date: date = Field(description="Buckets count calendar days after this date.")
 
 
+class RunRerun(BaseModel):
+    """A re-run (D-31 §5, BE-16.3): a new run on exactly the original run's pins (snapshot,
+    reporting date, module and engine versions, rule set and assumption set), even when those
+    rule versions are SUPERSEDED. It reproduces the original's manifest_sha256 and
+    result_sha256."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    rerun_of: uuid.UUID = Field(
+        description="The run to re-run (404 alike for an absent and a foreign id). 409 "
+        "rerun_not_reproducible when the engine or manifest version changed since."
+    )
+
+
 class RunModuleRef(BaseModel):
     module_id: uuid.UUID
     module_version_id: uuid.UUID
@@ -134,7 +148,9 @@ class RunSummary(BaseModel):
         "contributions, warnings); set when the run ends. Equal across runs on the same pins."
     )
     warning_count: int
-    rerun_of_run_id: uuid.UUID | None = Field(description="Reserved for re-runs (BE-16.3).")
+    rerun_of_run_id: uuid.UUID | None = Field(
+        description="Set on a re-run (BE-16.3): the run whose pins it repeats."
+    )
     started_at: datetime
     ended_at: datetime | None
     created_by: str
@@ -344,7 +360,11 @@ class LadderRow(BaseModel):
     inflows: Value
     outflows: Value
     net_gap: Value = Field(description="inflows - outflows.")
-    cumulative_gap: Value = Field(description="Running sum of net_gap over the buckets so far.")
+    cumulative_gap: Value = Field(
+        description="Running sum of net_gap over the buckets so far. Once a net gap of the "
+        "currency is masked, every later cumulative gap is masked, even when it is exactly "
+        "zero (D-33: masked wins over 'zeros stay clear')."
+    )
     inflows_contractual: Value
     inflows_behavioural: Value
     outflows_contractual: Value

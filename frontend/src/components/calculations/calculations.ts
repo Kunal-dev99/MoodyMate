@@ -126,6 +126,7 @@ export const POST_CHECK_TEXT: Record<PostCheck, string> = {
   CUMULATIVE_GAP: 'The cumulative gap is the running sum of the net gaps.',
   HQLA_TOTALS: 'Every HQLA level total equals the sum of its included asset rows (lcr_hqla).',
   LCR_FIGURES: 'Every per-currency LCR figure is recomputed from its contributions (lcr_hqla).',
+  RERUN_REPRODUCED: 'A re-run reproduces the original run\'s result hash on the original pins.',
 }
 
 export const INPUT_REF_TEXT: Record<InputRefType, string> = {

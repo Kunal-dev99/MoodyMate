@@ -13,7 +13,7 @@ import {
 } from 'lucide-react'
 import type { Schemas } from '@/api/client'
 import type { NavItem } from '@/components/layout/sidebar'
-import { CALCULATIONS_UI_ENABLED, DOMAIN_UI_ENABLED } from '@/config/features'
+import { CALCULATIONS_UI_ENABLED, DOMAIN_UI_ENABLED, RULES_UI_ENABLED } from '@/config/features'
 
 /**
  * Platform workspaces (Architecture §14). `planned` workspaces render a clear
@@ -60,7 +60,10 @@ export const mainWorkspaces: Workspace[] = [
         href: '/domain',
         label: 'Financial Domain',
         icon: Landmark,
-        description: 'Instrument catalogue: projected versions, attributes, cash flows and their lineage to imports.',
+        // FE-16.1: the registry is named only while it is live (NEXT_PUBLIC_RULES_UI); off, the Phase 15 text.
+        description: RULES_UI_ENABLED
+          ? 'Instrument catalogue with its lineage to imports, and the registry: methodology rules and their versions, calculation modules and assumption sets.'
+          : 'Instrument catalogue: projected versions, attributes, cash flows and their lineage to imports.',
         permission: 'domain:read',
       }
     : {
@@ -133,6 +136,31 @@ export const adminWorkspaces: Workspace[] = [
     description: 'Your identity, roles and effective permissions; users for administrators.',
   },
 ]
+
+/** A page of a workspace, shown as a tab strip at the top of its routes. */
+export interface WorkspaceSection {
+  slug: string
+  href: string
+  label: string
+  /** Hidden without this permission (cosmetic; D-04: the API refuses with 403). */
+  permission: Schemas['Permission']
+}
+
+/**
+ * FE-16.1: the Financial Domain's pages: the Phase 14 instrument catalogue (at /domain, as
+ * before) and the read-only registry of rules, modules and assumption sets. Empty while
+ * NEXT_PUBLIC_RULES_UI=off or the workspace is planned, so /domain shows no tab strip, as in
+ * Phase 15 (D-02).
+ */
+export const domainSections: WorkspaceSection[] =
+  DOMAIN_UI_ENABLED && RULES_UI_ENABLED
+    ? [
+        { slug: 'instruments', href: '/domain', label: 'Instruments', permission: 'domain:read' },
+        { slug: 'rules', href: '/domain/rules', label: 'Rules', permission: 'rule:read' },
+        { slug: 'modules', href: '/domain/modules', label: 'Modules', permission: 'rule:read' },
+        { slug: 'assumption-sets', href: '/domain/assumption-sets', label: 'Assumption sets', permission: 'rule:read' },
+      ]
+    : []
 
 export function findWorkspace(slug: string): Workspace | undefined {
   return [...mainWorkspaces, ...adminWorkspaces].find((w) => w.slug === slug)

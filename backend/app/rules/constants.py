@@ -166,7 +166,8 @@ SEEDED_RULE_OWNER = "Methodology owner (risk_analyst), provisional"
 SEEDED_ASSUMPTION_SET_NAME = "baseline (illustrative)"
 
 # --- lcr_hqla v1 (Phase 17, BE-17.1, D-35 §2): ILLUSTRATIVE / PROVISIONAL; frozen copies in
-# migration 0020. Decimal parameters are JSON strings of exact decimal text, never numbers.
+# migration 0020. Each schema has exactly its kind's keys (rules.service `_KINDS`); decimal
+# parameters are JSON strings of exact decimal text padded to the scale (Phase 16's stored shape).
 
 LCR_HQLA = "lcr_hqla"
 LCR_SEED_TAG = "0020_lcr_hqla"
@@ -209,7 +210,7 @@ LCR_SEEDED_RULES: dict[str, tuple[str, RuleCategory, dict[str, Any], dict[str, A
         "HQLA haircut by instrument type (illustrative)",
         RuleCategory.FACTOR,
         _factor_schema(keyed=True),
-        {"map": {"BOND": "0"}},
+        {"map": {"BOND": "0.0000"}},
         "BOND has a 0 haircut: its HQLA value is its position balance x (1 - haircut) "
         "(D-35 §2).",
     ),
@@ -217,14 +218,14 @@ LCR_SEEDED_RULES: dict[str, tuple[str, RuleCategory, dict[str, Any], dict[str, A
         "Outflow run-off rate by instrument type (illustrative)",
         RuleCategory.FACTOR,
         _factor_schema(keyed=True),
-        {"map": {"DEPOSIT": "0.10"}},
+        {"map": {"DEPOSIT": "0.1000"}},
         "DEPOSIT balances run off at 0.10: outflows are balance x run-off (D-35 §2).",
     ),
     LCR_INFLOW_RATE: (
         "Inflow rate by instrument type (illustrative)",
         RuleCategory.FACTOR,
         _factor_schema(keyed=True),
-        {"map": {"LOAN": "0.50"}},
+        {"map": {"LOAN": "0.5000"}},
         "LOAN cash flows due within the horizon flow in at 0.50 (D-35 §2).",
     ),
     LCR_INFLOW_HORIZON_DAYS: (
@@ -244,8 +245,68 @@ LCR_SEEDED_RULES: dict[str, tuple[str, RuleCategory, dict[str, Any], dict[str, A
         "Inflow cap as a share of outflows (illustrative)",
         RuleCategory.FACTOR,
         _factor_schema(keyed=False),
-        {"value": "0.75"},
+        {"value": "0.7500"},
         "Inflows count up to 0.75 x outflows: inflows = min(inflows x rate, cap x outflows) "
         "(D-35 §2).",
     ),
 }
+
+
+# --- Phase 16: governed rule changes (BE-16.1, BE-16.2, D-32 §1, §3) -------------------------
+
+# The key vocabularies a map kind may name (D-32 §1): instrument_type is the tenant's
+# `instrument_type` codes (domain, seeded PROVISIONAL).
+PARAMETER_VOCABULARIES = ("instrument_type",)
+MAX_BUCKETS = 50
+MAX_MAP_ENTRIES = 200
+MAX_DECIMAL_SCALE = 18
+MAX_DAYS = 36_600  # bucket bounds: about 100 years of calendar days
+
+
+class RuleRefusal(StrEnum):
+    """Refused rule writes, each audited DENIED with this code as its reason (D-32 §3)."""
+
+    RULE_CHANGE_DISABLED = "rule_change_disabled"  # 409: RULE_CHANGE_ENABLED=false
+    INVALID_PARAMETERS = "invalid_parameters"  # 422: not the definition's kind (BE-16.1)
+    INVALID_PARAMETER_SCHEMA = "invalid_parameter_schema"  # 409: the definition's own schema
+    NO_CHANGE = "no_change"  # 422: the patch leaves the ACTIVE parameters as they are
+    NO_ACTIVE_VERSION = "no_active_version"  # 409: nothing to copy a DRAFT from
+    INVALID_STATUS = "invalid_status"  # 409: e.g. approving a DRAFT (not submitted)
+    SELF_APPROVAL = "self_approval"  # 409: the author decides on their own version
+    NOT_AUTHOR = "not_author"  # 409: only the author submits (releases) their DRAFT
+    STALE_VERSION = "stale_version"  # 409: another version was activated since this one
+
+
+class ParameterProblem(StrEnum):
+    """Value-free problem codes of `invalid_parameters` (and of a bad parameter schema)."""
+
+    NOT_AN_OBJECT = "not_an_object"
+    UNKNOWN_KEY = "unknown_key"
+    MISSING_KEY = "missing_key"
+    INEXACT_NUMBER = "inexact_number"  # a JSON number with a fraction or exponent
+    NOT_DECIMAL_TEXT = "not_decimal_text"
+    NOT_INTEGER = "not_integer"
+    NOT_TEXT = "not_text"
+    OUT_OF_RANGE = "out_of_range"
+    SCALE_EXCEEDED = "scale_exceeded"
+    NOT_IN_VALUES = "not_in_values"
+    NOT_IN_VOCABULARY = "not_in_vocabulary"
+    EMPTY = "empty"
+    TOO_MANY = "too_many"
+    INVALID_CODE = "invalid_code"
+    DUPLICATE = "duplicate"
+    BOUNDS_ORDER = "bounds_order"
+    NOT_CONTIGUOUS = "not_contiguous"
+    LAST_NOT_OPEN = "last_not_open"
+    LABEL_MISMATCH = "label_mismatch"
+    UNKNOWN_KIND = "unknown_kind"
+    UNKNOWN_VOCABULARY = "unknown_vocabulary"
+
+
+# Audit actions (D-10, D-24 §4): every step and every refusal (`rule.*`).
+PROPOSE_RULE = "rule.propose"
+SUBMIT_RULE = "rule.submit"
+APPROVE_RULE = "rule.approve"
+REJECT_RULE = "rule.reject"
+ACTIVATE_RULE = "rule.activate"
+SUPERSEDE_RULE = "rule.supersede"

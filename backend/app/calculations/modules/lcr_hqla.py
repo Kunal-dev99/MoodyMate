@@ -10,8 +10,8 @@ Per currency, with no FX. Every parameter is a pinned rule version:
 - `lcr_inflow_rate` (DECIMAL_MAP), `lcr_inflow_horizon_days` (INTEGER) and `lcr_inflow_cap`
   (DECIMAL, a share of outflows).
 Decimal parameters are JSON strings of exact decimal text, parsed with Decimal(str); a JSON
-number or any other form is refused (PARAMETERS_INVALID, the run is BLOCKED). A type may not
-be both HQLA and a run-off liability.
+number or any other form is refused (PARAMETERS_INVALID, the run is BLOCKED). A type has one
+role at most: HQLA, a run-off liability or an inflow (overlaps are PARAMETERS_INVALID).
 
 Each position (the value is its `balance`, PROVISIONAL: the schema has no market value) is,
 in this order:
@@ -243,6 +243,12 @@ def parse(parameters: PinnedParameters) -> Parameters:
         raise ParameterError("every HQLA instrument type has a haircut")
     if set(found.levels) & set(found.run_off):
         raise ParameterError("an instrument type is HQLA or a run-off liability, not both")
+    # One role per type, so no balance or cash flow is counted twice (e.g. a bond as HQLA and
+    # its coupons as inflows would overstate the ratio).
+    if set(found.levels) & set(found.inflow_rates):
+        raise ParameterError("an instrument type is HQLA or an inflow, not both")
+    if set(found.run_off) & set(found.inflow_rates):
+        raise ParameterError("an instrument type is a run-off liability or an inflow, not both")
     return found
 
 
@@ -405,10 +411,13 @@ def currency_row(
     """One currency's LCR from its contributions (also the engine's post-check)."""
     totals = {level: ZERO for level in HqlaLevel}
     counts = dict.fromkeys(HqlaLevel, 0)
+    nonzero = dict.fromkeys(HqlaLevel, 0)
     for a in assets:
         if a.level is not None:
             totals[a.level] += a.hqla_value
             counts[a.level] += 1
+            if a.hqla_value != ZERO:
+                nonzero[a.level] += 1
     hqla = totals[HqlaLevel.L1] + totals[HqlaLevel.L2A] + totals[HqlaLevel.L2B]
     outflow_balance = sum((o.balance for o in outflows), ZERO)
     outflow_total = sum((o.outflow for o in outflows), ZERO)
@@ -450,6 +459,11 @@ def currency_row(
         ratio=ratio,
         warnings=tuple(warnings),
         rule_version_ids=rule_ids,
+        level1_nonzero_count=nonzero[HqlaLevel.L1],
+        level2a_nonzero_count=nonzero[HqlaLevel.L2A],
+        level2b_nonzero_count=nonzero[HqlaLevel.L2B],
+        outflow_nonzero_count=sum(1 for o in outflows if o.balance != ZERO),
+        inflow_nonzero_count=sum(1 for i in inflows if i.amount != ZERO),
     )
 
 

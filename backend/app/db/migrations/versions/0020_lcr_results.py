@@ -4,7 +4,9 @@
 * `lcr_result`: one row per lcr_hqla run and currency: HQLA by level and in total, outflows,
   inflows before and after the cap, the denominator and the ratio (NULL with
   LCR_DENOMINATOR_ZERO when the denominator is not positive). The identities between the
-  figures are CHECK-constrained (exact NUMERIC arithmetic).
+  figures are CHECK-constrained (exact NUMERIC arithmetic). Beside each contribution count,
+  its non-zero count (`*_nonzero_count`): the D-33 minimum aggregation counts only
+  contributions with a value, so zero rows cannot unmask a single balance.
 * `hqla_asset_result`: one row per asset position of a run, included at its level (value =
   balance x (1 - haircut)) or excluded with its reason (value 0), under its currency's
   `lcr_result` row, with its position version's lineage.
@@ -18,8 +20,10 @@
   for the default tenant: module `lcr_hqla` v1 AVAILABLE with its declared contracts, and
   the rules `hqla_level`, `hqla_haircut`, `lcr_outflow_run_off`, `lcr_inflow_rate`,
   `lcr_inflow_horizon_days` and `lcr_inflow_cap`, each with an ACTIVE v1 (inserted DRAFT and
-  moved through IN_REVIEW, approved_by the tag). Decimal parameters are JSON strings of exact
-  decimal text. Frozen copies of the code's enums and seed (kept equal by test_calculations).
+  moved through IN_REVIEW, approved_by the tag). Each parameter schema has exactly the keys
+  Phase 16's validator requires of its kind, and the parameters are in its stored shape:
+  decimals are JSON strings of exact decimal text padded to the schema's scale. Frozen copies
+  of the code's enums and seed (kept equal by test_calculations).
 
 D-01: additive only. `calculation_warning.code` (0018) is a closed CHECK that a forward
 migration may not widen, so the LCR's own warnings live in `lcr_result.warning_codes`.
@@ -30,7 +34,7 @@ drops the triggers, function and tables, and removes only its tagged seed rows (
 their append-only triggers lifted for that one transaction.
 
 Revision ID: 0020
-Revises: 0018 (re-chained after Phase 16's 0019 at merge time)
+Revises: 0018
 Create Date: 2026-10-17
 
 D-01: additive only (no DROP in upgrade). D-02: downgrade must restore the prior schema.
@@ -144,7 +148,7 @@ RULES: dict[str, tuple[str, str, dict[str, Any], dict[str, Any], str]] = {
         "HQLA haircut by instrument type (illustrative)",
         "FACTOR",
         _factor(keyed=True),
-        {"map": {"BOND": "0"}},
+        {"map": {"BOND": "0.0000"}},
         "BOND has a 0 haircut: its HQLA value is its position balance x (1 - haircut) "
         "(D-35 §2).",
     ),
@@ -152,14 +156,14 @@ RULES: dict[str, tuple[str, str, dict[str, Any], dict[str, Any], str]] = {
         "Outflow run-off rate by instrument type (illustrative)",
         "FACTOR",
         _factor(keyed=True),
-        {"map": {"DEPOSIT": "0.10"}},
+        {"map": {"DEPOSIT": "0.1000"}},
         "DEPOSIT balances run off at 0.10: outflows are balance x run-off (D-35 §2).",
     ),
     "lcr_inflow_rate": (
         "Inflow rate by instrument type (illustrative)",
         "FACTOR",
         _factor(keyed=True),
-        {"map": {"LOAN": "0.50"}},
+        {"map": {"LOAN": "0.5000"}},
         "LOAN cash flows due within the horizon flow in at 0.50 (D-35 §2).",
     ),
     "lcr_inflow_horizon_days": (
@@ -174,7 +178,7 @@ RULES: dict[str, tuple[str, str, dict[str, Any], dict[str, Any], str]] = {
         "Inflow cap as a share of outflows (illustrative)",
         "FACTOR",
         _factor(keyed=False),
-        {"value": "0.75"},
+        {"value": "0.7500"},
         "Inflows count up to 0.75 x outflows: inflows = min(inflows x rate, cap x outflows) "
         "(D-35 §2).",
     ),
@@ -340,8 +344,9 @@ def _create_tables() -> None:
         sa.Column("currency", sa.String(length=3), nullable=False),
         *_numeric("hqla_level1", "hqla_level2a", "hqla_level2b", "hqla_total"),
         *_integer("level1_count", "level2a_count", "level2b_count", "excluded_asset_count"),
+        *_integer("level1_nonzero_count", "level2a_nonzero_count", "level2b_nonzero_count"),
         *_numeric("outflow_balance", "outflows"),
-        *_integer("outflow_count"),
+        *_integer("outflow_count", "outflow_nonzero_count"),
         *_numeric(
             "inflows_gross",
             "inflows_before_cap",
@@ -350,7 +355,7 @@ def _create_tables() -> None:
             "inflows_after_cap",
         ),
         sa.Column("inflow_cap_applied", sa.Boolean(), nullable=False),
-        *_integer("inflow_count"),
+        *_integer("inflow_count", "inflow_nonzero_count"),
         *_numeric("net_outflows"),
         *_numeric("ratio", nullable=True),
         sa.Column("warning_codes", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
@@ -372,6 +377,15 @@ def _create_tables() -> None:
             "counts",
             "level1_count >= 0 AND level2a_count >= 0 AND level2b_count >= 0"
             " AND excluded_asset_count >= 0 AND outflow_count >= 0 AND inflow_count >= 0",
+        ),
+        _ck(
+            t,
+            "nonzero_counts",
+            "level1_nonzero_count BETWEEN 0 AND level1_count"
+            " AND level2a_nonzero_count BETWEEN 0 AND level2a_count"
+            " AND level2b_nonzero_count BETWEEN 0 AND level2b_count"
+            " AND outflow_nonzero_count BETWEEN 0 AND outflow_count"
+            " AND inflow_nonzero_count BETWEEN 0 AND inflow_count",
         ),
         _ck(t, "inflow_cap_rate", "inflow_cap_rate >= 0 AND inflow_cap_rate <= 1"),
         _ck(t, "inflow_cap", "inflow_cap_amount = inflow_cap_rate * outflows"),

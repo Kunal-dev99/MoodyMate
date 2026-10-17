@@ -335,6 +335,14 @@ class LcrResult(_RunOutput, ScopedModel, Base):
             " AND excluded_asset_count >= 0 AND outflow_count >= 0 AND inflow_count >= 0",
             name="counts",
         ),
+        CheckConstraint(
+            "level1_nonzero_count BETWEEN 0 AND level1_count"
+            " AND level2a_nonzero_count BETWEEN 0 AND level2a_count"
+            " AND level2b_nonzero_count BETWEEN 0 AND level2b_count"
+            " AND outflow_nonzero_count BETWEEN 0 AND outflow_count"
+            " AND inflow_nonzero_count BETWEEN 0 AND inflow_count",
+            name="nonzero_counts",
+        ),
         CheckConstraint("inflow_cap_rate >= 0 AND inflow_cap_rate <= 1", name="inflow_cap_rate"),
         CheckConstraint("inflow_cap_amount = inflow_cap_rate * outflows", name="inflow_cap"),
         CheckConstraint(
@@ -362,9 +370,14 @@ class LcrResult(_RunOutput, ScopedModel, Base):
     level2a_count: Mapped[int] = mapped_column(Integer, nullable=False)
     level2b_count: Mapped[int] = mapped_column(Integer, nullable=False)
     excluded_asset_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    # D-33: the contributions with a non-zero value (what the masking decision counts).
+    level1_nonzero_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    level2a_nonzero_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    level2b_nonzero_count: Mapped[int] = mapped_column(Integer, nullable=False)
     outflow_balance: Mapped[Decimal] = _numeric()
     outflows: Mapped[Decimal] = _numeric()
     outflow_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    outflow_nonzero_count: Mapped[int] = mapped_column(Integer, nullable=False)
     inflows_gross: Mapped[Decimal] = _numeric()
     inflows_before_cap: Mapped[Decimal] = _numeric()
     inflow_cap_rate: Mapped[Decimal] = _numeric()
@@ -372,6 +385,7 @@ class LcrResult(_RunOutput, ScopedModel, Base):
     inflows_after_cap: Mapped[Decimal] = _numeric()
     inflow_cap_applied: Mapped[bool] = mapped_column(Boolean, nullable=False)
     inflow_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    inflow_nonzero_count: Mapped[int] = mapped_column(Integer, nullable=False)
     net_outflows: Mapped[Decimal] = _numeric()
     ratio: Mapped[Decimal | None] = mapped_column(Numeric(asdecimal=True))
     warning_codes: Mapped[list[str]] = mapped_column(JSONB, nullable=False)

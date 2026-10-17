@@ -226,6 +226,13 @@ class LcrRow:
     ratio: Decimal | None  # None: the denominator is not positive (LCR_DENOMINATOR_ZERO)
     warnings: tuple[LcrWarningCode, ...]
     rule_version_ids: tuple[uuid.UUID, ...]
+    # D-33: per level, outflows and inflows, the contributions with a non-zero value (HQLA
+    # value, balance, amount): the minimum aggregation counts only these.
+    level1_nonzero_count: int
+    level2a_nonzero_count: int
+    level2b_nonzero_count: int
+    outflow_nonzero_count: int
+    inflow_nonzero_count: int
 
 
 @dataclass(frozen=True)

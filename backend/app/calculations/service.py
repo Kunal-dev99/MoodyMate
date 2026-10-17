@@ -117,7 +117,7 @@ from app.rules.constants import (
     ImplementationStatus,
 )
 from app.rules.models import AssumptionSet, MaturityBucketDefinition, RuleDefinition, RuleVersion
-from app.rules.service import ModuleView, RulesService, canonical_sha256
+from app.rules.service import ModuleView, RulesService, canonical_sha256, exact_json
 
 logger = logging.getLogger("app.calculations")
 W = CalculationWarningCode
@@ -276,6 +276,8 @@ def lcr_post_checks(
             == tuple(len(by_level[level]) for level in HqlaLevel)
             and r.hqla_total == r.hqla_level1 + r.hqla_level2a + r.hqla_level2b
             and r.excluded_asset_count == sum(1 for a in mine if a.level is None)
+            and (r.level1_nonzero_count, r.level2a_nonzero_count, r.level2b_nonzero_count)
+            == tuple(sum(1 for v in by_level[level] if v != zero) for level in HqlaLevel)
         )
         out = [o for o in result.outflows if o.currency == currency]
         into = [i for i in result.inflows if i.currency == currency]
@@ -297,6 +299,8 @@ def lcr_post_checks(
             and (r.outflows, r.outflow_count) == (outflows, len(out))
             and r.inflows_gross == sum((i.amount for i in into), zero)
             and (r.inflows_before_cap, r.inflow_count) == (before, len(into))
+            and r.outflow_nonzero_count == sum(1 for o in out if o.balance != zero)
+            and r.inflow_nonzero_count == sum(1 for i in into if i.amount != zero)
             and (r.inflow_cap_amount, r.inflows_after_cap) == (cap_amount, after)
             and r.inflow_cap_applied == (before > cap_amount)
             and r.net_outflows == net
@@ -340,6 +344,13 @@ def _lcr_document(r: LcrRow) -> dict[str, Any]:
             r.excluded_asset_count,
             r.outflow_count,
             r.inflow_count,
+        ],
+        "nonzero_counts": [
+            r.level1_nonzero_count,
+            r.level2a_nonzero_count,
+            r.level2b_nonzero_count,
+            r.outflow_nonzero_count,
+            r.inflow_nonzero_count,
         ],
         "warnings": [w.value for w in r.warnings],
         "rule_version_ids": [str(i) for i in r.rule_version_ids],
@@ -402,6 +413,63 @@ def _warning_document(w: ModuleWarning) -> dict[str, Any]:
     }
 
 
+def kept_lcr(
+    status: CalculationRunStatus, lcr: Sequence[LcrRow], assets: Sequence[HqlaAsset]
+) -> tuple[list[LcrRow], list[HqlaAsset]]:
+    """The lcr_hqla outputs a finishing run stores (and hashes): only when it SUCCEEDED."""
+    if status not in SUCCEEDED:
+        return [], []
+    return sorted(lcr, key=lambda r: r.currency), list(assets)
+
+
+def reproduce(
+    expected: str | None,
+    status: CalculationRunStatus,
+    gap: Sequence[GapRow],
+    contributions: Sequence[Contribution],
+    warnings: Sequence[ModuleWarning],
+    checks: Mapping[PostCheck, bool],
+    *,
+    lcr: Sequence[LcrRow] = (),
+    assets: Sequence[HqlaAsset] = (),
+) -> tuple[
+    CalculationRunStatus,
+    list[GapRow],
+    list[Contribution],
+    list[ModuleWarning],
+    dict[PostCheck, bool],
+    str,
+]:
+    """The stored outputs and `result_sha256` of a finishing run (results only when it
+    SUCCEEDED). A re-run (`expected`: its original's result_sha256, D-31 §5) that does not
+    reproduce it ends FAILED with a POST_CHECK_FAILED warning and no result: never a
+    silent, different success. The lcr_hqla outputs (`lcr`, `assets`) are hashed too; the
+    caller stores `kept_lcr(status, ...)` of the returned status."""
+    keep = status in SUCCEEDED
+    kept_gap = sorted(gap, key=lambda g: (g.currency, g.bucket.sequence)) if keep else []
+    kept = list(contributions) if keep else []
+    found = list(warnings)
+    sha = canonical_sha256(
+        result_document(status, kept_gap, kept, found, *kept_lcr(status, lcr, assets))
+    )
+    if expected is None:
+        return status, kept_gap, kept, found, dict(checks), sha
+    if sha == expected:
+        return status, kept_gap, kept, found, {**checks, PostCheck.RERUN_REPRODUCED: True}, sha
+    failed = CalculationRunStatus.FAILED
+    found.append(
+        ModuleWarning(
+            W.POST_CHECK_FAILED,
+            WarningSeverity.ERROR,
+            "The re-run did not reproduce its original run's result_sha256: the run is FAILED "
+            "and no result is stored (D-31 §5).",
+            details={"check": PostCheck.RERUN_REPRODUCED.value},
+        )
+    )
+    sha = canonical_sha256(result_document(failed, [], [], found))
+    return failed, [], [], found, {**checks, PostCheck.RERUN_REPRODUCED: False}, sha
+
+
 def result_document(
     status: CalculationRunStatus,
     gap: Sequence[GapRow],
@@ -446,8 +514,9 @@ def ladder_classes(
     Aggregates are `internal` (D-33 option A), but a figure built from 1 to `minimum` - 1
     contributions would show a single cash flow's (confidential) amount, e.g. with a
     reporting date one day before a due date. So:
-    - a direction/origin part with 0 < count < minimum takes its contributions'
-      classification; a part with no contribution stays as it is (it is 0);
+    - a direction/origin part with 0 < count < minimum non-zero contributions takes its
+      contributions' classification; a part with no non-zero contribution stays as it is
+      (it is 0). Zero contributions do not count: two of them must not unmask a third;
     - inflows, outflows and the net gap take the most sensitive classification of what they
       are derived from;
     - the cumulative gap carries the most sensitive classification so far in its currency,
@@ -487,8 +556,9 @@ def _clear_if_zero(value: Decimal | None, code: str, aggregate: str) -> str:
 def liquidity_classes(row: LcrResult, minimum: int) -> dict[str, str]:
     """D-33 minimum aggregation (CALC_MIN_AGGREGATE_COUNT, PROVISIONAL) for one currency's
     LCR, for masking on read. The row is `internal` (an aggregate), but:
-    - an HQLA level, the outflows or the inflows built from 1 to `minimum` - 1
-      contributions take the contributions' classification;
+    - an HQLA level, the outflows or the inflows built from 1 to `minimum` - 1 non-zero
+      contributions take the contributions' classification (a zero contribution does not
+      count: two zero rows must not unmask a single balance);
     - derived figures take the most sensitive part they are built from: the HQLA total
       (its levels), the cap amount (outflows), the inflows after the cap and whether the
       cap binds (inflows before the cap and outflows), the denominator (outflows and
@@ -501,13 +571,13 @@ def liquidity_classes(row: LcrResult, minimum: int) -> dict[str, str]:
         return _clear_if_zero(value, contributed if 0 < count < minimum else agg, agg)
 
     c = {
-        "hqla_level1": part(row.level1_count, row.hqla_level1),
-        "hqla_level2a": part(row.level2a_count, row.hqla_level2a),
-        "hqla_level2b": part(row.level2b_count, row.hqla_level2b),
-        "outflow_balance": part(row.outflow_count, row.outflow_balance),
-        "outflows": part(row.outflow_count, row.outflows),
-        "inflows_gross": part(row.inflow_count, row.inflows_gross),
-        "inflows_before_cap": part(row.inflow_count, row.inflows_before_cap),
+        "hqla_level1": part(row.level1_nonzero_count, row.hqla_level1),
+        "hqla_level2a": part(row.level2a_nonzero_count, row.hqla_level2a),
+        "hqla_level2b": part(row.level2b_nonzero_count, row.hqla_level2b),
+        "outflow_balance": part(row.outflow_nonzero_count, row.outflow_balance),
+        "outflows": part(row.outflow_nonzero_count, row.outflows),
+        "inflows_gross": part(row.inflow_nonzero_count, row.inflows_gross),
+        "inflows_before_cap": part(row.inflow_nonzero_count, row.inflows_before_cap),
     }
     levels = most_sensitive([c["hqla_level1"], c["hqla_level2a"], c["hqla_level2b"]])
     c["hqla_total"] = _clear_if_zero(row.hqla_total, levels, agg)
@@ -567,6 +637,16 @@ class RunSpec:
                 "reporting_date": self.reporting_date.isoformat(),
             }
         )
+
+
+@dataclass(frozen=True)
+class RerunSpec:
+    """A re-run of a run on its exact pins (BE-16.3)."""
+
+    rerun_of: uuid.UUID
+
+    def sha256(self) -> str:
+        return canonical_sha256({"rerun_of": str(self.rerun_of)})
 
 
 @dataclass(frozen=True)
@@ -640,6 +720,21 @@ class LadderView:
     min_aggregate_count: int
 
 
+@dataclass(frozen=True)
+class _Pinned:
+    """What a run pins before its manifest is written: a new run's ACTIVE versions, or a
+    re-run's original pins (`rerun_of`)."""
+
+    snapshot: DatasetSnapshot
+    view: ModuleView
+    implementation: RegisteredModule
+    definitions: dict[str, RuleDefinition]  # rule code -> definition
+    versions: dict[str, RuleVersion]  # rule code -> pinned version
+    assumption_set: AssumptionSet
+    reporting_date: date
+    rerun_of: CalculationRun | None = None
+
+
 @dataclass
 class _Run:
     """What the engine carries from the pinning transaction into execution (plain values:
@@ -652,6 +747,8 @@ class _Run:
     members: dict[str, DatasetSnapshotMember]  # schema code -> member
     versions: dict[str, RuleVersion]  # rule code -> pinned version
     pins: SchemaPins
+    # A re-run: its original's result_sha256, which it must reproduce (D-31 §5).
+    expected_result_sha256: str | None = None
     counts: dict[str, int] = field(default_factory=dict)
     events: dict[uuid.UUID, CashflowEvent] = field(default_factory=dict)
     positions: dict[uuid.UUID, PositionVersion] = field(default_factory=dict)
@@ -893,9 +990,87 @@ class CalculationService:
 
     # --- create (BE-15.4) ---------------------------------------------------------------
 
+    async def _new_pins(self, spec: RunSpec) -> _Pinned:
+        """A new run pins the snapshot and the ACTIVE rule versions (D-31 §4)."""
+        snapshot = await self.snapshots.found(spec.dataset_snapshot_id)
+        if snapshot is None:
+            await self._refuse(
+                ApiError(404, "not_found", "Dataset snapshot not found."), spec.dataset_snapshot_id
+            )
+        view = await self.rules.module_view(spec.module_version_id)
+        if view is None:
+            await self._refuse(self._unavailable(spec.module_version_id, "not_found"))
+        implementation = registered(view.module.code, view.version.version)
+        if view.version.implementation_status != ImplementationStatus.AVAILABLE.value:
+            reason = "planned"
+        elif implementation is None:
+            reason = "not_implemented"
+        elif not view.runnable:
+            reason = "configuration_incomplete"
+        else:
+            reason = ""
+        if reason or implementation is None or view.assumption_set is None:
+            await self._refuse(self._unavailable(view.version.id, reason or "not_implemented"))
+        return _Pinned(
+            snapshot,
+            view,
+            implementation,
+            {r.definition.code: r.definition for r in view.rules},
+            {r.definition.code: r.active for r in view.rules if r.active is not None},
+            view.assumption_set,
+            spec.reporting_date,
+        )
+
+    def _not_reproducible(self, run_id: uuid.UUID, reason: str) -> ApiError:
+        return ApiError(
+            409,
+            RunRefusal.RERUN_NOT_REPRODUCIBLE,
+            "This run cannot be re-run on its pins in this release (its engine or manifest "
+            "version changed, or its pins no longer resolve to the same content).",
+            {"run_id": str(run_id), "reason": reason},
+        )
+
+    async def _rerun_pins(self, spec: RerunSpec) -> _Pinned:
+        """A re-run pins exactly what its original pinned (BE-16.3): the same snapshot,
+        reporting date, module version, rule set (even SUPERSEDED versions) and assumption
+        set, on the same engine version."""
+        original = await self.repo.fresh(spec.rerun_of)
+        if original is None:
+            await self._refuse(ApiError(404, "not_found", RUN_NOT_FOUND), spec.rerun_of)
+        if (
+            original.engine_version != ENGINE_VERSION
+            or original.manifest.get("manifest_version") != MANIFEST_VERSION
+        ):
+            await self._refuse(self._not_reproducible(original.id, "engine_changed"), original.id)
+        snapshot = await self.snapshots.found(original.dataset_snapshot_id)
+        view = await self.rules.module_view(original.module_version_id)
+        implementation = (
+            registered(view.module.code, view.version.version) if view is not None else None
+        )
+        if (
+            view is None
+            or implementation is None
+            or view.version.implementation_status != ImplementationStatus.AVAILABLE.value
+        ):
+            await self._refuse(self._unavailable(original.module_version_id, "not_implemented"))
+        pinned = await self.rules.pinned(original.rule_set_id)
+        assumption_set = await self.rules.assumption_set_by_id(original.assumption_set_id)
+        if snapshot is None or assumption_set is None or not pinned:
+            await self._refuse(self._not_reproducible(original.id, "pins_changed"), original.id)
+        return _Pinned(
+            snapshot,
+            view,
+            implementation,
+            {d.code: d for d, _ in pinned},
+            {d.code: v for d, v in pinned},
+            assumption_set,
+            original.reporting_date,
+            original,
+        )
+
     async def create(
         self,
-        spec: RunSpec,
+        spec: RunSpec | RerunSpec,
         idempotency_key: str,
         enabled: bool,
         stale_seconds: int = 900,
@@ -934,52 +1109,42 @@ class CalculationService:
                 await self._fail(existing.id, {}, "stale_run")
             return await self.get(existing.id), False
 
-        snapshot = await self.snapshots.found(spec.dataset_snapshot_id)
-        if snapshot is None:
-            await self._refuse(
-                ApiError(404, "not_found", "Dataset snapshot not found."), spec.dataset_snapshot_id
-            )
-        view = await self.rules.module_view(spec.module_version_id)
-        if view is None:
-            await self._refuse(self._unavailable(spec.module_version_id, "not_found"))
-        implementation = registered(view.module.code, view.version.version)
-        if view.version.implementation_status != ImplementationStatus.AVAILABLE.value:
-            reason = "planned"
-        elif implementation is None:
-            reason = "not_implemented"
-        elif not view.runnable:
-            reason = "configuration_incomplete"
-        else:
-            reason = ""
-        if reason or implementation is None or view.assumption_set is None:
-            await self._refuse(self._unavailable(view.version.id, reason or "not_implemented"))
-
+        pinned = (
+            await self._rerun_pins(spec)
+            if isinstance(spec, RerunSpec)
+            else await self._new_pins(spec)
+        )
+        snapshot, view, assumption_set = pinned.snapshot, pinned.view, pinned.assumption_set
         members = {m.schema_code: m for m in await self.snapshots.members(snapshot.id)}
-        definitions = {r.definition.code: r.definition for r in view.rules}
-        versions = {r.definition.code: r.active for r in view.rules if r.active is not None}
+        versions = pinned.versions
         rule_set = await self.rules.rule_set_for(list(versions.values()))
         pins = await self.domain.schema_pins()
         manifest = self._manifest(
-            spec.reporting_date,
+            pinned.reporting_date,
             view,
             snapshot,
             members,
             rule_set.id,
             rule_set.content_sha256,
-            definitions,
+            pinned.definitions,
             versions,
-            view.assumption_set,
+            assumption_set,
             pins,
         )
         manifest_sha256 = canonical_sha256(manifest)
+        original = pinned.rerun_of
+        if original is not None and (
+            manifest_sha256 != original.manifest_sha256 or rule_set.id != original.rule_set_id
+        ):
+            await self._refuse(self._not_reproducible(original.id, "pins_changed"), original.id)
         run = CalculationRun(
             id=uuid.uuid4(),
             tenant_id=self.principal.tenant_id,
             dataset_snapshot_id=snapshot.id,
             module_version_id=view.version.id,
             rule_set_id=rule_set.id,
-            assumption_set_id=view.assumption_set.id,
-            reporting_date=spec.reporting_date,
+            assumption_set_id=assumption_set.id,
+            reporting_date=pinned.reporting_date,
             engine_version=ENGINE_VERSION,
             status=CalculationRunStatus.RUNNING.value,
             manifest=manifest,
@@ -987,6 +1152,7 @@ class CalculationService:
             warning_count=0,
             idempotency_key=idempotency_key,
             request_sha256=fingerprint,
+            rerun_of_run_id=original.id if original is not None else None,
             correlation_id=get_correlation_id(),
             created_by=actor,
         )
@@ -999,7 +1165,7 @@ class CalculationService:
             rule_set.id,
             rule_set.content_sha256,
             versions,
-            view.assumption_set,
+            assumption_set,
             pins,
         )
         await self.repo.insert_rows(
@@ -1025,9 +1191,10 @@ class CalculationService:
             "module_version": view.version.version,
             "dataset_snapshot_id": str(snapshot.id),
             "rule_set_id": str(rule_set.id),
-            "assumption_set_id": str(view.assumption_set.id),
+            "assumption_set_id": str(assumption_set.id),
             "engine_version": ENGINE_VERSION,
             "manifest_sha256": manifest_sha256,
+            "rerun_of_run_id": str(original.id) if original is not None else None,
         }
         audit_by(
             self.session,
@@ -1041,7 +1208,16 @@ class CalculationService:
         # D-31 §3: the run exists, RUNNING, before anything is computed.
         await self.session.commit()
 
-        state = _Run(run.id, spec.reporting_date, view, implementation, members, versions, pins)
+        state = _Run(
+            run.id,
+            pinned.reporting_date,
+            view,
+            pinned.implementation,
+            members,
+            versions,
+            pins,
+            original.result_sha256 if original is not None else None,
+        )
         try:
             await self._execute(state)
         except BaseException as exc:  # the engine's own failure: recorded, never silent
@@ -1267,6 +1443,15 @@ class CalculationService:
             ]
             await self._end(state, CalculationRunStatus.BLOCKED, ModuleResult(), warnings, {})
             return
+        if not all(exact_json(v.parameters) for v in state.versions.values()):
+            warning = ModuleWarning(
+                W.PARAMETERS_INVALID,
+                WarningSeverity.ERROR,
+                "A pinned rule parameter holds an inexact JSON number; decimals are exact text "
+                "(D-32 §1).",
+            )
+            await self._end(state, CalculationRunStatus.BLOCKED, ModuleResult(), [warning], {})
+            return
         inputs = await self._inputs(state)
         parameters = {
             code: PinnedRule(v.id, MappingProxyType(dict(v.parameters)))
@@ -1355,15 +1540,18 @@ class CalculationService:
     ) -> None:
         """Store the outputs (results only for a successful run, which needs its pinned
         `state`), end the run with its result hash and outcome, audit it and commit."""
-        keep = status in SUCCEEDED
-        gap = sorted(result.liquidity_gap, key=lambda g: (g.currency, g.bucket.sequence))
-        gap = gap if keep else []
-        contributions = list(result.contributions) if keep else []
-        lcr = sorted(result.lcr, key=lambda r: r.currency) if keep else []
-        assets = list(result.hqla_assets) if keep else []
-        result_sha256 = canonical_sha256(
-            result_document(status, gap, contributions, warnings, lcr, assets)
+        status, gap, contributions, warnings, checks, result_sha256 = reproduce(
+            state.expected_result_sha256 if state is not None else None,
+            status,
+            result.liquidity_gap,
+            result.contributions,
+            warnings,
+            checks,
+            lcr=result.lcr,
+            assets=result.hqla_assets,
         )
+        keep = status in SUCCEEDED
+        lcr, assets = kept_lcr(status, result.lcr, result.hqla_assets)
         tenant, actor = self.principal.tenant_id, self.principal.actor
         bucket_ids = {b.code: b.id for b in buckets}
         gap_ids: dict[tuple[str, str], uuid.UUID] = {}
@@ -1536,6 +1724,11 @@ class CalculationService:
                     "inflows_after_cap": r.inflows_after_cap,
                     "inflow_cap_applied": r.inflow_cap_applied,
                     "inflow_count": r.inflow_count,
+                    "level1_nonzero_count": r.level1_nonzero_count,
+                    "level2a_nonzero_count": r.level2a_nonzero_count,
+                    "level2b_nonzero_count": r.level2b_nonzero_count,
+                    "outflow_nonzero_count": r.outflow_nonzero_count,
+                    "inflow_nonzero_count": r.inflow_nonzero_count,
                     "net_outflows": r.net_outflows,
                     "ratio": r.ratio,
                     "warning_codes": [w.value for w in r.warnings],
@@ -1752,3 +1945,11 @@ class CalculationService:
             {r.id: liquidity_classes(r, min_aggregate_count) for r in rows},
             min_aggregate_count,
         )
+
+    # --- for the rule registry reads (BE-16.2) ----------------------------------------------
+
+    async def runs_in_rule_sets(
+        self, rule_set_ids: Sequence[uuid.UUID], limit: int
+    ) -> tuple[int, list[CalculationRun]]:
+        """How many runs pin one of these rule sets, and the newest `limit` of them."""
+        return await self.repo.in_rule_sets(rule_set_ids, limit)

@@ -59,6 +59,14 @@ export const DOMAIN_UI_ENABLED = process.env.NEXT_PUBLIC_DOMAIN_UI !== 'off'
 export const CALCULATIONS_UI_ENABLED = process.env.NEXT_PUBLIC_CALCULATIONS_UI !== 'off'
 
 /**
+ * NEXT_PUBLIC_RULES_UI=off (FE-16.1): the Financial Domain workspace loses its registry tabs
+ * (Rules, Modules, Assumption sets) and every /domain registry route is a 404 again, restoring
+ * the Phase 15 UI exactly. The backend's own switch is RULE_CHANGE_ENABLED, which freezes the
+ * rules at their ACTIVE versions (writes 409 `rule_change_disabled`); reads work either way.
+ */
+export const RULES_UI_ENABLED = process.env.NEXT_PUBLIC_RULES_UI !== 'off'
+
+/**
  * NEXT_PUBLIC_LIQUIDITY_UI=off (FE-17.1): the run detail of an `lcr_hqla` run shows the Phase 15
  * layout again (the maturity-ladder section, which says the module has no ladder) instead of
  * the liquidity view, restoring the Phase 15 UI exactly. The backend's own reversal is retiring
