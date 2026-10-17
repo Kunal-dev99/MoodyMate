@@ -25,7 +25,11 @@ export const canValidate = (status: ImportStatus, manifest: ImportManifest | nul
 /** D-20 §3: a corrected file may be uploaded for a QUARANTINED or FAILED import. */
 export const canRetry = (status: ImportStatus): boolean => status === 'QUARANTINED' || status === 'FAILED'
 
-/** The import wizard, pre-filled with the source and `retry_of_import_id`. */
+/**
+ * The import wizard, pre-filled with the source and `retry_of_import_id` = `job.id`: the
+ * import that holds the quarantine items (D-27 §4). Items are resolved only by a direct
+ * retry, so this is never `job.retry_of_import_id` (no retry of a retry's original).
+ */
 export const retryHref = (job: { id: string; source_id: string }): string =>
   `/ingestion/imports/new?source=${encodeURIComponent(job.source_id)}&retry_of=${encodeURIComponent(job.id)}`
 
