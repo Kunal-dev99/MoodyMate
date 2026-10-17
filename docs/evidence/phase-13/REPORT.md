@@ -40,8 +40,10 @@ source change.
 | Frontend lint, `tsc --noEmit` | clean |
 | Playwright, full suite on a fresh DB | 26 passed (1.1 m) |
 
-BE-13.2 and FE-13.1 are ticked once CI is green on the Phase 13 PR (their Done-whens are CI
-runs).
+**CI on PR #21** (run 39024100939, head `c4a49e5`): backend, frontend and e2e all passed,
+including the "WS2 verification suite" step. The `playwright-report` artifact was uploaded.
+https://github.com/Kunal-dev99/MoodyMate/actions/runs/39024100939. BE-13.2 and FE-13.1 are
+ticked on that evidence.
 
 ## Notes and open items
 

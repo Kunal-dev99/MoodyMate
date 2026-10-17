@@ -1324,7 +1324,7 @@ verification suite and browser smoke tests in CI.
   XLSX, JSON and a test-only in-memory `FakeFeedAdapter`.
   - *Done-when:* the contract suite passes for all four adapters, and the fake adapter is
     wired in only from `app/tests` (a grep of `app/` outside tests finds no reference to it).
-- [ ] **BE-13.2** WS2 verification suite (`pytest -m ws2`, a new CI step that prints the
+- [x] **BE-13.2** WS2 verification suite (`pytest -m ws2`, a new CI step that prints the
   matrix). It covers:
   - every WS2 route × every seeded role, asserting the expected 2xx on a prepared fixture
     for allowed roles and 403 `forbidden` with the declared `required_permission` for the
@@ -1344,7 +1344,7 @@ verification suite and browser smoke tests in CI.
   check that artifact store hashes match `import_artifact`.
   - *Done-when:* every WS2 table appears in a RETENTION.md row and the restore outline lists
     the artifact hash check.
-- [ ] **FE-13.1** Playwright WS2 smoke:
+- [x] **FE-13.1** Playwright WS2 smoke:
   1. a steward registers a source and uploads;
   2. the profile is shown;
   3. the steward maps and validates the mapping;
