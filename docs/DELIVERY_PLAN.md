@@ -1164,11 +1164,11 @@ edited in place.
     set equals the schema; each value is checked against the DB; it is unchanged, along with the
     pin and the canonical count, after mapping v2 is ACTIVE and after an applied proposal
     deprecates schema v1; the 0014 pin trigger refuses pinning a DEPRECATED version).
-- [ ] **FE-11.1** Validation dashboard tab: accepted/quarantined/rejected/warning counts, an
+- [x] **FE-11.1** Validation dashboard tab: accepted/quarantined/rejected/warning counts, an
   issues table with filters and field-level detail, and the manifest panel.
   - *Done-when:* a browser run on the mixed-errors fixture shows counts and issue codes
     equal to the API response, and the counts add up to the row count.
-- [ ] **FE-11.2** Quarantine view: masked values, disposition actions gated on
+- [x] **FE-11.2** Quarantine view: masked values, disposition actions gated on
   `quality:review`, and "Retry with corrected file", which opens the import wizard
   pre-filled with `retry_of_import_id`.
   - *Done-when:* a browser run as `data_steward` moves an item OPEN → UNDER_REVIEW →
@@ -1186,14 +1186,27 @@ Goal: every validated import has a reconciliation that cannot report MATCHED whi
 fails. A changed source shape raises drift events that a person must review. Nothing
 changes a schema, contract or mapping automatically.
 
-- [ ] **BE-12.1** Migration plus models: `reconciliation_run` (outcome per D-23, tolerance
+- [x] **BE-12.1** Migration plus models: `reconciliation_run` (outcome per D-23, tolerance
   policy) and `reconciliation_item` in `backend/app/reconciliation`; `data_drift_event`
   (`drift_type` and `status` per D-23, baseline import, column, observed vs baseline
   summary) in `mapping`. Results are append-only, and drift events allow status and review
   fields only. TRUNCATE is blocked and CHECKs cover the enums.
   - *Done-when:* the round trip passes; the trigger tests pass; the downgrade refusal is
-    tested.
-- [ ] **BE-12.2** Reconciliation runs at the end of validation:
+    tested. — ✔ verified by code read at cdbade9 (D-28). `db/migrations/versions/0016_reconciliation_and_drift.py`:
+    append-only and TRUNCATE triggers on runs and items `:94-101,195-203`; run insert check
+    (validated import, own tenant) `:103-117`; item insert check (never non-MATCHED under
+    MATCHED, an unexplained gap needs BROKEN) `:119-138`; drift guard (content frozen, no
+    DELETE/TRUNCATE, review once from OPEN) `:140-165`; drift insert check (created OPEN,
+    baseline COMPLETED/COMPLETED_WITH_WARNINGS of the same source and tenant) `:167-191`; enum,
+    variance and status-of-variance CHECKs `:266-399`; downgrade refusal `:452-458`. Models in
+    `reconciliation/models.py:41-68` and `mapping/models.py:231-285`.
+    `test_reconciliation.py::test_phase12_tables_are_guarded_in_the_database` (frozen enum copies
+    equal the code; UPDATE/DELETE/TRUNCATE refused; item and event insert refusals; review once;
+    downgrade to 0015 refused with counts unchanged, and 0015's own refusal still holds once the
+    Phase 12 rows are gone). Round trip: `test_ws1_verification.py::test_migration_round_trip_and_downgrade_guards`
+    (head → base → head, head = 0016) and the CI step `Migration round trip (D-02)`
+    (`.github/workflows/ci.yml:48-49`). Pass results as reported: local 47 passed, CI run 43.
+- [x] **BE-12.2** Reconciliation runs at the end of validation:
   - **Count conservation:** `source_rows = accepted + quarantined + rejected`, with zero
     tolerance.
   - **Upload control count:** `expected_row_count` against the source rows, when provided.
@@ -1207,8 +1220,21 @@ changes a schema, contract or mapping automatically.
   - *Done-when:* tests prove the clean fixture is MATCHED, the quarantine fixture is
     REVIEW_REQUIRED with the exact Decimal variance as a string, and a wrong
     `expected_row_count` is BROKEN. A table test asserts the outcome is never MATCHED when
-    any item is not MATCHED.
-- [ ] **BE-12.3** Drift detection after profiling, behind `DRIFT_DETECTION_ENABLED` (default
+    any item is not MATCHED. — ✔ verified by code read at cdbade9 (D-28). Called from
+    validation in its transaction, for every final status (`ingestion/service.py:1101,1118-1163`);
+    figures read back from the DB in one scoped aggregate (`ingestion/repository.py:441-489`);
+    item status, outcome and checks in `reconciliation/service.py:60-66,103-110,153-215`
+    (Decimal under an exact context that traps rounding, `:49`); tolerance from
+    `RECONCILIATION_TOLERANCE` (default `0`, `core/config.py:84`; route `ingestion/router.py:693`);
+    `GET /imports/{import_id}/reconciliation` under `import:read`, figures as `format(d, "f")`
+    text and masked by classification (`reconciliation/router.py:35-83`).
+    `test_reconciliation.py::test_reconciliation_outcomes_and_exact_variances` (clean fixture
+    MATCHED; mixed-errors fixture REVIEW_REQUIRED with notional variance `"4237607.14001"` equal
+    to the held rows' total; `expected_row_count=24` BROKEN with variance `"-1"`; risk_analyst and
+    auditor see masked totals; 404 `reconciliation_not_found` before validation; table test over
+    155 combinations: MATCHED iff every item MATCHED, BROKEN iff a gap is unexplained; every
+    stored run checked; no `float` in the reconciler source).
+- [x] **BE-12.3** Drift detection after profiling, behind `DRIFT_DETECTION_ENABLED` (default
   `true`). It compares the import's profile with the baseline, which is the latest
   COMPLETED or COMPLETED_WITH_WARNINGS import of the same source profile. It emits
   COLUMN_ADDED, COLUMN_REMOVED, TYPE_CHANGED, NULL_RATE_SHIFT and RANGE_SHIFT events, with
@@ -1216,24 +1242,70 @@ changes a schema, contract or mapping automatically.
   is `GET /imports/{import_id}/drift`.
   - *Done-when:* tests prove the extra-column fixture after a clean baseline emits exactly
     one COLUMN_ADDED; schema, contract and mapping hashes are unchanged after detection; and
-    with the setting off, no events are written.
-- [ ] **BE-12.4** `POST /drift-events/{drift_event_id}/review` (`quality:review`; outcome
+    with the setting off, no events are written. — ✔ verified by code read at cdbade9 (D-28).
+    Settings `core/config.py:87-92` (thresholds `0.10` / `0.25`, PROVISIONAL, guarded
+    `:173-184`); off means no thresholds and no detection (`ingestion/router.py:407-411`,
+    `ingestion/service.py:856-859`, in the profiling transaction); baseline query
+    `ingestion/repository.py:491-507` (latest COMPLETED / COMPLETED_WITH_WARNINGS import of the
+    same source, other than this one, with a profile); detector `mapping/service.py:1269-1314`;
+    events and audit `import.drift_detect` `:1349-1411`; `GET /imports/{import_id}/drift` under
+    `import:read` (`mapping/router.py:420-437`). `test_reconciliation.py::test_drift_detection_setting_and_review`
+    (first import: no baseline, no events, no detection audit; extra-column fixture after the
+    clean baseline: exactly one COLUMN_ADDED `legacy_flag`; `governed(db)` (schema, contract and
+    mapping hashes and statuses, field and proposal counts) equal before and after; with
+    `DRIFT_DETECTION_ENABLED=False` no event and no `import.drift_detect`; the five types on
+    synthetic profiles, including the at-threshold non-events; no `float` in the detector).
+    Note: the baseline is matched by source system, which equals "same source profile" while a
+    source has one profile (D-28 §5).
+- [x] **BE-12.4** `POST /drift-events/{drift_event_id}/review` (`quality:review`; outcome
   ACKNOWLEDGED or ACTION_REQUIRED plus a required comment; audited). ACTION_REQUIRED returns
   a link hint to the Phase 5 proposal page and creates nothing else.
   - *Done-when:* tests prove the review is recorded with the reviewer and audit event, a
     second review gets 409, `risk_analyst` gets 403, and the `schema_change_proposal` count
-    is unchanged after ACTION_REQUIRED.
-- [ ] **FE-12.1** Reconciliation tab: per-check rows with source, target, held, variance and
+    is unchanged after ACTION_REQUIRED. — ✔ verified by code read at cdbade9 (D-28).
+    `mapping/router.py:440-458` (`quality:review` plus `IngestionEnabled`; body
+    `mapping/schemas.py:369-373`, outcome ACKNOWLEDGED | ACTION_REQUIRED, comment required, at
+    most 1,000 characters); `mapping/service.py:1444-1493` (row lock; scoped 404 for absent and
+    foreign; 409 `already_reviewed` when the move is not in `DRIFT_TRANSITIONS`; every refusal
+    audited DENIED; success audited `drift_event.review`; ACTION_REQUIRED returns `proposal_link`
+    to `/schemas/proposals/new?schema={id}` only). `test_reconciliation.py::test_drift_detection_setting_and_review`
+    (risk_analyst and approver 403 with `required_permission` `quality:review`; 422 for missing,
+    blank or OPEN outcome; foreign tenant 404 body equal to a random id's, audited DENIED;
+    ACTION_REQUIRED recorded with `reviewed_by = user:{id}`, comment and time, one SUCCESS audit
+    event; `governed(db)` unchanged, so the `schema_change_proposal` count is unchanged; second
+    review 409 `already_reviewed`, audited DENIED, nothing changed).
+- [x] **FE-12.1** Reconciliation tab: per-check rows with source, target, held, variance and
   tolerance, and an outcome pill. Decimals are rendered from API strings and never parsed to
   numbers.
   - *Done-when:* a browser run on the quarantine fixture shows REVIEW_REQUIRED with the
     variance text equal to the API string. A grep finds no `parseFloat`/`Number(` on
-    reconciliation values.
-- [ ] **FE-12.2** Drift alerts tab with a review dialog. "Propose schema change" links to the
+    reconciliation values. — ✔ verified by code read at cdbade9.
+    `frontend/src/components/ingestion/ImportReconciliationTab.tsx` (GET only; figures rendered
+    through `figureDisplay`, `reconciliation.ts:61-65`, as the server's text; outcome pill from
+    the server). Browser: `frontend/e2e/reconciliation.spec.ts` test "FE-12.1: the quarantine
+    fixture reconciles REVIEW_REQUIRED; …" (`:56-115`: validates `instrument__mixed_errors.csv`
+    in the browser, `data-outcome="REVIEW_REQUIRED"`, every figure of every row equals the API
+    string, notional variance text equals `notional.variance`), plus the risk_analyst masking test
+    (`:117-133`). Grep: `src/components/ingestion/__tests__/reconciliation.test.ts:125-146` greps
+    the seven reconciliation and drift files for `parseFloat`, `parseInt`, `Number(`, `Math.`,
+    `toFixed`, unary `+` and more; an architect grep of those files also finds none. The spec runs
+    in the CI `e2e` job (`ci.yml:82-129`, all of `e2e/`, no skip); CI run 43 on cdbade9 passed, as
+    reported (log not opened by the architect).
+- [x] **FE-12.2** Drift alerts tab with a review dialog. "Propose schema change" links to the
   existing Phase 5 new-proposal page (prefilled schema only).
   - *Done-when:* a browser run uploads a clean import, then the extra-column import, sees
     the COLUMN_ADDED alert, acknowledges it as `data_steward`, and the alert then shows the
-    reviewer and comment.
+    reviewer and comment. — ✔ verified by code read at cdbade9.
+    `ImportDriftTab.tsx` (alerts, Review gated on `quality:review`, "Propose schema change"
+    gated on `schema:propose` and shown only for ACTION_REQUIRED), `DriftReviewDialog.tsx`
+    (outcome and comment required; closes on the server's 200 and reloads), `drift.ts:88-90`
+    (link built from `schema_id` only). Browser: `reconciliation.spec.ts` test "FE-12.2: a clean
+    import, then the extra-column import: …" (`:135-194`: both uploads through the wizard, the
+    clean one validated; exactly one `COLUMN_ADDED:legacy_flag` against the clean baseline;
+    ACKNOWLEDGED with a comment; the alert shows `reviewed_by` and the comment, also after a
+    reload), and the "Action required" test (`:196-247`: link to
+    `/schemas/proposals/new?schema={id}` with only the schema prefilled, proposal total unchanged;
+    risk_analyst has no Review button and gets 403). Same CI note as FE-12.1.
 
 *Reversibility:* additive tables. The downgrade refuses while runs or events exist.
 Turning off `DRIFT_DETECTION_ENABLED` stops new drift events (existing ones stay
@@ -1246,7 +1318,7 @@ Goal: the adapter contract is documented and enforced by tests, so a future feed
 warehouse adapter plugs in without changing the core. The whole of WS2 is proven by a
 verification suite and browser smoke tests in CI.
 
-- [ ] **BE-13.1** `docs/ADAPTERS.md`, the adapter contract: interface, limits, the row/locator
+- [x] **BE-13.1** `docs/ADAPTERS.md`, the adapter contract: interface, limits, the row/locator
   shape, error codes, the no-float rule and the provenance fields. It comes with a
   parametrised contract test suite that every adapter must pass. The suite runs over CSV,
   XLSX, JSON and a test-only in-memory `FakeFeedAdapter`.
@@ -1266,7 +1338,7 @@ verification suite and browser smoke tests in CI.
   - a base → head migration round trip.
   - *Done-when:* the step runs green in CI on the Phase 13 PR and the matrix table appears in
     the CI log.
-- [ ] **BE-13.3** `docs/RETENTION.md` gets PROVISIONAL rows for raw artifacts, source
+- [x] **BE-13.3** `docs/RETENTION.md` gets PROVISIONAL rows for raw artifacts, source
   records, canonical records and lineage, validation issues and quarantine, profiles and
   drift, and reconciliation (owners named, no numbers). The restore procedure gains the
   check that artifact store hashes match `import_artifact`.

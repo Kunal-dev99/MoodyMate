@@ -533,6 +533,100 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
      FILE_BLOCKED, and the import is FAILED.
 - **Reversal:** a new decision, or a new validation_profile version for point 6.
 
+## D-28 Phase 12 reconciliation and drift semantics
+
+- **Status:** proposed. Recorded 2026-10-17 from the Phase 12 code at `cdbade9`; it becomes
+  active when the user confirms. PROVISIONAL where noted.
+- **Date:** 2026-10-17
+- **Context:** Phase 12 (`docs/evidence/phase-12/REPORT.md`) implemented behaviours that go
+  beyond the plan text of BE-12.1 to BE-12.4. They are written down here as built, so later
+  phases rely on them knowingly.
+- **Decision:**
+  1. **One reconciliation per validated import.** Validation writes it in its own transaction,
+     for every final status (COMPLETED, COMPLETED_WITH_WARNINGS, QUARANTINED, FAILED). The
+     run and its items are append-only, with a unique import id. Changing the checks or the
+     rules means a new `reconciler_version` (now 1). `GET /imports/{id}/reconciliation`
+     (`import:read`) answers 404 `reconciliation_not_found` before validation. There is no
+     write route and no off switch: reconciliation is a control.
+  2. **Checks, in a fixed order.** For every check, `variance = source - target`, and `held`
+     is the part of the gap that held rows explain.
+     - ROW_COUNT: source rows against rows with a canonical record. `held` is the rows with a
+       quarantine item (quarantined or rejected).
+     - EXPECTED_ROW_COUNT, only when the upload declared one: the declared count against the
+       source rows. `held` is none.
+     - CONTROL_TOTAL, per contract control-total column: the source total against the
+       accepted rows' total. `held` is the held rows' total.
+     - DECLARED_CONTROL_TOTAL, only when the upload declared that column's total: the
+       declared total against the source total. `held` is none.
+
+     A value counts towards a total only when it is plain decimal text after trimming
+     spaces. The counts of parseable, unparseable and empty values are kept in `details`.
+  3. **Status and outcome rules.**
+     - An item is MATCHED when its variance is 0, WITHIN_TOLERANCE when
+       |variance| ≤ tolerance, and otherwise VARIANCE.
+     - An item is *unexplained* when |variance − held| > tolerance, with a missing `held`
+       counting as 0.
+     - The run is BROKEN if any item is unexplained, otherwise REVIEW_REQUIRED if any item is
+       not MATCHED, otherwise MATCHED.
+
+     So a quarantine import whose gaps equal its held rows is REVIEW_REQUIRED, and any
+     declared figure that differs is BROKEN. Insert triggers refuse a non-MATCHED item under
+     a MATCHED run, and an unexplained item under a run that is not BROKEN. CHECKs hold the
+     variance and the status-of-variance rule.
+  4. **Tolerance and exact decimals** (PROVISIONAL). `RECONCILIATION_TOLERANCE` is one
+     absolute tolerance, default `0`, a finite Decimal of at least 0. It applies to
+     CONTROL_TOTAL and DECLARED_CONTROL_TOTAL only. Row counts always use 0 (CHECK). Each run
+     stores the policy it applied (`kind ABSOLUTE`, `tolerance`, `count_tolerance "0"`,
+     `provisional true`, `setting`). The arithmetic is Decimal under a context that traps any
+     rounding, never float, and is stored as NUMERIC. The API returns every figure as exact
+     decimal text (`format(d, "f")`, never in exponent form). A role that is not cleared sees
+     a control total's source, target, held and variance masked, by the more sensitive of the
+     column's and the artifact's classification. Counts are always public.
+  5. **Drift baseline.** Detection runs after profiling, at upload, in the profiling
+     transaction. The baseline is the most recent import (by `created_at`, then id) of the same
+     tenant and source system, other than this one, that is COMPLETED or
+     COMPLETED_WITH_WARNINGS and has a profile. This equals "same source profile" while a
+     source has one profile. An insert trigger also enforces it. The baseline is fixed when the
+     event is written. With no baseline (a first import), nothing is compared, written or
+     audited.
+  6. **Drift types and thresholds as settings** (PROVISIONAL).
+     - COLUMN_ADDED and COLUMN_REMOVED match on the exact column name.
+     - TYPE_CHANGED: the suggested (most specific) candidate type differs, when both sides
+       have one.
+     - NULL_RATE_SHIFT: the null rate moved by more than `DRIFT_NULL_RATE_THRESHOLD`
+       (default `0.10`, from 0 to 1).
+     - RANGE_SHIFT: for a column numeric on both sides, the min or max lies beyond the
+       baseline's by more than `DRIFT_RANGE_THRESHOLD` (default `0.25`) × the baseline's
+       range, or × |baseline max| when the range is zero.
+
+     A value exactly at a threshold is not drift. Each event stores the thresholds it applied
+     and `detector_version` 1. Summaries keep profile statistics only (never top values), and
+     min and max are masked by the column's classification on read. One event per
+     (import, type, column).
+  7. **`DRIFT_DETECTION_ENABLED`** (default `true`). When it is off, no detection runs and no
+     event or `import.drift_detect` audit is written. Existing events stay readable and
+     reviewable, so this switch is the D-02 reversal for drift.
+  8. **Review outcomes.**
+     - `POST /drift-events/{id}/review` needs `quality:review` and is also refused while
+       `INGESTION_ENABLED` is off.
+     - The outcome is ACKNOWLEDGED or ACTION_REQUIRED. A comment of 1 to 1,000 characters is
+       required.
+     - The move is OPEN → one of those two, once. The review records the reviewer, the
+       comment and the time, and is audited `drift_event.review`.
+     - A second review is 409 `already_reviewed`, audited DENIED, and changes nothing.
+       Absent and foreign events give the same 404, also audited.
+     - The database freezes the event content and allows only that one review move. Events
+       are never deleted or truncated.
+  9. **No automatic proposals.** Neither detection nor review creates or changes a schema,
+     contract, mapping or schema change proposal. ACTION_REQUIRED only returns a
+     `proposal_link` to the Phase 5 page `/schemas/proposals/new?schema={id}`, which prefills
+     the import's target schema and nothing else.
+- **Consequences:** the downgrade of 0016 refuses while any run or drift event exists
+  (D-20 §4). Phase 13 (BE-13.2, BE-13.3) covers these tables in the WS2 matrix and in
+  RETENTION.md. The client must set the real tolerance and thresholds before production use.
+- **Reversal:** a new decision. A change to point 2 or 3 also bumps `reconciler_version`, and
+  a change to point 6 bumps `detector_version`.
+
 ---
 
 <!-- Never renumber existing IDs. New decisions are appended as D-05, D-06, … -->
