@@ -139,6 +139,7 @@ def test_route_by_role_authorization_matrix(api: TestClient, db: str) -> None:
         "source_id": seeded_source_id(db),
         "import_id": imported.json()["id"],
         "mapping_id": ws1_mapping(api, db, steward)["id"],
+        "batch_id": imported.json()["batches"][0]["id"],  # Phase 11: GET /quarantine/{batch_id}
     }
     tokens = {role: dev_token(api, role) for role in ROLES}
     failures = []
@@ -294,6 +295,10 @@ AUDITED = {
     "POST /api/v1/imports/{import_id}/mappings/validate": "mapping.validate",
     "POST /api/v1/mappings/{mapping_id}/versions/{version}/submit": "mapping_version.submit",
     "POST /api/v1/mappings/{mapping_id}/versions/{version}/approval": "mapping.approve",
+    "POST /api/v1/imports/{import_id}/validate": "import.validate",
+    "POST /api/v1/quarantine/{batch_id}/items/{quarantine_id}/disposition": (
+        "quarantine.disposition"
+    ),
 }
 
 
@@ -384,6 +389,23 @@ def test_every_mutating_route_is_listed_and_emits_an_audit_event(api: TestClient
         approver,
         f"{versions}/approval",
         {"decision": "APPROVE"},
+    )
+    # Phase 11: validate an import with a bad currency (QUARANTINED), then review its item.
+    held = upload(api, steward, seeded_source_id(db), WS1_CSV + b"I-3,BOND,EURO,1.00\n")
+    assert held.status_code == 201, held.text
+    validated_import = call(
+        "POST /api/v1/imports/{import_id}/validate",
+        steward,
+        f"/api/v1/imports/{held.json()['id']}/validate",
+    )
+    assert validated_import["status"] == "QUARANTINED", validated_import
+    batch = validated_import["batches"][0]["id"]
+    [item] = api.get(f"/api/v1/quarantine/{batch}", headers=steward).json()["items"]
+    call(
+        "POST /api/v1/quarantine/{batch_id}/items/{quarantine_id}/disposition",
+        steward,
+        f"/api/v1/quarantine/{batch}/items/{item['id']}/disposition",
+        {"status": "UNDER_REVIEW"},
     )
     # Every listed route was exercised here: listing a route without driving it fails.
     assert called == set(AUDITED)
