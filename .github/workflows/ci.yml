@@ -48,9 +48,11 @@ jobs:
       - name: Migration round trip (D-02)
         run: alembic upgrade head && alembic downgrade base && alembic upgrade head
       - name: Tests
-        run: pytest -q -m "not ws1"
+        run: pytest -q -m "not ws1 and not ws2"
       - name: WS1 verification suite (BE-6.3; prints the route x role matrix)
         run: pytest -m ws1 -v
+      - name: WS2 verification suite (BE-13.2; prints the WS2 route x role matrix)
+        run: pytest -m ws2 -v
       - name: OpenAPI drift check (D-05)
         run: python -m scripts.export_openapi --check
 

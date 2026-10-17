@@ -117,3 +117,44 @@ export async function ensureActiveMapping(request: APIRequestContext, contractId
   expect((await approved.json()).status).toBe('ACTIVE')
   return version.mapping_id
 }
+
+/** Upload a sample through the import wizard (FE-8.1); returns the server's import. */
+export async function uploadInBrowser(page: Page, sourceId: string, file: string) {
+  await page.goto(`/ingestion/imports/new?source=${sourceId}`)
+  await page.getByTestId('import-continue').click()
+  await page.getByTestId('import-file').setInputFiles(join(SAMPLES, file))
+  await page.getByTestId('synthetic-attested').click()
+  const uploaded = page.waitForResponse((r) => r.request().method() === 'POST' && r.url() === `${API}/api/v1/imports`)
+  await page.getByTestId('import-upload').click()
+  const response = await uploaded
+  expect(response.status()).toBe(201)
+  const job = await response.json()
+  await page.waitForURL(`**/ingestion/imports/${job.id}**`)
+  return job as { id: string; status: string; row_count: number }
+}
+
+/** Validate the open import from its Validation tab (FE-11.1); returns the server's import. */
+export async function validateInBrowser(page: Page, importId: string) {
+  await page.getByTestId('import-tab-validation').click()
+  const validated = page.waitForResponse((r) => r.request().method() === 'POST' && r.url() === `${API}/api/v1/imports/${importId}/validate`)
+  await page.getByTestId('import-validate').click()
+  const response = await validated
+  expect(response.status(), await response.text()).toBe(200)
+  return response.json()
+}
+
+/** A reconciliation figure as the API sends it (BE-12.1): a decimal string, masked, or absent. */
+export type Figure = string | { masked: true; classification: string } | null
+export type ReconItem = {
+  sequence: number
+  check: string
+  column: string | null
+  status: string
+  source: Figure
+  target: Figure
+  held: Figure
+  variance: Figure
+  tolerance: string
+}
+/** How the Reconciliation tab renders a figure (FE-12.1). */
+export const shownFigure = (v: Figure) => (v === null ? '—' : typeof v === 'string' ? v : 'masked')

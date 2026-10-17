@@ -1,18 +1,41 @@
-"""BE-8.3 (D-16, D-17, D-24 §1-2): adapter refusals. Every bad file and every limit is
-refused with its own code, and no refusal carries a cell value. Values come out as exact
-strings, never floats. No database needed."""
+"""Adapters, no database needed.
 
+1. BE-8.3 (D-16, D-17, D-24 §1-2): adapter refusals. Every bad file and every limit is
+   refused with its own code, and no refusal carries a cell value. Values come out as exact
+   strings, never floats.
+2. BE-13.1: the adapter contract (docs/ADAPTERS.md), one loop over every adapter: CSV,
+   XLSX, JSON and the test-only in-memory `FakeFeedAdapter` (app/tests/fake_feed.py). A
+   future adapter is added to `contract_kits()` and must pass the same checks.
+"""
+
+import inspect
 import io
+import json
+import sys
 import zipfile
-from dataclasses import replace
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass, replace
+from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import openpyxl
 import pytest
 
-from app.ingestion.adapters import HARD_LIMITS, AdapterError, AdapterOptions, parse_upload
-from app.ingestion.constants import SourceFormat, UploadRefusal
-from app.tests import xlsx_kit
+from app.ingestion.adapters import (
+    ADAPTERS,
+    HARD_LIMITS,
+    AdapterError,
+    AdapterOptions,
+    Limits,
+    RowFlag,
+    SourceAdapter,
+    SourceRow,
+    parse_upload,
+)
+from app.ingestion.adapters.base import collect
+from app.ingestion.constants import RowFlagCode, SourceFormat, UploadRefusal
+from app.tests import fake_feed, xlsx_kit
 from app.tests.xlsx_kit import rewrite, xlsx
 from scripts.make_synthetic_samples import OUT
 
@@ -153,3 +176,161 @@ def test_bad_files_and_limits_are_refused_with_their_own_code() -> None:
     ):
         error = refused(data, fmt)
         assert secret not in f"{error.code} {error.message} {error.details}", error.code
+
+
+# --- 2. The adapter contract (BE-13.1) ------------------------------------------------------------
+
+COLUMNS = ["trade_id", "amount", "ccy"]
+TABLE: list[list[Any]] = [["T-1", Decimal("100.25"), "EUR"], ["T-2", Decimal("-0.5"), "USD"]]
+EXPECTED = [{"trade_id": "T-1", "amount": "100.25", "ccy": "EUR"}, {"trade_id": "T-2",
+            "amount": "-0.5", "ccy": "USD"}]  # fmt: skip
+SECRET = "SENTINEL-CONTRACT-4410"
+Make = Callable[[list[str], list[list[Any]], bool], bytes]
+
+
+def _csv(columns: list[str], rows: list[list[Any]], marker: bool) -> bytes:
+    lines = (["# ILLUSTRATIVE / SYNTHETIC"] if marker else []) + [",".join(columns)]
+    lines += [",".join(str(v) for v in r) for r in rows]
+    return ("\n".join(lines) + "\n").encode()
+
+
+def _json(columns: list[str], rows: list[list[Any]], marker: bool) -> bytes:
+    def scalar(v: Any) -> str:  # a Decimal is a JSON number with its exact text
+        return str(v) if isinstance(v, Decimal) else json.dumps(v)
+
+    records = ", ".join(
+        "{"
+        + ", ".join(f"{json.dumps(c)}: {scalar(v)}" for c, v in zip(columns, r, strict=True))
+        + "}"
+        for r in rows
+    )
+    text = f"[{records}]"
+    if marker:
+        text = f'{{"marker": "ILLUSTRATIVE / SYNTHETIC test", "records": {text}}}'
+    return text.encode()
+
+
+def _xlsx(columns: list[str], rows: list[list[Any]], marker: bool) -> bytes:
+    def cell(v: Any) -> xlsx_kit.Cell:
+        return ("n", str(v)) if isinstance(v, Decimal) else ("s", str(v))
+
+    cells = [[cell(c) for c in columns], *([cell(v) for v in r] for r in rows)]
+    if marker:
+        return xlsx(cells)
+    return xlsx(cells, sheet="Sheet1", title=None)
+
+
+@dataclass(frozen=True)
+class Kit:
+    name: str
+    adapter: SourceAdapter
+    make: Make
+    positional: bool  # cells by position (extras possible); JSON names every value
+    registered: bool  # in ADAPTERS; the fake never is
+
+
+def contract_kits() -> list[Kit]:
+    return [
+        Kit("CSV", ADAPTERS[SourceFormat.CSV], _csv, True, True),
+        Kit("XLSX", ADAPTERS[SourceFormat.XLSX], _xlsx, True, True),
+        Kit("JSON", ADAPTERS[SourceFormat.JSON], _json, False, True),
+        Kit("FakeFeed", fake_feed.FakeFeedAdapter(), fake_feed.frame, True, False),
+    ]
+
+
+def _rows(kit: Kit, data: bytes, limits: Limits = HARD_LIMITS) -> tuple[Any, list[SourceRow]]:
+    stream = kit.adapter.iter_rows(data, AdapterOptions(), limits)
+    return stream, collect(stream.drafts, limits)
+
+
+def _refusal(kit: Kit, data: bytes, **limits: int) -> AdapterError:
+    with pytest.raises(AdapterError) as caught:
+        _rows(kit, data, replace(HARD_LIMITS, **limits))
+    return caught.value
+
+
+def test_every_adapter_meets_the_contract() -> None:
+    kits = contract_kits()
+    assert {k.adapter.format for k in kits if k.registered} == set(ADAPTERS), "a format untested"
+    samples = {k.name: k.make(COLUMNS, TABLE, True) for k in kits}
+    for kit in kits:
+        a, data = kit.adapter, samples[kit.name]
+        # Interface: a SourceAdapter with its format and the media type it reports.
+        assert isinstance(a, SourceAdapter), kit.name
+        assert isinstance(a.format, SourceFormat) and a.media_type, kit.name
+        # Detection by content only: its own content, never another registered format's.
+        assert a.detect(data), f"{kit.name}: does not detect its own content"
+        for other in kits:
+            if other is not kit and (other.registered or not kit.registered):
+                claimed = a.detect(samples[other.name])
+                assert not claimed, f"{kit.name}: claims {other.name} content"
+
+        # Rows: the header in order, the marker, numbered rows with positional locators.
+        stream, rows = _rows(kit, data)
+        assert isinstance(stream.drafts, Iterator), f"{kit.name}: rows are not lazy"
+        assert stream.columns == COLUMNS, f"{kit.name}: columns {stream.columns}"
+        assert stream.marker_present is True, f"{kit.name}: marker not recorded"
+        assert _rows(kit, kit.make(COLUMNS, TABLE, False))[0].marker_present is False, kit.name
+        assert [r.ordinal for r in rows] == [1, 2], f"{kit.name}: ordinals"
+        locators = [r.locator for r in rows]
+        for loc in locators:
+            assert loc and all(
+                isinstance(k, str) and type(v) in (str, int) for k, v in loc.items()
+            ), f"{kit.name}: locator {loc}"
+        assert len({json.dumps(loc, sort_keys=True) for loc in locators}) == 2, kit.name
+        # No-float rule: every value is the exact text, a str, never a float.
+        assert [r.values for r in rows] == EXPECTED, f"{kit.name}: values {rows}"
+        for r in rows:
+            assert all(type(v) is str for v in r.values.values()), f"{kit.name}: non-str value"
+            assert r.extras == [] and r.flags == [], f"{kit.name}: unexpected facts on {r}"
+        if kit.registered:  # the import service's entry point gives the same rows
+            parsed = parse_upload(data, a.format, AdapterOptions(), HARD_LIMITS)
+            assert (parsed.columns, parsed.rows, parsed.media_type) == (
+                COLUMNS,
+                rows,
+                a.media_type,
+            ), kit.name
+
+        # Nothing is dropped: a cell beyond the header is kept as an extra and flagged.
+        if kit.positional:
+            _, [ragged] = _rows(kit, kit.make(COLUMNS, [["T-3", Decimal("1"), "EUR", "x"]], True))
+            assert ragged.extras == ["x"], f"{kit.name}: extra cell {ragged}"
+            assert ragged.flags == [RowFlag(RowFlagCode.EXTRA_CELLS, 4)], kit.name
+
+        # Limits and refusals: each with its own code, positions only, never a value.
+        wide = kit.make([*COLUMNS, "extra"], [[*TABLE[0], "x"]], True)
+        long_cell = kit.make(COLUMNS, [["T-1", SECRET * 10, "EUR"]], True)
+        for case, error, code in (
+            ("columns", _refusal(kit, wide, max_columns=3), UploadRefusal.TOO_MANY_COLUMNS),
+            ("rows", _refusal(kit, data, max_rows=1), UploadRefusal.TOO_MANY_ROWS),
+            (
+                "cell",
+                _refusal(kit, long_cell, max_cell_chars=len(SECRET)),
+                UploadRefusal.CELL_TOO_LONG,
+            ),
+            (
+                "header",
+                _refusal(kit, kit.make(["a", "a"], [["1", "2"]], True)),
+                UploadRefusal.INVALID_HEADER,
+            ),
+        ):
+            assert error.code == code, f"{kit.name} {case}: {error.code}, expected {code}"
+            assert error.status_code == 422, f"{kit.name} {case}"
+            details = error.details or {}
+            assert all(type(v) in (str, int) for v in details.values()), f"{kit.name} {case}"
+            text = f"{error.message} {details}"
+            assert SECRET not in text and "T-1" not in text, f"{kit.name} {case}: leaks a value"
+
+        # Isolation: an adapter touches neither the database nor the artifact store, and
+        # depends on no other adapter.
+        source = inspect.getsource(sys.modules[type(a).__module__])
+        for forbidden in ("sqlalchemy", "app.db", "artifacts", "_adapter import", "service"):
+            assert forbidden not in source, f"{kit.name}: imports {forbidden}"
+
+    # The fake is wired in only from app/tests (the BE-13.1 grep).
+    app_dir = Path(__file__).resolve().parents[1]
+    tests_dir = Path(__file__).resolve().parent
+    for path in app_dir.rglob("*.py"):
+        if tests_dir not in path.parents:
+            text = path.read_text()
+            assert "FakeFeedAdapter" not in text and "fake_feed" not in text, path

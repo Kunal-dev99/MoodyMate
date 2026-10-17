@@ -32,21 +32,28 @@ def _db_reachable(url: str) -> bool:
     return asyncio.run(probe())
 
 
-# BE-6.3: rows of the route x role matrix, printed at the end of the test report.
+# BE-6.3 / BE-13.2: rows of the route x role matrices, printed at the end of the test report.
 WS1_MATRIX: list[dict[str, Any]] = []
+WS2_MATRIX: list[dict[str, Any]] = []
+
+
+def _print_matrix(tr: Any, title: str, matrix: list[dict[str, Any]]) -> None:
+    roles = [k for k in matrix[0] if k not in ("route", "permission")]
+    width = max(len(r["route"]) for r in matrix)
+    tr.section(title)
+    tr.write_line(f"{'route':<{width}}  {'permission':<15} " + " ".join(f"{r:>14}" for r in roles))
+    for row in matrix:
+        cells = " ".join(f"{row[r]:>14}" for r in roles)
+        tr.write_line(f"{row['route']:<{width}}  {row['permission']:<15} {cells}")
 
 
 def pytest_terminal_summary(terminalreporter: Any) -> None:
-    if not WS1_MATRIX:
-        return
-    roles = [k for k in WS1_MATRIX[0] if k not in ("route", "permission")]
-    width = max(len(r["route"]) for r in WS1_MATRIX)
-    tr = terminalreporter
-    tr.section("WS1 authorization matrix (route x role, HTTP status; 403 = denied)")
-    tr.write_line(f"{'route':<{width}}  {'permission':<15} " + " ".join(f"{r:>14}" for r in roles))
-    for row in WS1_MATRIX:
-        cells = " ".join(f"{row[r]:>14}" for r in roles)
-        tr.write_line(f"{row['route']:<{width}}  {row['permission']:<15} {cells}")
+    if WS1_MATRIX:
+        title = "WS1 authorization matrix (route x role, HTTP status; 403 = denied)"
+        _print_matrix(terminalreporter, title, WS1_MATRIX)
+    if WS2_MATRIX:
+        title = "WS2 authorization matrix (route x role, HTTP status; 403 = denied)"
+        _print_matrix(terminalreporter, title, WS2_MATRIX)
 
 
 @pytest.fixture(scope="session")

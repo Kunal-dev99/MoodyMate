@@ -4,7 +4,7 @@
 
 **Deliberately absent:** numeric retention periods and recovery objectives (RPO/RTO). Architecture §11 and §18 say not to set these until the client agrees them. Where a number would go, this document names who decides it.
 
-**Scope:** the artifact classes that exist after Feature 01 (WS1 foundation). Later features (raw import artifacts, canonical records, calculation runs and results, reports, AI requests) add their own rows when they are built (Data Model "Define retention/deletion for raw artifacts, derived records, AI requests and logs").
+**Scope:** the artifact classes that exist after Feature 01 (WS1 foundation) and Feature 02 (WS2 ingestion, BE-13.3: migrations 0009–0016 and the raw artifact store). Later features (calculation runs and results, reports, AI requests) add their own rows when they are built (Data Model "Define retention/deletion for raw artifacts, derived records, AI requests and logs").
 
 ## Principles that already hold in the code
 
@@ -18,6 +18,9 @@
 - **Migrations never drop governed data silently.**
   - The 0004 (audit), 0006 (registry) and 0008 (proposals) downgrades refuse while their tables hold data.
   - Dropping the audit trail needs an explicit `-x allow_audit_loss=true`.
+- **WS2 data is kept until the client sets retention (D-20 §4, PROVISIONAL).** Raw artifacts, source records, quarantine items and issues have no delete or purge path in the application, and the 0012–0016 downgrades refuse while their tables hold rows.
+  - WS2 tables are append-only or move by status only, enforced by DB triggers (`*_append_only`, `*_guard`, `*_immutable`, `*_no_delete`, `*_no_truncate`).
+  - Raw artifacts are content-addressed, write-once and re-verified on every read (D-15). The application never deletes one.
 - **Environments are separated by data class (BE-6.1, D-14).** Only `production` may hold client data. `local`, `test` and `staging` are synthetic only, and every response says which (`X-Data-Class`).
 
 ## Per artifact class
@@ -31,6 +34,14 @@
 | **Identity and access** | `user_account`, `user_role`, `role`, `permission`, `role_permission` | User records stay while referenced by audit events (audit actors are user ids). Users are disabled (`status`), not deleted. | Personal fields (email, display name) can be erased or pseudonymised on a data-subject request, keeping the id so the audit trail stays readable. That procedure is not built yet. | Included in every database backup. | Data protection officer (erasure vs. audit), IAM owner |
 | **Classification and access policy** | `data_classification`, `access_policy` | Kept for the life of the platform. Codes are referenced by schema fields and audit-detail classifications. | Seed rows are removed only by their migration's downgrade (D-11). | Included in every database backup. | Information security (classification scheme, PROVISIONAL) |
 | **Seed and illustrative data** | Rows tagged `seeded_by` | Kept until the client confirms or replaces them. | Removed only by the seeding migration's downgrade, which touches tagged rows only. | Included in backups like any other rows. | Product owner (when to replace the illustrative schemas) |
+| **Source registry** (WS2) | `source_system`, `source_profile`, `source_contract` | Kept for the life of the platform. A contract version is the agreement an import was checked against, so any version referenced by a retained import must stay. | Sources are never deleted by the application (`source_*_no_delete`). Contracts are frozen from creation and retired by status (SUPERSEDED). | Included in every database backup. | Data governance owner, source system owners (named per source in `source_profile.owner`) |
+| **Raw artifacts** (WS2) | `import_artifact` (hash, size, MIME, original filename, `storage_ref`, `classification`, `retention_state`) and the artifact store objects under `ARTIFACT_STORE_DIR` (`sha256/<2 hex>/<64 hex>`, D-15) | PROVISIONAL (D-20 §4): kept indefinitely (`retention_state = RETAINED`, the only state) until the client sets a period. The original file is the evidence behind every record derived from it. | Never deleted by the application: the store is write-once and `import_artifact` is append-only. A future purge sets `retention_state` and removes the object by the owner-level procedure, leaving the row and its hash as evidence. Not built. | **Not covered by database backups.** The store needs its own backup, taken together with the database so rows and objects match; restore checks the hashes (below). Object storage replaces the filesystem later (D-12, D-15). | Compliance (period), Data protection officer (client files containing personal data), Infrastructure (object storage and its backup) |
+| **Imports and source records** (WS2) | `import_job`, `import_batch`, `source_record` | PROVISIONAL (D-20 §4): kept indefinitely until the client sets retention. A source record is the row as delivered (raw values, extras, flags, locator) and the start of lineage. | Append-only; never deleted by the application. Corrections are new imports (`retry_of_import_id`), never edits (D-20 §3). | Included in every database backup. | Compliance (period), Data governance owner |
+| **Canonical records and lineage** (WS2) | `canonical_record`, `record_lineage`, `import_manifest` | Kept while any retained calculation run pins the import's manifest (D-22), and at least as long as the source records they derive from. | Append-only; never deleted by the application. The manifest is written once per import. | Included in every database backup. | Model risk (runs pinning manifests), Data governance owner |
+| **Validation issues and quarantine** (WS2) | `validation_issue`, `quarantine_item`, `validation_profile` | PROVISIONAL (D-20 §4): kept indefinitely until the client sets retention. A quarantine item's disposition history is its audit events (D-20 §2). | Issues and profiles are append-only. Quarantine items move by status only (`quarantine_item_guard`); REJECTED and RESOLVED are final, and nothing is deleted. Displayed values are masked by classification. | Included in every database backup. | Data quality owner (data stewards), Compliance |
+| **Mappings** (WS2) | `field_mapping`, `mapping_version`, `mapping_rule`, `mapping_validation` | Kept for the life of the platform. An import pins the mapping version it was validated with, so any pinned version must stay. | Non-draft versions and their rules are immutable; versions are retired by status. Dry-run results are append-only. Nothing is deleted. | Included in every database backup. | Data governance owner, Model risk |
+| **Profiles and drift** (WS2) | `data_profile_snapshot`, `data_drift_event` | Kept as long as the import they describe. Profiles hold aggregates (counts, ranges, masked examples per classification), not whole rows. | Profiles are append-only. Drift events move once from OPEN to a reviewed status (`data_drift_event_guard`) and are never deleted. | Included in every database backup. | Data quality owner (data stewards), Information security (masked examples) |
+| **Reconciliation** (WS2) | `reconciliation_run`, `reconciliation_item` | Kept as long as the import they reconcile: the run is the evidence that the import's counts and control totals were checked. | Append-only; never deleted by the application. | Included in every database backup. | Finance / product control (control totals and tolerances), Compliance |
 | **Application logs** | Process stdout (JSON lines); destination decided at deployment | Short-lived operational data. Logs never carry classified values: they are redacted with the same codes as API masking (BE-3.5), and database driver messages are withheld. | Expire with the log platform's policy. | Not backed up by the application. | Operations (log platform and its retention), Information security |
 | **Local and test databases** | `moodymate_dev`, `moodymate_test`, per-feature copies (D-03) | Synthetic data only (BE-6.1). Feature copies are dropped after their feature merges. | Disposable. | None. | n/a |
 
@@ -50,11 +61,12 @@ For audit events the evidence is written *before* the rows are removed, so the t
 - **Restore procedure (outline; to be written and rehearsed per environment):**
   1. Restore the database backup into an isolated instance.
   2. Run `alembic current` and confirm it shows the expected head.
-  3. Confirm the protective triggers and functions exist: `audit_event_*`, `schema_version_immutable`, `schema_field_immutable`, `schema_dependency_same_tenant`, the `*_no_truncate` triggers and `schema_change_proposal_*`.
-  4. Run the WS1 verification suite (`pytest -m ws1`) against it.
-  5. Reconcile row counts per class against the backup manifest.
-  6. Only then switch traffic.
-  7. Record the restore as an operational event, with timings, so the agreed RTO can be measured.
+  3. Confirm the protective triggers and functions exist: `audit_event_*`, `schema_version_immutable`, `schema_field_immutable`, `schema_dependency_same_tenant`, the `*_no_truncate` triggers and `schema_change_proposal_*`, and for WS2 the `source_*`, `import_*`, `*_append_only`, `*_guard`, `*_immutable`, `*_checks`, `*_same_tenant` and `import_job_mapping_pin` triggers on the tables above.
+  4. Restore the artifact store from the backup taken with the database, then **check that the artifact store hashes match `import_artifact`**: for every `import_artifact` row, the object at `storage_ref` exists, its SHA-256 equals `sha256` and its size equals `size_bytes`; and list any object without a row. A missing or mismatched object is a failed restore (the application fails closed on it with `artifact_integrity_error`, D-15); it is not repaired silently.
+  5. Run the WS1 and WS2 verification suites (`pytest -m ws1`, `pytest -m ws2`) against it.
+  6. Reconcile row counts per class against the backup manifest.
+  7. Only then switch traffic.
+  8. Record the restore as an operational event, with timings, so the agreed RTO can be measured.
 - **Recovery objectives.** No RPO/RTO is stated here; they come from the business continuity owners.
 
 ## Open items
@@ -64,3 +76,5 @@ For audit events the evidence is written *before* the rows are removed, so the t
 3. The archival procedure and evidence format for audit events (Internal Audit).
 4. Erasure versus audit readability for personal data (Data protection officer).
 5. The non-owner application database role that makes the triggers binding (Infrastructure).
+6. WS2 retention per class (D-20 §4): raw artifacts, source records, quarantine and issues, and whether a purged artifact keeps its `import_artifact` row as evidence (Compliance, Data protection officer).
+7. Artifact store backup and the hash-check tooling for restore step 4: a script is not built yet (Infrastructure).
