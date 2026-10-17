@@ -4,7 +4,7 @@
 built it and merged it to master in `ffdf5fe`, `3bc019e`, `dd17dea`, `b17b963` and `f187f79`
 (merge `cdbade9`). The architect verified it by reading the code at `cdbade9` in the
 `feat/ws2-p13` worktree. All six tasks are ticked. The semantics as built are recorded as
-**D-28** (proposed, waiting for the user's confirmation).
+**D-28** (active, confirmed by the user).
 
 **Commit note.** `b17b963` is titled "WIP", but its content is final: it is part of the
 merged Phase 12 and is covered by the checks below. No follow-up commit replaces it.
@@ -80,4 +80,4 @@ merged Phase 12 and is covered by the checks below. No follow-up commit replaces
   The spec can write screenshots with `RECONCILIATION_SCREENSHOT=<dir>`.
 - **PROVISIONAL settings.** `RECONCILIATION_TOLERANCE` (0), `DRIFT_NULL_RATE_THRESHOLD`
   (0.10) and `DRIFT_RANGE_THRESHOLD` (0.25) are PROVISIONAL until the client sets them.
-- **D-28 is proposed, not yet active.** It needs the user's confirmation.
+- **D-28** was confirmed by the user and is active.

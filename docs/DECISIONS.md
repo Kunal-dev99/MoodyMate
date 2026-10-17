@@ -535,8 +535,8 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
 
 ## D-28 Phase 12 reconciliation and drift semantics
 
-- **Status:** proposed. Recorded 2026-10-17 from the Phase 12 code at `cdbade9`; it becomes
-  active when the user confirms. PROVISIONAL where noted.
+- **Status:** active (confirmed by the user 2026-10-17). Recorded from the Phase 12 code at
+  `cdbade9`. PROVISIONAL where noted.
 - **Date:** 2026-10-17
 - **Context:** Phase 12 (`docs/evidence/phase-12/REPORT.md`) implemented behaviours that go
   beyond the plan text of BE-12.1 to BE-12.4. They are written down here as built, so later
@@ -626,6 +626,271 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
   RETENTION.md. The client must set the real tolerance and thresholds before production use.
 - **Reversal:** a new decision. A change to point 2 or 3 also bumps `reconciler_version`, and
   a change to point 6 bumps `detector_version`.
+
+## D-29 Projecting canonical records into the WS3 domain tables
+
+- **Status:** active (Feature 03 plan approved by the user, 2026-10-17)
+- **Date:** 2026-10-17
+- **Context:** D-22 deferred this projection to WS3. Data Model §4 needs stable identities
+  plus immutable versions for reproducible runs. `canonical_record` has no `tenant_id`
+  column, and the seeded `instrument` v1 types `maturity_date` as free text.
+- **Question:** when and how do accepted canonical records become domain rows?
+- **Options:**
+  - **A (recommended):** an explicit, idempotent per-import step,
+    `POST /imports/{id}/projection` (`domain:project`).
+  - **B:** project automatically at the end of validation. Rejected: it couples WS2 to WS3,
+    and an off switch would leave WS2 changed.
+  - **C:** project lazily when a snapshot is created. Rejected: the catalogue would be empty
+    until someone calculates.
+- **Recommended (A):**
+  1. **Eligibility.** An import is eligible when it has an `import_manifest`, its status is
+     COMPLETED, COMPLETED_WITH_WARNINGS or QUARANTINED, and its schema code is `instrument`,
+     `position` or `cashflow_event`. Only accepted rows are projected.
+  2. **Rows.** Each accepted canonical record gives exactly one `instrument_version`,
+     `position_version` or `cashflow_event` row, so rows are conserved. One
+     `domain_projection` row per import holds a value-free summary. Calling the step again
+     returns that row and writes nothing.
+  3. **Identity.**
+     - `instrument` and `position` get a stable UUID per (tenant, source system, business
+       key).
+     - A later import of the same key adds a new version and never updates an old one.
+     - "Current" is not defined. Time is chosen by pinning a snapshot (D-30).
+     - Effective dating is PROVISIONAL until the client defines business-date semantics.
+  4. **Field projection.**
+     - A frozen spec per schema code (`projector_version` 1) maps schema fields to typed
+       columns.
+     - Amounts are stored as exact `NUMERIC`, never rounded, and dates as `DATE`.
+     - A STRING schema field is never parsed into a typed column. For example, `instrument`
+       v1 `maturity_date` stays NULL and is counted as `TYPE_NOT_PROJECTED`.
+     - Extension-eligible instrument fields go to `instrument_attribute_value`.
+     - Every other field stays in `canonical_record`, where lineage reaches it. Nothing is
+       dropped.
+  5. **Instrument types.** These are a seeded PROVISIONAL vocabulary. An unknown type is
+     still projected with `instrument_type_id` NULL and counted, and modules warn on it.
+  6. **Integrity.**
+     - Every row stores `canonical_record_id` (unique), `import_job_id`,
+       `schema_version_id` and `payload_sha256`.
+     - Rows are append-only (UPDATE, DELETE and TRUNCATE are refused).
+     - `tenant_id` is copied from `import_job`, and a same-tenant insert trigger checks it.
+  7. **Switch and audit.** `DOMAIN_PROJECTION_ENABLED` (default `true`): when off, the step
+     answers 409 `domain_projection_disabled`, which is audited. Reads still work.
+- **Consequences:** a new schema version (e.g. `instrument` v2) needs a new
+  `projector_version` before its imports can be projected. The downgrade refuses while any
+  projection exists.
+
+## D-30 Cross-import dataset snapshot
+
+- **Status:** active (Feature 03 plan approved by the user, 2026-10-17)
+- **Date:** 2026-10-17
+- **Question:** what exactly does a calculation run pin as its dataset (Data Model §7: a
+  `dataset_snapshot_id` or an immutable input manifest)?
+- **Recommended:**
+  1. **What a snapshot is.** A `dataset_snapshot` is an immutable set of projected imports,
+     with **at most one import per schema code** in the MVP. Each member pins the import,
+     its `import_manifest.manifest_sha256` and its `domain_projection`.
+     `content_sha256` hashes the sorted member list.
+  2. **Content-addressed.** The same member set returns the existing snapshot, so no
+     idempotency key is needed. `POST /dataset-snapshots` needs `calc:run`, and the create
+     is audited.
+  3. **Refusals** (409, each audited DENIED):
+     - `not_projected`;
+     - `duplicate_schema`;
+     - `reconciliation_broken`: a member's D-28 outcome is BROKEN (fail closed, Arch §6.2
+       step 5);
+     - `ambiguous_business_key`: one business key resolves to two instruments inside the
+       snapshot.
+
+     QUARANTINED members are allowed. Their held counts are carried into the run manifest so
+     coverage is visible (PROVISIONAL).
+  4. **Cross-source references.** A `cashflow_event` or `position` resolves its
+     `instrument_id` by business key within the snapshot and the tenant. An unresolved
+     reference is a run warning, never a silent drop. This is PROVISIONAL until the client
+     sets source-of-truth precedence (Data Model §11).
+- **Alternatives:**
+  - Pin the imports directly on the run. Rejected: there is no reusable or comparable dataset
+    identity.
+  - Allow several imports per schema. Deferred: it needs merge and precedence rules.
+- **Consequences:** this depends on D-28 §3 (reconciliation outcome), which is still
+  *proposed*.
+
+## D-31 Calculation framework: module interface, run lifecycle and reproducibility
+
+- **Status:** active (Feature 03 plan approved by the user, 2026-10-17)
+- **Date:** 2026-10-17
+- **Question:** how are modules plugged in, executed and made reproducible?
+- **Recommended:**
+  1. **Module interface.**
+     - A module lives in `app/calculations/modules/`, a sub-package as D-25 §2 allows.
+     - It declares `code`, `version`, its input contract (the schema codes and fields it
+       needs), the rule definitions it reads, the assumption keys it reads, and its output
+       tables.
+     - `run(inputs, parameters) -> ModuleResult(results, intermediates, warnings)` is a
+       **pure function** over frozen typed inputs. It does no DB or network I/O and reads no
+       clock, randomness or environment. It holds no float, and a source grep enforces
+       this, as in BE-11.2.
+     - A module is registered in code and seeded as a `module_version` row. Startup refuses
+       a registered module that has no row. There is no API to create a module: a new module
+       version means a code release plus a migration.
+  2. **Decimal policy.**
+     - Every module runs under a declared Decimal context that traps Inexact, Rounded and
+       InvalidOperation.
+     - Any rounding is an explicit `quantize` that the module declares (scale and mode,
+       default ROUND_HALF_EVEN, PROVISIONAL).
+     - Values are stored as `NUMERIC` and returned as exact decimal text
+       (`format(d, "f")`).
+  3. **Run lifecycle.**
+     - The statuses are the Data Model §9 set (D-06): QUEUED, RUNNING, SUCCEEDED,
+       SUCCEEDED_WITH_WARNINGS, FAILED, CANCELLED, BLOCKED. Execution is synchronous in the
+       MVP, as in D-21, so QUEUED and CANCELLED are reserved for WS4.
+     - The run row is written as RUNNING in its own transaction, so a crash leaves evidence.
+     - BLOCKED means the input contract was not met, for example a required schema is
+       missing from the snapshot.
+     - FAILED means a post-check failed (Arch §6.2 step 5), and never counts as a silent
+       success. Post-checks include: every in-scope input is used once or excluded with a
+       warning code, and every aggregate equals the sum of its contributions.
+     - Pre-run refusals (permission, switch, a PLANNED module, a bad body) are 4xx and write
+       no run.
+  4. **Pins and manifest.**
+     - A run pins the snapshot, `reporting_date`, the module version, `engine_version`, the
+       rule set (D-32 §4) and the assumption set. It also pins, per member, the schema and
+       mapping versions (via `import_manifest`) and its parameters.
+     - `calculation_input_ref` rows list each pin.
+     - `manifest_sha256` covers the pinned content only, not the run id or times.
+       `result_sha256` covers the canonical serialisation of all outputs.
+  5. **Immutability and reproducibility.**
+     - The status moves only RUNNING → one terminal status, once, enforced by trigger.
+     - Outputs are inserted only while RUNNING and are append-only afterwards. Nothing is
+       ever updated or deleted.
+     - A re-run (`rerun_of`) is a new run on the same pins and must reproduce
+       `result_sha256`.
+     - `POST /calculation-runs` takes an `Idempotency-Key`, as in D-21 §2.
+  6. **Lineage in this feature.** Every per-input contribution is an `intermediate_value`
+     that references its domain row. The chain then runs through `canonical_record_id` →
+     `record_lineage` → `source_record` → import. The generic `lineage_node`/`lineage_edge`
+     graph is WS4 RO-03.
+  7. **Switch.** `CALCULATIONS_ENABLED` (default `true`): when off, new snapshots and runs get
+     409 `calculations_disabled` (audited). Existing runs stay readable.
+  8. **No AI.** Nothing on the run path calls the AI layer.
+- **Consequences:** datasets are small enough for synchronous runs under the D-16 bounds.
+  Async execution comes with WS4.
+
+## D-32 Rule, module and assumption registry: parameters, lifecycle and maker-checker
+
+- **Status:** active (Feature 03 plan approved by the user, 2026-10-17)
+- **Date:** 2026-10-17
+- **Question:** how are methodology parameters represented and changed?
+- **Recommended:**
+  1. **Rules are data.** A `rule_definition` has a code, a category, a target module, an
+     owner and a `parameter_schema` built only from a closed list of kinds:
+     - `DECIMAL(min, max, scale)`;
+     - `INTEGER(min, max)`;
+     - `ENUM(values)`;
+     - `DAY_BUCKETS`: ordered, contiguous half-open day intervals, with an open last bucket;
+     - `ENUM_MAP`;
+     - `DECIMAL_MAP`.
+
+     There are no expressions, formulas, templates or user code (as in D-19). Adding a kind
+     needs code, tests and an appended decision.
+  2. **Versions.**
+     - A `rule_version` holds immutable `parameters` plus `parameters_sha256`.
+     - The lifecycle is the Data Model §9 set plus REJECTED (D-06): DRAFT → IN_REVIEW →
+       ACTIVE (approval) or REJECTED, then ACTIVE → SUPERSEDED or RETIRED.
+     - A version is immutable once it leaves DRAFT, enforced by a DB trigger that also covers
+       TRUNCATE.
+     - At most one ACTIVE version exists per definition. Activating a new version
+       supersedes the previous one in the same transaction.
+  3. **Maker-checker.**
+     - Proposing and submitting need `rule:propose`.
+     - Approving needs `rule:approve`, and the approver is not the author (409
+       `self_approval`).
+     - Every step and every refusal is audited.
+     - `RULE_CHANGE_ENABLED=false` freezes the rules at their ACTIVE versions.
+  4. **Content-addressed rule sets.** Each run's set of pinned rule versions is written once
+     as a `rule_set` (plus its members), keyed by the hash of the sorted version ids. So a
+     "rule-set version" exists without a separate rule-set authoring workflow.
+  5. **Bucket definitions.** `maturity_bucket_definition` rows are the immutable
+     materialisation of a `DAY_BUCKETS` rule version. There is one lifecycle, not two.
+  6. **Assumption sets.** They are versioned, with provenance, owner, effective dates and
+     status. They are seeded and read-only in Feature 03, and every run pins one. Authoring
+     is deferred.
+  7. **Seeded versions.** These are ACTIVE by a tagged migration (D-11). They record
+     `approved_by = <seed tag>` and are marked PROVISIONAL and ILLUSTRATIVE. They are
+     replaced only through point 3.
+- **Alternatives:**
+  - Free-form JSON parameters. Rejected: they cannot be governed or validated.
+  - Formula strings. Rejected: Arch §7 and the WS cross-cutting rules forbid them.
+  - Hand-authored rule sets. Deferred: content addressing is enough for pinning.
+
+## D-33 Classification and masking of calculation outputs
+
+- **Status:** active (Feature 03 plan approved by the user, 2026-10-17). PROVISIONAL.
+- **Date:** 2026-10-17
+- **Context:** the inputs that drive results are `confidential`: cash-flow `amount`, position
+  `balance` and instrument `notional`. `risk_analyst` has clearance `internal` (BE-3.5 seed).
+  Under input-level masking, the role that runs calculations would see masked results.
+- **Question:** what classification do outputs carry?
+- **Options:**
+  - **A (recommended):**
+    - aggregates (bucket and currency totals, gaps, HQLA, outflow and inflow totals,
+      ratios) are `internal`;
+    - per-input contributions, intermediate values and asset rows carry the most sensitive
+      classification among their input fields;
+    - the API masks by the caller's clearance, as in BE-3.5.
+  - **B:** every output inherits its inputs' classification. The analyst then sees masked
+    totals unless clearances change.
+  - **C:** raise `risk_analyst` clearance to `confidential`. That is a change to the role
+    model, which the client must approve.
+- **Consequences of A:** an analyst sees aggregates and runs the module, but not
+  instrument-level amounts. The client must confirm this before production.
+
+## D-34 WS3 permissions and role grants
+
+- **Status:** active (Feature 03 plan approved by the user, 2026-10-17). PROVISIONAL (D-11).
+- **Date:** 2026-10-17
+- **Decision (proposed):** seven new permissions, seeded by a tagged migration:
+  - `domain:read`, `rule:read` and `calc:read` go to all five roles;
+  - `domain:project` goes to data_steward;
+  - `rule:propose` and `calc:run` go to risk_analyst;
+  - `rule:approve` goes to approver.
+- **Segregation of duties:**
+  - stewards curate data and analysts calculate;
+  - analysts propose methodology changes and approvers activate them;
+  - platform_admin and auditor read only.
+- **Consequences:** the matrix is in the Feature 03 section of `docs/DELIVERY_PLAN.md`. The
+  WS1 matrix test covers every WS3 route.
+
+## D-35 Illustrative methodology seeds for the prototype modules
+
+- **Status:** active (Feature 03 plan approved by the user, 2026-10-17). PROVISIONAL / ILLUSTRATIVE.
+- **Date:** 2026-10-17
+- **Context:** the client's bucket sets, cash-flow conventions and liquidity parameters are
+  unknown (Data Model §11). WS3-P4 still asks for a bounded LCR/HQLA and maturity-ladder
+  demonstration on synthetic data.
+- **Decision (proposed):**
+  1. **Maturity ladder v1** works per currency, with no FX.
+     - Its seeded rules:
+       - `maturity_buckets`: illustrative day intervals (0,1], (1,7], (7,30], (30,90],
+         (90,180], (180,365], (365,730], (730,∞), counted as calendar days after the
+         reporting date;
+       - `cashflow_direction`: LOAN and BOND → INFLOW, DEPOSIT → OUTFLOW, as an
+         illustrative asset/liability assumption, because `cashflow_event` v1 has no
+         direction;
+       - `past_due_treatment`: EXCLUDE_WITH_WARNING.
+     - Both CONTRACTUAL and BEHAVIOURAL origins are included and shown separately.
+  2. **LCR/HQLA v1** also works per currency, and its parameters are illustrative:
+     - BOND is Level 1 with a 0 haircut, and other types are not HQLA;
+     - DEPOSIT has a 0.10 run-off;
+     - LOAN inflows have a 0.50 rate, a 30-day horizon and a 0.75 inflow cap;
+     - the value is the position `balance`, because the schema has no market value;
+     - there are no L2A/L2B caps;
+     - the ratio is quantized to 4 dp ROUND_HALF_EVEN.
+  3. **Labelling.** Every seeded rule version, module and UI result says "Illustrative
+     prototype. Not a regulatory calculation; no parity with any vendor system is claimed."
+  4. **Golden cases.** Engineering golden cases are hand-computed fixtures marked
+     `ENGINEERING — awaiting domain-expert approval`. They are not "approved golden cases"
+     until a named financial owner signs them off (Arch §12, §17).
+- **Consequences:** replacing these values is a rule-version change through D-32 §3 and needs
+  no code. Nothing here may be used for client decisions.
 
 ---
 
