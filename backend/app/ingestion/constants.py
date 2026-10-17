@@ -173,3 +173,184 @@ class UploadRefusal(StrEnum):
     UNKNOWN_CONTROL_TOTAL_COLUMN = "unknown_control_total_column"
     NO_CURRENT_CONTRACT = "no_current_contract"
     NO_ACTIVE_VERSION = "no_active_version"
+    # Phase 11: a retry (POST /imports with retry_of_import_id, D-20 §3).
+    RETRY_SOURCE_MISMATCH = "retry_source_mismatch"
+    RETRY_NOT_APPLICABLE = "retry_not_applicable"
+
+
+# --- Phase 11: validation, quarantine and canonical records (BE-11.1 – BE-11.5) -------------
+
+
+class ValidationSeverity(StrEnum):
+    """Data Model §9 `validation_issue.severity`."""
+
+    INFO = "INFO"
+    WARNING = "WARNING"
+    ERROR = "ERROR"
+    BLOCKER = "BLOCKER"
+
+
+class IssueDisposition(StrEnum):
+    """D-23 `validation_issue.disposition`: what the issue does to its row (or file)."""
+
+    ACCEPTED_WITH_WARNING = "ACCEPTED_WITH_WARNING"
+    QUARANTINED = "QUARANTINED"
+    REJECTED = "REJECTED"
+    FILE_BLOCKED = "FILE_BLOCKED"
+
+
+# The dispositions a severity may carry (a profile entry outside this is refused).
+SEVERITY_DISPOSITIONS: dict[ValidationSeverity, frozenset[IssueDisposition]] = {
+    ValidationSeverity.INFO: frozenset({IssueDisposition.ACCEPTED_WITH_WARNING}),
+    ValidationSeverity.WARNING: frozenset({IssueDisposition.ACCEPTED_WITH_WARNING}),
+    ValidationSeverity.ERROR: frozenset({IssueDisposition.QUARANTINED}),
+    ValidationSeverity.BLOCKER: frozenset(
+        {IssueDisposition.REJECTED, IssueDisposition.FILE_BLOCKED}
+    ),
+}
+
+
+class RowOutcome(StrEnum):
+    """D-20 §1 / D-23: every source row ends in exactly one outcome."""
+
+    ACCEPTED = "ACCEPTED"
+    QUARANTINED = "QUARANTINED"
+    REJECTED = "REJECTED"
+
+
+class ValidationCode(StrEnum):
+    """Validation issue codes (BE-11.2). An issue names a row, a field or a column and a
+    rule, never a value. File-level codes have no row."""
+
+    # File level: the mapping cannot be applied to this file (FILE_BLOCKED) or is partial.
+    REQUIRED_FIELD_UNMAPPED = "REQUIRED_FIELD_UNMAPPED"
+    REQUIRED_COLUMN_MISSING = "REQUIRED_COLUMN_MISSING"
+    BUSINESS_KEY_COLUMN_MISSING = "BUSINESS_KEY_COLUMN_MISSING"
+    MAPPING_RULE_INVALID = "MAPPING_RULE_INVALID"
+    SOURCE_COLUMN_MISSING = "SOURCE_COLUMN_MISSING"
+    UNMAPPED_COLUMN = "UNMAPPED_COLUMN"  # PRESERVEd or not in the contract: kept, never dropped
+    # Row level, from the adapter's row facts (D-25).
+    BLANK_ROW = "BLANK_ROW"
+    EXTRA_CELLS = "EXTRA_CELLS"
+    MISSING_CELLS = "MISSING_CELLS"
+    CELL_ERROR = "CELL_ERROR"
+    FORMULA_WITHOUT_CACHED_VALUE = "FORMULA_WITHOUT_CACHED_VALUE"
+    FORMULA_CACHED_VALUE = "FORMULA_CACHED_VALUE"
+    PRECISION_BEYOND_15_DIGITS = "PRECISION_BEYOND_15_DIGITS"
+    # Row level, per field.
+    REQUIRED_VALUE_MISSING = "REQUIRED_VALUE_MISSING"
+    INVALID_TYPE = "INVALID_TYPE"
+    INVALID_DATE = "INVALID_DATE"
+    SCALE_EXCEEDED = "SCALE_EXCEEDED"
+    PRECISION_EXCEEDED = "PRECISION_EXCEEDED"
+    INVALID_CURRENCY_CODE = "INVALID_CURRENCY_CODE"
+    UNMAPPED_VALUE = "UNMAPPED_VALUE"
+    MISSING_BUSINESS_KEY = "MISSING_BUSINESS_KEY"
+    DUPLICATE_BUSINESS_KEY = "DUPLICATE_BUSINESS_KEY"
+
+
+# Codes that concern the whole file (no row); the rest concern one row.
+FILE_LEVEL_CODES = frozenset(
+    {
+        ValidationCode.REQUIRED_FIELD_UNMAPPED,
+        ValidationCode.REQUIRED_COLUMN_MISSING,
+        ValidationCode.BUSINESS_KEY_COLUMN_MISSING,
+        ValidationCode.MAPPING_RULE_INVALID,
+        ValidationCode.SOURCE_COLUMN_MISSING,
+        ValidationCode.UNMAPPED_COLUMN,
+    }
+)
+
+_W = (ValidationSeverity.WARNING, IssueDisposition.ACCEPTED_WITH_WARNING)
+_E = (ValidationSeverity.ERROR, IssueDisposition.QUARANTINED)
+_R = (ValidationSeverity.BLOCKER, IssueDisposition.REJECTED)
+_F = (ValidationSeverity.BLOCKER, IssueDisposition.FILE_BLOCKED)
+_C = ValidationCode
+# The default validation profile (PROVISIONAL, D-11): issue code -> severity -> disposition.
+# Migration 0015 seeds a frozen copy (kept equal by test_validation); the engine applies the
+# stored profile, never this table directly.
+DEFAULT_VALIDATION_RULES: dict[ValidationCode, tuple[ValidationSeverity, IssueDisposition]] = {
+    _C.REQUIRED_FIELD_UNMAPPED: _F,
+    _C.REQUIRED_COLUMN_MISSING: _F,
+    _C.BUSINESS_KEY_COLUMN_MISSING: _F,
+    _C.MAPPING_RULE_INVALID: _F,
+    _C.SOURCE_COLUMN_MISSING: _W,
+    _C.UNMAPPED_COLUMN: _W,
+    _C.BLANK_ROW: _R,
+    _C.EXTRA_CELLS: _R,
+    _C.MISSING_CELLS: _W,
+    _C.CELL_ERROR: _E,
+    _C.FORMULA_WITHOUT_CACHED_VALUE: _E,
+    _C.FORMULA_CACHED_VALUE: (ValidationSeverity.INFO, IssueDisposition.ACCEPTED_WITH_WARNING),
+    _C.PRECISION_BEYOND_15_DIGITS: _E,
+    _C.REQUIRED_VALUE_MISSING: _E,
+    _C.INVALID_TYPE: _E,
+    _C.INVALID_DATE: _E,
+    _C.SCALE_EXCEEDED: _E,
+    _C.PRECISION_EXCEEDED: _E,
+    _C.INVALID_CURRENCY_CODE: _E,
+    _C.UNMAPPED_VALUE: _E,
+    _C.MISSING_BUSINESS_KEY: _E,
+    _C.DUPLICATE_BUSINESS_KEY: _E,
+}
+DEFAULT_VALIDATION_PROFILE_CODE = "default"
+VALIDATION_PROFILE_SEED_TAG = "0015_validation_profile_seed"
+VALIDATOR_VERSION = 1  # part of the manifest: a change to the engine's rules is a new version
+
+
+class QuarantineStatus(StrEnum):
+    """Data Model §9 `quarantine_item.status`."""
+
+    OPEN = "OPEN"
+    UNDER_REVIEW = "UNDER_REVIEW"
+    REJECTED = "REJECTED"
+    CORRECTED = "CORRECTED"
+    RETRY_READY = "RETRY_READY"
+    RESOLVED = "RESOLVED"
+
+
+_Q = QuarantineStatus
+# D-20 §2 transition table: status -> statuses it may move to. Enforced by the service and by
+# the database trigger (0015, a frozen copy kept equal by a test). An item starts OPEN
+# (QUARANTINED row) or REJECTED (REJECTED row). REJECTED and RESOLVED are final.
+QUARANTINE_TRANSITIONS: dict[QuarantineStatus, frozenset[QuarantineStatus]] = {
+    _Q.OPEN: frozenset({_Q.UNDER_REVIEW}),
+    _Q.UNDER_REVIEW: frozenset({_Q.REJECTED, _Q.RETRY_READY, _Q.OPEN}),
+    _Q.RETRY_READY: frozenset({_Q.CORRECTED}),
+    _Q.CORRECTED: frozenset({_Q.RESOLVED, _Q.RETRY_READY}),
+    _Q.REJECTED: frozenset(),
+    _Q.RESOLVED: frozenset(),
+}
+QUARANTINE_INITIAL = frozenset({_Q.OPEN, _Q.REJECTED})
+# Moves a reviewer makes by hand (POST .../disposition). The others happen only when a retry
+# import is validated (D-20 §2: RETRY_READY -> CORRECTED -> RESOLVED | RETRY_READY).
+MANUAL_QUARANTINE_MOVES: frozenset[tuple[QuarantineStatus, QuarantineStatus]] = frozenset(
+    {
+        (_Q.OPEN, _Q.UNDER_REVIEW),
+        (_Q.UNDER_REVIEW, _Q.REJECTED),
+        (_Q.UNDER_REVIEW, _Q.RETRY_READY),
+        (_Q.UNDER_REVIEW, _Q.OPEN),
+    }
+)
+# Statuses an original import's items may be retried from.
+RETRYABLE_IMPORT_STATUSES = frozenset({ImportStatus.QUARANTINED, ImportStatus.FAILED})
+
+# ISO 4217 active alphabetic codes (list one, 2024), for fields whose unit is ISO 4217.
+ISO_4217_CODES = frozenset(
+    """
+    AED AFN ALL AMD ANG AOA ARS AUD AWG AZN BAM BBD BDT BGN BHD BIF BMD BND BOB BOV BRL BSD
+    BTN BWP BYN BZD CAD CDF CHE CHF CHW CLF CLP CNY COP COU CRC CUP CVE CZK DJF DKK DOP DZD
+    EGP ERN ETB EUR FJD FKP GBP GEL GHS GIP GMD GNF GTQ GYD HKD HNL HTG HUF IDR ILS INR IQD
+    IRR ISK JMD JOD JPY KES KGS KHR KMF KPW KRW KWD KYD KZT LAK LBP LKR LRD LSL LYD MAD MDL
+    MGA MKD MMK MNT MOP MRU MUR MVR MWK MXN MXV MYR MZN NAD NGN NIO NOK NPR NZD OMR PAB PEN
+    PGK PHP PKR PLN PYG QAR RON RSD RUB RWF SAR SBD SCR SDG SEK SGD SHP SLE SLL SOS SRD SSP
+    STN SVC SYP SZL THB TJS TMT TND TOP TRY TTD TWD TZS UAH UGX USD USN UYI UYU UYW UZS VED
+    VES VND VUV WST XAF XAG XAU XBA XBB XBC XBD XCD XCG XDR XOF XPD XPF XPT XSU XTS XUA XXX
+    YER ZAR ZMW ZWG ZWL
+    """.split()
+)
+
+
+def is_iso4217_unit(unit: str | None) -> bool:
+    """A schema field's unit names ISO 4217 ('ISO4217', 'ISO 4217', any case)."""
+    return unit is not None and unit.replace(" ", "").replace("-", "").upper() == "ISO4217"
