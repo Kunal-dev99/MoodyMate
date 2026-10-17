@@ -240,6 +240,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/imports/{import_id}/projection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Import Projection
+         * @description The import's projection, if any (read only; the same body as the POST's): its counts
+         *     and TYPE_NOT_PROJECTED summary. 404 `projection_not_found` until it is projected; 404
+         *     `not_found` alike for an absent and another tenant's import (D-04).
+         */
+        get: operations["getImportProjection"];
+        put?: never;
+        /**
+         * Project Import
+         * @description Project a validated import's accepted rows into immutable domain versions (D-29):
+         *     one instrument version, position version or cash-flow event per canonical record, each
+         *     keeping lineage to it. 409 `projection_unsupported` for another schema (or schema
+         *     version), 409 `not_validated` before validation (or for a FAILED import), 409
+         *     `domain_projection_disabled` while the switch is off; each refusal is audited DENIED.
+         */
+        post: operations["projectImport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/imports/{import_id}/reconciliation": {
         parameters: {
             query?: never;
@@ -281,6 +311,48 @@ export interface paths {
          *     reconciled in the same transaction (BE-12.2, GET /imports/{import_id}/reconciliation).
          */
         post: operations["validateImport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/instruments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Instruments
+         * @description The instrument catalogue of the caller's tenant, by business key. A filter matches an
+         *     instrument when any of its versions matches.
+         */
+        get: operations["listInstruments"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/instruments/{instrument_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Instrument
+         * @description One instrument: every version (oldest first) with its attributes, import, source row
+         *     ordinal, canonical record and the cash flows naming its business key.
+         */
+        get: operations["getInstrument"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -747,6 +819,25 @@ export interface components {
             /** Size Bytes */
             size_bytes: number;
         };
+        /** AttributeOut */
+        AttributeOut: {
+            /**
+             * Classification
+             * @description The pinned schema field's classification.
+             */
+            classification: string;
+            /**
+             * Code
+             * @description The extension-eligible schema field.
+             */
+            code: string;
+            data_type: components["schemas"]["FieldType"];
+            /**
+             * Value
+             * @description The canonical typed text, or masked.
+             */
+            value: string | components["schemas"]["MaskedValue"];
+        };
         /** AuditEventOut */
         AuditEventOut: {
             /** Action */
@@ -825,6 +916,46 @@ export interface components {
             row_count: number;
             /** Sheet Name */
             sheet_name: string | null;
+        };
+        /** CashFlowOut */
+        CashFlowOut: {
+            /**
+             * Amount
+             * @description Exact decimal text, in `currency`.
+             */
+            amount: string | components["schemas"]["MaskedValue"] | null;
+            /** Business Key */
+            business_key: string | components["schemas"]["MaskedValue"];
+            /**
+             * Canonical Record Id
+             * Format: uuid
+             */
+            canonical_record_id: string;
+            /**
+             * Cashflow Event Id
+             * Format: uuid
+             */
+            cashflow_event_id: string;
+            /** Cashflow Type */
+            cashflow_type: string | components["schemas"]["MaskedValue"] | null;
+            /** Currency */
+            currency: string | components["schemas"]["MaskedValue"] | null;
+            /** Due Date */
+            due_date: string | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Import Id
+             * Format: uuid
+             */
+            import_id: string;
+            /** Origin */
+            origin: string | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Schema Version Id
+             * Format: uuid
+             */
+            schema_version_id: string;
+            /** Source Ordinal */
+            source_ordinal: number;
         };
         /**
          * ColumnPolicy
@@ -1128,6 +1259,12 @@ export interface components {
             /** @description OPEN->UNDER_REVIEW; UNDER_REVIEW->REJECTED | RETRY_READY | OPEN. Other moves are 409 invalid_transition (CORRECTED and RESOLVED come from a retry import). */
             status: components["schemas"]["QuarantineStatus"];
         };
+        /**
+         * DomainSchemaCode
+         * @description The canonical schemas the projector supports (D-29 §1).
+         * @enum {string}
+         */
+        DomainSchemaCode: "instrument" | "position" | "cashflow_event";
         /** DriftEventOut */
         DriftEventOut: {
             /**
@@ -1706,6 +1843,198 @@ export interface components {
              */
             updated_at: string;
         };
+        /** InstrumentDetail */
+        InstrumentDetail: {
+            /** Business Key */
+            business_key: string | components["schemas"]["MaskedValue"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Instrument Id
+             * Format: uuid
+             */
+            instrument_id: string;
+            /** Source Code */
+            source_code: string;
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+            /**
+             * Versions
+             * @description Oldest first.
+             */
+            versions: components["schemas"]["InstrumentVersionOut"][];
+        };
+        /** InstrumentPage */
+        InstrumentPage: {
+            /**
+             * Instrument Types
+             * @description The instrument type vocabulary of the caller's tenant (for filters).
+             */
+            instrument_types: components["schemas"]["InstrumentTypeOut"][];
+            /** Items */
+            items: components["schemas"]["InstrumentSummary"][];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /** Total */
+            total: number;
+        };
+        /** InstrumentSummary */
+        InstrumentSummary: {
+            /**
+             * Business Key
+             * @description The source's identifier of the instrument.
+             */
+            business_key: string | components["schemas"]["MaskedValue"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Currency
+             * @description ISO 4217, in the latest version.
+             */
+            currency: string | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Instrument Id
+             * Format: uuid
+             */
+            instrument_id: string;
+            /**
+             * Instrument Type
+             * @description As given, in the latest version.
+             */
+            instrument_type: string | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Latest Import Id
+             * Format: uuid
+             */
+            latest_import_id: string;
+            /**
+             * Latest Version
+             * @description The highest version number. 'Current' is not defined: a calculation pins versions through a dataset snapshot (D-29 §3).
+             */
+            latest_version: number;
+            /** Source Code */
+            source_code: string;
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+            /** Version Count */
+            version_count: number;
+        };
+        /** InstrumentTypeOut */
+        InstrumentTypeOut: {
+            /** Code */
+            code: string;
+            /** Name */
+            name: string;
+            /**
+             * Provisional
+             * @description A PROVISIONAL / illustrative seeded value (D-11).
+             */
+            provisional: boolean;
+        };
+        /** InstrumentVersionOut */
+        InstrumentVersionOut: {
+            /** Attributes */
+            attributes: components["schemas"]["AttributeOut"][];
+            /**
+             * Canonical Record Id
+             * Format: uuid
+             * @description Lineage: canonical record -> source record -> import.
+             */
+            canonical_record_id: string;
+            /**
+             * Cash Flows
+             * @description Projected cash-flow events of the instrument's own source naming its business key, in the caller's tenant (matched by source and key, so every version lists the same events).
+             */
+            cash_flows: components["schemas"]["CashFlowOut"][];
+            /** Currency */
+            currency: string | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Import Id
+             * Format: uuid
+             * @description The import this version was projected from.
+             */
+            import_id: string;
+            /**
+             * Instrument Type
+             * @description As given.
+             */
+            instrument_type: string | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Instrument Type Known
+             * @description The type is in the seeded vocabulary (else modules warn, D-29 §5).
+             */
+            instrument_type_known: boolean;
+            /**
+             * Interest Rate
+             * @description Exact decimal text, in `interest_rate_unit`.
+             */
+            interest_rate: string | components["schemas"]["MaskedValue"] | null;
+            /** Interest Rate Unit */
+            interest_rate_unit: string | null;
+            /**
+             * Maturity Date
+             * @description ISO date; empty while the pinned field is free text (TYPE_NOT_PROJECTED).
+             */
+            maturity_date: string | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Notional
+             * @description Exact decimal text, in `currency`.
+             */
+            notional: string | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Payload Sha256
+             * @description The canonical payload's SHA-256, or the text 'masked' unless the caller is cleared for the most sensitive field of the pinned schema version (a hash of a small payload could otherwise be brute-forced to masked values).
+             */
+            payload_sha256: string;
+            /**
+             * Projected At
+             * Format: date-time
+             */
+            projected_at: string;
+            /**
+             * Projection Id
+             * Format: uuid
+             */
+            projection_id: string;
+            /** Schema Version */
+            schema_version: number | null;
+            /**
+             * Schema Version Id
+             * Format: uuid
+             */
+            schema_version_id: string;
+            /**
+             * Source Ordinal
+             * @description The source row's ordinal within its import.
+             */
+            source_ordinal: number;
+            /**
+             * Source Record Id
+             * Format: uuid
+             */
+            source_record_id: string;
+            /** Version */
+            version: number;
+            /**
+             * Version Id
+             * Format: uuid
+             */
+            version_id: string;
+        };
         /**
          * IssueCode
          * @description Dry-run issue codes. An issue names rules, fields and columns, never a value.
@@ -2269,7 +2598,7 @@ export interface components {
          * Permission
          * @enum {string}
          */
-        Permission: "schema:read" | "schema:propose" | "schema:approve" | "audit:read" | "admin:read" | "source:read" | "source:manage" | "import:read" | "import:write" | "mapping:read" | "mapping:propose" | "mapping:approve" | "quarantine:read" | "quality:review";
+        Permission: "schema:read" | "schema:propose" | "schema:approve" | "audit:read" | "admin:read" | "source:read" | "source:manage" | "import:read" | "import:write" | "mapping:read" | "mapping:propose" | "mapping:approve" | "quarantine:read" | "quality:review" | "domain:read" | "domain:project" | "rule:read" | "rule:propose" | "rule:approve" | "calc:read" | "calc:run";
         /**
          * ProfileIn
          * @description A new source's profile. Always provisional on create (D2): only the client's approval,
@@ -2344,6 +2673,96 @@ export interface components {
             rows_with_extra_cells: number;
             /** Rows With Missing Cells */
             rows_with_missing_cells: number;
+        };
+        /** ProjectionOut */
+        ProjectionOut: {
+            /**
+             * Accepted Count
+             * @description The import manifest's accepted rows.
+             */
+            accepted_count: number;
+            /**
+             * Import Id
+             * Format: uuid
+             */
+            import_id: string;
+            import_status: components["schemas"]["ImportStatus"];
+            /**
+             * Projected At
+             * Format: date-time
+             */
+            projected_at: string;
+            /** Projected By */
+            projected_by: string;
+            /**
+             * Projected Count
+             * @description Rows written; equals accepted_count.
+             */
+            projected_count: number;
+            /**
+             * Projection Id
+             * Format: uuid
+             */
+            projection_id: string;
+            /**
+             * Projector Version
+             * @description The frozen field projection spec (D-29 §4).
+             */
+            projector_version: number;
+            schema_code: components["schemas"]["DomainSchemaCode"];
+            /** Schema Version */
+            schema_version: number;
+            /**
+             * Schema Version Id
+             * Format: uuid
+             */
+            schema_version_id: string;
+            summary: components["schemas"]["ProjectionSummary"];
+        };
+        /**
+         * ProjectionSummary
+         * @description Value-free: counts and schema field names only (D-29 §2).
+         */
+        ProjectionSummary: {
+            /**
+             * Attribute Values
+             * @description Instrument attribute values written.
+             */
+            attribute_values: number;
+            /**
+             * Canonical Only Fields
+             * @description Schema fields with no typed column: they stay in the canonical record, reached through the row's canonical_record_id (lineage).
+             */
+            canonical_only_fields: string[];
+            /**
+             * New Identities
+             * @description Instruments or positions seen for the first time (0 for cash flows).
+             */
+            new_identities: number;
+            /**
+             * Records
+             * @description Accepted canonical records of the import read.
+             */
+            records: number;
+            /**
+             * Rows Projected
+             * @description Version or event rows written: one per accepted canonical record.
+             */
+            rows_projected: number;
+            /**
+             * Type Not Projected
+             * @description TYPE_NOT_PROJECTED: per schema field, the values not projected into their typed column because the pinned field type differs (e.g. `instrument` v1 `maturity_date` is free text). They stay in the canonical record.
+             */
+            type_not_projected: {
+                [key: string]: number;
+            };
+            /**
+             * Unknown Values
+             * @description UNKNOWN_VALUE: per schema field, the values outside a seeded PROVISIONAL vocabulary (instrument type, cash-flow type, origin). Still projected; the vocabulary reference stays empty.
+             */
+            unknown_values: {
+                [key: string]: number;
+            };
         };
         /** ProposalApproval */
         ProposalApproval: {
@@ -3880,6 +4299,95 @@ export interface operations {
             };
         };
     };
+    getImportProjection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                import_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectionOut"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    projectImport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                import_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Already projected: the existing projection is returned and nothing is written (header Idempotent-Replayed: true). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectionOut"];
+                };
+            };
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectionOut"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     getImportReconciliation: {
         parameters: {
             query?: never;
@@ -3938,6 +4446,94 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ImportDetail"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    listInstruments: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                /** @description Instruments with a version of this type. */
+                instrument_type?: string | null;
+                /** @description Instruments with a version in this currency. */
+                currency?: string | null;
+                source_id?: string | null;
+                /** @description Instruments with a version from this import. */
+                import_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstrumentPage"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    getInstrument: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                instrument_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstrumentDetail"];
                 };
             };
             /** @description Client error (standard envelope) */

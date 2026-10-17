@@ -5,7 +5,8 @@ separate step and the route x role matrix is printed in the test report.
    403 exactly where the role lacks the route's permission; 401 for every route without a
    token.
 2. Cross-tenant isolation: a user of another tenant sees and changes nothing here, and
-   another tenant's resource is the same 404 as a random id.
+   another tenant's resource is the same 404 as a random id (WS3 instruments and the
+   projection included, Phase 14).
 3. Audit completeness: every mutating route is listed and emits its audit event.
 4. Migrations: base -> head round trip with the seed; the downgrade refuses while user data
    or audit rows exist.
@@ -27,17 +28,20 @@ from app.tests.conftest import WS1_MATRIX, alembic_config, clean, dev_token, ins
 from app.tests.helpers import (
     FIELD_KEYS,
     IMPORTS,
+    INSTRUMENTS,
     PROPOSALS,
     SOURCES,
     cid,
     contract_body,
     events,
+    projected_instruments,
     removal_proposal,
     schema_id,
     seeded_source_id,
     source_body,
     token_for,
     upload,
+    validated_sample,
 )
 
 pytestmark = [pytest.mark.db, pytest.mark.ws1]
@@ -110,12 +114,6 @@ def ws1_mapping_body(db: str, rules: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def ws1_mapping(api: TestClient, db: str, headers: dict[str, str]) -> Any:
-    r = api.post("/api/v1/mappings", json=ws1_mapping_body(db, WS1_RULES), headers=headers)
-    assert r.status_code == 201, r.text
-    return r.json()
-
-
 # --- 1. Authorization matrix ---------------------------------------------------------------------
 
 
@@ -130,16 +128,19 @@ def test_route_by_role_authorization_matrix(api: TestClient, db: str) -> None:
     # Existing ids, so GET routes answer 2xx for permitted roles (the plan's 2xx side).
     steward = dev_token(api, "data_steward")
     proposal = removal_proposal(api, db, steward)
-    imported = upload(api, steward, seeded_source_id(db), b"instrument_id\nA\n")
-    assert imported.status_code == 201, imported.text
+    # Phase 14: a validated, projected import (its mapping ACTIVE) and one of its instruments.
+    projected = projected_instruments(api, db, steward, dev_token(api, "approver"))
+    imported = api.get(f"{IMPORTS}/{projected['import_id']}", headers=steward)
+    assert imported.status_code == 200, imported.text
     ids = {
         "schema_id": str(schema_id(db, "instrument")),
         "proposal_id": proposal["id"],
         "user_id": api.get("/api/v1/me", headers=dev_token(api, "auditor")).json()["user_id"],
         "source_id": seeded_source_id(db),
         "import_id": imported.json()["id"],
-        "mapping_id": ws1_mapping(api, db, steward)["id"],
+        "mapping_id": projected["mapping_id"],
         "batch_id": imported.json()["batches"][0]["id"],  # Phase 11: GET /quarantine/{batch_id}
+        "instrument_id": projected["instrument_id"],  # Phase 14: GET /instruments/{id}
     }
     tokens = {role: dev_token(api, role) for role in ROLES}
     failures = []
@@ -177,6 +178,24 @@ def test_route_by_role_authorization_matrix(api: TestClient, db: str) -> None:
     [profile] = [r for r in WS1_MATRIX if r["route"] == "GET /api/v1/imports/{import_id}/profile"]
     assert profile["permission"] == "import:read"
     assert all(profile[role] == 200 for role in ROLES), profile
+    # BE-14.4: the catalogue routes and the projection read are domain:read and 2xx for every
+    # seeded role; BE-14.3:
+    # the projection is domain:project, 2xx (the existing projection) for data_steward only.
+    for route in (
+        "GET /api/v1/instruments",
+        "GET /api/v1/instruments/{instrument_id}",
+        "GET /api/v1/imports/{import_id}/projection",
+    ):
+        [row] = [r for r in WS1_MATRIX if r["route"] == route]
+        assert row["permission"] == "domain:read"
+        assert all(row[role] == 200 for role in ROLES), row
+    [projection] = [
+        r for r in WS1_MATRIX if r["route"] == "POST /api/v1/imports/{import_id}/projection"
+    ]
+    assert projection["permission"] == "domain:project"
+    assert {role: projection[role] for role in ROLES} == {
+        role: 200 if role == "data_steward" else 403 for role in ROLES
+    }
     assert len(WS1_MATRIX) >= 12
 
 
@@ -190,6 +209,9 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
     here_user = api.get("/api/v1/me", headers=dev_token(api, "auditor")).json()["user_id"]
     here_source = seeded_source_id(db)
     here_import = upload(api, steward, here_source, b"instrument_id\nA\n").json()["id"]
+    # Phase 14: a projected import and one of its instruments.
+    here_projected = projected_instruments(api, db, steward, dev_token(api, "approver"))
+    here_instrument = here_projected["instrument_id"]
 
     other_tenant = insert_tenant(db, f"other-{uuid.uuid4().hex[:6]}")
     outsider = token_for(
@@ -201,7 +223,7 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
     # Lists hold only the outsider's own tenant.
     users = api.get("/api/v1/users", headers=outsider).json()["items"]
     assert len(users) == 1 and users[0]["display_name"].endswith("dev:outsider")
-    for path in ("/api/v1/schemas", PROPOSALS, SOURCES, IMPORTS):
+    for path in ("/api/v1/schemas", PROPOSALS, SOURCES, IMPORTS, INSTRUMENTS):
         assert api.get(path, headers=outsider).json()["total"] == 0, path
     audit = api.get("/api/v1/audit-events", params={"limit": 200}, headers=outsider).json()
     theirs = {
@@ -231,6 +253,12 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
         ),
         (f"{PROPOSALS}/{here['id']}", f"{PROPOSALS}/{uuid.uuid4()}"),
         (f"/api/v1/users/{here_user}", f"/api/v1/users/{uuid.uuid4()}"),
+        # Phase 14: the instrument catalogue and the projection read.
+        (f"{INSTRUMENTS}/{here_instrument}", f"{INSTRUMENTS}/{uuid.uuid4()}"),
+        (
+            f"{IMPORTS}/{here_projected['import_id']}/projection",
+            f"{IMPORTS}/{uuid.uuid4()}/projection",
+        ),
     ):
         mine, absent = api.get(real, headers=outsider), api.get(random_id, headers=outsider)
         assert mine.status_code == absent.status_code == 404, real
@@ -256,12 +284,29 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
     assert r.status_code == 404
     r = api.post(SOURCES, json=source_body(db, code="outsider_feed"), headers=outsider)
     assert (r.status_code, r.json()["message"]) == (404, "Schema not found.")
+    # Phase 14: projecting this tenant's import is the same 404 as an absent one, audited.
+    for import_id in (here_projected["import_id"], here_import):
+        correlation = cid()
+        r = api.post(
+            f"{IMPORTS}/{import_id}/projection",
+            headers={**outsider, "X-Correlation-ID": correlation},
+        )
+        assert (r.status_code, r.json()["code"]) == (404, "not_found")
+        [denied] = events(db, correlation)
+        assert (denied["outcome"], str(denied["tenant_id"])) == ("DENIED", str(other_tenant))
     correlation = cid()
     r = upload(api, outsider, here_source, b"instrument_id\nA\n", cid=correlation)
     assert (r.status_code, r.json()["code"]) == (404, "not_found")
     [denied] = events(db, correlation)
     assert denied["outcome"] == "DENIED"
-    for table in ("schema_change_proposal", "source_system", "import_job"):
+    for table in (
+        "schema_change_proposal",
+        "source_system",
+        "import_job",
+        "domain_projection",
+        "instrument",
+        "instrument_version",
+    ):
         n = sql(db, f"SELECT count(*) AS n FROM {table} WHERE tenant_id = $1", other_tenant)
         assert n[0]["n"] == 0, table
 
@@ -306,6 +351,8 @@ AUDITED = {
         "quarantine.disposition"
     ),
     "POST /api/v1/drift-events/{drift_event_id}/review": "drift_event.review",
+    # Phase 14 (BE-14.3, BE-14.5): projection into the WS3 domain.
+    "POST /api/v1/imports/{import_id}/projection": "import.project",
 }
 
 
@@ -418,6 +465,15 @@ def test_every_mutating_route_is_listed_and_emits_an_audit_event(api: TestClient
     # column raises COLUMN_ADDED, which the steward reviews.
     done = api.post(f"{IMPORTS}/{clean_import.json()['id']}/validate", headers=steward)
     assert done.status_code == 200 and done.json()["status"] == "COMPLETED", done.text
+    # Phase 14: a validated import projected into the domain. The schema change above left
+    # `instrument` v3 ACTIVE, which projector v1 refuses (D-29), so a cash-flow import is used.
+    cash_flows = validated_sample(api, db, steward, approver, "cashflow_event")
+    projected = call(
+        "POST /api/v1/imports/{import_id}/projection",
+        steward,
+        f"{IMPORTS}/{cash_flows['id']}/projection",
+    )
+    assert projected["projected_count"] == projected["accepted_count"] == 25, projected
     wider = upload(
         api,
         steward,

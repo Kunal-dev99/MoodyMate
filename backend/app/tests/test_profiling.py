@@ -1,7 +1,7 @@
 """Profiling (Phase 9, BE-9.2/9.3, D-21, D-25): the golden profile of the synthetic
-instrument CSV, masking of profile values by role, in_contract on an extra column, and the
-IMPORT_PROFILING_ENABLED switch. (The snapshot's append-only trigger is proven in
-test_imports.py with the other import tables.)"""
+instrument CSV, masking of profile values by role and in_contract on an extra column (one
+test since BE-14.1), and the IMPORT_PROFILING_ENABLED switch. (The snapshot's append-only
+trigger is proven in test_imports.py with the other import tables.)"""
 
 import csv
 import io
@@ -78,9 +78,9 @@ def test_golden_profile_of_the_synthetic_instrument_csv(api: TestClient, db: str
     assert json.loads(profile["details"])["content_sha256"] == golden["content_sha256"]
     assert "notional" not in profile["details"] and "INS-" not in profile["details"]
 
-
-def test_profile_values_are_masked_by_role(api: TestClient, db: str) -> None:
-    import_id = uploaded(api, db)["id"]
+    # BE-14.1 fold (was test_profile_values_are_masked_by_role): the same upload's profile,
+    # masked by role.
+    import_id = body["id"]
     clearance = {  # role -> sees confidential values (0005 access policy seed)
         "data_steward": True,
         "approver": True,
@@ -119,8 +119,7 @@ def test_profile_values_are_masked_by_role(api: TestClient, db: str) -> None:
     # Masked and clear profiles differ only in the values.
     assert without_values(bodies["data_steward"]) == without_values(bodies["risk_analyst"])
 
-
-def test_the_extra_column_fixture_reports_in_contract_false(api: TestClient, db: str) -> None:
+    # BE-14.1 fold (was test_the_extra_column_fixture_reports_in_contract_false).
     import_id = uploaded(api, db, "instrument__unknown_extra_column.csv")["id"]
     r = api.get(f"{IMPORTS}/{import_id}/profile", headers=dev_token(api, "data_steward"))
     assert r.status_code == 200, r.text

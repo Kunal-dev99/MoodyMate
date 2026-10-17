@@ -10,6 +10,7 @@ from fastapi import APIRouter
 from app.api.v1 import health
 from app.core.config import Settings
 from app.core.errors import ERROR_RESPONSES
+from app.domain import router as domain
 from app.governance import router as governance
 from app.ingestion import router as ingestion
 from app.mapping import router as mapping
@@ -24,6 +25,7 @@ def build_api_router(settings: Settings) -> APIRouter:
     api_router.include_router(ingestion.router)
     api_router.include_router(mapping.router)
     api_router.include_router(reconciliation.router)
+    api_router.include_router(domain.router)
     if settings.dev_sessions_enabled:
         api_router.include_router(governance.dev_router)
     return api_router

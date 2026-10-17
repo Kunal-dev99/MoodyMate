@@ -11,7 +11,9 @@ from httpx import Response
 
 from app.core.config import Settings
 from app.core.tokens import DevTokens
-from app.governance.constants import DEFAULT_TENANT_ID, DEV_ISSUER
+from app.governance.constants import DEFAULT_TENANT_ID, DEV_ISSUER, FieldType
+from app.ingestion.adapters import AdapterOptions, Limits, parse_upload
+from app.ingestion.constants import SourceFormat
 from app.tests.conftest import insert_user, sql
 
 IMPORTS = "/api/v1/imports"
@@ -284,3 +286,112 @@ def validate_import(
     api: TestClient, headers: dict[str, str], import_id: str, **kw: Any
 ) -> Response:
     return api.post(f"{IMPORTS}/{import_id}/validate", headers={**headers, **kw})
+
+
+# --- Phase 14: projection into the WS3 domain (D-29) ------------------------------------------
+
+INSTRUMENTS = "/api/v1/instruments"
+
+
+def project(api: TestClient, headers: dict[str, str], import_id: str, **kw: Any) -> Response:
+    return api.post(f"{IMPORTS}/{import_id}/projection", headers={**headers, **kw})
+
+
+def validated_instruments(
+    api: TestClient, db: str, steward: dict[str, str], approver: dict[str, str]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """(import, ACTIVE mapping version): the synthetic instrument CSV on the seeded source,
+    its core mapping activated against it, validated (COMPLETED)."""
+    imported = import_sample(api, steward, db, sample("instrument.csv"))
+    version = instrument_mapping(api, db, steward, approver, imported["id"])
+    r = validate_import(api, steward, imported["id"])
+    assert r.status_code == 200 and r.json()["status"] == "COMPLETED", r.text
+    return dict(r.json()), version
+
+
+def projected_instruments(
+    api: TestClient, db: str, steward: dict[str, str], approver: dict[str, str]
+) -> dict[str, Any]:
+    """The synthetic instrument CSV validated and projected: its import, mapping and one
+    instrument id."""
+    imported, version = validated_instruments(api, db, steward, approver)
+    r = project(api, steward, imported["id"])
+    assert r.status_code == 201, r.text
+    page = api.get(INSTRUMENTS, params={"import_id": imported["id"]}, headers=steward).json()
+    return {
+        "import_id": imported["id"],
+        "mapping_id": version["mapping_id"],
+        "instrument_id": page["items"][0]["instrument_id"],
+    }
+
+
+def validated_sample(
+    api: TestClient, db: str, steward: dict[str, str], approver: dict[str, str], code: str
+) -> dict[str, Any]:
+    """The synthetic position (XLSX) or cash-flow (JSON) sample: its own source and contract
+    (the file's columns, its business key), a mapping of every column (decimals and dates
+    parsed) made ACTIVE against it, and the import validated."""
+    name, fmt, key = {
+        "position": ("position.xlsx", SourceFormat.XLSX, "position_id"),
+        "cashflow_event": ("cashflow_event.json", SourceFormat.JSON, "cashflow_id"),
+    }[code]
+    data = sample(name)
+    columns = parse_upload(data, fmt, AdapterOptions(), Limits()).columns
+    body = source_body(
+        db,
+        code=f"{code}_feed",
+        profile={
+            "format": fmt.value,
+            "owner": "Test data team",
+            "default_classification": "confidential",
+        },
+        contract=contract_body(
+            db,
+            schema=code,
+            expected_columns=[{"name": c, "required": True} for c in columns],
+            business_key_columns=[key],
+            control_total_columns=[],
+        ),
+    )
+    r = api.post(SOURCES, json=body, headers=steward)
+    assert r.status_code == 201, r.text
+    source = r.json()
+    r = upload(api, steward, source["id"], data, filename=name)
+    assert r.status_code == 201, r.text
+    imported = r.json()
+    rules = sample_rules(api, db, steward, code, columns)
+    mapping = {
+        "code": f"{code}_map",
+        "name": f"{code} (test)",
+        "source_contract_id": source["current_contract"]["id"],
+        "rules": rules,
+    }
+    r = api.post(MAPPINGS, json=mapping, headers=steward)
+    assert r.status_code == 201, r.text
+    activate_version(api, steward, approver, r.json()["versions"][0], imported["id"])
+    r = validate_import(api, steward, imported["id"])
+    assert r.status_code == 200 and r.json()["status"] == "COMPLETED", r.text
+    return dict(r.json())
+
+
+def sample_rules(
+    api: TestClient, db: str, steward: dict[str, str], code: str, columns: list[str]
+) -> list[dict[str, Any]]:
+    """Map each column to the same-named field of the schema's v1: decimals and dates
+    parsed, everything else copied."""
+    types = {f["name"]: f["data_type"] for f in v1_fields(api, steward, schema_id(db, code))}
+    rules = []
+    for column in columns:
+        kind, params = "COPY", {}
+        if types[column] == FieldType.DECIMAL:
+            kind = "PARSE_DECIMAL"
+        elif types[column] == FieldType.DATE:
+            kind, params = "PARSE_DATE", {"format": "YYYY-MM-DD"}
+        rules.append(
+            {
+                "source_column": column,
+                "target_field": column,
+                "transform": {"code": kind, "params": params},
+            }
+        )
+    return rules

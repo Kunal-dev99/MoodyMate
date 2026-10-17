@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import type { Schemas } from '@/api/client'
 import type { NavItem } from '@/components/layout/sidebar'
+import { DOMAIN_UI_ENABLED } from '@/config/features'
 
 /**
  * Platform workspaces (Architecture §14). `planned` workspaces render a clear
@@ -52,14 +53,24 @@ export const mainWorkspaces: Workspace[] = [
     description: 'Imports, mapping grid, profiling, validation issues and quarantine.',
     permission: 'source:read',
   },
-  {
-    slug: 'domain',
-    href: '/domain',
-    label: 'Financial Domain',
-    icon: Landmark,
-    description: 'Instrument types and records, assumptions and the rule registry.',
-    planned: { phase: 'Feature 03', workstream: 'WS3' },
-  },
+  // FE-14.1: live behind DOMAIN_UI_ENABLED; off, the Phase 13 "planned" entry exactly (D-02).
+  DOMAIN_UI_ENABLED
+    ? {
+        slug: 'domain',
+        href: '/domain',
+        label: 'Financial Domain',
+        icon: Landmark,
+        description: 'Instrument catalogue: projected versions, attributes, cash flows and their lineage to imports.',
+        permission: 'domain:read',
+      }
+    : {
+        slug: 'domain',
+        href: '/domain',
+        label: 'Financial Domain',
+        icon: Landmark,
+        description: 'Instrument types and records, assumptions and the rule registry.',
+        planned: { phase: 'Feature 03', workstream: 'WS3' },
+      },
   {
     slug: 'calculations',
     href: '/calculations',

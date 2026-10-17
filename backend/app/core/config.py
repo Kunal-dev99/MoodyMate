@@ -94,6 +94,10 @@ class Settings(BaseSettings):
     # the baseline's range is a RANGE_SHIFT.
     DRIFT_NULL_RATE_THRESHOLD: Decimal = Decimal("0.10")
     DRIFT_RANGE_THRESHOLD: Decimal = Decimal("0.25")
+    # Phase 14 (FC-01, D-29, D-02): project validated imports into the WS3 domain tables.
+    # Off stops new projections (409 domain_projection_disabled, audited); existing domain
+    # rows stay readable.
+    DOMAIN_PROJECTION_ENABLED: bool = True
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
 
     # D-15: root of the write-once raw artifact store. Required outside local/test (D-13);
