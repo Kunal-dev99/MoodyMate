@@ -2011,7 +2011,7 @@ class Validator:
                         "transform": transform.code.value,
                     }
                 )
-            findings.extend(self._key_findings(ordinal, key, values))
+            findings.extend(self._key_findings(ordinal, key))
         worst = max((_OUTCOME_RANK[f.disposition] for f in findings), default=0)
         held = sorted({f.code.value for f in findings if _OUTCOME_RANK[f.disposition] > 0})
         if worst >= _OUTCOME_RANK[IssueDisposition.REJECTED]:
@@ -2023,9 +2023,7 @@ class Validator:
         self.accepted += 1
         return RowResult(ordinal, RowOutcome.ACCEPTED, findings, payload, trace, key, [])
 
-    def _key_findings(
-        self, ordinal: int, key: str | None, values: Mapping[str, str]
-    ) -> list[Finding]:
+    def _key_findings(self, ordinal: int, key: str | None) -> list[Finding]:
         if not self.business_keys:
             return []
         label = ", ".join(self.business_keys)
