@@ -1044,7 +1044,7 @@ ends in exactly one outcome (ACCEPTED → `canonical_record`, QUARANTINED or REJ
 are actionable and carry no values, and quarantine is reviewable and retryable. Nothing is
 edited in place.
 
-- [ ] **BE-11.1** Migration plus models:
+- [x] **BE-11.1** Migration plus models:
   - `validation_profile`: versioned and immutable; maps issue code → severity → disposition.
   - `validation_issue`: code, severity, field, `source_record_id`, rule ref, value-free
     message, disposition per D-23.
@@ -1060,8 +1060,20 @@ edited in place.
   everywhere, and CHECKs cover the enums.
   - *Done-when:* the round trip passes; trigger tests cover each table, including an UPDATE
     of `quarantine_item.source_record_id` being refused while a status change is allowed;
-    the downgrade refusal is tested.
-- [ ] **BE-11.2** Validation engine. It applies the import's mapping version and checks:
+    the downgrade refusal is tested. — ✔ verified by code read at b4e0c27.
+    `db/migrations/versions/0015_validation_tables.py` (append-only function on five tables plus
+    TRUNCATE triggers `:132-139,284-292`; `quarantine_item_guard` freezes content, moves only along
+    the D-20 table and writes `resolved_by_import_id` once, by a direct retry of the item's import
+    `:141-177`; insert checks for items, canonical records, lineage, issues and manifests
+    `:179-272`; manifest conservation CHECK `:416-419`; seed tagged `0015_validation_profile_seed`
+    `:711-729`; downgrade refuses on any result or untagged profile `:732-740`).
+    `test_validation.py::test_validation_tables_are_guarded_in_the_database` (UPDATE/DELETE/
+    TRUNCATE CASCADE on each append-only table; item `source_record_id`/`reason_codes`/`owner`
+    edits, illegal moves, DELETE and TRUNCATE refused; OPEN → UNDER_REVIEW allowed with the rest of
+    the row unchanged; insert checks; seed and frozen copies equal the code; downgrade refused with
+    counts unchanged). Round trip: `test_ws1_verification.py::test_migration_round_trip_and_downgrade_guards`
+    and the reported 0015↔0014 run. Follow-up P11-1 (no CHECK on `validation_issue.code`).
+- [x] **BE-11.2** Validation engine. It applies the import's mapping version and checks:
   - type and required per `schema_field`;
   - DECIMAL precision/scale (fixed precision; over-scale is an error, never rounded);
   - date validity and format;
@@ -1079,7 +1091,19 @@ edited in place.
     - validating the same artifact twice through two imports gives identical
       `payload_sha256`s;
     - no canonical value is a float (JSON-type assertion).
-- [ ] **BE-11.3** `POST /imports/{import_id}/validate` and `GET /imports/{import_id}/issues`
+
+    — ✔ verified by code read at b4e0c27. `ingestion/service.py:1822-2066` (`Validator`: every row
+    returns exactly one outcome, with counters per outcome; a file-level BLOCKER rejects every row;
+    blank and "" cells count as missing through `apply` in `mapping/transforms/engine.py:481-505`;
+    over-scale refused, never rounded `engine.py:371-386`; ISO 4217 by normalised unit
+    `constants.py:354-356`; the first occurrence owns a business key and later ones are
+    DUPLICATE_BUSINESS_KEY; messages name fields, columns and rules, never values).
+    `test_validation.py::test_engine_fixtures_invariant_and_no_floats` (24 fixtures, exact
+    (row, field, code) sets and status; conservation per fixture and over 25 seeded generated
+    batches; string-only payloads at the field's scale; no `float` in the engine source).
+    `test_validate_statuses_issues_and_identical_payloads` (the same artifact in two imports gives
+    identical `payload_sha256`s and `canonical_sha256`; no JSON number in any stored payload).
+- [x] **BE-11.3** `POST /imports/{import_id}/validate` and `GET /imports/{import_id}/issues`
   (paginated; filter by severity, code and field).
   - `validate` needs a usable ACTIVE mapping version (otherwise 409 `mapping_required`, and
     the status is MAPPING_REQUIRED). It pins `mapping_version_id` and moves VALIDATING →
@@ -1088,8 +1112,18 @@ edited in place.
   - It runs once per import; a second call gets 409 `already_validated`, and a re-run means
     a new import (D-21). It is audited `import.validate`.
   - *Done-when:* tests cover each final status with its fixture, a 409 for an import with no
-    mapping, a 409 on a second validate, and issue filters and pagination.
-- [ ] **BE-11.4** `GET /quarantine/{batch_id}`: items with masked raw values (D-20), using
+    mapping, a 409 on a second validate, and issue filters and pagination. — ✔ verified by
+    code read at b4e0c27. `ingestion/router.py:666-732` (`import:write` plus `IngestionEnabled`;
+    issues under `import:read`); `ingestion/service.py:908-1090` (locks the import; audited 404 /
+    `already_validated` / `invalid_status` / `mapping_required` refusals; pins the mapping version,
+    then streams records in keyset pages of 1,000 and inserts everything in one transaction,
+    committed once at the end). `test_validation.py::test_validate_statuses_issues_and_identical_payloads`
+    (409 `mapping_required` with one DENIED event and the status still MAPPING_REQUIRED;
+    COMPLETED / COMPLETED_WITH_WARNINGS / QUARANTINED / FAILED with their fixtures, the pinned
+    version, the counts adding up to 25 and stored rows equal to the counts; a second validate
+    gets 409 `already_validated` with DENIED and no change; filters by severity/code/field, a
+    second page, 422 on an unknown code; no fixture value in any message). Follow-ups P11-2, P11-5.
+- [x] **BE-11.4** `GET /quarantine/{batch_id}`: items with masked raw values (D-20), using
   `mask_mapping` with column classes as in BE-9.3.
   `POST /quarantine/{batch_id}/items/{quarantine_id}/disposition`: transitions per the D-20
   table, audited, with no row deletion. Retry is `POST /imports` with
@@ -1102,13 +1136,34 @@ edited in place.
     - `auditor` reads with masked values;
     - a retry import resolves the matching items;
     - the `quarantine_item` row count never decreases across the whole test.
-- [ ] **BE-11.5** Import manifest. `GET /imports/{import_id}` returns a `manifest` with:
+
+    — ✔ verified by code read at b4e0c27. `ingestion/router.py:735-816` (`quarantine:read` /
+    `quality:review` plus `IngestionEnabled`; `mask_mapping` by each column's class, where a mapped
+    field's class applies and otherwise the source default, extra cells by the default);
+    `ingestion/service.py:2139-2290` (scoped lookups give the same 404; manual moves only, every
+    refusal audited; automatic RETRY_READY → CORRECTED → RESOLVED / RETRY_READY moves are separate
+    UPDATEs, audited, inside the retry's validation transaction); `_check_retry` `:1092-1115`
+    (same source, QUARANTINED or FAILED only, audited). `test_quarantine.py::test_quarantine_masking_dispositions_and_retry`
+    (auditor gets masked values, approver and steward get the allowed ones; `risk_analyst` 403 on
+    both endpoints; a foreign batch gets a 404 body equal to a random id's; every manual move
+    succeeds and equals MANUAL_QUARANTINE_MOVES; every other target is 409 `invalid_transition`
+    with DENIED and no change, including from REJECTED and RESOLVED; `retry_not_applicable` and
+    404 retries refused; the retry resolves row 4 and returns row 6 to RETRY_READY with the
+    expected audit actions; item count checked after every step and never decreasing).
+    Follow-ups P11-3, P11-4, P11-6.
+- [x] **BE-11.5** Import manifest. `GET /imports/{import_id}` returns a `manifest` with:
   artifact SHA-256 and classification, source contract version, `schema_version_id`,
   `mapping_version_id`, validation profile version, and accepted/quarantined/rejected/warning
   counts (the Data Model §10 shape).
   - *Done-when:* a test asserts the manifest keys and values after validation, and that
     they are unchanged after a later mapping version is activated and after a schema change
-    proposal is applied.
+    proposal is applied. — ✔ verified by code read at b4e0c27. `ingestion/service.py:1001-1063`
+    (the manifest is built once at validation and stored in the append-only `import_manifest`,
+    with its insert check against the pinned versions and the row count, and a conservation
+    CHECK). `test_quarantine.py::test_manifest_is_stable_after_mapping_and_schema_changes` (the key
+    set equals the schema; each value is checked against the DB; it is unchanged, along with the
+    pin and the canonical count, after mapping v2 is ACTIVE and after an applied proposal
+    deprecates schema v1; the 0014 pin trigger refuses pinning a DEPRECATED version).
 - [ ] **FE-11.1** Validation dashboard tab: accepted/quarantined/rejected/warning counts, an
   issues table with filters and field-level detail, and the manifest panel.
   - *Done-when:* a browser run on the mixed-errors fixture shows counts and issue codes

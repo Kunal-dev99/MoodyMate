@@ -504,6 +504,35 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
   regression shows up.
 - **Reversal:** a new decision.
 
+## D-27 Phase 11 validation semantics
+
+- **Status:** active (recorded 2026-10-17 from the Phase 11 review; PROVISIONAL where noted)
+- **Date:** 2026-10-17
+- **Context:** the Phase 11 review (`docs/evidence/phase-11/REPORT.md`) asked for these
+  behaviours to be written down. They go beyond the plan text.
+- **Decision:**
+  1. **Import manifest table.** `import_manifest` is written once with the validation
+     outcome and is append-only. It is what a calculation pins (D-22). Its unique import id
+     enforces "validate once".
+  2. **No usable mapping at validate.** Validate answers 409 `mapping_required` and leaves the
+     status unchanged. Profiling sets MAPPING_REQUIRED (Phase 9); validate does not.
+  3. **REJECTED is final** (PROVISIONAL). Rows rejected by the default profile (BLANK_ROW,
+     EXTRA_CELLS) and every row of a FAILED import have REJECTED quarantine items. A
+     corrected retry is accepted on its own, but those original items are not linked to it
+     (`resolved_by_import_id` stays empty). Only RETRY_READY items are resolved.
+  4. **Retry the original import.** Items are resolved only by a direct retry
+     (`retry_of_import_id` = the item's import). The retry wizard always targets the import
+     that holds the items.
+  5. **Duplicate business keys: the first occurrence wins.** The first row carrying a key owns
+     it, even if that row is itself quarantined. Later rows with the same key are quarantined
+     as DUPLICATE_BUSINESS_KEY.
+  6. **Default validation profile v1** (PROVISIONAL, tagged seed). BLANK_ROW and EXTRA_CELLS
+     are BLOCKER/REJECTED. MISSING_CELLS is a WARNING. Cell, formula and precision errors are
+     ERROR/QUARANTINED. Field errors (required, type, date, scale, precision, currency,
+     unmapped value, missing or duplicate key) are ERROR/QUARANTINED. File-level problems are
+     FILE_BLOCKED, and the import is FAILED.
+- **Reversal:** a new decision, or a new validation_profile version for point 6.
+
 ---
 
 <!-- Never renumber existing IDs. New decisions are appended as D-05, D-06, … -->

@@ -17,10 +17,14 @@ from app.ingestion.constants import (
     CsvDelimiter,
     DataClass,
     ImportStatus,
+    IssueDisposition,
+    QuarantineStatus,
     RetentionState,
     SourceEncoding,
     SourceFormat,
     SourceKind,
+    ValidationCode,
+    ValidationSeverity,
 )
 
 CODE = r"^[a-z][a-z0-9_]{0,99}$"
@@ -188,6 +192,7 @@ class ImportForm(BaseModel):
     synthetic_attested: bool = False
     expected_row_count: int | None = Field(default=None, ge=0, le=1_000_000_000)
     control_totals: dict[ColumnName, DecimalText] | None = Field(default=None, max_length=20)
+    retry_of_import_id: uuid.UUID | None = None
 
 
 class ArtifactOut(BaseModel):
@@ -200,6 +205,7 @@ class ArtifactOut(BaseModel):
 
 
 class BatchOut(BaseModel):
+    id: uuid.UUID = Field(description="The batch id (GET /quarantine/{batch_id}).")
     batch_number: int
     sheet_name: str | None
     row_count: int
@@ -241,8 +247,71 @@ class ImportSummary(BaseModel):
     updated_at: datetime
 
 
+class ManifestProfile(BaseModel):
+    id: uuid.UUID
+    code: str
+    version: int
+    content_sha256: str
+    provisional: bool
+
+
+class ManifestArtifact(BaseModel):
+    sha256: str = Field(description="SHA-256 of the raw artifact (hex).")
+    size_bytes: int
+    classification: str
+
+
+class ManifestQuality(BaseModel):
+    """accepted + quarantined + rejected = row_count, always (D-20 §1, DB CHECK)."""
+
+    row_count: int
+    accepted_records: int
+    quarantined_records: int
+    rejected_records: int
+    warnings: int = Field(description="WARNING-severity issues (file- and row-level).")
+
+
+class ImportManifest(BaseModel):
+    """What validation pinned and produced (BE-11.5, Data Model §10). Written once with the
+    outcome and never changed: this is what a calculation run pins (D-22)."""
+
+    manifest_id: uuid.UUID
+    manifest_sha256: str = Field(description="SHA-256 of the manifest content.")
+    manifest_version: int
+    validated_at: datetime
+    validated_by: str
+    import_id: uuid.UUID
+    status: ImportStatus = Field(description="The import's outcome status.")
+    source_id: uuid.UUID
+    source_code: str
+    source_profile_id: uuid.UUID
+    source_contract_id: uuid.UUID
+    source_contract_version: int
+    source_contract_sha256: str
+    schema_id: uuid.UUID
+    schema_code: str
+    schema_version_id: uuid.UUID
+    schema_version: int
+    schema_sha256: str
+    mapping_id: uuid.UUID
+    mapping_code: str
+    mapping_version_id: uuid.UUID
+    mapping_version: int
+    mapping_sha256: str
+    validation_profile: ManifestProfile
+    validator_version: int
+    artifact: ManifestArtifact
+    quality: ManifestQuality
+    canonical_sha256: str = Field(
+        description="SHA-256 over the accepted records' payload hashes in file order."
+    )
+
+
 class ImportDetail(ImportSummary):
     batches: list[BatchOut]
+    manifest: ImportManifest | None = Field(
+        default=None, description="Present once the import is validated (BE-11.5)."
+    )
 
 
 class ImportPage(BaseModel):
@@ -339,3 +408,87 @@ class ImportProfile(BaseModel):
     schema_version: int
     summary: ProfileSummary
     columns: list[ColumnProfile] = Field(description="In file order.")
+
+
+# --- Phase 11: validation issues and quarantine (BE-11.3, BE-11.4) ----------------------------
+
+
+class IssueOut(BaseModel):
+    """A validation finding. It names a row, field, column and rule; never a value."""
+
+    id: uuid.UUID
+    sequence: int = Field(description="Order in which validation raised it.")
+    row: int | None = Field(
+        description="1-based data row (source record ordinal); null for " "a file-level issue."
+    )
+    source_record_id: uuid.UUID | None
+    code: ValidationCode
+    severity: ValidationSeverity
+    disposition: IssueDisposition
+    field: str | None = Field(description="The schema field concerned, if any.")
+    source_column: str | None = Field(description="The source column concerned, if any.")
+    rule_position: int | None = Field(description="The mapping rule's position, if any.")
+    validation_profile_id: uuid.UUID
+    message: str = Field(description="Actionable text; never contains a value.")
+
+
+class IssuePage(BaseModel):
+    import_id: uuid.UUID
+    import_status: ImportStatus
+    items: list[IssueOut]
+    total: int
+    limit: int
+    offset: int
+    severity_counts: dict[str, int] = Field(
+        description="Severity -> issues of this import (unfiltered)."
+    )
+
+
+QuarantineCell = str | MaskedValue
+
+
+class QuarantineItemOut(BaseModel):
+    id: uuid.UUID
+    import_id: uuid.UUID
+    batch_id: uuid.UUID
+    source_record_id: uuid.UUID
+    row: int = Field(description="1-based data row (source record ordinal).")
+    locator: dict[str, str | int] = Field(description="Where the row is in the file.")
+    reason_codes: list[ValidationCode] = Field(description="Why the row is held.")
+    status: QuarantineStatus
+    owner: str
+    resolved_by_import_id: uuid.UUID | None
+    values: dict[str, QuarantineCell] = Field(
+        description="The row as read (never edited), masked by each column's classification."
+    )
+    extra_values: list[QuarantineCell] = Field(
+        description="Cells beyond the header, masked by the source's default classification."
+    )
+    allowed_dispositions: list[QuarantineStatus] = Field(
+        description="The statuses a reviewer may move this item to now."
+    )
+    created_at: datetime
+    updated_at: datetime
+
+
+class QuarantineBatch(BaseModel):
+    batch_id: uuid.UUID
+    batch_number: int
+    import_id: uuid.UUID
+    import_status: ImportStatus
+    source_id: uuid.UUID
+    columns: list[str] = Field(description="The batch's header, in file order.")
+    column_classifications: dict[str, str]
+    items: list[QuarantineItemOut]
+    total: int
+    limit: int
+    offset: int
+    status_counts: dict[str, int] = Field(description="Status -> items of this batch.")
+
+
+class DispositionIn(BaseModel):
+    status: QuarantineStatus = Field(
+        description="OPEN->UNDER_REVIEW; UNDER_REVIEW->REJECTED | RETRY_READY | OPEN. Other "
+        "moves are 409 invalid_transition (CORRECTED and RESOLVED come from a retry import)."
+    )
+    comment: SafeMultilineText | None = Field(default=None, max_length=1000)

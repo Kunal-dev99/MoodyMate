@@ -165,6 +165,31 @@ ALTER TABLE field_mapping ENABLE TRIGGER field_mapping_immutable;
 COMMIT;
 """
 
+# Validation results (Phase 11) reference imports, records and mapping versions: removed
+# before the mappings. Append-only, so the triggers are lifted for this one transaction.
+_VALIDATION_CLEANUP = """
+BEGIN;
+ALTER TABLE record_lineage DISABLE TRIGGER record_lineage_append_only;
+ALTER TABLE canonical_record DISABLE TRIGGER canonical_record_append_only;
+ALTER TABLE validation_issue DISABLE TRIGGER validation_issue_append_only;
+ALTER TABLE import_manifest DISABLE TRIGGER import_manifest_append_only;
+ALTER TABLE validation_profile DISABLE TRIGGER validation_profile_append_only;
+ALTER TABLE quarantine_item DISABLE TRIGGER quarantine_item_guard;
+DELETE FROM record_lineage;
+DELETE FROM canonical_record;
+DELETE FROM validation_issue;
+DELETE FROM import_manifest;
+DELETE FROM quarantine_item;
+DELETE FROM validation_profile WHERE seeded_by IS NULL;
+ALTER TABLE record_lineage ENABLE TRIGGER record_lineage_append_only;
+ALTER TABLE canonical_record ENABLE TRIGGER canonical_record_append_only;
+ALTER TABLE validation_issue ENABLE TRIGGER validation_issue_append_only;
+ALTER TABLE import_manifest ENABLE TRIGGER import_manifest_append_only;
+ALTER TABLE validation_profile ENABLE TRIGGER validation_profile_append_only;
+ALTER TABLE quarantine_item ENABLE TRIGGER quarantine_item_guard;
+COMMIT;
+"""
+
 # Deletes everything that is not seed data (D-11), children first.
 _CLEANUP = [
     "DELETE FROM user_role",
@@ -172,6 +197,7 @@ _CLEANUP = [
     "DELETE FROM role_permission WHERE seeded_by IS NULL",
     "DELETE FROM role WHERE seeded_by IS NULL",
     "DELETE FROM permission WHERE seeded_by IS NULL",
+    _VALIDATION_CLEANUP,
     _MAPPING_CLEANUP,
     _PROFILE_CLEANUP,
     _IMPORT_CLEANUP,
@@ -218,7 +244,13 @@ def script(url: str, statements: str) -> None:
 
 def clean(url: str) -> None:
     for statement in _CLEANUP:
-        if statement in (_INGESTION_CLEANUP, _IMPORT_CLEANUP, _PROFILE_CLEANUP, _MAPPING_CLEANUP):
+        if statement in (
+            _INGESTION_CLEANUP,
+            _IMPORT_CLEANUP,
+            _PROFILE_CLEANUP,
+            _MAPPING_CLEANUP,
+            _VALIDATION_CLEANUP,
+        ):
             try:
                 script(url, statement)
             except (asyncpg.UndefinedTableError, asyncpg.UndefinedObjectError):

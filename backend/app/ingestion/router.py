@@ -1,6 +1,7 @@
 """ingestion.router
 
-Source registration (BE-7.4), import (BE-8.4) and import profile (BE-9.3) endpoints. Every
+Source registration (BE-7.4), import (BE-8.4), import profile (BE-9.3), validation and
+issues (BE-11.3, BE-11.5) and quarantine (BE-11.4) endpoints. Every
 route declares its permission (D-04, the Feature 02 endpoint table); tenant scope comes from
 the principal.
 Writes are refused with 409 `ingestion_disabled` (audited) while INGESTION_ENABLED is off
@@ -26,7 +27,7 @@ from starlette.datastructures import UploadFile
 from starlette.formparsers import MultiPartException, MultiPartParser
 
 from app.core.auth import get_principal, require_permission
-from app.core.classification import mask_mapping
+from app.core.classification import MaskedValue, mask_mapping
 from app.core.config import Settings
 from app.core.errors import ApiError
 from app.core.principal import Principal
@@ -34,8 +35,22 @@ from app.db.session import get_session
 from app.governance.constants import Permission
 from app.governance.service import record_denial
 from app.ingestion.adapters import Limits
-from app.ingestion.constants import ImportStatus, UploadRefusal
-from app.ingestion.models import ImportJob, SourceContract, SourceSystem
+from app.ingestion.constants import (
+    ImportStatus,
+    QuarantineStatus,
+    UploadRefusal,
+    ValidationCode,
+    ValidationSeverity,
+)
+from app.ingestion.models import (
+    ImportJob,
+    ImportManifest,
+    QuarantineItem,
+    SourceContract,
+    SourceRecord,
+    SourceSystem,
+    ValidationIssue,
+)
 from app.ingestion.schemas import (
     ArtifactOut,
     BatchOut,
@@ -43,18 +58,27 @@ from app.ingestion.schemas import (
     ContractColumn,
     ContractIn,
     ContractOut,
+    DispositionIn,
     ImportDetail,
     ImportForm,
     ImportPage,
     ImportProfile,
     ImportSummary,
+    IssueOut,
+    IssuePage,
     ProfileOut,
     ProfileSummary,
+    QuarantineBatch,
+    QuarantineCell,
+    QuarantineItemOut,
     SourceCreate,
     SourceDetail,
     SourcePage,
     SourceSummary,
     TopValue,
+)
+from app.ingestion.schemas import (
+    ImportManifest as ImportManifestOut,
 )
 from app.ingestion.service import (
     ContractSpec,
@@ -63,9 +87,12 @@ from app.ingestion.service import (
     ImportService,
     ProfileSpec,
     ProfileView,
+    QuarantineService,
+    QuarantineView,
     SourceService,
     UploadSpec,
     current_contract,
+    manual_moves,
     profile_of,
 )
 
@@ -74,6 +101,8 @@ SourceReader = Annotated[Principal, Depends(require_permission(Permission.SOURCE
 SourceManager = Annotated[Principal, Depends(require_permission(Permission.SOURCE_MANAGE))]
 ImportReader = Annotated[Principal, Depends(require_permission(Permission.IMPORT_READ))]
 ImportWriter = Annotated[Principal, Depends(require_permission(Permission.IMPORT_WRITE))]
+QuarantineReader = Annotated[Principal, Depends(require_permission(Permission.QUARANTINE_READ))]
+QualityReviewer = Annotated[Principal, Depends(require_permission(Permission.QUALITY_REVIEW))]
 
 router = APIRouter(tags=["ingestion"])
 
@@ -260,6 +289,14 @@ UPLOAD_BODY: dict[str, Any] = {
                         "description": "JSON object of the contract's control-total columns "
                         'to exact decimal text, e.g. {"notional": "1234.50"}.',
                     },
+                    "retry_of_import_id": {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "A corrected file for this earlier QUARANTINED or "
+                        "FAILED import of the same source (D-20 §3). When the retry is "
+                        "validated, its RETRY_READY items whose business key it contains move "
+                        "to CORRECTED, then RESOLVED if accepted.",
+                    },
                 },
             }
         }
@@ -405,11 +442,32 @@ def _import_fields(job: ImportJob, labels: ImportLabels, principal: Principal) -
     )
 
 
-def _import_detail(job: ImportJob, labels: ImportLabels, principal: Principal) -> ImportDetail:
+def _manifest(manifest: ImportManifest | None) -> ImportManifestOut | None:
+    if manifest is None:
+        return None
+    return ImportManifestOut.model_validate(
+        {
+            **manifest.manifest,
+            "manifest_id": manifest.id,
+            "manifest_sha256": manifest.manifest_sha256,
+            "validated_at": manifest.created_at,
+            "validated_by": manifest.created_by,
+        }
+    )
+
+
+def _import_detail(
+    job: ImportJob,
+    labels: ImportLabels,
+    principal: Principal,
+    manifest: ImportManifest | None = None,
+) -> ImportDetail:
     return ImportDetail(
         **_import_fields(job, labels, principal).model_dump(),
+        manifest=_manifest(manifest),
         batches=[
             BatchOut(
+                id=b.id,
                 batch_number=b.batch_number,
                 sheet_name=b.sheet_name,
                 row_count=b.row_count,
@@ -478,6 +536,7 @@ async def create_import(
             synthetic_attested=form.synthetic_attested,
             expected_row_count=form.expected_row_count,
             control_totals=form.control_totals,
+            retry_of_import_id=form.retry_of_import_id,
         ),
         ImportPolicy(
             settings.data_class,
@@ -517,9 +576,10 @@ async def list_imports(
 async def get_import(
     import_id: uuid.UUID, principal: ImportReader, session: SessionDep
 ) -> ImportDetail:
+    """The import, with its manifest once validated (BE-11.5)."""
     service = ImportService(session, principal)
     job = await service.get(import_id)
-    return _import_detail(job, await service.labels([job]), principal)
+    return _import_detail(job, await service.labels([job]), principal, await service.manifest(job))
 
 
 # --- Phase 9: the import's profile (BE-9.3) -----------------------------------------------------
@@ -598,3 +658,159 @@ async def get_import_profile(
         summary=ProfileSummary.model_validate(snap.summary),
         columns=[_column_profile(c, view, clear) for c in snap.columns],
     )
+
+
+# --- Phase 11: validation, issues and quarantine (BE-11.3 – BE-11.5) ------------------------------
+
+
+@router.post(
+    "/imports/{import_id}/validate", response_model=ImportDetail, operation_id="validateImport"
+)
+async def validate_import(
+    import_id: uuid.UUID, principal: ImportWriter, session: SessionDep, _: IngestionEnabled
+) -> ImportDetail:
+    """Validate the import with its usable ACTIVE mapping version, once (D-21): it is pinned,
+    every row is accepted (a canonical record), quarantined or rejected, and the import ends
+    COMPLETED, COMPLETED_WITH_WARNINGS, QUARANTINED or FAILED (a file-level BLOCKER: no row
+    accepted). 409 `mapping_required` without a usable mapping version, 409
+    `already_validated` on a second call: a re-run is a new import."""
+    service = ImportService(session, principal)
+    job = await service.validate(import_id)
+    return _import_detail(job, await service.labels([job]), principal, await service.manifest(job))
+
+
+def _issue(issue: ValidationIssue) -> IssueOut:
+    return IssueOut(
+        id=issue.id,
+        sequence=issue.sequence,
+        row=issue.ordinal,
+        source_record_id=issue.source_record_id,
+        code=ValidationCode(issue.code),
+        severity=ValidationSeverity(issue.severity),
+        disposition=issue.disposition,
+        field=issue.field,
+        source_column=issue.source_column,
+        rule_position=issue.rule_position,
+        validation_profile_id=issue.validation_profile_id,
+        message=issue.message,
+    )
+
+
+@router.get(
+    "/imports/{import_id}/issues", response_model=IssuePage, operation_id="listImportIssues"
+)
+async def list_import_issues(
+    import_id: uuid.UUID,
+    principal: ImportReader,
+    session: SessionDep,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    severity: ValidationSeverity | None = None,
+    code: ValidationCode | None = None,
+    field: Annotated[
+        str | None,
+        Query(
+            min_length=1,
+            max_length=200,
+            description="A schema field or source column name (exact).",
+        ),
+    ] = None,
+) -> IssuePage:
+    """The import's validation issues, file-level first then by row, filtered by severity,
+    code and field. Issues carry no values."""
+    job, items, total, counts = await ImportService(session, principal).issues(
+        import_id, severity, code, field, limit, offset
+    )
+    return IssuePage(
+        import_id=job.id,
+        import_status=ImportStatus(job.status),
+        items=[_issue(i) for i in items],
+        total=total,
+        limit=limit,
+        offset=offset,
+        severity_counts=counts,
+    )
+
+
+def _quarantine_item(
+    item: QuarantineItem, record: SourceRecord, view: QuarantineView, clear: frozenset[str]
+) -> QuarantineItemOut:
+    """An item with its source row masked through mask_mapping by each column's
+    classification (BE-9.3, D-20); extra cells by the source's default classification."""
+    default = view.default_classification
+    extras: list[QuarantineCell] = [
+        value if default in clear else MaskedValue(classification=default)
+        for value in record.extra_values
+    ]
+    return QuarantineItemOut(
+        id=item.id,
+        import_id=item.import_job_id,
+        batch_id=item.batch_id,
+        source_record_id=item.source_record_id,
+        row=item.ordinal,
+        locator=record.locator,
+        reason_codes=[ValidationCode(c) for c in item.reason_codes],
+        status=QuarantineStatus(item.status),
+        owner=item.owner,
+        resolved_by_import_id=item.resolved_by_import_id,
+        values=mask_mapping(
+            record.raw_values,
+            {c: view.classifications.get(c, default) for c in record.raw_values},
+            clear,
+        ),
+        extra_values=extras,
+        allowed_dispositions=manual_moves(item.status),
+        created_at=item.created_at,
+        updated_at=item.updated_at,
+    )
+
+
+@router.get("/quarantine/{batch_id}", response_model=QuarantineBatch, operation_id="getQuarantine")
+async def get_quarantine(
+    batch_id: uuid.UUID,
+    principal: QuarantineReader,
+    session: SessionDep,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    status: QuarantineStatus | None = None,
+) -> QuarantineBatch:
+    """A batch's quarantined and rejected rows (D-20), by row, with their values masked by
+    classification. Nothing here is ever deleted."""
+    view = await QuarantineService(session, principal).batch_view(batch_id, status, limit, offset)
+    clear = principal.clear_classifications
+    return QuarantineBatch(
+        batch_id=view.batch.id,
+        batch_number=view.batch.batch_number,
+        import_id=view.job.id,
+        import_status=ImportStatus(view.job.status),
+        source_id=view.job.source_system_id,
+        columns=view.batch.columns,
+        column_classifications=view.classifications,
+        items=[_quarantine_item(i, r, view, clear) for i, r in view.items],
+        total=view.total,
+        limit=limit,
+        offset=offset,
+        status_counts=view.status_counts,
+    )
+
+
+@router.post(
+    "/quarantine/{batch_id}/items/{quarantine_id}/disposition",
+    response_model=QuarantineItemOut,
+    operation_id="dispositionQuarantineItem",
+)
+async def disposition_quarantine_item(
+    batch_id: uuid.UUID,
+    quarantine_id: uuid.UUID,
+    body: DispositionIn,
+    principal: QualityReviewer,
+    session: SessionDep,
+    _: IngestionEnabled,
+) -> QuarantineItemOut:
+    """Move an item along the D-20 table (audited). No row is deleted or edited; a
+    correction is a new import with retry_of_import_id."""
+    view = await QuarantineService(session, principal).disposition(
+        batch_id, quarantine_id, body.status, body.comment
+    )
+    [(item, record)] = view.items
+    return _quarantine_item(item, record, view, principal.clear_classifications)

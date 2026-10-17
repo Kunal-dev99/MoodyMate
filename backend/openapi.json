@@ -255,6 +255,12 @@
             "title": "Column Count",
             "type": "integer"
           },
+          "id": {
+            "description": "The batch id (GET /quarantine/{batch_id}).",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
           "row_count": {
             "title": "Row Count",
             "type": "integer"
@@ -272,6 +278,7 @@
           }
         },
         "required": [
+          "id",
           "batch_number",
           "sheet_name",
           "row_count",
@@ -884,6 +891,32 @@
         "title": "DevSessionResponse",
         "type": "object"
       },
+      "DispositionIn": {
+        "properties": {
+          "comment": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          },
+          "status": {
+            "$ref": "#/components/schemas/QuarantineStatus",
+            "description": "OPEN->UNDER_REVIEW; UNDER_REVIEW->REJECTED | RETRY_READY | OPEN. Other moves are 409 invalid_transition (CORRECTED and RESOLVED come from a retry import)."
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "DispositionIn",
+        "type": "object"
+      },
       "EnvironmentInfo": {
         "description": "Shown on every page outside production (FE-6.1).",
         "properties": {
@@ -1215,6 +1248,17 @@
             "title": "Id",
             "type": "string"
           },
+          "manifest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ImportManifest"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Present once the import is validated (BE-11.5)."
+          },
           "mapping_version_id": {
             "anyOf": [
               {
@@ -1331,6 +1375,164 @@
           "batches"
         ],
         "title": "ImportDetail",
+        "type": "object"
+      },
+      "ImportManifest": {
+        "description": "What validation pinned and produced (BE-11.5, Data Model \u00a710). Written once with the\noutcome and never changed: this is what a calculation run pins (D-22).",
+        "properties": {
+          "artifact": {
+            "$ref": "#/components/schemas/ManifestArtifact"
+          },
+          "canonical_sha256": {
+            "description": "SHA-256 over the accepted records' payload hashes in file order.",
+            "title": "Canonical Sha256",
+            "type": "string"
+          },
+          "import_id": {
+            "format": "uuid",
+            "title": "Import Id",
+            "type": "string"
+          },
+          "manifest_id": {
+            "format": "uuid",
+            "title": "Manifest Id",
+            "type": "string"
+          },
+          "manifest_sha256": {
+            "description": "SHA-256 of the manifest content.",
+            "title": "Manifest Sha256",
+            "type": "string"
+          },
+          "manifest_version": {
+            "title": "Manifest Version",
+            "type": "integer"
+          },
+          "mapping_code": {
+            "title": "Mapping Code",
+            "type": "string"
+          },
+          "mapping_id": {
+            "format": "uuid",
+            "title": "Mapping Id",
+            "type": "string"
+          },
+          "mapping_sha256": {
+            "title": "Mapping Sha256",
+            "type": "string"
+          },
+          "mapping_version": {
+            "title": "Mapping Version",
+            "type": "integer"
+          },
+          "mapping_version_id": {
+            "format": "uuid",
+            "title": "Mapping Version Id",
+            "type": "string"
+          },
+          "quality": {
+            "$ref": "#/components/schemas/ManifestQuality"
+          },
+          "schema_code": {
+            "title": "Schema Code",
+            "type": "string"
+          },
+          "schema_id": {
+            "format": "uuid",
+            "title": "Schema Id",
+            "type": "string"
+          },
+          "schema_sha256": {
+            "title": "Schema Sha256",
+            "type": "string"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "schema_version_id": {
+            "format": "uuid",
+            "title": "Schema Version Id",
+            "type": "string"
+          },
+          "source_code": {
+            "title": "Source Code",
+            "type": "string"
+          },
+          "source_contract_id": {
+            "format": "uuid",
+            "title": "Source Contract Id",
+            "type": "string"
+          },
+          "source_contract_sha256": {
+            "title": "Source Contract Sha256",
+            "type": "string"
+          },
+          "source_contract_version": {
+            "title": "Source Contract Version",
+            "type": "integer"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          },
+          "source_profile_id": {
+            "format": "uuid",
+            "title": "Source Profile Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ImportStatus",
+            "description": "The import's outcome status."
+          },
+          "validated_at": {
+            "format": "date-time",
+            "title": "Validated At",
+            "type": "string"
+          },
+          "validated_by": {
+            "title": "Validated By",
+            "type": "string"
+          },
+          "validation_profile": {
+            "$ref": "#/components/schemas/ManifestProfile"
+          },
+          "validator_version": {
+            "title": "Validator Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "manifest_id",
+          "manifest_sha256",
+          "manifest_version",
+          "validated_at",
+          "validated_by",
+          "import_id",
+          "status",
+          "source_id",
+          "source_code",
+          "source_profile_id",
+          "source_contract_id",
+          "source_contract_version",
+          "source_contract_sha256",
+          "schema_id",
+          "schema_code",
+          "schema_version_id",
+          "schema_version",
+          "schema_sha256",
+          "mapping_id",
+          "mapping_code",
+          "mapping_version_id",
+          "mapping_version",
+          "mapping_sha256",
+          "validation_profile",
+          "validator_version",
+          "artifact",
+          "quality",
+          "canonical_sha256"
+        ],
+        "title": "ImportManifest",
         "type": "object"
       },
       "ImportPage": {
@@ -1694,6 +1896,177 @@
         "title": "IssueCode",
         "type": "string"
       },
+      "IssueDisposition": {
+        "description": "D-23 `validation_issue.disposition`: what the issue does to its row (or file).",
+        "enum": [
+          "ACCEPTED_WITH_WARNING",
+          "QUARANTINED",
+          "REJECTED",
+          "FILE_BLOCKED"
+        ],
+        "title": "IssueDisposition",
+        "type": "string"
+      },
+      "IssueOut": {
+        "description": "A validation finding. It names a row, field, column and rule; never a value.",
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/ValidationCode"
+          },
+          "disposition": {
+            "$ref": "#/components/schemas/IssueDisposition"
+          },
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The schema field concerned, if any.",
+            "title": "Field"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "message": {
+            "description": "Actionable text; never contains a value.",
+            "title": "Message",
+            "type": "string"
+          },
+          "row": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "1-based data row (source record ordinal); null for a file-level issue.",
+            "title": "Row"
+          },
+          "rule_position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The mapping rule's position, if any.",
+            "title": "Rule Position"
+          },
+          "sequence": {
+            "description": "Order in which validation raised it.",
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/ValidationSeverity"
+          },
+          "source_column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The source column concerned, if any.",
+            "title": "Source Column"
+          },
+          "source_record_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Record Id"
+          },
+          "validation_profile_id": {
+            "format": "uuid",
+            "title": "Validation Profile Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "sequence",
+          "row",
+          "source_record_id",
+          "code",
+          "severity",
+          "disposition",
+          "field",
+          "source_column",
+          "rule_position",
+          "validation_profile_id",
+          "message"
+        ],
+        "title": "IssueOut",
+        "type": "object"
+      },
+      "IssuePage": {
+        "properties": {
+          "import_id": {
+            "format": "uuid",
+            "title": "Import Id",
+            "type": "string"
+          },
+          "import_status": {
+            "$ref": "#/components/schemas/ImportStatus"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/IssueOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "severity_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Severity -> issues of this import (unfiltered).",
+            "title": "Severity Counts",
+            "type": "object"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "import_id",
+          "import_status",
+          "items",
+          "total",
+          "limit",
+          "offset",
+          "severity_counts"
+        ],
+        "title": "IssuePage",
+        "type": "object"
+      },
       "IssueSeverity": {
         "enum": [
           "BLOCKER",
@@ -1718,6 +2091,99 @@
           "code"
         ],
         "title": "LowerTransform",
+        "type": "object"
+      },
+      "ManifestArtifact": {
+        "properties": {
+          "classification": {
+            "title": "Classification",
+            "type": "string"
+          },
+          "sha256": {
+            "description": "SHA-256 of the raw artifact (hex).",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sha256",
+          "size_bytes",
+          "classification"
+        ],
+        "title": "ManifestArtifact",
+        "type": "object"
+      },
+      "ManifestProfile": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "content_sha256": {
+            "title": "Content Sha256",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "provisional": {
+            "title": "Provisional",
+            "type": "boolean"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "version",
+          "content_sha256",
+          "provisional"
+        ],
+        "title": "ManifestProfile",
+        "type": "object"
+      },
+      "ManifestQuality": {
+        "description": "accepted + quarantined + rejected = row_count, always (D-20 \u00a71, DB CHECK).",
+        "properties": {
+          "accepted_records": {
+            "title": "Accepted Records",
+            "type": "integer"
+          },
+          "quarantined_records": {
+            "title": "Quarantined Records",
+            "type": "integer"
+          },
+          "rejected_records": {
+            "title": "Rejected Records",
+            "type": "integer"
+          },
+          "row_count": {
+            "title": "Row Count",
+            "type": "integer"
+          },
+          "warnings": {
+            "description": "WARNING-severity issues (file- and row-level).",
+            "title": "Warnings",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "row_count",
+          "accepted_records",
+          "quarantined_records",
+          "rejected_records",
+          "warnings"
+        ],
+        "title": "ManifestQuality",
         "type": "object"
       },
       "MapValuesParams": {
@@ -3159,6 +3625,241 @@
         "title": "ProposalSubmit",
         "type": "object"
       },
+      "QuarantineBatch": {
+        "properties": {
+          "batch_id": {
+            "format": "uuid",
+            "title": "Batch Id",
+            "type": "string"
+          },
+          "batch_number": {
+            "title": "Batch Number",
+            "type": "integer"
+          },
+          "column_classifications": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Column Classifications",
+            "type": "object"
+          },
+          "columns": {
+            "description": "The batch's header, in file order.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Columns",
+            "type": "array"
+          },
+          "import_id": {
+            "format": "uuid",
+            "title": "Import Id",
+            "type": "string"
+          },
+          "import_status": {
+            "$ref": "#/components/schemas/ImportStatus"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/QuarantineItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          },
+          "status_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Status -> items of this batch.",
+            "title": "Status Counts",
+            "type": "object"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "batch_id",
+          "batch_number",
+          "import_id",
+          "import_status",
+          "source_id",
+          "columns",
+          "column_classifications",
+          "items",
+          "total",
+          "limit",
+          "offset",
+          "status_counts"
+        ],
+        "title": "QuarantineBatch",
+        "type": "object"
+      },
+      "QuarantineItemOut": {
+        "properties": {
+          "allowed_dispositions": {
+            "description": "The statuses a reviewer may move this item to now.",
+            "items": {
+              "$ref": "#/components/schemas/QuarantineStatus"
+            },
+            "title": "Allowed Dispositions",
+            "type": "array"
+          },
+          "batch_id": {
+            "format": "uuid",
+            "title": "Batch Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "extra_values": {
+            "description": "Cells beyond the header, masked by the source's default classification.",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/components/schemas/MaskedValue"
+                }
+              ]
+            },
+            "title": "Extra Values",
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "import_id": {
+            "format": "uuid",
+            "title": "Import Id",
+            "type": "string"
+          },
+          "locator": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "description": "Where the row is in the file.",
+            "title": "Locator",
+            "type": "object"
+          },
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "reason_codes": {
+            "description": "Why the row is held.",
+            "items": {
+              "$ref": "#/components/schemas/ValidationCode"
+            },
+            "title": "Reason Codes",
+            "type": "array"
+          },
+          "resolved_by_import_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved By Import Id"
+          },
+          "row": {
+            "description": "1-based data row (source record ordinal).",
+            "title": "Row",
+            "type": "integer"
+          },
+          "source_record_id": {
+            "format": "uuid",
+            "title": "Source Record Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/QuarantineStatus"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "values": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/components/schemas/MaskedValue"
+                }
+              ]
+            },
+            "description": "The row as read (never edited), masked by each column's classification.",
+            "title": "Values",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "import_id",
+          "batch_id",
+          "source_record_id",
+          "row",
+          "locator",
+          "reason_codes",
+          "status",
+          "owner",
+          "resolved_by_import_id",
+          "values",
+          "extra_values",
+          "allowed_dispositions",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "QuarantineItemOut",
+        "type": "object"
+      },
+      "QuarantineStatus": {
+        "description": "Data Model \u00a79 `quarantine_item.status`.",
+        "enum": [
+          "OPEN",
+          "UNDER_REVIEW",
+          "REJECTED",
+          "CORRECTED",
+          "RETRY_READY",
+          "RESOLVED"
+        ],
+        "title": "QuarantineStatus",
+        "type": "string"
+      },
       "RetentionState": {
         "description": "`import_artifact.retention_state`. D-20 \u00a74 (PROVISIONAL): artifacts are kept\nindefinitely until the client sets retention; no other state exists yet.",
         "enum": [
@@ -4531,6 +5232,35 @@
         "title": "ValidateIn",
         "type": "object"
       },
+      "ValidationCode": {
+        "description": "Validation issue codes (BE-11.2). An issue names a row, a field or a column and a\nrule, never a value. File-level codes have no row.",
+        "enum": [
+          "REQUIRED_FIELD_UNMAPPED",
+          "REQUIRED_COLUMN_MISSING",
+          "BUSINESS_KEY_COLUMN_MISSING",
+          "MAPPING_RULE_INVALID",
+          "SOURCE_COLUMN_MISSING",
+          "UNMAPPED_COLUMN",
+          "BLANK_ROW",
+          "EXTRA_CELLS",
+          "MISSING_CELLS",
+          "CELL_ERROR",
+          "FORMULA_WITHOUT_CACHED_VALUE",
+          "FORMULA_CACHED_VALUE",
+          "PRECISION_BEYOND_15_DIGITS",
+          "REQUIRED_VALUE_MISSING",
+          "INVALID_TYPE",
+          "INVALID_DATE",
+          "SCALE_EXCEEDED",
+          "PRECISION_EXCEEDED",
+          "INVALID_CURRENCY_CODE",
+          "UNMAPPED_VALUE",
+          "MISSING_BUSINESS_KEY",
+          "DUPLICATE_BUSINESS_KEY"
+        ],
+        "title": "ValidationCode",
+        "type": "string"
+      },
       "ValidationIssue": {
         "description": "What is wrong, where (rule, field, column) and how often. Never a source value.",
         "properties": {
@@ -4662,6 +5392,17 @@
         ],
         "title": "ValidationRef",
         "type": "object"
+      },
+      "ValidationSeverity": {
+        "description": "Data Model \u00a79 `validation_issue.severity`.",
+        "enum": [
+          "INFO",
+          "WARNING",
+          "ERROR",
+          "BLOCKER"
+        ],
+        "title": "ValidationSeverity",
+        "type": "string"
       },
       "ValueParams": {
         "additionalProperties": false,
@@ -5223,6 +5964,11 @@
                     "format": "binary",
                     "type": "string"
                   },
+                  "retry_of_import_id": {
+                    "description": "A corrected file for this earlier QUARANTINED or FAILED import of the same source (D-20 \u00a73). When the retry is validated, its RETRY_READY items whose business key it contains move to CORRECTED, then RESOLVED if accepted.",
+                    "format": "uuid",
+                    "type": "string"
+                  },
                   "source_id": {
                     "format": "uuid",
                     "type": "string"
@@ -5299,6 +6045,7 @@
     },
     "/api/v1/imports/{import_id}": {
       "get": {
+        "description": "The import, with its manifest once validated (BE-11.5).",
         "operationId": "getImport",
         "parameters": [
           {
@@ -5350,6 +6097,140 @@
           }
         ],
         "summary": "Get Import",
+        "tags": [
+          "ingestion"
+        ]
+      }
+    },
+    "/api/v1/imports/{import_id}/issues": {
+      "get": {
+        "description": "The import's validation issues, file-level first then by row, filtered by severity,\ncode and field. Issues carry no values.",
+        "operationId": "listImportIssues",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "import_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Import Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "severity",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ValidationSeverity"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Severity"
+            }
+          },
+          {
+            "in": "query",
+            "name": "code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ValidationCode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Code"
+            }
+          },
+          {
+            "description": "A schema field or source column name (exact).",
+            "in": "query",
+            "name": "field",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A schema field or source column name (exact).",
+              "title": "Field"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssuePage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Import Issues",
         "tags": [
           "ingestion"
         ]
@@ -5478,6 +6359,65 @@
           }
         ],
         "summary": "Get Import Profile",
+        "tags": [
+          "ingestion"
+        ]
+      }
+    },
+    "/api/v1/imports/{import_id}/validate": {
+      "post": {
+        "description": "Validate the import with its usable ACTIVE mapping version, once (D-21): it is pinned,\nevery row is accepted (a canonical record), quarantined or rejected, and the import ends\nCOMPLETED, COMPLETED_WITH_WARNINGS, QUARANTINED or FAILED (a file-level BLOCKER: no row\naccepted). 409 `mapping_required` without a usable mapping version, 409\n`already_validated` on a second call: a re-run is a new import.",
+        "operationId": "validateImport",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "import_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Import Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Validate Import",
         "tags": [
           "ingestion"
         ]
@@ -6021,6 +6961,183 @@
         "summary": "My Permissions",
         "tags": [
           "identity"
+        ]
+      }
+    },
+    "/api/v1/quarantine/{batch_id}": {
+      "get": {
+        "description": "A batch's quarantined and rejected rows (D-20), by row, with their values masked by\nclassification. Nothing here is ever deleted.",
+        "operationId": "getQuarantine",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Batch Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/QuarantineStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuarantineBatch"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Quarantine",
+        "tags": [
+          "ingestion"
+        ]
+      }
+    },
+    "/api/v1/quarantine/{batch_id}/items/{quarantine_id}/disposition": {
+      "post": {
+        "description": "Move an item along the D-20 table (audited). No row is deleted or edited; a\ncorrection is a new import with retry_of_import_id.",
+        "operationId": "dispositionQuarantineItem",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Batch Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "quarantine_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Quarantine Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DispositionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuarantineItemOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Disposition Quarantine Item",
+        "tags": [
+          "ingestion"
         ]
       }
     },
