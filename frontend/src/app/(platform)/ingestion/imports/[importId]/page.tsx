@@ -16,8 +16,10 @@ import { MaskedValue, isMasked } from '@/components/common/MaskedValue'
 import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
 import { startLoad, type LoadFailure } from '@/components/common/load'
+import { ImportDriftTab } from '@/components/ingestion/ImportDriftTab'
 import { ImportProfileTab } from '@/components/ingestion/ImportProfileTab'
 import { ImportQuarantineTab } from '@/components/ingestion/ImportQuarantineTab'
+import { ImportReconciliationTab } from '@/components/ingestion/ImportReconciliationTab'
 import { ImportValidationTab } from '@/components/ingestion/ImportValidationTab'
 import { ImportStatusPill } from '@/components/ingestion/ImportStatusPill'
 import { ImportsPlanned } from '@/components/ingestion/ImportsTab'
@@ -26,7 +28,14 @@ import { formatBytes, type ImportDetail } from '@/components/ingestion/imports'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { IMPORT_PROFILE_UI_ENABLED, IMPORTS_UI_ENABLED, MAPPING_UI_ENABLED, VALIDATION_UI_ENABLED } from '@/config/features'
+import {
+  DRIFT_UI_ENABLED,
+  IMPORT_PROFILE_UI_ENABLED,
+  IMPORTS_UI_ENABLED,
+  MAPPING_UI_ENABLED,
+  RECONCILIATION_UI_ENABLED,
+  VALIDATION_UI_ENABLED,
+} from '@/config/features'
 
 type State = { kind: 'loading' } | { kind: 'ready'; job: ImportDetail } | LoadFailure
 
@@ -44,13 +53,15 @@ function Field({ label, children, testId }: { label: string; children: ReactNode
   )
 }
 
-type TabKey = 'status' | 'profile' | 'validation' | 'quarantine'
+type TabKey = 'status' | 'profile' | 'validation' | 'quarantine' | 'reconciliation' | 'drift'
 
 /**
  * FE-9.1: Status and Profile tabs, with the open one in `?tab=` so a link can open the
  * profile. Behind IMPORT_PROFILE_UI_ENABLED: off, the page is the Phase 8 layout.
  * FE-11.1/11.2: Validation and Quarantine tabs behind VALIDATION_UI_ENABLED; Quarantine
  * only with quarantine:read (cosmetic: the server refuses the call too, D-04).
+ * FE-12.1/12.2: Reconciliation and Drift tabs (import:read, like the page), behind
+ * RECONCILIATION_UI_ENABLED and DRIFT_UI_ENABLED; both off, the tabs are the Phase 11 set.
  */
 function ImportTabs({ job, status, onChanged }: { job: ImportDetail; status: ReactNode; onChanged: (job: ImportDetail | null) => void }) {
   const importId = job.id
@@ -61,6 +72,8 @@ function ImportTabs({ job, status, onChanged }: { job: ImportDetail; status: Rea
   if (IMPORT_PROFILE_UI_ENABLED) tabs.push('profile')
   if (VALIDATION_UI_ENABLED) tabs.push('validation')
   if (VALIDATION_UI_ENABLED && has('quarantine:read')) tabs.push('quarantine')
+  if (RECONCILIATION_UI_ENABLED) tabs.push('reconciliation')
+  if (DRIFT_UI_ENABLED) tabs.push('drift')
   const requested = params.get('tab') as TabKey | null
   const tab: TabKey = requested && tabs.includes(requested) ? requested : 'status'
   const select = (value: string) => {
@@ -91,6 +104,16 @@ function ImportTabs({ job, status, onChanged }: { job: ImportDetail; status: Rea
             Quarantine
           </TabsTrigger>
         )}
+        {tabs.includes('reconciliation') && (
+          <TabsTrigger value="reconciliation" data-testid="import-tab-reconciliation">
+            Reconciliation
+          </TabsTrigger>
+        )}
+        {tabs.includes('drift') && (
+          <TabsTrigger value="drift" data-testid="import-tab-drift">
+            Drift
+          </TabsTrigger>
+        )}
       </TabsList>
       <TabsContent value="status" className="mt-4 space-y-4">
         {status}
@@ -108,6 +131,17 @@ function ImportTabs({ job, status, onChanged }: { job: ImportDetail; status: Rea
       {tabs.includes('quarantine') && (
         <TabsContent value="quarantine" className="mt-4">
           <ImportQuarantineTab job={job} />
+        </TabsContent>
+      )}
+      {tabs.includes('reconciliation') && (
+        <TabsContent value="reconciliation" className="mt-4">
+          {/* Reloaded when validation writes the manifest (and with it the reconciliation). */}
+          <ImportReconciliationTab key={job.manifest?.manifest_id ?? 'not-validated'} job={job} />
+        </TabsContent>
+      )}
+      {tabs.includes('drift') && (
+        <TabsContent value="drift" className="mt-4">
+          <ImportDriftTab job={job} />
         </TabsContent>
       )}
     </Tabs>
@@ -325,7 +359,7 @@ function ImportView({ importId }: { importId: string }) {
           </p>
         )}
 
-        {IMPORT_PROFILE_UI_ENABLED || VALIDATION_UI_ENABLED ? (
+        {IMPORT_PROFILE_UI_ENABLED || VALIDATION_UI_ENABLED || RECONCILIATION_UI_ENABLED || DRIFT_UI_ENABLED ? (
           <ImportTabs
             job={job}
             status={sections}

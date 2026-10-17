@@ -917,6 +917,374 @@
         "title": "DispositionIn",
         "type": "object"
       },
+      "DriftEventOut": {
+        "properties": {
+          "allowed_outcomes": {
+            "description": "Review outcomes still possible.",
+            "items": {
+              "$ref": "#/components/schemas/DriftStatus"
+            },
+            "title": "Allowed Outcomes",
+            "type": "array"
+          },
+          "baseline": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DriftSummary"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The baseline's column (none if added)."
+          },
+          "baseline_import_id": {
+            "description": "The latest COMPLETED or COMPLETED_WITH_WARNINGS import of the same source.",
+            "format": "uuid",
+            "title": "Baseline Import Id",
+            "type": "string"
+          },
+          "classification": {
+            "description": "Masks the summaries' min and max (BE-9.3 rule).",
+            "title": "Classification",
+            "type": "string"
+          },
+          "column": {
+            "title": "Column",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "detector_version": {
+            "title": "Detector Version",
+            "type": "integer"
+          },
+          "drift_type": {
+            "$ref": "#/components/schemas/DriftType"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "import_id": {
+            "format": "uuid",
+            "title": "Import Id",
+            "type": "string"
+          },
+          "observed": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DriftSummary"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "This import's column (none if removed)."
+          },
+          "proposal_link": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProposalLink"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set when the review is ACTION_REQUIRED: a link hint, nothing created."
+          },
+          "review_comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Comment"
+          },
+          "reviewed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed At"
+          },
+          "reviewed_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed By"
+          },
+          "sequence": {
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DriftStatus"
+          },
+          "thresholds": {
+            "additionalProperties": true,
+            "description": "PROVISIONAL thresholds applied (text).",
+            "title": "Thresholds",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "import_id",
+          "sequence",
+          "baseline_import_id",
+          "drift_type",
+          "column",
+          "classification",
+          "observed",
+          "baseline",
+          "thresholds",
+          "detector_version",
+          "status",
+          "allowed_outcomes",
+          "reviewed_by",
+          "review_comment",
+          "reviewed_at",
+          "proposal_link",
+          "created_at"
+        ],
+        "title": "DriftEventOut",
+        "type": "object"
+      },
+      "DriftPage": {
+        "properties": {
+          "baseline_import_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The baseline the events compare with (none when there are no events).",
+            "title": "Baseline Import Id"
+          },
+          "import_id": {
+            "format": "uuid",
+            "title": "Import Id",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DriftEventOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "status_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Status Counts",
+            "type": "object"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "import_id",
+          "baseline_import_id",
+          "items",
+          "total",
+          "status_counts"
+        ],
+        "title": "DriftPage",
+        "type": "object"
+      },
+      "DriftReviewIn": {
+        "properties": {
+          "comment": {
+            "description": "Required.",
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Comment",
+            "type": "string"
+          },
+          "outcome": {
+            "description": "ACKNOWLEDGED, or ACTION_REQUIRED (a schema change should be proposed).",
+            "enum": [
+              "ACKNOWLEDGED",
+              "ACTION_REQUIRED"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          }
+        },
+        "required": [
+          "outcome",
+          "comment"
+        ],
+        "title": "DriftReviewIn",
+        "type": "object"
+      },
+      "DriftStatus": {
+        "description": "D-23 `data_drift_event.status`. A person reviews an OPEN event once.",
+        "enum": [
+          "OPEN",
+          "ACKNOWLEDGED",
+          "ACTION_REQUIRED"
+        ],
+        "title": "DriftStatus",
+        "type": "string"
+      },
+      "DriftSummary": {
+        "description": "A column's profile statistics on one side of a drift event. `min` and `max` are data,\nmasked by the event's classification; everything else is metadata.",
+        "properties": {
+          "candidate_types": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Candidate Types",
+            "type": "array"
+          },
+          "distinct_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distinct Count"
+          },
+          "max": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max"
+          },
+          "min": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min"
+          },
+          "null_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Null Count"
+          },
+          "null_rate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Decimal text (4 places), never a number.",
+            "title": "Null Rate"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position"
+          },
+          "suggested_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suggested Type"
+          },
+          "value_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Count"
+          }
+        },
+        "required": [
+          "position",
+          "value_count",
+          "null_count",
+          "null_rate",
+          "distinct_count",
+          "candidate_types",
+          "suggested_type",
+          "min",
+          "max"
+        ],
+        "title": "DriftSummary",
+        "type": "object"
+      },
+      "DriftType": {
+        "description": "D-23 `data_drift_event.drift_type`: how an import's profile differs from its\nbaseline's (the latest COMPLETED or COMPLETED_WITH_WARNINGS import of the same source).",
+        "enum": [
+          "COLUMN_ADDED",
+          "COLUMN_REMOVED",
+          "TYPE_CHANGED",
+          "NULL_RATE_SHIFT",
+          "RANGE_SHIFT"
+        ],
+        "title": "DriftType",
+        "type": "string"
+      },
       "EnvironmentInfo": {
         "description": "Shown on every page outside production (FE-6.1).",
         "properties": {
@@ -3401,6 +3769,33 @@
         "title": "ProposalDecision",
         "type": "string"
       },
+      "ProposalLink": {
+        "description": "Where a person proposes a schema change (the Phase 5 page, target schema prefilled).\nA hint only: nothing was created.",
+        "properties": {
+          "href": {
+            "description": "Frontend route, e.g. /schemas/proposals/new?schema={id}.",
+            "title": "Href",
+            "type": "string"
+          },
+          "kind": {
+            "const": "SCHEMA_CHANGE_PROPOSAL",
+            "default": "SCHEMA_CHANGE_PROPOSAL",
+            "title": "Kind",
+            "type": "string"
+          },
+          "schema_id": {
+            "format": "uuid",
+            "title": "Schema Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "href",
+          "schema_id"
+        ],
+        "title": "ProposalLink",
+        "type": "object"
+      },
       "ProposalList": {
         "properties": {
           "items": {
@@ -3858,6 +4253,219 @@
           "RESOLVED"
         ],
         "title": "QuarantineStatus",
+        "type": "string"
+      },
+      "ReconciliationCheck": {
+        "description": "What one `reconciliation_item` compares (BE-12.2). `variance = source - target`.\n\n- ROW_COUNT: source rows vs accepted rows; held = quarantined + rejected. Zero tolerance.\n- EXPECTED_ROW_COUNT: the upload's declared `expected_row_count` vs the source rows.\n  Zero tolerance.\n- CONTROL_TOTAL: per contract control-total column, the source total of the parseable\n  values vs the accepted rows' total; held = the held rows' total.\n- DECLARED_CONTROL_TOTAL: the upload's declared total vs that source total.",
+        "enum": [
+          "ROW_COUNT",
+          "EXPECTED_ROW_COUNT",
+          "CONTROL_TOTAL",
+          "DECLARED_CONTROL_TOTAL"
+        ],
+        "title": "ReconciliationCheck",
+        "type": "string"
+      },
+      "ReconciliationItemOut": {
+        "properties": {
+          "check": {
+            "$ref": "#/components/schemas/ReconciliationCheck"
+          },
+          "classification": {
+            "description": "Masks this item's figures (public for counts).",
+            "title": "Classification",
+            "type": "string"
+          },
+          "column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The control-total column (none for row counts).",
+            "title": "Column"
+          },
+          "details": {
+            "additionalProperties": true,
+            "description": "Counts of parseable, unparseable and empty values (totals only).",
+            "title": "Details",
+            "type": "object"
+          },
+          "held": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The part of the gap that held (quarantined or rejected) rows explain.",
+            "title": "Held"
+          },
+          "sequence": {
+            "description": "Check order within the run.",
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "description": "Exact decimal text. ROW_COUNT: source rows; EXPECTED_ROW_COUNT: the declared count; CONTROL_TOTAL: the total of the column's parseable values over all rows; DECLARED_CONTROL_TOTAL: the declared total.",
+            "title": "Source"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ReconciliationItemStatus"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "description": "ROW_COUNT: accepted rows; EXPECTED_ROW_COUNT: source rows; CONTROL_TOTAL: the accepted rows' total; DECLARED_CONTROL_TOTAL: the source total.",
+            "title": "Target"
+          },
+          "tolerance": {
+            "description": "Absolute tolerance applied (row counts: 0).",
+            "title": "Tolerance",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "'rows' for counts; for totals, the unit of the schema field the column is mapped to (none when it has none).",
+            "title": "Unit"
+          },
+          "variance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "description": "source - target, exact.",
+            "title": "Variance"
+          }
+        },
+        "required": [
+          "sequence",
+          "check",
+          "column",
+          "unit",
+          "classification",
+          "source",
+          "target",
+          "held",
+          "variance",
+          "tolerance",
+          "status",
+          "details"
+        ],
+        "title": "ReconciliationItemOut",
+        "type": "object"
+      },
+      "ReconciliationItemStatus": {
+        "description": "D-23 `reconciliation_item.status`, a function of the variance and the tolerance.",
+        "enum": [
+          "MATCHED",
+          "WITHIN_TOLERANCE",
+          "VARIANCE"
+        ],
+        "title": "ReconciliationItemStatus",
+        "type": "string"
+      },
+      "ReconciliationOut": {
+        "properties": {
+          "import_id": {
+            "format": "uuid",
+            "title": "Import Id",
+            "type": "string"
+          },
+          "import_status": {
+            "$ref": "#/components/schemas/ImportStatus"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ReconciliationItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/ReconciliationOutcome",
+            "description": "MATCHED only when every item is MATCHED; BROKEN when a gap is not explained by held rows (or a declared figure differs); else REVIEW_REQUIRED."
+          },
+          "reconciled_at": {
+            "format": "date-time",
+            "title": "Reconciled At",
+            "type": "string"
+          },
+          "reconciled_by": {
+            "title": "Reconciled By",
+            "type": "string"
+          },
+          "reconciler_version": {
+            "title": "Reconciler Version",
+            "type": "integer"
+          },
+          "reconciliation_id": {
+            "format": "uuid",
+            "title": "Reconciliation Id",
+            "type": "string"
+          },
+          "tolerance_policy": {
+            "additionalProperties": true,
+            "description": "PROVISIONAL tolerance policy applied.",
+            "title": "Tolerance Policy",
+            "type": "object"
+          }
+        },
+        "required": [
+          "reconciliation_id",
+          "import_id",
+          "import_status",
+          "outcome",
+          "tolerance_policy",
+          "reconciler_version",
+          "reconciled_at",
+          "reconciled_by",
+          "items"
+        ],
+        "title": "ReconciliationOut",
+        "type": "object"
+      },
+      "ReconciliationOutcome": {
+        "description": "D-23 `reconciliation_run.outcome`. MATCHED only when every item is MATCHED.",
+        "enum": [
+          "MATCHED",
+          "REVIEW_REQUIRED",
+          "BROKEN"
+        ],
+        "title": "ReconciliationOutcome",
         "type": "string"
       },
       "RetentionState": {
@@ -5782,6 +6390,75 @@
         ]
       }
     },
+    "/api/v1/drift-events/{drift_event_id}/review": {
+      "post": {
+        "description": "Review an OPEN drift event once (audited): ACKNOWLEDGED, or ACTION_REQUIRED, which\nreturns a link to the schema change proposal page and creates nothing. A second review\nis 409 already_reviewed.",
+        "operationId": "reviewDriftEvent",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "drift_event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Drift Event Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DriftReviewIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DriftEventOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Review Drift Event",
+        "tags": [
+          "mapping"
+        ]
+      }
+    },
     "/api/v1/health": {
       "get": {
         "operationId": "getHealth",
@@ -6102,6 +6779,65 @@
         ]
       }
     },
+    "/api/v1/imports/{import_id}/drift": {
+      "get": {
+        "description": "The import's drift events against its source's baseline (DI-06), in detection order.\nValues (min, max) are masked by each column's classification; nothing is changed.",
+        "operationId": "getImportDrift",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "import_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Import Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DriftPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Import Drift",
+        "tags": [
+          "mapping"
+        ]
+      }
+    },
     "/api/v1/imports/{import_id}/issues": {
       "get": {
         "description": "The import's validation issues, file-level first then by row, filtered by severity,\ncode and field. Issues carry no values.",
@@ -6364,9 +7100,68 @@
         ]
       }
     },
+    "/api/v1/imports/{import_id}/reconciliation": {
+      "get": {
+        "description": "The import's reconciliation (DI-05): row-count conservation, the declared row count\nand each control total, with exact decimal figures. 404 reconciliation_not_found until\nthe import is validated.",
+        "operationId": "getImportReconciliation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "import_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Import Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconciliationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Import Reconciliation",
+        "tags": [
+          "reconciliation"
+        ]
+      }
+    },
     "/api/v1/imports/{import_id}/validate": {
       "post": {
-        "description": "Validate the import with its usable ACTIVE mapping version, once (D-21): it is pinned,\nevery row is accepted (a canonical record), quarantined or rejected, and the import ends\nCOMPLETED, COMPLETED_WITH_WARNINGS, QUARANTINED or FAILED (a file-level BLOCKER: no row\naccepted). 409 `mapping_required` without a usable mapping version, 409\n`already_validated` on a second call: a re-run is a new import.",
+        "description": "Validate the import with its usable ACTIVE mapping version, once (D-21): it is pinned,\nevery row is accepted (a canonical record), quarantined or rejected, and the import ends\nCOMPLETED, COMPLETED_WITH_WARNINGS, QUARANTINED or FAILED (a file-level BLOCKER: no row\naccepted). 409 `mapping_required` without a usable mapping version, 409\n`already_validated` on a second call: a re-run is a new import. The import is\nreconciled in the same transaction (BE-12.2, GET /imports/{import_id}/reconciliation).",
         "operationId": "validateImport",
         "parameters": [
           {

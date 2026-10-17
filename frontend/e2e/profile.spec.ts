@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
+import { API } from './support'
 
 /**
  * Feature 02 Phase 9 browser checks against the real stack (backend ENV=test, synthetic).
@@ -10,7 +11,6 @@ import { expect, test, type Page } from '@playwright/test'
  *         as "masked", as many as the API masked for them.
  */
 
-const API = 'http://localhost:8000'
 const FIXTURE = join(__dirname, '../../backend/samples/synthetic/instrument__unknown_extra_column.csv')
 const EXTRA_COLUMN = 'legacy_flag'
 

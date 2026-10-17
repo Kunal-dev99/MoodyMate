@@ -10,7 +10,10 @@ import { defineConfig, devices } from '@playwright/test'
  * with one worker. CI starts from a fresh database each run; locally, point
  * DATABASE_URL at a disposable copy (D-03).
  */
-const API_PORT = 8000
+// The backend's port: 8000 unless E2E_API_PORT is set, e.g. when a dev server already holds
+// 8000 (outside CI, reuseExistingServer would otherwise run the suite against whatever
+// answers there). Build the frontend with NEXT_PUBLIC_API_BASE_URL=http://localhost:<port>.
+const API_PORT = process.env.E2E_API_PORT ?? '8000'
 const WEB_PORT = 3000
 const backendDb = process.env.E2E_DATABASE_URL ?? process.env.DATABASE_URL
 // CI installs the backend without a virtualenv; locally it runs from backend/.venv.

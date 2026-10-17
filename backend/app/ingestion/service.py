@@ -470,14 +470,24 @@ class UploadSpec:
 
 
 @dataclass(frozen=True)
+class DriftThresholds:
+    """BE-12.3: the PROVISIONAL drift thresholds (DRIFT_NULL_RATE_THRESHOLD,
+    DRIFT_RANGE_THRESHOLD), passed to the mapping module's drift detection."""
+
+    null_rate: Decimal
+    range_share: Decimal
+
+
+@dataclass(frozen=True)
 class ImportPolicy:
-    """What the deployment decides: the effective data class (D-14), the D-16 limits and
-    where raw artifacts go (D-15)."""
+    """What the deployment decides: the effective data class (D-14), the D-16 limits,
+    where raw artifacts go (D-15), and whether profiling and drift detection run."""
 
     data_class: str
     limits: Limits
     store: ArtifactStore
     profiling: bool = True  # IMPORT_PROFILING_ENABLED (D-02)
+    drift: DriftThresholds | None = None  # None: DRIFT_DETECTION_ENABLED is off (D-02)
 
 
 def request_sha256(spec: UploadSpec, file_sha256: str) -> str:
@@ -601,7 +611,7 @@ class ImportService:
             ):
                 # A profiling run that failed earlier is retried by replaying the upload.
                 # (A profiled import is also RECEIVED once a usable mapping exists.)
-                await self.profile(replay_id)
+                await self.profile(replay_id, policy.drift)
                 return await self.get(replay_id), False
             return replay, False
 
@@ -754,7 +764,7 @@ class ImportService:
         # transaction): if it fails, the upload stands as RECEIVED without a profile, and a
         # replay of the same upload retries it.
         if policy.profiling:
-            await self.profile(job.id)
+            await self.profile(job.id, policy.drift)
         return await self.get(job.id), True
 
     # --- profiling (BE-9.2, D-21) ------------------------------------------------------------
@@ -791,11 +801,16 @@ class ImportService:
         partitions (for the mapping dry run, BE-10.4). Scoped through the import."""
         return self.repo.record_partitions(job.id, size)
 
-    async def profile(self, import_id: uuid.UUID) -> DataProfileSnapshot:
+    async def profile(
+        self, import_id: uuid.UUID, drift: DriftThresholds | None = None
+    ) -> DataProfileSnapshot:
         """Profile a RECEIVED import: RECEIVED -> PROFILING -> RECEIVED when a usable ACTIVE
         mapping exists, else MAPPING_REQUIRED (D-21). One transaction, audited
         `import.profile` with metadata only (no column names, no values). Idempotent: an
-        import that has a profile gets it back unchanged."""
+        import that has a profile gets it back unchanged.
+
+        With `drift` (DRIFT_DETECTION_ENABLED), the new profile is compared with the
+        source's baseline in the same transaction (BE-12.3), by the mapping module."""
         job = await self.repo.lock(import_id)
         if job is None:
             await self.refuse(
@@ -838,6 +853,10 @@ class ImportService:
         usable = await self.has_usable_mapping(job)
         move(job, ImportStatus.RECEIVED if usable else ImportStatus.MAPPING_REQUIRED)
         await self.repo.flush()
+        if drift is not None:
+            from app.mapping.service import DriftService  # mapping depends on ingestion
+
+            await DriftService(self.session, self.principal).detect(job, snapshot, drift)
         details: dict[str, Any] = {
             "status": job.status,
             "snapshot_id": str(snapshot.id),
@@ -858,6 +877,11 @@ class ImportService:
         )
         await self.session.commit()
         return snapshot
+
+    async def drift_baseline(self, job: ImportJob) -> tuple[ImportJob, DataProfileSnapshot] | None:
+        """BE-12.3: the latest COMPLETED or COMPLETED_WITH_WARNINGS import of the job's source
+        (one profile per source), with its profile; None for a first import."""
+        return await self.repo.drift_baseline(job)
 
     async def profile_view(self, import_id: uuid.UUID) -> "ProfileView":
         """What GET /imports/{id}/profile shows (BE-9.3): the stored profile plus, per
@@ -905,12 +929,13 @@ class ImportService:
         items, total = await self.repo.issue_page(job.id, severity, code, field, limit, offset)
         return job, items, total, await self.repo.severity_counts(job.id)
 
-    async def validate(self, import_id: uuid.UUID) -> ImportJob:
+    async def validate(self, import_id: uuid.UUID, tolerance: Decimal = Decimal(0)) -> ImportJob:
         """Validate an import once (D-21), in one transaction, audited `import.validate`:
         pin the usable ACTIVE mapping version (D-18 §5), move it VALIDATING, give every row
         exactly one outcome (canonical record, OPEN or REJECTED quarantine item, D-20 §1),
-        store the issues and the manifest, move it to its outcome status, and resolve the
-        quarantine items of the import it retries (D-20 §2). Refusals are audited DENIED."""
+        store the issues and the manifest, move it to its outcome status, reconcile it
+        (BE-12.2, `tolerance` = RECONCILIATION_TOLERANCE), and resolve the quarantine items
+        of the import it retries (D-20 §2). Refusals are audited DENIED."""
         job = await self.repo.lock(import_id)
         if job is None:
             await self.refuse(
@@ -1073,6 +1098,7 @@ class ImportService:
             "manifest_sha256": manifest_sha,
             "retry_of_import_id": str(job.retry_of_import_id) if job.retry_of_import_id else None,
         }
+        await self._reconcile(job, contract, mapping_version, units, artifact, tolerance)
         audit_by(
             self.session,
             self.principal,
@@ -1088,6 +1114,53 @@ class ImportService:
             )
         await self.session.commit()
         return await self.get(job.id)
+
+    async def _reconcile(
+        self,
+        job: ImportJob,
+        contract: SourceContract,
+        mapping_version: Any,
+        units: Mapping[str, str | None],
+        artifact: ImportArtifact,
+        tolerance: Decimal,
+    ) -> None:
+        """BE-12.2: reconcile what this validation stored, read back from the database
+        (source rows against canonical records and quarantine items), in its transaction.
+        A control total is labelled with its mapped field's unit and masked by the more
+        sensitive of the column's classification (BE-9.3) and the artifact's (as the
+        declared totals are on the import)."""
+        from app.reconciliation.service import (  # reconciliation depends on ingestion
+            ColumnFigures,
+            ColumnMeta,
+            Declared,
+            ImportFigures,
+            ReconciliationService,
+            most_sensitive,
+        )
+
+        columns = list(contract.control_total_columns)
+        rows, accepted, held, totals = await self.repo.reconciliation_figures(job.id, columns)
+        mapped = await self.mapped_classifications(job)
+        source = await self.sources.get(job.source_system_id)
+        default = profile_of(source).default_classification
+        targets = {
+            r.source_column: r.target_field
+            for r in mapping_version.rules
+            if r.column_policy == "MAP" and r.source_column is not None
+        }
+        await ReconciliationService(self.session, self.principal).record(
+            job,
+            ImportFigures(rows, accepted, held, {c: ColumnFigures(*totals[c]) for c in columns}),
+            Declared(job.expected_row_count, dict(job.control_totals or {})),
+            {
+                c: ColumnMeta(
+                    units.get(targets.get(c) or ""),
+                    most_sensitive(mapped.get(c, default), artifact.classification),
+                )
+                for c in columns
+            },
+            tolerance,
+        )
 
     async def _check_retry(self, original_id: uuid.UUID, source_id: uuid.UUID) -> None:
         """D-20 §3: a retry corrects an earlier validated import of the same source that held

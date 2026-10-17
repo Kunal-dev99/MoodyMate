@@ -1,6 +1,8 @@
 """mapping.router
 
-The mapping workbench (BE-10.3 – BE-10.5). Every route declares its permission (D-04, the
+The mapping workbench (BE-10.3 – BE-10.5) and drift events (BE-12.3, BE-12.4: GET
+/imports/{import_id}/drift under `import:read`, POST /drift-events/{id}/review under
+`quality:review`). Every route declares its permission (D-04, the
 Feature 02 endpoint table); tenant scope comes from the principal.
 
 Writes are refused with 409 (audited DENIED) while INGESTION_ENABLED (`ingestion_disabled`,
@@ -10,21 +12,26 @@ Reads, and imports using ACTIVE versions, keep working.
 
 import uuid
 from collections.abc import Awaitable, Callable
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Path, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import get_principal, require_permission
+from app.core.classification import mask_mapping
 from app.core.errors import ApiError
 from app.core.principal import Principal
 from app.db.session import get_session
 from app.governance.constants import Permission
 from app.governance.service import record_denial
-from app.mapping.constants import Refusal
-from app.mapping.models import FieldMapping, MappingValidation, MappingVersion
+from app.mapping.constants import DRIFT_TRANSITIONS, DriftStatus, DriftType, Refusal
+from app.mapping.models import DataDriftEvent, FieldMapping, MappingValidation, MappingVersion
 from app.mapping.schemas import (
     ApprovalIn,
+    DriftEventOut,
+    DriftPage,
+    DriftReviewIn,
+    DriftSummary,
     MappingCreate,
     MappingDetail,
     MappingPage,
@@ -32,6 +39,7 @@ from app.mapping.schemas import (
     MappingValidationOut,
     MappingVersionIn,
     MappingVersionOut,
+    ProposalLink,
     RuleIn,
     RuleOut,
     RuleResult,
@@ -41,7 +49,14 @@ from app.mapping.schemas import (
     ValidationIssue,
     ValidationRef,
 )
-from app.mapping.service import MappingLabels, MappingService, MappingSpec, RuleSpec
+from app.mapping.service import (
+    DriftService,
+    DriftView,
+    MappingLabels,
+    MappingService,
+    MappingSpec,
+    RuleSpec,
+)
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 MappingReader = Annotated[Principal, Depends(require_permission(Permission.MAPPING_READ))]
@@ -343,3 +358,101 @@ async def validate_import_mapping(
         created_by=v.created_by,
         created_at=v.created_at,
     )
+
+
+# --- Phase 12: drift events (BE-12.3, BE-12.4) ---------------------------------------------------
+
+ImportReader = Annotated[Principal, Depends(require_permission(Permission.IMPORT_READ))]
+QualityReviewer = Annotated[Principal, Depends(require_permission(Permission.QUALITY_REVIEW))]
+
+
+def _drift_summary(
+    summary: dict[str, Any] | None, code: str, clear: frozenset[str]
+) -> DriftSummary | None:
+    """One side of an event, its min and max masked by the column's classification."""
+    if summary is None:
+        return None
+    bounds = mask_mapping(
+        {"min": summary.get("min"), "max": summary.get("max")}, {"min": code, "max": code}, clear
+    )
+    return DriftSummary(
+        position=summary.get("position"),
+        value_count=summary.get("value_count"),
+        null_count=summary.get("null_count"),
+        null_rate=summary.get("null_rate"),
+        distinct_count=summary.get("distinct_count"),
+        candidate_types=summary.get("candidate_types") or [],
+        suggested_type=summary.get("suggested_type"),
+        min=bounds["min"],
+        max=bounds["max"],
+    )
+
+
+def _drift_event(event: DataDriftEvent, view: DriftView, clear: frozenset[str]) -> DriftEventOut:
+    code = view.classification(event.column_name)
+    status = DriftStatus(event.status)
+    return DriftEventOut(
+        id=event.id,
+        import_id=event.import_job_id,
+        sequence=event.sequence,
+        baseline_import_id=event.baseline_import_id,
+        drift_type=DriftType(event.drift_type),
+        column=event.column_name,
+        classification=code,
+        observed=_drift_summary(event.observed_summary, code, clear),
+        baseline=_drift_summary(event.baseline_summary, code, clear),
+        thresholds=event.thresholds,
+        detector_version=event.detector_version,
+        status=status,
+        allowed_outcomes=sorted(DRIFT_TRANSITIONS[status]),
+        reviewed_by=event.reviewed_by,
+        review_comment=event.review_comment,
+        reviewed_at=event.reviewed_at,
+        proposal_link=(
+            ProposalLink(href=view.proposal_href(), schema_id=view.schema_id)
+            if status == DriftStatus.ACTION_REQUIRED
+            else None
+        ),
+        created_at=event.created_at,
+    )
+
+
+@router.get("/imports/{import_id}/drift", response_model=DriftPage, operation_id="getImportDrift")
+async def get_import_drift(
+    import_id: uuid.UUID, principal: ImportReader, session: SessionDep
+) -> DriftPage:
+    """The import's drift events against its source's baseline (DI-06), in detection order.
+    Values (min, max) are masked by each column's classification; nothing is changed."""
+    view = await DriftService(session, principal).view(import_id)
+    clear = principal.clear_classifications
+    counts: dict[str, int] = {}
+    for event in view.events:
+        counts[event.status] = counts.get(event.status, 0) + 1
+    return DriftPage(
+        import_id=view.job.id,
+        baseline_import_id=view.events[0].baseline_import_id if view.events else None,
+        items=[_drift_event(e, view, clear) for e in view.events],
+        total=len(view.events),
+        status_counts=counts,
+    )
+
+
+@router.post(
+    "/drift-events/{drift_event_id}/review",
+    response_model=DriftEventOut,
+    operation_id="reviewDriftEvent",
+)
+async def review_drift_event(
+    drift_event_id: uuid.UUID,
+    body: DriftReviewIn,
+    principal: QualityReviewer,
+    session: SessionDep,
+    _: IngestionEnabled,
+) -> DriftEventOut:
+    """Review an OPEN drift event once (audited): ACKNOWLEDGED, or ACTION_REQUIRED, which
+    returns a link to the schema change proposal page and creates nothing. A second review
+    is 409 already_reviewed."""
+    view, event = await DriftService(session, principal).review(
+        drift_event_id, DriftStatus(body.outcome), body.comment
+    )
+    return _drift_event(event, view, principal.clear_classifications)

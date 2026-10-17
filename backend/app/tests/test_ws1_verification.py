@@ -218,6 +218,12 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
         (f"{SOURCES}/{here_source}", f"{SOURCES}/{uuid.uuid4()}"),
         (f"{IMPORTS}/{here_import}", f"{IMPORTS}/{uuid.uuid4()}"),
         (f"{IMPORTS}/{here_import}/profile", f"{IMPORTS}/{uuid.uuid4()}/profile"),
+        # Phase 12: drift and reconciliation reads are scoped through the import.
+        (f"{IMPORTS}/{here_import}/drift", f"{IMPORTS}/{uuid.uuid4()}/drift"),
+        (
+            f"{IMPORTS}/{here_import}/reconciliation",
+            f"{IMPORTS}/{uuid.uuid4()}/reconciliation",
+        ),
         (f"/api/v1/schemas/{instrument}/versions", f"/api/v1/schemas/{uuid.uuid4()}/versions"),
         (
             f"/api/v1/schemas/{instrument}/diff?from=1&to=2",
@@ -299,6 +305,7 @@ AUDITED = {
     "POST /api/v1/quarantine/{batch_id}/items/{quarantine_id}/disposition": (
         "quarantine.disposition"
     ),
+    "POST /api/v1/drift-events/{drift_event_id}/review": "drift_event.review",
 }
 
 
@@ -406,6 +413,25 @@ def test_every_mutating_route_is_listed_and_emits_an_audit_event(api: TestClient
         steward,
         f"/api/v1/quarantine/{batch}/items/{item['id']}/disposition",
         {"status": "UNDER_REVIEW"},
+    )
+    # Phase 12: the clean import, validated, is the drift baseline; a file with one more
+    # column raises COLUMN_ADDED, which the steward reviews.
+    done = api.post(f"{IMPORTS}/{clean_import.json()['id']}/validate", headers=steward)
+    assert done.status_code == 200 and done.json()["status"] == "COMPLETED", done.text
+    wider = upload(
+        api,
+        steward,
+        seeded_source_id(db),
+        b"instrument_id,instrument_type,currency,notional,extra\nI-1,BOND,EUR,100.00,x\n",
+    )
+    assert wider.status_code == 201, wider.text
+    drift = api.get(f"{IMPORTS}/{wider.json()['id']}/drift", headers=steward).json()["items"]
+    [added] = [e for e in drift if e["drift_type"] == "COLUMN_ADDED"]
+    call(
+        "POST /api/v1/drift-events/{drift_event_id}/review",
+        steward,
+        f"/api/v1/drift-events/{added['id']}/review",
+        {"outcome": "ACKNOWLEDGED", "comment": "Expected: a new optional column."},
     )
     # Every listed route was exercised here: listing a route without driving it fails.
     assert called == set(AUDITED)

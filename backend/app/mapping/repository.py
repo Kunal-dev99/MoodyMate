@@ -6,12 +6,13 @@ principal's scope (D-04). Versions, rules and validations are reached only throu
 """
 
 import uuid
+from typing import Any
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, insert, select
 
 from app.db.repository import ScopedRepository
 from app.mapping.constants import MappingVersionStatus
-from app.mapping.models import FieldMapping, MappingValidation, MappingVersion
+from app.mapping.models import DataDriftEvent, FieldMapping, MappingValidation, MappingVersion
 
 
 class MappingRepository(ScopedRepository[FieldMapping]):
@@ -125,6 +126,38 @@ class MappingRepository(ScopedRepository[FieldMapping]):
 
     def add(self, *rows: object) -> None:
         self.session.add_all(rows)
+
+    async def flush(self) -> None:
+        await self.session.flush()
+
+
+class DriftRepository(ScopedRepository[DataDriftEvent]):
+    """Drift events carry `tenant_id` (BE-12.1): every query is scoped by it."""
+
+    model = DataDriftEvent
+
+    async def for_import(self, import_id: uuid.UUID) -> list[DataDriftEvent]:
+        result = await self.session.execute(
+            self.scoped()
+            .where(DataDriftEvent.import_job_id == import_id)
+            .order_by(DataDriftEvent.sequence)
+            .execution_options(populate_existing=True)
+        )
+        return list(result.scalars())
+
+    async def lock(self, event_id: uuid.UUID) -> DataDriftEvent | None:
+        """An event of the caller's tenant, locked: one review at a time."""
+        result = await self.session.execute(
+            self.scoped()
+            .where(DataDriftEvent.id == event_id)
+            .with_for_update(of=DataDriftEvent)
+            .execution_options(populate_existing=True)
+        )
+        return result.scalar_one_or_none()
+
+    async def insert_events(self, rows: list[dict[str, Any]]) -> None:
+        if rows:
+            await self.session.execute(insert(DataDriftEvent), rows)
 
     async def flush(self) -> None:
         await self.session.flush()

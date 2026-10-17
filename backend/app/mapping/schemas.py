@@ -11,11 +11,14 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.core.classification import MaskedValue
 from app.core.text import SafeMultilineText, SafeText
 from app.governance.constants import FieldType, ProposalDecision
 from app.mapping.constants import (
     MAX_RULES,
     ColumnPolicy,
+    DriftStatus,
+    DriftType,
     IssueCode,
     IssueSeverity,
     MappingVersionStatus,
@@ -299,3 +302,72 @@ class MappingValidationOut(BaseModel):
     rule_results: list[RuleResult]
     created_by: str
     created_at: datetime
+
+
+# --- Phase 12: drift events (BE-12.3, BE-12.4) ---------------------------------------------------
+
+
+class DriftSummary(BaseModel):
+    """A column's profile statistics on one side of a drift event. `min` and `max` are data,
+    masked by the event's classification; everything else is metadata."""
+
+    position: int | None
+    value_count: int | None
+    null_count: int | None
+    null_rate: str | None = Field(description="Decimal text (4 places), never a number.")
+    distinct_count: int | None
+    candidate_types: list[str]
+    suggested_type: str | None
+    min: str | MaskedValue | None
+    max: str | MaskedValue | None
+
+
+class ProposalLink(BaseModel):
+    """Where a person proposes a schema change (the Phase 5 page, target schema prefilled).
+    A hint only: nothing was created."""
+
+    kind: Literal["SCHEMA_CHANGE_PROPOSAL"] = "SCHEMA_CHANGE_PROPOSAL"
+    href: str = Field(description="Frontend route, e.g. /schemas/proposals/new?schema={id}.")
+    schema_id: uuid.UUID
+
+
+class DriftEventOut(BaseModel):
+    id: uuid.UUID
+    import_id: uuid.UUID
+    sequence: int
+    baseline_import_id: uuid.UUID = Field(
+        description="The latest COMPLETED or COMPLETED_WITH_WARNINGS import of the same source."
+    )
+    drift_type: DriftType
+    column: str
+    classification: str = Field(description="Masks the summaries' min and max (BE-9.3 rule).")
+    observed: DriftSummary | None = Field(description="This import's column (none if removed).")
+    baseline: DriftSummary | None = Field(description="The baseline's column (none if added).")
+    thresholds: dict[str, Any] = Field(description="PROVISIONAL thresholds applied (text).")
+    detector_version: int
+    status: DriftStatus
+    allowed_outcomes: list[DriftStatus] = Field(description="Review outcomes still possible.")
+    reviewed_by: str | None
+    review_comment: str | None
+    reviewed_at: datetime | None
+    proposal_link: ProposalLink | None = Field(
+        description="Set when the review is ACTION_REQUIRED: a link hint, nothing created."
+    )
+    created_at: datetime
+
+
+class DriftPage(BaseModel):
+    import_id: uuid.UUID
+    baseline_import_id: uuid.UUID | None = Field(
+        description="The baseline the events compare with (none when there are no events)."
+    )
+    items: list[DriftEventOut]
+    total: int
+    status_counts: dict[str, int]
+
+
+class DriftReviewIn(BaseModel):
+    outcome: Literal[DriftStatus.ACKNOWLEDGED, DriftStatus.ACTION_REQUIRED] = Field(
+        description="ACKNOWLEDGED, or ACTION_REQUIRED (a schema change should be proposed)."
+    )
+    comment: SafeMultilineText = Field(max_length=1000, description="Required.")
