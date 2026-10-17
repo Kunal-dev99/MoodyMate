@@ -74,9 +74,10 @@ describe('ingestion workspace navigation (FE-7.1)', () => {
     expect(ingestion?.permission).toBe('source:read')
   })
   it('leaves every other planned workspace planned', () => {
-    // FE-14.1 made `domain` live (planned again with NEXT_PUBLIC_DOMAIN_UI=off).
+    // FE-14.1 made `domain` live (planned again with NEXT_PUBLIC_DOMAIN_UI=off), and FE-15.1
+    // `calculations` (planned again with NEXT_PUBLIC_CALCULATIONS_UI=off).
     const planned = mainWorkspaces.filter((w) => w.planned).map((w) => w.slug)
-    expect(planned).toEqual(['calculations', 'scenarios', 'reports', 'assistant'])
+    expect(planned).toEqual(['scenarios', 'reports', 'assistant'])
   })
 })
 

@@ -13,7 +13,7 @@ import {
 } from 'lucide-react'
 import type { Schemas } from '@/api/client'
 import type { NavItem } from '@/components/layout/sidebar'
-import { DOMAIN_UI_ENABLED } from '@/config/features'
+import { CALCULATIONS_UI_ENABLED, DOMAIN_UI_ENABLED } from '@/config/features'
 
 /**
  * Platform workspaces (Architecture §14). `planned` workspaces render a clear
@@ -71,14 +71,25 @@ export const mainWorkspaces: Workspace[] = [
         description: 'Instrument types and records, assumptions and the rule registry.',
         planned: { phase: 'Feature 03', workstream: 'WS3' },
       },
-  {
-    slug: 'calculations',
-    href: '/calculations',
-    label: 'Calculations',
-    icon: Calculator,
-    description: 'Module selection, run submission, run history, warnings and results.',
-    planned: { phase: 'Feature 03–04', workstream: 'WS3 / WS4' },
-  },
+  // FE-15.1: live behind CALCULATIONS_UI_ENABLED; off, the Phase 14 "planned" entry exactly (D-02).
+  CALCULATIONS_UI_ENABLED
+    ? {
+        slug: 'calculations',
+        href: '/calculations',
+        label: 'Calculations',
+        icon: Calculator,
+        description:
+          'Pinned dataset snapshots, run submission, run history, manifests, warnings and the illustrative maturity ladder with its lineage.',
+        permission: 'calc:read',
+      }
+    : {
+        slug: 'calculations',
+        href: '/calculations',
+        label: 'Calculations',
+        icon: Calculator,
+        description: 'Module selection, run submission, run history, warnings and results.',
+        planned: { phase: 'Feature 03–04', workstream: 'WS3 / WS4' },
+      },
   {
     slug: 'scenarios',
     href: '/scenarios',

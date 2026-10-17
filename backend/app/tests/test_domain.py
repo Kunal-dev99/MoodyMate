@@ -30,6 +30,8 @@ from typing import Any
 import asyncpg
 import pytest
 from alembic import command
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from fastapi.testclient import TestClient
 
 from app.core.config import Settings
@@ -525,7 +527,9 @@ def test_domain_projection_catalogue_and_guards(
 
     # The downgrade refuses while a projection exists, in one transaction: nothing changes.
     head = str(sql(db, "SELECT version_num FROM alembic_version")[0]["version_num"])
-    assert head == "0017"
+    # Head is 0017 or a later WS3 revision (0018, Phase 15), whose downgrade passes without
+    # calculation rows; 0017's own refusal is what stops this one.
+    assert head == str(ScriptDirectory.from_config(Config("alembic.ini")).get_current_head())
     before = domain_counts(db)
     try:
         with pytest.raises(Exception, match="this downgrade is refused"):

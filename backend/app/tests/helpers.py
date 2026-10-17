@@ -14,7 +14,7 @@ from app.core.tokens import DevTokens
 from app.governance.constants import DEFAULT_TENANT_ID, DEV_ISSUER, FieldType
 from app.ingestion.adapters import AdapterOptions, Limits, parse_upload
 from app.ingestion.constants import SourceFormat
-from app.tests.conftest import insert_user, sql
+from app.tests.conftest import dev_token, insert_user, sql
 
 IMPORTS = "/api/v1/imports"
 SOURCES = "/api/v1/sources"
@@ -395,3 +395,51 @@ def sample_rules(
             }
         )
     return rules
+
+
+# --- Phase 15: dataset snapshots and calculation runs (D-30, D-31) ---------------------------
+
+SNAPSHOTS = "/api/v1/dataset-snapshots"
+RUNS = "/api/v1/calculation-runs"
+MODULES = "/api/v1/calculation-modules"
+
+
+def module_version_id(
+    api: TestClient, headers: dict[str, str], code: str = "maturity_ladder"
+) -> str:
+    """The id of the module's (first) version in GET /calculation-modules."""
+    items = api.get(MODULES, headers=headers).json()["items"]
+    return str(next(m["module_version_id"] for m in items if m["code"] == code))
+
+
+def make_snapshot(
+    api: TestClient, headers: dict[str, str], import_ids: list[str], **kw: Any
+) -> Response:
+    return api.post(SNAPSHOTS, json={"import_ids": import_ids}, headers={**headers, **kw})
+
+
+def start_run(
+    api: TestClient,
+    headers: dict[str, str],
+    body: dict[str, Any],
+    key: str | None = None,
+    **kw: Any,
+) -> Response:
+    extra = {"Idempotency-Key": key or uuid.uuid4().hex}
+    return api.post(RUNS, json=body, headers={**headers, **extra, **kw})
+
+
+def blocked_run(api: TestClient, import_id: str) -> dict[str, Any]:
+    """A snapshot of one projected import and a maturity-ladder run on it, as risk_analyst:
+    BLOCKED unless the snapshot holds both schemas the ladder needs. Returns both ids."""
+    analyst = dev_token(api, "risk_analyst")
+    r = make_snapshot(api, analyst, [import_id])
+    assert r.status_code == 201, r.text
+    body = {
+        "dataset_snapshot_id": r.json()["snapshot_id"],
+        "module_version_id": module_version_id(api, analyst),
+        "reporting_date": "2026-12-31",
+    }
+    run = start_run(api, analyst, body)
+    assert run.status_code == 201, run.text
+    return {"snapshot_id": r.json()["snapshot_id"], "run_id": run.json()["run_id"]}

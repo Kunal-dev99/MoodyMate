@@ -311,6 +311,11 @@ class ReconciliationService:
         )
         return run
 
+    async def for_import(self, job: ImportJob) -> ReconciliationRun | None:
+        """The reconciliation of an import already reached through this scope (WS3 dataset
+        snapshots read its outcome, D-30 §3); None before validation."""
+        return await self.repo.for_import(job.id)
+
     async def view(
         self, import_id: uuid.UUID
     ) -> tuple[ImportJob, ReconciliationRun, list[ReconciliationItem]]:

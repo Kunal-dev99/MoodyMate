@@ -98,6 +98,17 @@ class Settings(BaseSettings):
     # Off stops new projections (409 domain_projection_disabled, audited); existing domain
     # rows stay readable.
     DOMAIN_PROJECTION_ENABLED: bool = True
+    # Phase 15 (FC-04, D-30, D-31, D-02): new dataset snapshots and calculation runs. Off
+    # refuses both (409 calculations_disabled, audited); existing snapshots and runs stay
+    # readable.
+    CALCULATIONS_ENABLED: bool = True
+    # D-33 minimum aggregation (PROVISIONAL): a maturity-ladder figure built from fewer than
+    # this many contributions (but at least one) takes its contributions' classification, so
+    # a role not cleared for them sees it masked. 1 turns the rule off.
+    CALC_MIN_AGGREGATE_COUNT: int = 3
+    # A run still RUNNING this many seconds after it started is presumed stopped: a replay of
+    # its Idempotency-Key ends it FAILED (ENGINE_ERROR) and returns it.
+    CALC_RUN_STALE_SECONDS: int = 900
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
 
     # D-15: root of the write-once raw artifact store. Required outside local/test (D-13);
@@ -180,7 +191,8 @@ class Settings(BaseSettings):
                 raise ValueError(f"{name} may only lower the hard ceiling ({ceiling})")
 
     def _guard_quality(self) -> None:
-        """Phase 12 thresholds: finite, not negative; a null-rate threshold is a rate."""
+        """Phase 12 thresholds: finite, not negative; a null-rate threshold is a rate. Phase 15
+        counts: at least 1."""
         for name in (
             "RECONCILIATION_TOLERANCE",
             "DRIFT_NULL_RATE_THRESHOLD",
@@ -191,6 +203,9 @@ class Settings(BaseSettings):
                 raise ValueError(f"{name} must be a finite decimal of at least 0")
         if self.DRIFT_NULL_RATE_THRESHOLD > 1:
             raise ValueError("DRIFT_NULL_RATE_THRESHOLD must be at most 1")
+        for name in ("CALC_MIN_AGGREGATE_COUNT", "CALC_RUN_STALE_SECONDS"):
+            if getattr(self, name) < 1:
+                raise ValueError(f"{name} must be at least 1")
 
     @property
     def artifact_store_dir(self) -> Path:

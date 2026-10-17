@@ -37,11 +37,17 @@ export async function coreBanking(request: APIRequestContext, headers: Record<st
   return { sourceId: source.id as string, contractId: source.current_contract.id as string }
 }
 
-/** POST /imports with a sample file (synthetic attested). */
-export async function uploadSample(request: APIRequestContext, headers: Record<string, string>, sourceId: string, file: string) {
+/** POST /imports with a sample file (synthetic attested); `mimeType` for a non-CSV sample. */
+export async function uploadSample(
+  request: APIRequestContext,
+  headers: Record<string, string>,
+  sourceId: string,
+  file: string,
+  mimeType = 'text/csv',
+) {
   const r = await request.post(`${API}/api/v1/imports`, {
     headers: { ...headers, 'Idempotency-Key': `e2e-${Date.now()}-${Math.random().toString(16).slice(2)}` },
-    multipart: { source_id: sourceId, synthetic_attested: 'true', file: { name: file, mimeType: 'text/csv', buffer: readFileSync(join(SAMPLES, file)) } },
+    multipart: { source_id: sourceId, synthetic_attested: 'true', file: { name: file, mimeType, buffer: readFileSync(join(SAMPLES, file)) } },
   })
   expect(r.status()).toBe(201)
   return r.json()

@@ -74,6 +74,98 @@
         "title": "ArtifactOut",
         "type": "object"
       },
+      "AssumptionSetPin": {
+        "description": "The ACTIVE version of the baseline assumption set (D-32 \u00a76): every run pins one.",
+        "properties": {
+          "assumption_set_id": {
+            "format": "uuid",
+            "title": "Assumption Set Id",
+            "type": "string"
+          },
+          "assumptions": {
+            "additionalProperties": true,
+            "description": "Empty in v1 (no module reads one yet).",
+            "title": "Assumptions",
+            "type": "object"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "content_sha256": {
+            "title": "Content Sha256",
+            "type": "string"
+          },
+          "effective_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective From"
+          },
+          "effective_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective To"
+          },
+          "illustrative": {
+            "title": "Illustrative",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "provenance": {
+            "title": "Provenance",
+            "type": "string"
+          },
+          "provisional": {
+            "title": "Provisional",
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RuleVersionStatus"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "assumption_set_id",
+          "code",
+          "name",
+          "version",
+          "status",
+          "owner",
+          "provenance",
+          "effective_from",
+          "effective_to",
+          "assumptions",
+          "content_sha256",
+          "provisional",
+          "illustrative"
+        ],
+        "title": "AssumptionSetPin",
+        "type": "object"
+      },
       "AttributeOut": {
         "properties": {
           "classification": {
@@ -324,6 +416,88 @@
         "title": "BatchOut",
         "type": "object"
       },
+      "BucketOut": {
+        "properties": {
+          "bucket_definition_id": {
+            "format": "uuid",
+            "title": "Bucket Definition Id",
+            "type": "string"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "lower_exclusive_days": {
+            "title": "Lower Exclusive Days",
+            "type": "integer"
+          },
+          "sequence": {
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "upper_inclusive_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "None: the open last bucket.",
+            "title": "Upper Inclusive Days"
+          }
+        },
+        "required": [
+          "bucket_definition_id",
+          "sequence",
+          "code",
+          "label",
+          "lower_exclusive_days",
+          "upper_inclusive_days"
+        ],
+        "title": "BucketOut",
+        "type": "object"
+      },
+      "CalculationRunStatus": {
+        "description": "Data Model \u00a79 `calculation_run.status` (D-06, D-31 \u00a73). Runs are synchronous in the\nMVP, so QUEUED and CANCELLED are reserved for WS4.",
+        "enum": [
+          "QUEUED",
+          "RUNNING",
+          "SUCCEEDED",
+          "SUCCEEDED_WITH_WARNINGS",
+          "FAILED",
+          "CANCELLED",
+          "BLOCKED"
+        ],
+        "title": "CalculationRunStatus",
+        "type": "string"
+      },
+      "CalculationWarningCode": {
+        "description": "`calculation_warning.code`. Messages and details are value-free (codes, counts, ids).\n\n- Exclusions (WARNING): the input is in scope but not used, never silently.\n- BLOCKED (ERROR): the input contract or the pinned configuration was not met.\n- FAILED (ERROR): a post-check or the engine failed.",
+        "enum": [
+          "INSTRUMENT_NOT_IN_SNAPSHOT",
+          "UNMAPPED_INSTRUMENT_TYPE",
+          "PAST_DUE_EXCLUDED",
+          "PAST_DUE_IN_FIRST_BUCKET",
+          "OUTSIDE_BUCKETS",
+          "MISSING_VALUE",
+          "NEGATIVE_AMOUNT",
+          "UNKNOWN_ORIGIN",
+          "INPUT_SCHEMA_MISSING",
+          "PARAMETERS_INVALID",
+          "BUCKET_DEFINITIONS_MISMATCH",
+          "AMBIGUOUS_INSTRUMENT_KEY",
+          "POST_CHECK_FAILED",
+          "ENGINE_ERROR"
+        ],
+        "title": "CalculationWarningCode",
+        "type": "string"
+      },
       "CashFlowOut": {
         "properties": {
           "amount": {
@@ -448,6 +622,24 @@
         ],
         "title": "CashFlowOut",
         "type": "object"
+      },
+      "CashflowDirection": {
+        "description": "The values of the `cashflow_direction` ENUM_MAP (D-35 \u00a71).",
+        "enum": [
+          "INFLOW",
+          "OUTFLOW"
+        ],
+        "title": "CashflowDirection",
+        "type": "string"
+      },
+      "CashflowOrigin": {
+        "description": "`cashflow_event` v1 `origin` (the seeded schema's description).",
+        "enum": [
+          "CONTRACTUAL",
+          "BEHAVIOURAL"
+        ],
+        "title": "CashflowOrigin",
+        "type": "string"
       },
       "ColumnPolicy": {
         "description": "D-23 `mapping_rule.column_policy`: a source column is mapped to a target field, or\npreserved as it is (never dropped).",
@@ -895,6 +1087,109 @@
         ],
         "title": "ContractStatus",
         "type": "string"
+      },
+      "ContributionLineage": {
+        "description": "cash-flow event -> canonical record -> source row -> import (D-31 \u00a76).",
+        "properties": {
+          "canonical_record_id": {
+            "format": "uuid",
+            "title": "Canonical Record Id",
+            "type": "string"
+          },
+          "cashflow_business_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "title": "Cashflow Business Key"
+          },
+          "cashflow_event_id": {
+            "format": "uuid",
+            "title": "Cashflow Event Id",
+            "type": "string"
+          },
+          "due_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "title": "Due Date"
+          },
+          "import_id": {
+            "format": "uuid",
+            "title": "Import Id",
+            "type": "string"
+          },
+          "instrument_business_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Business Key"
+          },
+          "instrument_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Id"
+          },
+          "instrument_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Version Id"
+          },
+          "source_ordinal": {
+            "title": "Source Ordinal",
+            "type": "integer"
+          },
+          "source_record_id": {
+            "format": "uuid",
+            "title": "Source Record Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cashflow_event_id",
+          "cashflow_business_key",
+          "due_date",
+          "instrument_id",
+          "instrument_version_id",
+          "instrument_business_key",
+          "canonical_record_id",
+          "import_id",
+          "source_record_id",
+          "source_ordinal"
+        ],
+        "title": "ContributionLineage",
+        "type": "object"
       },
       "CopyTransform": {
         "properties": {
@@ -1700,6 +1995,15 @@
         "title": "ImpactDependent",
         "type": "object"
       },
+      "ImplementationStatus": {
+        "description": "`module_version.implementation_status`: only AVAILABLE versions can run (D-31 \u00a71).\nPLANNED versions are declared extension points (Phase 18) and never run.",
+        "enum": [
+          "AVAILABLE",
+          "PLANNED"
+        ],
+        "title": "ImplementationStatus",
+        "type": "string"
+      },
       "ImportDetail": {
         "properties": {
           "artifact": {
@@ -2420,6 +2724,72 @@
         "title": "ImportSummary",
         "type": "object"
       },
+      "InputRefOut": {
+        "properties": {
+          "label": {
+            "description": "What the pin is, e.g. `instrument v1` or an engine version.",
+            "title": "Label",
+            "type": "string"
+          },
+          "ref_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref Id"
+          },
+          "ref_type": {
+            "$ref": "#/components/schemas/InputRefType"
+          },
+          "sequence": {
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The pinned content's hash, where it has one.",
+            "title": "Sha256"
+          }
+        },
+        "required": [
+          "sequence",
+          "ref_type",
+          "ref_id",
+          "label",
+          "sha256"
+        ],
+        "title": "InputRefOut",
+        "type": "object"
+      },
+      "InputRefType": {
+        "description": "`calculation_input_ref.ref_type`: one row per pin of a run (D-31 \u00a74).",
+        "enum": [
+          "DATASET_SNAPSHOT",
+          "IMPORT_MANIFEST",
+          "DOMAIN_PROJECTION",
+          "SCHEMA_VERSION",
+          "MAPPING_VERSION",
+          "MODULE_VERSION",
+          "ENGINE",
+          "RULE_SET",
+          "RULE_VERSION",
+          "ASSUMPTION_SET"
+        ],
+        "title": "InputRefType",
+        "type": "string"
+      },
       "InstrumentDetail": {
         "properties": {
           "business_key": {
@@ -2824,6 +3194,14 @@
         "title": "InstrumentVersionOut",
         "type": "object"
       },
+      "IntermediateCode": {
+        "description": "`intermediate_value.code`.",
+        "enum": [
+          "CASHFLOW_CONTRIBUTION"
+        ],
+        "title": "IntermediateCode",
+        "type": "string"
+      },
       "IssueCode": {
         "description": "Dry-run issue codes. An issue names rules, fields and columns, never a value.",
         "enum": [
@@ -3020,6 +3398,166 @@
         "title": "IssueSeverity",
         "type": "string"
       },
+      "LadderCurrency": {
+        "properties": {
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "rows": {
+            "description": "Every bucket, in bucket order.",
+            "items": {
+              "$ref": "#/components/schemas/LadderRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "currency",
+          "rows"
+        ],
+        "title": "LadderCurrency",
+        "type": "object"
+      },
+      "LadderRow": {
+        "properties": {
+          "bucket_code": {
+            "title": "Bucket Code",
+            "type": "string"
+          },
+          "bucket_label": {
+            "title": "Bucket Label",
+            "type": "string"
+          },
+          "bucket_sequence": {
+            "title": "Bucket Sequence",
+            "type": "integer"
+          },
+          "classification": {
+            "description": "`internal`: an aggregate (D-33). A figure built from fewer than `min_aggregate_count` contributions (but at least one), and every figure derived from it, takes the contributions' classification and is masked for a role not cleared for it.",
+            "title": "Classification",
+            "type": "string"
+          },
+          "contribution_count": {
+            "title": "Contribution Count",
+            "type": "integer"
+          },
+          "cumulative_gap": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "description": "Running sum of net_gap over the buckets so far.",
+            "title": "Cumulative Gap"
+          },
+          "inflows": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "title": "Inflows"
+          },
+          "inflows_behavioural": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "title": "Inflows Behavioural"
+          },
+          "inflows_contractual": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "title": "Inflows Contractual"
+          },
+          "liquidity_gap_result_id": {
+            "format": "uuid",
+            "title": "Liquidity Gap Result Id",
+            "type": "string"
+          },
+          "net_gap": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "description": "inflows - outflows.",
+            "title": "Net Gap"
+          },
+          "outflows": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "title": "Outflows"
+          },
+          "outflows_behavioural": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "title": "Outflows Behavioural"
+          },
+          "outflows_contractual": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "title": "Outflows Contractual"
+          }
+        },
+        "required": [
+          "liquidity_gap_result_id",
+          "bucket_code",
+          "bucket_sequence",
+          "bucket_label",
+          "classification",
+          "inflows",
+          "outflows",
+          "net_gap",
+          "cumulative_gap",
+          "inflows_contractual",
+          "inflows_behavioural",
+          "outflows_contractual",
+          "outflows_behavioural",
+          "contribution_count"
+        ],
+        "title": "LadderRow",
+        "type": "object"
+      },
       "LowerTransform": {
         "properties": {
           "code": {
@@ -3059,6 +3597,177 @@
           "classification"
         ],
         "title": "ManifestArtifact",
+        "type": "object"
+      },
+      "ManifestAssumptionSet": {
+        "properties": {
+          "assumption_set_id": {
+            "format": "uuid",
+            "title": "Assumption Set Id",
+            "type": "string"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "content_sha256": {
+            "title": "Content Sha256",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "assumption_set_id",
+          "code",
+          "version",
+          "content_sha256"
+        ],
+        "title": "ManifestAssumptionSet",
+        "type": "object"
+      },
+      "ManifestLabels": {
+        "properties": {
+          "illustrative": {
+            "title": "Illustrative",
+            "type": "boolean"
+          },
+          "provisional": {
+            "title": "Provisional",
+            "type": "boolean"
+          },
+          "statement": {
+            "title": "Statement",
+            "type": "string"
+          }
+        },
+        "required": [
+          "illustrative",
+          "provisional",
+          "statement"
+        ],
+        "title": "ManifestLabels",
+        "type": "object"
+      },
+      "ManifestMember": {
+        "properties": {
+          "accepted_count": {
+            "title": "Accepted Count",
+            "type": "integer"
+          },
+          "import_id": {
+            "format": "uuid",
+            "title": "Import Id",
+            "type": "string"
+          },
+          "import_manifest_id": {
+            "format": "uuid",
+            "title": "Import Manifest Id",
+            "type": "string"
+          },
+          "manifest_sha256": {
+            "title": "Manifest Sha256",
+            "type": "string"
+          },
+          "mapping_version_id": {
+            "format": "uuid",
+            "title": "Mapping Version Id",
+            "type": "string"
+          },
+          "projection_id": {
+            "format": "uuid",
+            "title": "Projection Id",
+            "type": "string"
+          },
+          "projector_version": {
+            "title": "Projector Version",
+            "type": "integer"
+          },
+          "quarantined_count": {
+            "title": "Quarantined Count",
+            "type": "integer"
+          },
+          "reconciliation_outcome": {
+            "$ref": "#/components/schemas/ReconciliationOutcome"
+          },
+          "rejected_count": {
+            "title": "Rejected Count",
+            "type": "integer"
+          },
+          "schema_code": {
+            "$ref": "#/components/schemas/DomainSchemaCode"
+          },
+          "schema_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Version"
+          },
+          "schema_version_id": {
+            "format": "uuid",
+            "title": "Schema Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_code",
+          "import_id",
+          "import_manifest_id",
+          "manifest_sha256",
+          "projection_id",
+          "projector_version",
+          "schema_version_id",
+          "schema_version",
+          "mapping_version_id",
+          "accepted_count",
+          "quarantined_count",
+          "rejected_count",
+          "reconciliation_outcome"
+        ],
+        "title": "ManifestMember",
+        "type": "object"
+      },
+      "ManifestModule": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "engine_version": {
+            "description": "The engine version the module version declares.",
+            "title": "Engine Version",
+            "type": "string"
+          },
+          "module_id": {
+            "format": "uuid",
+            "title": "Module Id",
+            "type": "string"
+          },
+          "module_version_id": {
+            "format": "uuid",
+            "title": "Module Version Id",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "module_id",
+          "module_version_id",
+          "code",
+          "version",
+          "engine_version"
+        ],
+        "title": "ManifestModule",
         "type": "object"
       },
       "ManifestProfile": {
@@ -3128,6 +3837,104 @@
           "warnings"
         ],
         "title": "ManifestQuality",
+        "type": "object"
+      },
+      "ManifestRuleSet": {
+        "properties": {
+          "content_sha256": {
+            "description": "SHA-256 of the sorted rule version ids (D-32 \u00a74).",
+            "title": "Content Sha256",
+            "type": "string"
+          },
+          "members": {
+            "description": "By rule code.",
+            "items": {
+              "$ref": "#/components/schemas/ManifestRuleVersion"
+            },
+            "title": "Members",
+            "type": "array"
+          },
+          "rule_set_id": {
+            "format": "uuid",
+            "title": "Rule Set Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rule_set_id",
+          "content_sha256",
+          "members"
+        ],
+        "title": "ManifestRuleSet",
+        "type": "object"
+      },
+      "ManifestRuleVersion": {
+        "properties": {
+          "parameters": {
+            "additionalProperties": true,
+            "title": "Parameters",
+            "type": "object"
+          },
+          "parameters_sha256": {
+            "title": "Parameters Sha256",
+            "type": "string"
+          },
+          "rule_code": {
+            "title": "Rule Code",
+            "type": "string"
+          },
+          "rule_id": {
+            "format": "uuid",
+            "title": "Rule Id",
+            "type": "string"
+          },
+          "rule_version_id": {
+            "format": "uuid",
+            "title": "Rule Version Id",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "rule_id",
+          "rule_code",
+          "rule_version_id",
+          "version",
+          "parameters_sha256",
+          "parameters"
+        ],
+        "title": "ManifestRuleVersion",
+        "type": "object"
+      },
+      "ManifestSnapshot": {
+        "properties": {
+          "content_sha256": {
+            "title": "Content Sha256",
+            "type": "string"
+          },
+          "dataset_snapshot_id": {
+            "format": "uuid",
+            "title": "Dataset Snapshot Id",
+            "type": "string"
+          },
+          "members": {
+            "description": "By schema code.",
+            "items": {
+              "$ref": "#/components/schemas/ManifestMember"
+            },
+            "title": "Members",
+            "type": "array"
+          }
+        },
+        "required": [
+          "dataset_snapshot_id",
+          "content_sha256",
+          "members"
+        ],
+        "title": "ManifestSnapshot",
         "type": "object"
       },
       "MapValuesParams": {
@@ -3827,6 +4634,73 @@
         "title": "MaskedValue",
         "type": "object"
       },
+      "MaturityLadderOut": {
+        "properties": {
+          "bucket_rule_version_id": {
+            "format": "uuid",
+            "title": "Bucket Rule Version Id",
+            "type": "string"
+          },
+          "buckets": {
+            "items": {
+              "$ref": "#/components/schemas/BucketOut"
+            },
+            "title": "Buckets",
+            "type": "array"
+          },
+          "currencies": {
+            "description": "Per currency, no FX (D-35). Empty unless the run SUCCEEDED (with or without warnings).",
+            "items": {
+              "$ref": "#/components/schemas/LadderCurrency"
+            },
+            "title": "Currencies",
+            "type": "array"
+          },
+          "illustrative": {
+            "title": "Illustrative",
+            "type": "boolean"
+          },
+          "min_aggregate_count": {
+            "description": "D-33 minimum aggregation (CALC_MIN_AGGREGATE_COUNT, PROVISIONAL): a figure from 1 to this many minus one contributions is masked like them.",
+            "title": "Min Aggregate Count",
+            "type": "integer"
+          },
+          "module": {
+            "$ref": "#/components/schemas/RunModuleRef"
+          },
+          "reporting_date": {
+            "format": "date",
+            "title": "Reporting Date",
+            "type": "string"
+          },
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "statement": {
+            "title": "Statement",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CalculationRunStatus"
+          }
+        },
+        "required": [
+          "run_id",
+          "status",
+          "reporting_date",
+          "module",
+          "bucket_rule_version_id",
+          "buckets",
+          "currencies",
+          "min_aggregate_count",
+          "illustrative",
+          "statement"
+        ],
+        "title": "MaturityLadderOut",
+        "type": "object"
+      },
       "Me": {
         "properties": {
           "display_name": {
@@ -3870,6 +4744,285 @@
           "roles"
         ],
         "title": "Me",
+        "type": "object"
+      },
+      "ModuleInputContract": {
+        "description": "What a module reads (D-31 \u00a71).",
+        "properties": {
+          "assumption_keys": {
+            "description": "The assumption keys it reads (none in v1).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Assumption Keys",
+            "type": "array"
+          },
+          "parameters": {
+            "description": "Run parameters, e.g. `reporting_date`.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Parameters",
+            "type": "array"
+          },
+          "rules": {
+            "description": "The rule definition codes the module reads.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Rules",
+            "type": "array"
+          },
+          "schemas": {
+            "items": {
+              "$ref": "#/components/schemas/SchemaRequirement"
+            },
+            "title": "Schemas",
+            "type": "array"
+          }
+        },
+        "required": [
+          "schemas",
+          "rules",
+          "assumption_keys",
+          "parameters"
+        ],
+        "title": "ModuleInputContract",
+        "type": "object"
+      },
+      "ModuleOutputContract": {
+        "description": "What a module writes (D-31 \u00a71).",
+        "properties": {
+          "intermediates": {
+            "description": "Intermediate value codes.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Intermediates",
+            "type": "array"
+          },
+          "results": {
+            "description": "Result tables.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "warning_codes": {
+            "description": "Warning codes it may raise.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Warning Codes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "results",
+          "intermediates",
+          "warning_codes"
+        ],
+        "title": "ModuleOutputContract",
+        "type": "object"
+      },
+      "ModulePage": {
+        "properties": {
+          "items": {
+            "description": "By module code, then version.",
+            "items": {
+              "$ref": "#/components/schemas/ModuleVersionOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "ModulePage",
+        "type": "object"
+      },
+      "ModuleRuleOut": {
+        "properties": {
+          "active_version": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuleVersionPin"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "None: the rule has no ACTIVE version, so the module cannot run."
+          },
+          "category": {
+            "$ref": "#/components/schemas/RuleCategory"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "parameter_schema": {
+            "additionalProperties": true,
+            "description": "A closed parameter kind (D-32 \u00a71).",
+            "title": "Parameter Schema",
+            "type": "object"
+          },
+          "rule_id": {
+            "format": "uuid",
+            "title": "Rule Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rule_id",
+          "code",
+          "name",
+          "category",
+          "owner",
+          "parameter_schema",
+          "description",
+          "active_version"
+        ],
+        "title": "ModuleRuleOut",
+        "type": "object"
+      },
+      "ModuleVersionOut": {
+        "properties": {
+          "assumption_set": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AssumptionSetPin"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "engine_version": {
+            "description": "The engine a run of this version pins.",
+            "title": "Engine Version",
+            "type": "string"
+          },
+          "illustrative": {
+            "title": "Illustrative",
+            "type": "boolean"
+          },
+          "implementation_status": {
+            "$ref": "#/components/schemas/ImplementationStatus"
+          },
+          "input_contract": {
+            "$ref": "#/components/schemas/ModuleInputContract"
+          },
+          "module_id": {
+            "format": "uuid",
+            "title": "Module Id",
+            "type": "string"
+          },
+          "module_version_id": {
+            "format": "uuid",
+            "title": "Module Version Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "output_contract": {
+            "$ref": "#/components/schemas/ModuleOutputContract"
+          },
+          "provisional": {
+            "title": "Provisional",
+            "type": "boolean"
+          },
+          "rules": {
+            "description": "The rules the module reads, in contract order.",
+            "items": {
+              "$ref": "#/components/schemas/ModuleRuleOut"
+            },
+            "title": "Rules",
+            "type": "array"
+          },
+          "runnable": {
+            "description": "AVAILABLE, implemented in this release, every rule it reads has an ACTIVE version and a baseline assumption set is ACTIVE. Otherwise POST /calculation-runs answers 409 module_not_available.",
+            "title": "Runnable",
+            "type": "boolean"
+          },
+          "statement": {
+            "description": "The D-35 label: not regulatory, no vendor parity.",
+            "title": "Statement",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "module_id",
+          "module_version_id",
+          "code",
+          "name",
+          "description",
+          "version",
+          "implementation_status",
+          "runnable",
+          "engine_version",
+          "input_contract",
+          "output_contract",
+          "rules",
+          "assumption_set",
+          "provisional",
+          "illustrative",
+          "statement",
+          "created_at"
+        ],
+        "title": "ModuleVersionOut",
         "type": "object"
       },
       "MyPermissions": {
@@ -4092,6 +5245,34 @@
         ],
         "title": "Permission",
         "type": "string"
+      },
+      "PostCheck": {
+        "description": "The engine's post-run checks (D-31 \u00a73, Arch \u00a76.2 step 5).",
+        "enum": [
+          "COVERAGE",
+          "BUCKET_DEFINED",
+          "BUCKET_TOTALS",
+          "CUMULATIVE_GAP"
+        ],
+        "title": "PostCheck",
+        "type": "string"
+      },
+      "PostCheckOut": {
+        "properties": {
+          "check": {
+            "$ref": "#/components/schemas/PostCheck"
+          },
+          "passed": {
+            "title": "Passed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "check",
+          "passed"
+        ],
+        "title": "PostCheckOut",
+        "type": "object"
       },
       "ProfileIn": {
         "description": "A new source's profile. Always provisional on create (D2): only the client's approval,\na later action, clears it. The API ignores unknown body fields, so a `provisional` sent\nhere has no effect.",
@@ -5183,6 +6364,156 @@
         "title": "ReconciliationOutcome",
         "type": "string"
       },
+      "ResultItem": {
+        "properties": {
+          "bucket_code": {
+            "title": "Bucket Code",
+            "type": "string"
+          },
+          "bucket_sequence": {
+            "title": "Bucket Sequence",
+            "type": "integer"
+          },
+          "classification": {
+            "description": "The most sensitive classification it reads.",
+            "title": "Classification",
+            "type": "string"
+          },
+          "code": {
+            "$ref": "#/components/schemas/IntermediateCode"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "days_after_reporting_date": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "title": "Days After Reporting Date"
+          },
+          "direction": {
+            "$ref": "#/components/schemas/CashflowDirection"
+          },
+          "intermediate_value_id": {
+            "format": "uuid",
+            "title": "Intermediate Value Id",
+            "type": "string"
+          },
+          "lineage": {
+            "$ref": "#/components/schemas/ContributionLineage"
+          },
+          "liquidity_gap_result_id": {
+            "format": "uuid",
+            "title": "Liquidity Gap Result Id",
+            "type": "string"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/CashflowOrigin"
+          },
+          "rule_version_ids": {
+            "description": "The rule versions that placed it.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Rule Version Ids",
+            "type": "array"
+          },
+          "sequence": {
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "unit": {
+            "description": "The ISO 4217 currency of the value.",
+            "title": "Unit",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "description": "Exact decimal text in `unit`, or masked (D-33).",
+            "title": "Value"
+          }
+        },
+        "required": [
+          "intermediate_value_id",
+          "sequence",
+          "code",
+          "value",
+          "unit",
+          "classification",
+          "currency",
+          "bucket_code",
+          "bucket_sequence",
+          "direction",
+          "origin",
+          "days_after_reporting_date",
+          "liquidity_gap_result_id",
+          "rule_version_ids",
+          "lineage"
+        ],
+        "title": "ResultItem",
+        "type": "object"
+      },
+      "ResultPage": {
+        "properties": {
+          "items": {
+            "description": "In run order.",
+            "items": {
+              "$ref": "#/components/schemas/ResultItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "statement": {
+            "title": "Statement",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CalculationRunStatus"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "run_id",
+          "status",
+          "items",
+          "total",
+          "limit",
+          "offset",
+          "statement"
+        ],
+        "title": "ResultPage",
+        "type": "object"
+      },
       "RetentionState": {
         "description": "`import_artifact.retention_state`. D-20 \u00a74 (PROVISIONAL): artifacts are kept\nindefinitely until the client sets retention; no other state exists yet.",
         "enum": [
@@ -5200,6 +6531,17 @@
           "auditor"
         ],
         "title": "Role",
+        "type": "string"
+      },
+      "RuleCategory": {
+        "description": "What a rule decides (`rule_definition.category`).",
+        "enum": [
+          "BUCKETING",
+          "CLASSIFICATION",
+          "TREATMENT",
+          "FACTOR"
+        ],
+        "title": "RuleCategory",
         "type": "string"
       },
       "RuleIn": {
@@ -5460,6 +6802,598 @@
           "failures"
         ],
         "title": "RuleResult",
+        "type": "object"
+      },
+      "RuleVersionPin": {
+        "description": "The ACTIVE version of a rule: what a run submitted now pins.",
+        "properties": {
+          "approved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved At"
+          },
+          "approved_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The approver, or the seed tag (D-32 \u00a77).",
+            "title": "Approved By"
+          },
+          "authored_by": {
+            "title": "Authored By",
+            "type": "string"
+          },
+          "effective_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective From"
+          },
+          "illustrative": {
+            "title": "Illustrative",
+            "type": "boolean"
+          },
+          "parameters": {
+            "additionalProperties": true,
+            "description": "Typed by the definition's parameter schema.",
+            "title": "Parameters",
+            "type": "object"
+          },
+          "parameters_sha256": {
+            "title": "Parameters Sha256",
+            "type": "string"
+          },
+          "provisional": {
+            "title": "Provisional",
+            "type": "boolean"
+          },
+          "rule_version_id": {
+            "format": "uuid",
+            "title": "Rule Version Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RuleVersionStatus"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "rule_version_id",
+          "version",
+          "status",
+          "parameters",
+          "parameters_sha256",
+          "effective_from",
+          "authored_by",
+          "approved_by",
+          "approved_at",
+          "provisional",
+          "illustrative"
+        ],
+        "title": "RuleVersionPin",
+        "type": "object"
+      },
+      "RuleVersionStatus": {
+        "description": "Data Model \u00a79 `rule_version.status` plus REJECTED (D-06, D-32 \u00a72). Also the status set\nof `assumption_set` versions.",
+        "enum": [
+          "DRAFT",
+          "IN_REVIEW",
+          "APPROVED",
+          "ACTIVE",
+          "SUPERSEDED",
+          "RETIRED",
+          "REJECTED"
+        ],
+        "title": "RuleVersionStatus",
+        "type": "string"
+      },
+      "RunCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "dataset_snapshot_id": {
+            "format": "uuid",
+            "title": "Dataset Snapshot Id",
+            "type": "string"
+          },
+          "module_version_id": {
+            "description": "An AVAILABLE module version from GET /calculation-modules.",
+            "format": "uuid",
+            "title": "Module Version Id",
+            "type": "string"
+          },
+          "reporting_date": {
+            "description": "Buckets count calendar days after this date.",
+            "format": "date",
+            "title": "Reporting Date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dataset_snapshot_id",
+          "module_version_id",
+          "reporting_date"
+        ],
+        "title": "RunCreate",
+        "type": "object"
+      },
+      "RunDetail": {
+        "properties": {
+          "assumption_set_id": {
+            "format": "uuid",
+            "title": "Assumption Set Id",
+            "type": "string"
+          },
+          "correlation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Correlation Id"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "dataset_snapshot_id": {
+            "format": "uuid",
+            "title": "Dataset Snapshot Id",
+            "type": "string"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "engine_version": {
+            "title": "Engine Version",
+            "type": "string"
+          },
+          "illustrative": {
+            "description": "Always true in Feature 03 (D-35).",
+            "title": "Illustrative",
+            "type": "boolean"
+          },
+          "input_refs": {
+            "description": "One row per pin (D-31 \u00a74).",
+            "items": {
+              "$ref": "#/components/schemas/InputRefOut"
+            },
+            "title": "Input Refs",
+            "type": "array"
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/RunManifest"
+          },
+          "manifest_sha256": {
+            "description": "SHA-256 of the canonical JSON of `manifest`: the pinned content only, never the run id, actor or times, so a run on the same pins has the same hash (D-31 \u00a74).",
+            "title": "Manifest Sha256",
+            "type": "string"
+          },
+          "module": {
+            "$ref": "#/components/schemas/RunModuleRef"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunOutcome"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set when the run ends."
+          },
+          "reporting_date": {
+            "format": "date",
+            "title": "Reporting Date",
+            "type": "string"
+          },
+          "rerun_of_run_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Reserved for re-runs (BE-16.3).",
+            "title": "Rerun Of Run Id"
+          },
+          "result_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "SHA-256 of the canonical serialisation of every output (ladder rows, contributions, warnings); set when the run ends. Equal across runs on the same pins.",
+            "title": "Result Sha256"
+          },
+          "rule_set_id": {
+            "format": "uuid",
+            "title": "Rule Set Id",
+            "type": "string"
+          },
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "statement": {
+            "description": "The D-35 label: not regulatory, no vendor parity.",
+            "title": "Statement",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CalculationRunStatus"
+          },
+          "warning_count": {
+            "title": "Warning Count",
+            "type": "integer"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/WarningOut"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "run_id",
+          "status",
+          "reporting_date",
+          "module",
+          "dataset_snapshot_id",
+          "rule_set_id",
+          "assumption_set_id",
+          "engine_version",
+          "manifest_sha256",
+          "result_sha256",
+          "warning_count",
+          "rerun_of_run_id",
+          "started_at",
+          "ended_at",
+          "created_by",
+          "illustrative",
+          "manifest",
+          "input_refs",
+          "warnings",
+          "outcome",
+          "correlation_id",
+          "statement"
+        ],
+        "title": "RunDetail",
+        "type": "object"
+      },
+      "RunManifest": {
+        "description": "Every version a run pinned (D-31 \u00a74), written once with the run. Statuses, times and\nthe actor are not part of it (they are on the run).",
+        "properties": {
+          "assumption_set": {
+            "$ref": "#/components/schemas/ManifestAssumptionSet"
+          },
+          "dataset_snapshot": {
+            "$ref": "#/components/schemas/ManifestSnapshot"
+          },
+          "engine_version": {
+            "title": "Engine Version",
+            "type": "string"
+          },
+          "labels": {
+            "$ref": "#/components/schemas/ManifestLabels"
+          },
+          "manifest_version": {
+            "title": "Manifest Version",
+            "type": "integer"
+          },
+          "module": {
+            "$ref": "#/components/schemas/ManifestModule"
+          },
+          "reporting_date": {
+            "format": "date",
+            "title": "Reporting Date",
+            "type": "string"
+          },
+          "rule_set": {
+            "$ref": "#/components/schemas/ManifestRuleSet"
+          }
+        },
+        "required": [
+          "manifest_version",
+          "engine_version",
+          "reporting_date",
+          "module",
+          "dataset_snapshot",
+          "rule_set",
+          "assumption_set",
+          "labels"
+        ],
+        "title": "RunManifest",
+        "type": "object"
+      },
+      "RunModuleRef": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "module_id": {
+            "format": "uuid",
+            "title": "Module Id",
+            "type": "string"
+          },
+          "module_version_id": {
+            "format": "uuid",
+            "title": "Module Version Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "module_id",
+          "module_version_id",
+          "code",
+          "name",
+          "version"
+        ],
+        "title": "RunModuleRef",
+        "type": "object"
+      },
+      "RunOutcome": {
+        "description": "Value-free counts of a finished run.",
+        "properties": {
+          "bucketed": {
+            "title": "Bucketed",
+            "type": "integer"
+          },
+          "currencies": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Currencies",
+            "type": "array"
+          },
+          "excluded": {
+            "title": "Excluded",
+            "type": "integer"
+          },
+          "in_scope": {
+            "description": "Cash flows in scope: every row of the cash-flow member.",
+            "title": "In Scope",
+            "type": "integer"
+          },
+          "inputs": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Rows read per schema code.",
+            "title": "Inputs",
+            "type": "object"
+          },
+          "post_checks": {
+            "items": {
+              "$ref": "#/components/schemas/PostCheckOut"
+            },
+            "title": "Post Checks",
+            "type": "array"
+          },
+          "warnings_by_code": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Warnings By Code",
+            "type": "object"
+          }
+        },
+        "required": [
+          "inputs",
+          "in_scope",
+          "bucketed",
+          "excluded",
+          "warnings_by_code",
+          "currencies",
+          "post_checks"
+        ],
+        "title": "RunOutcome",
+        "type": "object"
+      },
+      "RunPage": {
+        "properties": {
+          "items": {
+            "description": "Newest first.",
+            "items": {
+              "$ref": "#/components/schemas/RunSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "RunPage",
+        "type": "object"
+      },
+      "RunSummary": {
+        "properties": {
+          "assumption_set_id": {
+            "format": "uuid",
+            "title": "Assumption Set Id",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "dataset_snapshot_id": {
+            "format": "uuid",
+            "title": "Dataset Snapshot Id",
+            "type": "string"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "engine_version": {
+            "title": "Engine Version",
+            "type": "string"
+          },
+          "illustrative": {
+            "description": "Always true in Feature 03 (D-35).",
+            "title": "Illustrative",
+            "type": "boolean"
+          },
+          "manifest_sha256": {
+            "description": "SHA-256 of the canonical JSON of `manifest`: the pinned content only, never the run id, actor or times, so a run on the same pins has the same hash (D-31 \u00a74).",
+            "title": "Manifest Sha256",
+            "type": "string"
+          },
+          "module": {
+            "$ref": "#/components/schemas/RunModuleRef"
+          },
+          "reporting_date": {
+            "format": "date",
+            "title": "Reporting Date",
+            "type": "string"
+          },
+          "rerun_of_run_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Reserved for re-runs (BE-16.3).",
+            "title": "Rerun Of Run Id"
+          },
+          "result_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "SHA-256 of the canonical serialisation of every output (ladder rows, contributions, warnings); set when the run ends. Equal across runs on the same pins.",
+            "title": "Result Sha256"
+          },
+          "rule_set_id": {
+            "format": "uuid",
+            "title": "Rule Set Id",
+            "type": "string"
+          },
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CalculationRunStatus"
+          },
+          "warning_count": {
+            "title": "Warning Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "run_id",
+          "status",
+          "reporting_date",
+          "module",
+          "dataset_snapshot_id",
+          "rule_set_id",
+          "assumption_set_id",
+          "engine_version",
+          "manifest_sha256",
+          "result_sha256",
+          "warning_count",
+          "rerun_of_run_id",
+          "started_at",
+          "ended_at",
+          "created_by",
+          "illustrative"
+        ],
+        "title": "RunSummary",
         "type": "object"
       },
       "ScaleParams": {
@@ -5833,6 +7767,35 @@
         "title": "SchemaList",
         "type": "object"
       },
+      "SchemaRequirement": {
+        "properties": {
+          "fields": {
+            "description": "The schema fields the module reads.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "required": {
+            "description": "Missing from the snapshot: the run is BLOCKED.",
+            "title": "Required",
+            "type": "boolean"
+          },
+          "schema_code": {
+            "description": "A canonical schema a snapshot member provides.",
+            "title": "Schema Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_code",
+          "required",
+          "fields"
+        ],
+        "title": "SchemaRequirement",
+        "type": "object"
+      },
       "SchemaSummary": {
         "properties": {
           "code": {
@@ -6061,6 +8024,201 @@
         ],
         "title": "SchemaVersionStatus",
         "type": "string"
+      },
+      "SnapshotCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "import_ids": {
+            "description": "Projected imports, at most one per schema code (D-30 \u00a71). The order does not matter: the same set always gives the same snapshot.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 10,
+            "minItems": 1,
+            "title": "Import Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "import_ids"
+        ],
+        "title": "SnapshotCreate",
+        "type": "object"
+      },
+      "SnapshotMemberOut": {
+        "properties": {
+          "accepted_count": {
+            "title": "Accepted Count",
+            "type": "integer"
+          },
+          "import_id": {
+            "format": "uuid",
+            "title": "Import Id",
+            "type": "string"
+          },
+          "import_manifest_id": {
+            "format": "uuid",
+            "title": "Import Manifest Id",
+            "type": "string"
+          },
+          "manifest_sha256": {
+            "description": "The pinned import manifest's hash (D-27 \u00a71).",
+            "title": "Manifest Sha256",
+            "type": "string"
+          },
+          "mapping_version_id": {
+            "format": "uuid",
+            "title": "Mapping Version Id",
+            "type": "string"
+          },
+          "projection_id": {
+            "format": "uuid",
+            "title": "Projection Id",
+            "type": "string"
+          },
+          "projector_version": {
+            "title": "Projector Version",
+            "type": "integer"
+          },
+          "quarantined_count": {
+            "description": "Held rows: carried into run manifests (D-30 \u00a73).",
+            "title": "Quarantined Count",
+            "type": "integer"
+          },
+          "reconciliation_outcome": {
+            "$ref": "#/components/schemas/ReconciliationOutcome",
+            "description": "MATCHED or REVIEW_REQUIRED: a BROKEN import is refused (D-28, D-30 \u00a73)."
+          },
+          "rejected_count": {
+            "title": "Rejected Count",
+            "type": "integer"
+          },
+          "schema_code": {
+            "$ref": "#/components/schemas/DomainSchemaCode"
+          },
+          "schema_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Version"
+          },
+          "schema_version_id": {
+            "format": "uuid",
+            "title": "Schema Version Id",
+            "type": "string"
+          },
+          "source_code": {
+            "title": "Source Code",
+            "type": "string"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "import_id",
+          "schema_code",
+          "schema_version_id",
+          "schema_version",
+          "mapping_version_id",
+          "import_manifest_id",
+          "manifest_sha256",
+          "projection_id",
+          "projector_version",
+          "source_id",
+          "source_code",
+          "accepted_count",
+          "quarantined_count",
+          "rejected_count",
+          "reconciliation_outcome"
+        ],
+        "title": "SnapshotMemberOut",
+        "type": "object"
+      },
+      "SnapshotOut": {
+        "properties": {
+          "content_sha256": {
+            "description": "SHA-256 of the canonical JSON of the members' (schema_code, import_id, manifest_sha256), sorted by schema code: the snapshot's identity (D-30 \u00a72).",
+            "title": "Content Sha256",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "member_count": {
+            "title": "Member Count",
+            "type": "integer"
+          },
+          "members": {
+            "description": "By schema code.",
+            "items": {
+              "$ref": "#/components/schemas/SnapshotMemberOut"
+            },
+            "title": "Members",
+            "type": "array"
+          },
+          "snapshot_id": {
+            "format": "uuid",
+            "title": "Snapshot Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "snapshot_id",
+          "content_sha256",
+          "member_count",
+          "members",
+          "created_at",
+          "created_by"
+        ],
+        "title": "SnapshotOut",
+        "type": "object"
+      },
+      "SnapshotPage": {
+        "properties": {
+          "items": {
+            "description": "Newest first.",
+            "items": {
+              "$ref": "#/components/schemas/SnapshotOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "SnapshotPage",
+        "type": "object"
       },
       "SourceCreate": {
         "properties": {
@@ -6743,6 +8901,75 @@
         ],
         "title": "ValueParams",
         "type": "object"
+      },
+      "WarningOut": {
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/CalculationWarningCode"
+          },
+          "details": {
+            "additionalProperties": true,
+            "description": "Value-free: codes, counts and field names.",
+            "title": "Details",
+            "type": "object"
+          },
+          "entity_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entity Id"
+          },
+          "entity_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "e.g. `cashflow_event`.",
+            "title": "Entity Type"
+          },
+          "message": {
+            "description": "Value-free.",
+            "title": "Message",
+            "type": "string"
+          },
+          "sequence": {
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/WarningSeverity"
+          }
+        },
+        "required": [
+          "sequence",
+          "code",
+          "severity",
+          "message",
+          "entity_type",
+          "entity_id",
+          "details"
+        ],
+        "title": "WarningOut",
+        "type": "object"
+      },
+      "WarningSeverity": {
+        "enum": [
+          "INFO",
+          "WARNING",
+          "ERROR"
+        ],
+        "title": "WarningSeverity",
+        "type": "string"
       }
     },
     "securitySchemes": {
@@ -7009,6 +9236,671 @@
         ]
       }
     },
+    "/api/v1/calculation-modules": {
+      "get": {
+        "description": "The calculation modules of the caller's tenant, AVAILABLE and PLANNED, with exactly\nthe versions a run submitted now would pin. Every seeded module is an illustrative\nprototype: not a regulatory calculation, no vendor parity claimed (D-35).",
+        "operationId": "listCalculationModules",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModulePage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Calculation Modules",
+        "tags": [
+          "rules"
+        ]
+      }
+    },
+    "/api/v1/calculation-runs": {
+      "get": {
+        "description": "The caller's tenant's runs, newest first.",
+        "operationId": "listCalculationRuns",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Runs of this module (any version).",
+            "in": "query",
+            "name": "module_code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Runs of this module (any version).",
+              "title": "Module Code"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/CalculationRunStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Calculation Runs",
+        "tags": [
+          "calculations"
+        ]
+      },
+      "post": {
+        "description": "Run a module on a dataset snapshot for a reporting date, synchronously (D-31). The\nengine pins the ACTIVE rule versions (as a content-addressed rule set), the baseline\nassumption set, the module and engine versions and the snapshot's members, writes the\nrun RUNNING with its manifest, runs the module and the post-checks, and ends it\nSUCCEEDED, SUCCEEDED_WITH_WARNINGS, FAILED (a post-check failed) or BLOCKED (the input\ncontract was not met). No AI is involved. Refusals: 404 `not_found` (snapshot), 409\n`module_not_available` (absent, PLANNED, not implemented, or a rule without an ACTIVE\nversion), 409 `calculations_disabled`, 409 `idempotency_conflict`; each audited DENIED. A\nreplay whose run is still RUNNING after CALC_RUN_STALE_SECONDS ends it FAILED\n(ENGINE_ERROR) and returns it.",
+        "operationId": "createCalculationRun",
+        "parameters": [
+          {
+            "description": "Unique per run request (per user). A retry with the same key and the same body returns the original run; with a different body, 409 idempotency_conflict (D-31 \u00a75).",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Unique per run request (per user). A retry with the same key and the same body returns the original run; with a different body, 409 idempotency_conflict (D-31 \u00a75).",
+              "maxLength": 255,
+              "minLength": 1,
+              "pattern": "^[!-~]+$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunDetail"
+                }
+              }
+            },
+            "description": "Idempotent replay: this key was used for the same request; the original run is returned (header Idempotent-Replayed: true)."
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Calculation Run",
+        "tags": [
+          "calculations"
+        ]
+      }
+    },
+    "/api/v1/calculation-runs/{run_id}": {
+      "get": {
+        "description": "One run: its manifest with every pinned id and version, its input refs, warnings and\noutcome counts. 404 alike for an absent and a foreign id (D-04).",
+        "operationId": "getCalculationRun",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Calculation Run",
+        "tags": [
+          "calculations"
+        ]
+      }
+    },
+    "/api/v1/calculation-runs/{run_id}/maturity-ladder": {
+      "get": {
+        "description": "The run's maturity ladder: per currency and bucket, inflows, outflows, net gap and\ncumulative gap, with the contractual and behavioural parts (D-35). Aggregates are\n`internal` (D-33). 404 `maturity_ladder_not_found` for a run of another module.",
+        "operationId": "getMaturityLadder",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaturityLadderOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Maturity Ladder",
+        "tags": [
+          "calculations"
+        ]
+      }
+    },
+    "/api/v1/calculation-runs/{run_id}/results": {
+      "get": {
+        "description": "The run's intermediate values (one contribution per bucketed cash flow), each with its\nlineage: cash-flow event -> canonical record -> import and source row (D-31 \u00a76). Filter\nby currency and bucket to drill down from a ladder row. The value is masked unless the\ncaller is cleared for the most sensitive field it reads (D-33).",
+        "operationId": "getCalculationRunResults",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "currency",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^[A-Z]{3}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Currency"
+            }
+          },
+          {
+            "in": "query",
+            "name": "bucket_code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 20,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Bucket Code"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Calculation Run Results",
+        "tags": [
+          "calculations"
+        ]
+      }
+    },
+    "/api/v1/dataset-snapshots": {
+      "get": {
+        "description": "The caller's tenant's snapshots, newest first.",
+        "operationId": "listDatasetSnapshots",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Dataset Snapshots",
+        "tags": [
+          "calculations"
+        ]
+      },
+      "post": {
+        "description": "Pin projected imports as one immutable dataset snapshot (D-30), at most one per schema\ncode. QUARANTINED imports are allowed; their held counts travel into run manifests.\nRefusals (409, each audited DENIED): `not_projected`, `duplicate_schema`,\n`reconciliation_broken` (a D-28 BROKEN member), `ambiguous_business_key` (a business key\nwith two versions in the snapshot) and `calculations_disabled`; 404 `not_found` alike for\nan absent and a foreign import.",
+        "operationId": "createDatasetSnapshot",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SnapshotCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotOut"
+                }
+              }
+            },
+            "description": "The same members already form a snapshot: it is returned and nothing is written (header Idempotent-Replayed: true)."
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Dataset Snapshot",
+        "tags": [
+          "calculations"
+        ]
+      }
+    },
+    "/api/v1/dataset-snapshots/{snapshot_id}": {
+      "get": {
+        "description": "One snapshot and its members; 404 alike for an absent and a foreign id (D-04).",
+        "operationId": "getDatasetSnapshot",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "snapshot_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Snapshot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Dataset Snapshot",
+        "tags": [
+          "calculations"
+        ]
+      }
+    },
     "/api/v1/dev/personas": {
       "get": {
         "operationId": "listDevPersonas",
@@ -7217,7 +10109,7 @@
     },
     "/api/v1/imports": {
       "get": {
-        "description": "Newest first; filter by source and status.",
+        "description": "Newest first; filter by source, status, schema code and projection (the Phase 15\nnew-run panel lists projected imports per schema with one call).",
         "operationId": "listImports",
         "parameters": [
           {
@@ -7274,6 +10166,43 @@
                 }
               ],
               "title": "Status"
+            }
+          },
+          {
+            "description": "Imports pinned to a version of this schema.",
+            "in": "query",
+            "name": "schema_code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Imports pinned to a version of this schema.",
+              "title": "Schema Code"
+            }
+          },
+          {
+            "description": "true: imports projected into the WS3 domain (D-29); false: imports not projected. Omitted: both.",
+            "in": "query",
+            "name": "projected",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "true: imports projected into the WS3 domain (D-29); false: imports not projected. Omitted: both.",
+              "title": "Projected"
             }
           }
         ],

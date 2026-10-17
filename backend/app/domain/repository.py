@@ -55,6 +55,15 @@ class DomainRepository(ScopedRepository[DomainProjection]):
             {"key": f"domain_projection:{self.scope.tenant_id}"},
         )
 
+    async def projected_import_ids(self) -> list[uuid.UUID]:
+        """The imports of the tenant that have a projection."""
+        result = await self.session.execute(
+            select(DomainProjection.import_job_id).where(
+                DomainProjection.tenant_id == self.scope.tenant_id
+            )
+        )
+        return list(result.scalars())
+
     async def projection_for(self, import_id: uuid.UUID) -> DomainProjection | None:
         result = await self.session.execute(
             self.scoped().where(DomainProjection.import_job_id == import_id)
@@ -199,3 +208,90 @@ class DomainRepository(ScopedRepository[DomainProjection]):
             .order_by(CashflowEvent.due_date, CashflowEvent.business_key, CashflowEvent.id)
         )
         return list(result.scalars())
+
+    # --- for WS3 dataset snapshots and runs (Phase 15, D-30, D-31): read only ---------------
+
+    async def ambiguous_keys(self, projection: DomainProjection) -> int:
+        """Business keys with more than one version row in this projection's import (one
+        key, two candidates inside a snapshot: D-30 §3)."""
+        rows: Any
+        if projection.schema_code == "instrument":
+            rows = (
+                select(Instrument.business_key)
+                .join(InstrumentVersion, InstrumentVersion.instrument_id == Instrument.id)
+                .where(
+                    InstrumentVersion.tenant_id == self.scope.tenant_id,
+                    InstrumentVersion.domain_projection_id == projection.id,
+                )
+                .group_by(Instrument.business_key)
+                .having(func.count() > 1)
+            )
+        elif projection.schema_code == "position":
+            rows = (
+                select(Position.business_key)
+                .join(PositionVersion, PositionVersion.position_id == Position.id)
+                .where(
+                    PositionVersion.tenant_id == self.scope.tenant_id,
+                    PositionVersion.domain_projection_id == projection.id,
+                )
+                .group_by(Position.business_key)
+                .having(func.count() > 1)
+            )
+        else:
+            return 0
+        return int(
+            await self.session.scalar(select(func.count()).select_from(rows.subquery())) or 0
+        )
+
+    async def import_cash_flows(self, import_id: uuid.UUID) -> list[CashflowEvent]:
+        """An import's projected cash-flow events in source order."""
+        result = await self.session.execute(
+            select(CashflowEvent)
+            .where(
+                CashflowEvent.tenant_id == self.scope.tenant_id,
+                CashflowEvent.import_job_id == import_id,
+            )
+            .order_by(CashflowEvent.source_ordinal, CashflowEvent.id)
+        )
+        return list(result.scalars())
+
+    async def import_instruments(self, import_id: uuid.UUID) -> list[tuple[InstrumentVersion, str]]:
+        """An import's projected instrument versions with their business keys, in source
+        order."""
+        result = await self.session.execute(
+            select(InstrumentVersion, Instrument.business_key)
+            .join(Instrument, Instrument.id == InstrumentVersion.instrument_id)
+            .where(
+                InstrumentVersion.tenant_id == self.scope.tenant_id,
+                Instrument.tenant_id == self.scope.tenant_id,
+                InstrumentVersion.import_job_id == import_id,
+            )
+            .order_by(InstrumentVersion.source_ordinal, InstrumentVersion.id)
+        )
+        return [(row[0], row[1]) for row in result]
+
+    async def cash_flows_by_id(self, ids: Sequence[uuid.UUID]) -> list[CashflowEvent]:
+        if not ids:
+            return []
+        result = await self.session.execute(
+            select(CashflowEvent).where(
+                CashflowEvent.tenant_id == self.scope.tenant_id, CashflowEvent.id.in_(ids)
+            )
+        )
+        return list(result.scalars())
+
+    async def instrument_versions_by_id(
+        self, ids: Sequence[uuid.UUID]
+    ) -> list[tuple[InstrumentVersion, str]]:
+        if not ids:
+            return []
+        result = await self.session.execute(
+            select(InstrumentVersion, Instrument.business_key)
+            .join(Instrument, Instrument.id == InstrumentVersion.instrument_id)
+            .where(
+                InstrumentVersion.tenant_id == self.scope.tenant_id,
+                Instrument.tenant_id == self.scope.tenant_id,
+                InstrumentVersion.id.in_(ids),
+            )
+        )
+        return [(row[0], row[1]) for row in result]

@@ -143,19 +143,36 @@ class ImportRepository(ScopedRepository[ImportJob]):
     model = ImportJob
 
     def _filtered(
-        self, source_id: uuid.UUID | None, status: str | None
+        self,
+        source_id: uuid.UUID | None,
+        status: str | None,
+        schema_version_ids: Sequence[uuid.UUID] | None = None,
+        ids: Sequence[uuid.UUID] | None = None,
+        exclude_ids: bool = False,
     ) -> Select[tuple[ImportJob]]:
         query = self.scoped()
         if source_id is not None:
             query = query.where(ImportJob.source_system_id == source_id)
         if status is not None:
             query = query.where(ImportJob.status == status)
+        if schema_version_ids is not None:
+            query = query.where(ImportJob.schema_version_id.in_(schema_version_ids))
+        if ids is not None:
+            matches = ImportJob.id.in_(ids)
+            query = query.where(~matches if exclude_ids else matches)
         return query
 
     async def page_filtered(
-        self, limit: int, offset: int, source_id: uuid.UUID | None, status: str | None
+        self,
+        limit: int,
+        offset: int,
+        source_id: uuid.UUID | None,
+        status: str | None,
+        schema_version_ids: Sequence[uuid.UUID] | None = None,
+        ids: Sequence[uuid.UUID] | None = None,
+        exclude_ids: bool = False,
     ) -> tuple[list[ImportJob], int]:
-        query = self._filtered(source_id, status)
+        query = self._filtered(source_id, status, schema_version_ids, ids, exclude_ids)
         total = await self.session.scalar(select(func.count()).select_from(query.subquery()))
         result = await self.session.execute(
             query.order_by(ImportJob.created_at.desc(), ImportJob.id.desc())
