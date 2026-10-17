@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { API } from './support'
 
 /**
  * Feature 02 Phase 7 browser checks against the real stack.
@@ -7,8 +8,6 @@ import { expect, test, type Page } from '@playwright/test'
  * FE-7.2: register a source, see it listed, add contract v2, see v1 Superseded and v2
  *         Provisional, and see both contract events (with correlation IDs) in its timeline.
  */
-
-const API = 'http://localhost:8000'
 
 async function signIn(page: Page, persona: string) {
   await page.goto('/login')

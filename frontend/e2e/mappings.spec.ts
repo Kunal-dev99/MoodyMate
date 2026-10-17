@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
+import { API } from './support'
 
 /**
  * Feature 02 Phase 10 browser checks against the real stack (backend ENV=test, synthetic).
@@ -12,7 +13,6 @@ import { expect, test, type Page } from '@playwright/test'
  *          "You cannot approve your own mapping"; the approver approves and the ACTIVE badge shows.
  */
 
-const API = 'http://localhost:8000'
 const SAMPLE = join(__dirname, '../../backend/samples/synthetic/instrument.csv')
 
 async function signIn(page: Page, persona: string) {

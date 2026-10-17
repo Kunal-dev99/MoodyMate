@@ -27,3 +27,17 @@ export const MAPPING_UI_ENABLED = process.env.NEXT_PUBLIC_MAPPING_UI !== 'off'
  * The backend's own switch is INGESTION_ENABLED, which refuses validation and dispositions.
  */
 export const VALIDATION_UI_ENABLED = process.env.NEXT_PUBLIC_VALIDATION_UI !== 'off'
+
+/**
+ * NEXT_PUBLIC_RECONCILIATION_UI=off (FE-12.1): the import page loses its Reconciliation tab,
+ * restoring the Phase 11 UI exactly. Reconciliation itself is a control with no off switch:
+ * validation still writes it and GET /imports/{id}/reconciliation stays readable.
+ */
+export const RECONCILIATION_UI_ENABLED = process.env.NEXT_PUBLIC_RECONCILIATION_UI !== 'off'
+
+/**
+ * NEXT_PUBLIC_DRIFT_UI=off (FE-12.2): the import page loses its Drift tab and the review
+ * dialog, restoring the Phase 11 UI exactly. The backend's own switches are
+ * DRIFT_DETECTION_ENABLED (no new events) and INGESTION_ENABLED (reviews refused, 409).
+ */
+export const DRIFT_UI_ENABLED = process.env.NEXT_PUBLIC_DRIFT_UI !== 'off'

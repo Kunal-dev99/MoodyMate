@@ -72,6 +72,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/drift-events/{drift_event_id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Review Drift Event
+         * @description Review an OPEN drift event once (audited): ACKNOWLEDGED, or ACTION_REQUIRED, which
+         *     returns a link to the schema change proposal page and creates nothing. A second review
+         *     is 409 already_reviewed.
+         */
+        post: operations["reviewDriftEvent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -126,6 +148,27 @@ export interface paths {
          * @description The import, with its manifest once validated (BE-11.5).
          */
         get: operations["getImport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/imports/{import_id}/drift": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Import Drift
+         * @description The import's drift events against its source's baseline (DI-06), in detection order.
+         *     Values (min, max) are masked by each column's classification; nothing is changed.
+         */
+        get: operations["getImportDrift"];
         put?: never;
         post?: never;
         delete?: never;
@@ -197,6 +240,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/imports/{import_id}/reconciliation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Import Reconciliation
+         * @description The import's reconciliation (DI-05): row-count conservation, the declared row count
+         *     and each control total, with exact decimal figures. 404 reconciliation_not_found until
+         *     the import is validated.
+         */
+        get: operations["getImportReconciliation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/imports/{import_id}/validate": {
         parameters: {
             query?: never;
@@ -212,7 +277,8 @@ export interface paths {
          *     every row is accepted (a canonical record), quarantined or rejected, and the import ends
          *     COMPLETED, COMPLETED_WITH_WARNINGS, QUARANTINED or FAILED (a file-level BLOCKER: no row
          *     accepted). 409 `mapping_required` without a usable mapping version, 409
-         *     `already_validated` on a second call: a re-run is a new import.
+         *     `already_validated` on a second call: a re-run is a new import. The import is
+         *     reconciled in the same transaction (BE-12.2, GET /imports/{import_id}/reconciliation).
          */
         post: operations["validateImport"];
         delete?: never;
@@ -1062,6 +1128,143 @@ export interface components {
             /** @description OPEN->UNDER_REVIEW; UNDER_REVIEW->REJECTED | RETRY_READY | OPEN. Other moves are 409 invalid_transition (CORRECTED and RESOLVED come from a retry import). */
             status: components["schemas"]["QuarantineStatus"];
         };
+        /** DriftEventOut */
+        DriftEventOut: {
+            /**
+             * Allowed Outcomes
+             * @description Review outcomes still possible.
+             */
+            allowed_outcomes: components["schemas"]["DriftStatus"][];
+            /** @description The baseline's column (none if added). */
+            baseline: components["schemas"]["DriftSummary"] | null;
+            /**
+             * Baseline Import Id
+             * Format: uuid
+             * @description The latest COMPLETED or COMPLETED_WITH_WARNINGS import of the same source.
+             */
+            baseline_import_id: string;
+            /**
+             * Classification
+             * @description Masks the summaries' min and max (BE-9.3 rule).
+             */
+            classification: string;
+            /** Column */
+            column: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Detector Version */
+            detector_version: number;
+            drift_type: components["schemas"]["DriftType"];
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Import Id
+             * Format: uuid
+             */
+            import_id: string;
+            /** @description This import's column (none if removed). */
+            observed: components["schemas"]["DriftSummary"] | null;
+            /** @description Set when the review is ACTION_REQUIRED: a link hint, nothing created. */
+            proposal_link: components["schemas"]["ProposalLink"] | null;
+            /** Review Comment */
+            review_comment: string | null;
+            /** Reviewed At */
+            reviewed_at: string | null;
+            /** Reviewed By */
+            reviewed_by: string | null;
+            /** Sequence */
+            sequence: number;
+            status: components["schemas"]["DriftStatus"];
+            /**
+             * Thresholds
+             * @description PROVISIONAL thresholds applied (text).
+             */
+            thresholds: {
+                [key: string]: unknown;
+            };
+        };
+        /** DriftPage */
+        DriftPage: {
+            /**
+             * Baseline Import Id
+             * @description The baseline the events compare with (none when there are no events).
+             */
+            baseline_import_id: string | null;
+            /**
+             * Import Id
+             * Format: uuid
+             */
+            import_id: string;
+            /** Items */
+            items: components["schemas"]["DriftEventOut"][];
+            /** Status Counts */
+            status_counts: {
+                [key: string]: number;
+            };
+            /** Total */
+            total: number;
+        };
+        /** DriftReviewIn */
+        DriftReviewIn: {
+            /**
+             * Comment
+             * @description Required.
+             */
+            comment: string;
+            /**
+             * Outcome
+             * @description ACKNOWLEDGED, or ACTION_REQUIRED (a schema change should be proposed).
+             * @enum {string}
+             */
+            outcome: "ACKNOWLEDGED" | "ACTION_REQUIRED";
+        };
+        /**
+         * DriftStatus
+         * @description D-23 `data_drift_event.status`. A person reviews an OPEN event once.
+         * @enum {string}
+         */
+        DriftStatus: "OPEN" | "ACKNOWLEDGED" | "ACTION_REQUIRED";
+        /**
+         * DriftSummary
+         * @description A column's profile statistics on one side of a drift event. `min` and `max` are data,
+         *     masked by the event's classification; everything else is metadata.
+         */
+        DriftSummary: {
+            /** Candidate Types */
+            candidate_types: string[];
+            /** Distinct Count */
+            distinct_count: number | null;
+            /** Max */
+            max: string | components["schemas"]["MaskedValue"] | null;
+            /** Min */
+            min: string | components["schemas"]["MaskedValue"] | null;
+            /** Null Count */
+            null_count: number | null;
+            /**
+             * Null Rate
+             * @description Decimal text (4 places), never a number.
+             */
+            null_rate: string | null;
+            /** Position */
+            position: number | null;
+            /** Suggested Type */
+            suggested_type: string | null;
+            /** Value Count */
+            value_count: number | null;
+        };
+        /**
+         * DriftType
+         * @description D-23 `data_drift_event.drift_type`: how an import's profile differs from its
+         *     baseline's (the latest COMPLETED or COMPLETED_WITH_WARNINGS import of the same source).
+         * @enum {string}
+         */
+        DriftType: "COLUMN_ADDED" | "COLUMN_REMOVED" | "TYPE_CHANGED" | "NULL_RATE_SHIFT" | "RANGE_SHIFT";
         /**
          * EnvironmentInfo
          * @description Shown on every page outside production (FE-6.1).
@@ -2170,6 +2373,29 @@ export interface components {
          * @enum {string}
          */
         ProposalDecision: "APPROVE" | "REJECT";
+        /**
+         * ProposalLink
+         * @description Where a person proposes a schema change (the Phase 5 page, target schema prefilled).
+         *     A hint only: nothing was created.
+         */
+        ProposalLink: {
+            /**
+             * Href
+             * @description Frontend route, e.g. /schemas/proposals/new?schema={id}.
+             */
+            href: string;
+            /**
+             * Kind
+             * @default SCHEMA_CHANGE_PROPOSAL
+             * @constant
+             */
+            kind: "SCHEMA_CHANGE_PROPOSAL";
+            /**
+             * Schema Id
+             * Format: uuid
+             */
+            schema_id: string;
+        };
         /** ProposalList */
         ProposalList: {
             /** Items */
@@ -2366,6 +2592,122 @@ export interface components {
          * @enum {string}
          */
         QuarantineStatus: "OPEN" | "UNDER_REVIEW" | "REJECTED" | "CORRECTED" | "RETRY_READY" | "RESOLVED";
+        /**
+         * ReconciliationCheck
+         * @description What one `reconciliation_item` compares (BE-12.2). `variance = source - target`.
+         *
+         *     - ROW_COUNT: source rows vs accepted rows; held = quarantined + rejected. Zero tolerance.
+         *     - EXPECTED_ROW_COUNT: the upload's declared `expected_row_count` vs the source rows.
+         *       Zero tolerance.
+         *     - CONTROL_TOTAL: per contract control-total column, the source total of the parseable
+         *       values vs the accepted rows' total; held = the held rows' total.
+         *     - DECLARED_CONTROL_TOTAL: the upload's declared total vs that source total.
+         * @enum {string}
+         */
+        ReconciliationCheck: "ROW_COUNT" | "EXPECTED_ROW_COUNT" | "CONTROL_TOTAL" | "DECLARED_CONTROL_TOTAL";
+        /** ReconciliationItemOut */
+        ReconciliationItemOut: {
+            check: components["schemas"]["ReconciliationCheck"];
+            /**
+             * Classification
+             * @description Masks this item's figures (public for counts).
+             */
+            classification: string;
+            /**
+             * Column
+             * @description The control-total column (none for row counts).
+             */
+            column: string | null;
+            /**
+             * Details
+             * @description Counts of parseable, unparseable and empty values (totals only).
+             */
+            details: {
+                [key: string]: unknown;
+            };
+            /**
+             * Held
+             * @description The part of the gap that held (quarantined or rejected) rows explain.
+             */
+            held: string | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Sequence
+             * @description Check order within the run.
+             */
+            sequence: number;
+            /**
+             * Source
+             * @description Exact decimal text. ROW_COUNT: source rows; EXPECTED_ROW_COUNT: the declared count; CONTROL_TOTAL: the total of the column's parseable values over all rows; DECLARED_CONTROL_TOTAL: the declared total.
+             */
+            source: string | components["schemas"]["MaskedValue"];
+            status: components["schemas"]["ReconciliationItemStatus"];
+            /**
+             * Target
+             * @description ROW_COUNT: accepted rows; EXPECTED_ROW_COUNT: source rows; CONTROL_TOTAL: the accepted rows' total; DECLARED_CONTROL_TOTAL: the source total.
+             */
+            target: string | components["schemas"]["MaskedValue"];
+            /**
+             * Tolerance
+             * @description Absolute tolerance applied (row counts: 0).
+             */
+            tolerance: string;
+            /**
+             * Unit
+             * @description 'rows' for counts; for totals, the unit of the schema field the column is mapped to (none when it has none).
+             */
+            unit: string | null;
+            /**
+             * Variance
+             * @description source - target, exact.
+             */
+            variance: string | components["schemas"]["MaskedValue"];
+        };
+        /**
+         * ReconciliationItemStatus
+         * @description D-23 `reconciliation_item.status`, a function of the variance and the tolerance.
+         * @enum {string}
+         */
+        ReconciliationItemStatus: "MATCHED" | "WITHIN_TOLERANCE" | "VARIANCE";
+        /** ReconciliationOut */
+        ReconciliationOut: {
+            /**
+             * Import Id
+             * Format: uuid
+             */
+            import_id: string;
+            import_status: components["schemas"]["ImportStatus"];
+            /** Items */
+            items: components["schemas"]["ReconciliationItemOut"][];
+            /** @description MATCHED only when every item is MATCHED; BROKEN when a gap is not explained by held rows (or a declared figure differs); else REVIEW_REQUIRED. */
+            outcome: components["schemas"]["ReconciliationOutcome"];
+            /**
+             * Reconciled At
+             * Format: date-time
+             */
+            reconciled_at: string;
+            /** Reconciled By */
+            reconciled_by: string;
+            /** Reconciler Version */
+            reconciler_version: number;
+            /**
+             * Reconciliation Id
+             * Format: uuid
+             */
+            reconciliation_id: string;
+            /**
+             * Tolerance Policy
+             * @description PROVISIONAL tolerance policy applied.
+             */
+            tolerance_policy: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * ReconciliationOutcome
+         * @description D-23 `reconciliation_run.outcome`. MATCHED only when every item is MATCHED.
+         * @enum {string}
+         */
+        ReconciliationOutcome: "MATCHED" | "REVIEW_REQUIRED" | "BROKEN";
         /**
          * RetentionState
          * @description `import_artifact.retention_state`. D-20 §4 (PROVISIONAL): artifacts are kept
@@ -3127,6 +3469,50 @@ export interface operations {
             };
         };
     };
+    reviewDriftEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                drift_event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DriftReviewIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DriftEventOut"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     getHealth: {
         parameters: {
             query?: never;
@@ -3323,6 +3709,46 @@ export interface operations {
             };
         };
     };
+    getImportDrift: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                import_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DriftPage"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     listImportIssues: {
         parameters: {
             query?: {
@@ -3432,6 +3858,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ImportProfile"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    getImportReconciliation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                import_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReconciliationOut"];
                 };
             };
             /** @description Client error (standard envelope) */

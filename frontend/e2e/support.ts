@@ -7,7 +7,12 @@ import { expect, type APIRequestContext, type Page } from '@playwright/test'
  * API with dev-session tokens; what the Done-whens check happens in the browser.
  */
 
-export const API = 'http://localhost:8000'
+/**
+ * The backend the browser build calls: E2E_API_PORT (default 8000), which must match the
+ * NEXT_PUBLIC_API_BASE_URL the frontend was built with. playwright.config.ts starts the
+ * backend on the same port.
+ */
+export const API = `http://localhost:${process.env.E2E_API_PORT ?? '8000'}`
 export const SAMPLES = join(__dirname, '../../backend/samples/synthetic')
 
 export async function signIn(page: Page, persona: string) {

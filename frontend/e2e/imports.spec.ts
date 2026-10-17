@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Page, type Route } from '@playwright/test'
+import { API } from './support'
 
 /**
  * Feature 02 Phase 8 browser checks against the real stack (backend ENV=test, synthetic).
@@ -19,7 +20,6 @@ import { expect, test, type Page, type Route } from '@playwright/test'
  * it on its own (413 payload_too_large), exactly as it would a client without the check.
  */
 
-const API = 'http://localhost:8000'
 const MIB = 1024 * 1024
 const SAMPLE = join(__dirname, '../../backend/samples/synthetic/instrument.csv')
 const SAMPLE_SHA256 = createHash('sha256').update(readFileSync(SAMPLE)).digest('hex')
