@@ -1884,6 +1884,266 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "HqlaAssetLineage": {
+        "description": "position version -> canonical record -> source row -> import (D-31 \u00a76).",
+        "properties": {
+          "canonical_record_id": {
+            "format": "uuid",
+            "title": "Canonical Record Id",
+            "type": "string"
+          },
+          "import_id": {
+            "format": "uuid",
+            "title": "Import Id",
+            "type": "string"
+          },
+          "instrument_business_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "title": "Instrument Business Key"
+          },
+          "instrument_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Id"
+          },
+          "instrument_version_id": {
+            "format": "uuid",
+            "title": "Instrument Version Id",
+            "type": "string"
+          },
+          "position_business_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "title": "Position Business Key"
+          },
+          "position_id": {
+            "format": "uuid",
+            "title": "Position Id",
+            "type": "string"
+          },
+          "position_version_id": {
+            "format": "uuid",
+            "title": "Position Version Id",
+            "type": "string"
+          },
+          "source_ordinal": {
+            "title": "Source Ordinal",
+            "type": "integer"
+          },
+          "source_record_id": {
+            "format": "uuid",
+            "title": "Source Record Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "position_version_id",
+          "position_id",
+          "position_business_key",
+          "instrument_id",
+          "instrument_version_id",
+          "instrument_business_key",
+          "canonical_record_id",
+          "import_id",
+          "source_record_id",
+          "source_ordinal"
+        ],
+        "title": "HqlaAssetLineage",
+        "type": "object"
+      },
+      "HqlaAssetOut": {
+        "description": "One asset position considered for HQLA: included at its level, or excluded with its\nreason. Positions whose type has a run-off rate are outflows, not asset rows.",
+        "properties": {
+          "balance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "description": "The position balance (the value, PROVISIONAL), or masked.",
+            "title": "Balance"
+          },
+          "classification": {
+            "description": "The most sensitive classification it reads (D-33).",
+            "title": "Classification",
+            "type": "string"
+          },
+          "exclusion_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HqlaExclusionReason"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set when excluded."
+          },
+          "haircut": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The pinned haircut, exact text; None when excluded.",
+            "title": "Haircut"
+          },
+          "hqla_asset_result_id": {
+            "format": "uuid",
+            "title": "Hqla Asset Result Id",
+            "type": "string"
+          },
+          "hqla_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "description": "balance x (1 - haircut) when included, 0 when excluded; or masked.",
+            "title": "Hqla Value"
+          },
+          "included": {
+            "title": "Included",
+            "type": "boolean"
+          },
+          "instrument_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "title": "Instrument Type"
+          },
+          "level": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HqlaLevel"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set when included."
+          },
+          "lineage": {
+            "$ref": "#/components/schemas/HqlaAssetLineage"
+          },
+          "rule_version_ids": {
+            "description": "The rule versions that placed it.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Rule Version Ids",
+            "type": "array"
+          },
+          "sequence": {
+            "title": "Sequence",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hqla_asset_result_id",
+          "sequence",
+          "included",
+          "level",
+          "exclusion_reason",
+          "instrument_type",
+          "balance",
+          "haircut",
+          "hqla_value",
+          "classification",
+          "rule_version_ids",
+          "lineage"
+        ],
+        "title": "HqlaAssetOut",
+        "type": "object"
+      },
+      "HqlaExclusionReason": {
+        "description": "`hqla_asset_result.exclusion_reason` (BE-17.1): why an asset row adds nothing to HQLA.\nInputs that cannot be read at all are excluded with a run warning instead.",
+        "enum": [
+          "NOT_HQLA_ELIGIBLE"
+        ],
+        "title": "HqlaExclusionReason",
+        "type": "string"
+      },
+      "HqlaLevel": {
+        "description": "The values of the `hqla_level` ENUM_MAP (D-35 \u00a72): an instrument type's HQLA level. A\ntype that is not a key of the map is not HQLA.",
+        "enum": [
+          "L1",
+          "L2A",
+          "L2B"
+        ],
+        "title": "HqlaLevel",
+        "type": "string"
+      },
+      "HqlaLevelOut": {
+        "properties": {
+          "asset_count": {
+            "title": "Asset Count",
+            "type": "integer"
+          },
+          "classification": {
+            "title": "Classification",
+            "type": "string"
+          },
+          "level": {
+            "$ref": "#/components/schemas/HqlaLevel"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "description": "Sum of the included asset rows' HQLA values at this level.",
+            "title": "Total"
+          }
+        },
+        "required": [
+          "level",
+          "total",
+          "asset_count",
+          "classification"
+        ],
+        "title": "HqlaLevelOut",
+        "type": "object"
+      },
       "ImpactAnalysis": {
         "properties": {
           "analysed_at": {
@@ -3556,6 +3816,302 @@
           "contribution_count"
         ],
         "title": "LadderRow",
+        "type": "object"
+      },
+      "LcrWarningCode": {
+        "description": "`lcr_result.warning_codes` (BE-17.2): value-free warnings about one currency's LCR.\nKept on the LCR row (a closed list, CHECK-constrained by migration 0020) because\n`calculation_warning.code` is a closed CHECK of migration 0018, which D-01 does not let a\nforward migration widen. A run with any of them ends SUCCEEDED_WITH_WARNINGS.",
+        "enum": [
+          "LCR_DENOMINATOR_ZERO",
+          "LCR_LEVEL_CAPS_NOT_APPLIED"
+        ],
+        "title": "LcrWarningCode",
+        "type": "string"
+      },
+      "LiquidityCurrency": {
+        "description": "One currency's LCR, no FX (D-35 \u00a72). Every figure is exact decimal text or masked: a\nfigure built from fewer than `min_aggregate_count` contributions (but at least one), and\nevery figure derived from it, takes the contributions' classification (D-33). Zero\nfigures and a NULL ratio stay clear.",
+        "properties": {
+          "assets": {
+            "description": "Included and excluded, in run order.",
+            "items": {
+              "$ref": "#/components/schemas/HqlaAssetOut"
+            },
+            "title": "Assets",
+            "type": "array"
+          },
+          "classification": {
+            "description": "`internal`: an aggregate (D-33).",
+            "title": "Classification",
+            "type": "string"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "excluded_asset_count": {
+            "title": "Excluded Asset Count",
+            "type": "integer"
+          },
+          "hqla_levels": {
+            "description": "L1, L2A and L2B, in that order.",
+            "items": {
+              "$ref": "#/components/schemas/HqlaLevelOut"
+            },
+            "title": "Hqla Levels",
+            "type": "array"
+          },
+          "hqla_total": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "description": "L1 + L2A + L2B: the sum of the included asset rows.",
+            "title": "Hqla Total"
+          },
+          "inflow_cap_amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "description": "inflow_cap_rate x outflows.",
+            "title": "Inflow Cap Amount"
+          },
+          "inflow_cap_applied": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "description": "True when the cap binds (inflows_before_cap > inflow_cap_amount).",
+            "title": "Inflow Cap Applied"
+          },
+          "inflow_cap_rate": {
+            "description": "The pinned cap, a share of outflows.",
+            "title": "Inflow Cap Rate",
+            "type": "string"
+          },
+          "inflow_count": {
+            "title": "Inflow Count",
+            "type": "integer"
+          },
+          "inflows_after_cap": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "description": "min(inflows_before_cap, inflow_cap_amount).",
+            "title": "Inflows After Cap"
+          },
+          "inflows_before_cap": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "description": "Sum of amount x inflow rate.",
+            "title": "Inflows Before Cap"
+          },
+          "inflows_gross": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "description": "Sum of the in-horizon inflow cash flows' amounts.",
+            "title": "Inflows Gross"
+          },
+          "lcr_result_id": {
+            "format": "uuid",
+            "title": "Lcr Result Id",
+            "type": "string"
+          },
+          "net_outflows": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "description": "outflows - inflows_after_cap: the denominator.",
+            "title": "Net Outflows"
+          },
+          "outflow_balance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "description": "Sum of the outflow positions' balances.",
+            "title": "Outflow Balance"
+          },
+          "outflow_count": {
+            "title": "Outflow Count",
+            "type": "integer"
+          },
+          "outflows": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "description": "Sum of balance x run-off.",
+            "title": "Outflows"
+          },
+          "ratio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "hqla_total / net_outflows, 4 dp ROUND_HALF_EVEN (PROVISIONAL). None (not computable) when net_outflows <= 0, with LCR_DENOMINATOR_ZERO.",
+            "title": "Ratio"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/LcrWarningCode"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "lcr_result_id",
+          "currency",
+          "classification",
+          "hqla_total",
+          "hqla_levels",
+          "assets",
+          "excluded_asset_count",
+          "outflow_balance",
+          "outflows",
+          "outflow_count",
+          "inflows_gross",
+          "inflows_before_cap",
+          "inflow_cap_rate",
+          "inflow_cap_amount",
+          "inflows_after_cap",
+          "inflow_cap_applied",
+          "inflow_count",
+          "net_outflows",
+          "ratio",
+          "warnings"
+        ],
+        "title": "LiquidityCurrency",
+        "type": "object"
+      },
+      "LiquidityOut": {
+        "properties": {
+          "currencies": {
+            "description": "Per currency, no FX (D-35). Empty unless the run SUCCEEDED (with or without warnings).",
+            "items": {
+              "$ref": "#/components/schemas/LiquidityCurrency"
+            },
+            "title": "Currencies",
+            "type": "array"
+          },
+          "illustrative": {
+            "title": "Illustrative",
+            "type": "boolean"
+          },
+          "inflow_horizon_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The pinned horizon: inflows are cash flows due (0, n] days after the reporting date.",
+            "title": "Inflow Horizon Days"
+          },
+          "limitations": {
+            "description": "Documented limitations of this module version.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Limitations",
+            "type": "array"
+          },
+          "min_aggregate_count": {
+            "description": "D-33 minimum aggregation (CALC_MIN_AGGREGATE_COUNT, PROVISIONAL).",
+            "title": "Min Aggregate Count",
+            "type": "integer"
+          },
+          "module": {
+            "$ref": "#/components/schemas/RunModuleRef"
+          },
+          "prototype": {
+            "description": "Always true: an illustrative LCR/HQLA prototype.",
+            "title": "Prototype",
+            "type": "boolean"
+          },
+          "reporting_date": {
+            "format": "date",
+            "title": "Reporting Date",
+            "type": "string"
+          },
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "statement": {
+            "title": "Statement",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CalculationRunStatus"
+          }
+        },
+        "required": [
+          "run_id",
+          "status",
+          "reporting_date",
+          "module",
+          "inflow_horizon_days",
+          "currencies",
+          "min_aggregate_count",
+          "limitations",
+          "prototype",
+          "illustrative",
+          "statement"
+        ],
+        "title": "LiquidityOut",
         "type": "object"
       },
       "LowerTransform": {
@@ -5252,7 +5808,9 @@
           "COVERAGE",
           "BUCKET_DEFINED",
           "BUCKET_TOTALS",
-          "CUMULATIVE_GAP"
+          "CUMULATIVE_GAP",
+          "HQLA_TOTALS",
+          "LCR_FIGURES"
         ],
         "title": "PostCheck",
         "type": "string"
@@ -7191,6 +7749,7 @@
         "description": "Value-free counts of a finished run.",
         "properties": {
           "bucketed": {
+            "description": "Inputs used: bucketed cash flows (maturity_ladder); asset rows, outflow positions and inflow cash flows (lcr_hqla).",
             "title": "Bucketed",
             "type": "integer"
           },
@@ -7202,11 +7761,12 @@
             "type": "array"
           },
           "excluded": {
+            "description": "Inputs excluded with a warning code.",
             "title": "Excluded",
             "type": "integer"
           },
           "in_scope": {
-            "description": "Cash flows in scope: every row of the cash-flow member.",
+            "description": "Inputs in scope: every cash flow (maturity_ladder); every position and cash flow (lcr_hqla).",
             "title": "In Scope",
             "type": "integer"
           },
@@ -7217,6 +7777,12 @@
             "description": "Rows read per schema code.",
             "title": "Inputs",
             "type": "object"
+          },
+          "out_of_scope": {
+            "default": 0,
+            "description": "lcr_hqla: cash flows that are not inflows by rule (type without an inflow rate, or due outside the horizon). Always 0 for maturity_ladder.",
+            "title": "Out Of Scope",
+            "type": "integer"
           },
           "post_checks": {
             "items": {
@@ -9525,6 +10091,65 @@
           }
         ],
         "summary": "Get Calculation Run",
+        "tags": [
+          "calculations"
+        ]
+      }
+    },
+    "/api/v1/calculation-runs/{run_id}/liquidity": {
+      "get": {
+        "description": "An lcr_hqla run's liquidity coverage, per currency: HQLA by level with its asset rows\n(included, or excluded with the reason), outflows, inflows before and after the cap, the\ndenominator and the ratio (None, with LCR_DENOMINATOR_ZERO, when it is not computable).\nExact decimal text. Aggregates are `internal`, asset rows carry the most sensitive\nclassification they read, and a figure built from fewer than CALC_MIN_AGGREGATE_COUNT\ncontributions is masked like them (D-33). An illustrative prototype, not regulatory\n(D-35). 404 alike for an absent and a foreign run; 404 `liquidity_not_found` for a run of\nanother module.",
+        "operationId": "getLiquidity",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LiquidityOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Liquidity",
         "tags": [
           "calculations"
         ]

@@ -21,15 +21,17 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from app.calculations.constants import (
     CalculationRunStatus,
     CalculationWarningCode,
+    HqlaExclusionReason,
     InputRefType,
     IntermediateCode,
+    LcrWarningCode,
     PostCheck,
     WarningSeverity,
 )
 from app.core.classification import MaskedValue
 from app.domain.constants import CashflowOrigin, DomainSchemaCode
 from app.reconciliation.constants import ReconciliationOutcome
-from app.rules.constants import CashflowDirection
+from app.rules.constants import CashflowDirection, HqlaLevel
 
 Value = str | MaskedValue
 
@@ -245,9 +247,20 @@ class RunOutcome(BaseModel):
     """Value-free counts of a finished run."""
 
     inputs: dict[str, int] = Field(description="Rows read per schema code.")
-    in_scope: int = Field(description="Cash flows in scope: every row of the cash-flow member.")
-    bucketed: int
-    excluded: int
+    in_scope: int = Field(
+        description="Inputs in scope: every cash flow (maturity_ladder); every position and "
+        "cash flow (lcr_hqla)."
+    )
+    bucketed: int = Field(
+        description="Inputs used: bucketed cash flows (maturity_ladder); asset rows, outflow "
+        "positions and inflow cash flows (lcr_hqla)."
+    )
+    excluded: int = Field(description="Inputs excluded with a warning code.")
+    out_of_scope: int = Field(
+        default=0,
+        description="lcr_hqla: cash flows that are not inflows by rule (type without an inflow "
+        "rate, or due outside the horizon). Always 0 for maturity_ladder.",
+    )
     warnings_by_code: dict[str, int]
     currencies: list[str]
     post_checks: list[PostCheckOut]
@@ -359,5 +372,105 @@ class MaturityLadderOut(BaseModel):
         description="D-33 minimum aggregation (CALC_MIN_AGGREGATE_COUNT, PROVISIONAL): a "
         "figure from 1 to this many minus one contributions is masked like them."
     )
+    illustrative: bool
+    statement: str
+
+
+# --- liquidity: the lcr_hqla read (BE-17.3) -----------------------------------------------------
+
+
+class HqlaAssetLineage(BaseModel):
+    """position version -> canonical record -> source row -> import (D-31 §6)."""
+
+    position_version_id: uuid.UUID
+    position_id: uuid.UUID
+    position_business_key: Value
+    instrument_id: uuid.UUID | None
+    instrument_version_id: uuid.UUID
+    instrument_business_key: Value
+    canonical_record_id: uuid.UUID
+    import_id: uuid.UUID
+    source_record_id: uuid.UUID
+    source_ordinal: int
+
+
+class HqlaAssetOut(BaseModel):
+    """One asset position considered for HQLA: included at its level, or excluded with its
+    reason. Positions whose type has a run-off rate are outflows, not asset rows."""
+
+    hqla_asset_result_id: uuid.UUID
+    sequence: int
+    included: bool
+    level: HqlaLevel | None = Field(description="Set when included.")
+    exclusion_reason: HqlaExclusionReason | None = Field(description="Set when excluded.")
+    instrument_type: Value
+    balance: Value = Field(description="The position balance (the value, PROVISIONAL), or masked.")
+    haircut: str | None = Field(description="The pinned haircut, exact text; None when excluded.")
+    hqla_value: Value = Field(
+        description="balance x (1 - haircut) when included, 0 when excluded; or masked."
+    )
+    classification: str = Field(description="The most sensitive classification it reads (D-33).")
+    rule_version_ids: list[uuid.UUID] = Field(description="The rule versions that placed it.")
+    lineage: HqlaAssetLineage
+
+
+class HqlaLevelOut(BaseModel):
+    level: HqlaLevel
+    total: Value = Field(description="Sum of the included asset rows' HQLA values at this level.")
+    asset_count: int
+    classification: str
+
+
+class LiquidityCurrency(BaseModel):
+    """One currency's LCR, no FX (D-35 §2). Every figure is exact decimal text or masked: a
+    figure built from fewer than `min_aggregate_count` contributions (but at least one), and
+    every figure derived from it, takes the contributions' classification (D-33). Zero
+    figures and a NULL ratio stay clear."""
+
+    lcr_result_id: uuid.UUID
+    currency: str
+    classification: str = Field(description="`internal`: an aggregate (D-33).")
+    hqla_total: Value = Field(description="L1 + L2A + L2B: the sum of the included asset rows.")
+    hqla_levels: list[HqlaLevelOut] = Field(description="L1, L2A and L2B, in that order.")
+    assets: list[HqlaAssetOut] = Field(description="Included and excluded, in run order.")
+    excluded_asset_count: int
+    outflow_balance: Value = Field(description="Sum of the outflow positions' balances.")
+    outflows: Value = Field(description="Sum of balance x run-off.")
+    outflow_count: int
+    inflows_gross: Value = Field(description="Sum of the in-horizon inflow cash flows' amounts.")
+    inflows_before_cap: Value = Field(description="Sum of amount x inflow rate.")
+    inflow_cap_rate: str = Field(description="The pinned cap, a share of outflows.")
+    inflow_cap_amount: Value = Field(description="inflow_cap_rate x outflows.")
+    inflows_after_cap: Value = Field(description="min(inflows_before_cap, inflow_cap_amount).")
+    inflow_cap_applied: bool | MaskedValue = Field(
+        description="True when the cap binds (inflows_before_cap > inflow_cap_amount)."
+    )
+    inflow_count: int
+    net_outflows: Value = Field(description="outflows - inflows_after_cap: the denominator.")
+    ratio: Value | None = Field(
+        description="hqla_total / net_outflows, 4 dp ROUND_HALF_EVEN (PROVISIONAL). None (not "
+        "computable) when net_outflows <= 0, with LCR_DENOMINATOR_ZERO."
+    )
+    warnings: list[LcrWarningCode]
+
+
+class LiquidityOut(BaseModel):
+    run_id: uuid.UUID
+    status: CalculationRunStatus
+    reporting_date: date
+    module: RunModuleRef
+    inflow_horizon_days: int | None = Field(
+        description="The pinned horizon: inflows are cash flows due (0, n] days after the "
+        "reporting date."
+    )
+    currencies: list[LiquidityCurrency] = Field(
+        description="Per currency, no FX (D-35). Empty unless the run SUCCEEDED (with or "
+        "without warnings)."
+    )
+    min_aggregate_count: int = Field(
+        description="D-33 minimum aggregation (CALC_MIN_AGGREGATE_COUNT, PROVISIONAL)."
+    )
+    limitations: list[str] = Field(description="Documented limitations of this module version.")
+    prototype: bool = Field(description="Always true: an illustrative LCR/HQLA prototype.")
     illustrative: bool
     statement: str

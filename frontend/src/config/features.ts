@@ -57,3 +57,11 @@ export const DOMAIN_UI_ENABLED = process.env.NEXT_PUBLIC_DOMAIN_UI !== 'off'
  * `calculations_disabled`); existing runs stay readable either way.
  */
 export const CALCULATIONS_UI_ENABLED = process.env.NEXT_PUBLIC_CALCULATIONS_UI !== 'off'
+
+/**
+ * NEXT_PUBLIC_LIQUIDITY_UI=off (FE-17.1): the run detail of an `lcr_hqla` run shows the Phase 15
+ * layout again (the maturity-ladder section, which says the module has no ladder) instead of
+ * the liquidity view, restoring the Phase 15 UI exactly. The backend's own reversal is retiring
+ * the module version (hidden from "New run" by status); existing runs stay readable either way.
+ */
+export const LIQUIDITY_UI_ENABLED = process.env.NEXT_PUBLIC_LIQUIDITY_UI !== 'off'

@@ -270,6 +270,35 @@ class DomainRepository(ScopedRepository[DomainProjection]):
         )
         return [(row[0], row[1]) for row in result]
 
+    async def import_positions(self, import_id: uuid.UUID) -> list[tuple[PositionVersion, str]]:
+        """An import's projected position versions with their business keys, in source
+        order (Phase 17, lcr_hqla)."""
+        result = await self.session.execute(
+            select(PositionVersion, Position.business_key)
+            .join(Position, Position.id == PositionVersion.position_id)
+            .where(
+                PositionVersion.tenant_id == self.scope.tenant_id,
+                Position.tenant_id == self.scope.tenant_id,
+                PositionVersion.import_job_id == import_id,
+            )
+            .order_by(PositionVersion.source_ordinal, PositionVersion.id)
+        )
+        return [(row[0], row[1]) for row in result]
+
+    async def positions_by_id(self, ids: Sequence[uuid.UUID]) -> list[tuple[PositionVersion, str]]:
+        if not ids:
+            return []
+        result = await self.session.execute(
+            select(PositionVersion, Position.business_key)
+            .join(Position, Position.id == PositionVersion.position_id)
+            .where(
+                PositionVersion.tenant_id == self.scope.tenant_id,
+                Position.tenant_id == self.scope.tenant_id,
+                PositionVersion.id.in_(ids),
+            )
+        )
+        return [(row[0], row[1]) for row in result]
+
     async def cash_flows_by_id(self, ids: Sequence[uuid.UUID]) -> list[CashflowEvent]:
         if not ids:
             return []

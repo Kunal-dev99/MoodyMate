@@ -78,6 +78,10 @@ class PostCheck(StrEnum):
     BUCKET_DEFINED = "BUCKET_DEFINED"  # every contribution lands in a pinned bucket
     BUCKET_TOTALS = "BUCKET_TOTALS"  # every aggregate equals the sum of its contributions
     CUMULATIVE_GAP = "CUMULATIVE_GAP"  # the cumulative gap is the running sum of net gaps
+    # lcr_hqla (Phase 17): every HQLA level total equals the sum of its included asset rows,
+    # and every per-currency LCR figure is recomputed from the contributions.
+    HQLA_TOTALS = "HQLA_TOTALS"
+    LCR_FIGURES = "LCR_FIGURES"
 
 
 class InputRefType(StrEnum):
@@ -101,6 +105,25 @@ class IntermediateCode(StrEnum):
     # One bucketed cash flow: its amount, in its currency, counted in one bucket's inflows or
     # outflows (D-31 §6: it references the cash-flow event, and so its lineage).
     CASHFLOW_CONTRIBUTION = "CASHFLOW_CONTRIBUTION"
+
+
+class HqlaExclusionReason(StrEnum):
+    """`hqla_asset_result.exclusion_reason` (BE-17.1): why an asset row adds nothing to HQLA.
+    Inputs that cannot be read at all are excluded with a run warning instead."""
+
+    NOT_HQLA_ELIGIBLE = "NOT_HQLA_ELIGIBLE"  # its instrument type has no level in the rule
+
+
+class LcrWarningCode(StrEnum):
+    """`lcr_result.warning_codes` (BE-17.2): value-free warnings about one currency's LCR.
+    Kept on the LCR row (a closed list, CHECK-constrained by migration 0020) because
+    `calculation_warning.code` is a closed CHECK of migration 0018, which D-01 does not let a
+    forward migration widen. A run with any of them ends SUCCEEDED_WITH_WARNINGS."""
+
+    # outflows - inflows after the cap is zero or negative: the ratio is NULL (not computable).
+    LCR_DENOMINATOR_ZERO = "LCR_DENOMINATOR_ZERO"
+    # Level 2A/2B assets are included without the L2 caps (a documented v1 limitation).
+    LCR_LEVEL_CAPS_NOT_APPLIED = "LCR_LEVEL_CAPS_NOT_APPLIED"
 
 
 class SnapshotRefusal(StrEnum):

@@ -15,6 +15,11 @@ D-31), migration 0018.
 - `intermediate_value`: one row per per-input contribution, referencing its cash-flow event
   and so its lineage (D-31 §6).
 - `calculation_warning`: value-free warnings by run and entity.
+- `lcr_result` (Phase 17, migration 0020): one row per lcr_hqla run and currency: HQLA by
+  level, outflows, inflows before and after the cap, the denominator and the ratio (NULL with
+  LCR_DENOMINATOR_ZERO when the denominator is not positive).
+- `hqla_asset_result` (Phase 17): one row per asset position of an lcr_hqla run, included at
+  its HQLA level or excluded with its reason, referencing its position version and lineage.
 
 Amounts are exact NUMERIC (Decimal) with an explicit currency. Every table carries
 `tenant_id` (D-04). Triggers: snapshots are append-only; a run is inserted RUNNING and moves
@@ -31,6 +36,7 @@ from enum import StrEnum
 from typing import Any
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Date,
     DateTime,
@@ -49,14 +55,16 @@ from app.calculations.constants import (
     TERMINAL_STATUSES,
     CalculationRunStatus,
     CalculationWarningCode,
+    HqlaExclusionReason,
     InputRefType,
     IntermediateCode,
+    LcrWarningCode,
     WarningSeverity,
 )
 from app.db.base import Base, ScopedModel
 from app.domain.constants import CashflowOrigin, DomainSchemaCode
 from app.reconciliation.constants import ReconciliationOutcome
-from app.rules.constants import CashflowDirection
+from app.rules.constants import CashflowDirection, HqlaLevel
 
 SHA256 = "~ '^[0-9a-f]{64}$'"
 CURRENCY = "~ '^[A-Z]{3}$'"
@@ -295,3 +303,136 @@ class CalculationWarning(_RunOutput, ScopedModel, Base):
     entity_type: Mapped[str | None] = mapped_column(String(50))
     entity_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     details: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+
+
+# --- lcr_hqla outputs (Phase 17, BE-17.1, migration 0020) ------------------------------------
+
+LCR_WARNINGS_JSON = "[" + ", ".join(f'"{c.value}"' for c in LcrWarningCode) + "]"
+
+
+def _numeric() -> Mapped[Decimal]:
+    return mapped_column(Numeric(asdecimal=True), nullable=False)
+
+
+class LcrResult(_RunOutput, ScopedModel, Base):
+    """One lcr_hqla run and currency (D-35 §2). Exact NUMERIC; the identities between the
+    figures are CHECK-constrained, so a row cannot disagree with itself."""
+
+    __tablename__ = "lcr_result"
+    __table_args__ = (
+        UniqueConstraint("calculation_run_id", "sequence"),
+        UniqueConstraint("currency", "calculation_run_id"),
+        CheckConstraint("sequence >= 1", name="sequence"),
+        CheckConstraint(f"currency {CURRENCY}", name="currency"),
+        CheckConstraint("hqla_total = hqla_level1 + hqla_level2a + hqla_level2b", name="hqla"),
+        CheckConstraint(
+            "hqla_level1 >= 0 AND hqla_level2a >= 0 AND hqla_level2b >= 0 AND outflows >= 0"
+            " AND outflow_balance >= 0 AND inflows_gross >= 0 AND inflows_before_cap >= 0",
+            name="non_negative",
+        ),
+        CheckConstraint(
+            "level1_count >= 0 AND level2a_count >= 0 AND level2b_count >= 0"
+            " AND excluded_asset_count >= 0 AND outflow_count >= 0 AND inflow_count >= 0",
+            name="counts",
+        ),
+        CheckConstraint("inflow_cap_rate >= 0 AND inflow_cap_rate <= 1", name="inflow_cap_rate"),
+        CheckConstraint("inflow_cap_amount = inflow_cap_rate * outflows", name="inflow_cap"),
+        CheckConstraint(
+            "inflows_after_cap = LEAST(inflows_before_cap, inflow_cap_amount)"
+            " AND inflow_cap_applied = (inflows_before_cap > inflow_cap_amount)",
+            name="inflows",
+        ),
+        CheckConstraint("net_outflows = outflows - inflows_after_cap", name="net_outflows"),
+        CheckConstraint("(ratio IS NULL) = (net_outflows <= 0)", name="ratio"),
+        CheckConstraint(
+            "jsonb_typeof(warning_codes) = 'array'"
+            f" AND warning_codes <@ '{LCR_WARNINGS_JSON}'::jsonb"
+            " AND (warning_codes @> '[\"LCR_DENOMINATOR_ZERO\"]') = (net_outflows <= 0)",
+            name="warning_codes",
+        ),
+        CheckConstraint("jsonb_typeof(rule_version_ids) = 'array'", name="rule_version_ids"),
+    )
+
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    hqla_level1: Mapped[Decimal] = _numeric()
+    hqla_level2a: Mapped[Decimal] = _numeric()
+    hqla_level2b: Mapped[Decimal] = _numeric()
+    hqla_total: Mapped[Decimal] = _numeric()
+    level1_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    level2a_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    level2b_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    excluded_asset_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    outflow_balance: Mapped[Decimal] = _numeric()
+    outflows: Mapped[Decimal] = _numeric()
+    outflow_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    inflows_gross: Mapped[Decimal] = _numeric()
+    inflows_before_cap: Mapped[Decimal] = _numeric()
+    inflow_cap_rate: Mapped[Decimal] = _numeric()
+    inflow_cap_amount: Mapped[Decimal] = _numeric()
+    inflows_after_cap: Mapped[Decimal] = _numeric()
+    inflow_cap_applied: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    inflow_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    net_outflows: Mapped[Decimal] = _numeric()
+    ratio: Mapped[Decimal | None] = mapped_column(Numeric(asdecimal=True))
+    warning_codes: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    rule_version_ids: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    # D-33: the row is an aggregate (`internal`); its contributions carry this one.
+    classification: Mapped[str] = mapped_column(
+        String(50), ForeignKey("data_classification.code"), nullable=False
+    )
+    contribution_classification: Mapped[str] = mapped_column(
+        String(50), ForeignKey("data_classification.code"), nullable=False
+    )
+
+
+class HqlaAssetResult(_RunOutput, ScopedModel, Base):
+    """One asset position of an lcr_hqla run: included at its level (value = balance x
+    (1 - haircut)) or excluded with its reason (value 0), with its position version's
+    lineage (D-31 §6)."""
+
+    __tablename__ = "hqla_asset_result"
+    __table_args__ = (
+        UniqueConstraint("calculation_run_id", "sequence"),
+        UniqueConstraint("position_version_id", "calculation_run_id"),
+        CheckConstraint("sequence >= 1", name="sequence"),
+        CheckConstraint(f"currency {CURRENCY}", name="currency"),
+        CheckConstraint(_in("level", HqlaLevel), name="level"),
+        CheckConstraint(_in("exclusion_reason", HqlaExclusionReason), name="exclusion_reason"),
+        CheckConstraint(
+            "included = (level IS NOT NULL) AND included = (exclusion_reason IS NULL)"
+            " AND included = (haircut IS NOT NULL)",
+            name="included",
+        ),
+        CheckConstraint(
+            "balance >= 0 AND (haircut IS NULL OR (haircut >= 0 AND haircut <= 1))",
+            name="balance",
+        ),
+        CheckConstraint(
+            "hqla_value = CASE WHEN included THEN balance * (1 - haircut) ELSE 0 END",
+            name="hqla_value",
+        ),
+        CheckConstraint("jsonb_typeof(rule_version_ids) = 'array'", name="rule_version_ids"),
+        CheckConstraint("source_ordinal >= 1", name="source_ordinal"),
+    )
+
+    lcr_result_id: Mapped[uuid.UUID] = _fk("lcr_result", index=True)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    included: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    level: Mapped[str | None] = mapped_column(String(3))
+    exclusion_reason: Mapped[str | None] = mapped_column(String(30))
+    instrument_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    balance: Mapped[Decimal] = _numeric()
+    haircut: Mapped[Decimal | None] = mapped_column(Numeric(asdecimal=True))
+    hqla_value: Mapped[Decimal] = _numeric()
+    rule_version_ids: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    classification: Mapped[str] = mapped_column(
+        String(50), ForeignKey("data_classification.code"), nullable=False
+    )
+    # Lineage (D-31 §6): the position version and the instrument version it was read with,
+    # and the position's canonical record, import and source row (checked on insert).
+    position_version_id: Mapped[uuid.UUID] = _fk("position_version")
+    instrument_version_id: Mapped[uuid.UUID] = _fk("instrument_version")
+    canonical_record_id: Mapped[uuid.UUID] = _fk("canonical_record")
+    import_job_id: Mapped[uuid.UUID] = _fk("import_job")
+    source_record_id: Mapped[uuid.UUID] = _fk("source_record")
+    source_ordinal: Mapped[int] = mapped_column(Integer, nullable=False)

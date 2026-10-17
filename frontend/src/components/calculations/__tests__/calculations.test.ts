@@ -764,6 +764,7 @@ describe('calculations code hygiene (FE-15.1/15.2)', () => {
     'components/calculations/CalculationsGate.tsx',
     'components/calculations/IllustrativeBanner.tsx',
     'components/calculations/LadderFigure.tsx',
+    'components/calculations/LiquidityView.tsx',
     'components/calculations/ManifestPanel.tsx',
     'components/calculations/MaturityLadderView.tsx',
     'components/calculations/NewRunPanel.tsx',
@@ -786,7 +787,7 @@ describe('calculations code hygiene (FE-15.1/15.2)', () => {
     for (const pattern of PARSING) expect(source, `${file} matches ${pattern}`).not.toMatch(pattern)
   })
 
-  it.each([...files, '../e2e/calculations.spec.ts'])('%s declares no hand-written payload type', (file) => {
+  it.each([...files, '../e2e/calculations.spec.ts', '../e2e/liquidity.spec.ts', '../e2e/calc-support.ts'])('%s declares no hand-written payload type', (file) => {
     expect(readFileSync(join(root, file), 'utf8')).not.toMatch(HAND_WRITTEN)
   })
 
@@ -802,6 +803,7 @@ describe('calculations code hygiene (FE-15.1/15.2)', () => {
     expect(calls('components/calculations/RunList.tsx')).toEqual(new Set(['api.GET(']))
     expect(calls('components/calculations/RunView.tsx')).toEqual(new Set(['api.GET(']))
     expect(calls('components/calculations/MaturityLadderView.tsx')).toEqual(new Set(['api.GET(']))
+    expect(calls('components/calculations/LiquidityView.tsx')).toEqual(new Set(['api.GET(']))
     expect(calls('components/calculations/calculations.ts')).toEqual(new Set(['api.GET(', 'api.POST(']))
   })
 })

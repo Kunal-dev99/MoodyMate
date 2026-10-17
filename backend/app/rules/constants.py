@@ -83,6 +83,15 @@ class PastDueTreatment(StrEnum):
     INCLUDE_IN_FIRST_BUCKET = "INCLUDE_IN_FIRST_BUCKET"
 
 
+class HqlaLevel(StrEnum):
+    """The values of the `hqla_level` ENUM_MAP (D-35 §2): an instrument type's HQLA level. A
+    type that is not a key of the map is not HQLA."""
+
+    L1 = "L1"
+    L2A = "L2A"
+    L2B = "L2B"
+
+
 # D-35 §3: every seeded rule version and module, and every result, carries this statement.
 ILLUSTRATIVE_STATEMENT = (
     "Illustrative prototype. Not a regulatory calculation; no parity with any vendor system "
@@ -155,3 +164,88 @@ SEEDED_RULES: dict[str, tuple[str, RuleCategory, dict[str, Any], dict[str, Any],
 }
 SEEDED_RULE_OWNER = "Methodology owner (risk_analyst), provisional"
 SEEDED_ASSUMPTION_SET_NAME = "baseline (illustrative)"
+
+# --- lcr_hqla v1 (Phase 17, BE-17.1, D-35 §2): ILLUSTRATIVE / PROVISIONAL; frozen copies in
+# migration 0020. Decimal parameters are JSON strings of exact decimal text, never numbers.
+
+LCR_HQLA = "lcr_hqla"
+LCR_SEED_TAG = "0020_lcr_hqla"
+HQLA_LEVEL = "hqla_level"
+HQLA_HAIRCUT = "hqla_haircut"
+LCR_OUTFLOW_RUN_OFF = "lcr_outflow_run_off"
+LCR_INFLOW_RATE = "lcr_inflow_rate"
+LCR_INFLOW_HORIZON_DAYS = "lcr_inflow_horizon_days"
+LCR_INFLOW_CAP = "lcr_inflow_cap"
+
+
+def _factor_schema(keyed: bool) -> dict[str, Any]:
+    """DECIMAL or DECIMAL_MAP over instrument types: a fraction in [0, 1], 4 dp at most."""
+    schema: dict[str, Any] = {
+        "kind": (ParameterKind.DECIMAL_MAP if keyed else ParameterKind.DECIMAL).value,
+        "min": "0",
+        "max": "1",
+        "scale": 4,
+    }
+    if keyed:
+        schema["key_vocabulary"] = "instrument_type"
+    return schema
+
+
+# code -> (name, category, parameter_schema, parameters, description)
+LCR_SEEDED_RULES: dict[str, tuple[str, RuleCategory, dict[str, Any], dict[str, Any], str]] = {
+    HQLA_LEVEL: (
+        "HQLA level by instrument type (illustrative)",
+        RuleCategory.CLASSIFICATION,
+        {
+            "kind": ParameterKind.ENUM_MAP.value,
+            "key_vocabulary": "instrument_type",
+            "values": [level.value for level in HqlaLevel],
+        },
+        {"map": {"BOND": HqlaLevel.L1.value}},
+        "BOND is Level 1 HQLA; an instrument type that is not a key of the map is not HQLA "
+        "(D-35 §2).",
+    ),
+    HQLA_HAIRCUT: (
+        "HQLA haircut by instrument type (illustrative)",
+        RuleCategory.FACTOR,
+        _factor_schema(keyed=True),
+        {"map": {"BOND": "0"}},
+        "BOND has a 0 haircut: its HQLA value is its position balance x (1 - haircut) "
+        "(D-35 §2).",
+    ),
+    LCR_OUTFLOW_RUN_OFF: (
+        "Outflow run-off rate by instrument type (illustrative)",
+        RuleCategory.FACTOR,
+        _factor_schema(keyed=True),
+        {"map": {"DEPOSIT": "0.10"}},
+        "DEPOSIT balances run off at 0.10: outflows are balance x run-off (D-35 §2).",
+    ),
+    LCR_INFLOW_RATE: (
+        "Inflow rate by instrument type (illustrative)",
+        RuleCategory.FACTOR,
+        _factor_schema(keyed=True),
+        {"map": {"LOAN": "0.50"}},
+        "LOAN cash flows due within the horizon flow in at 0.50 (D-35 §2).",
+    ),
+    LCR_INFLOW_HORIZON_DAYS: (
+        "Inflow horizon in days (illustrative)",
+        RuleCategory.BUCKETING,
+        {
+            "kind": ParameterKind.INTEGER.value,
+            "min": 1,
+            "max": 366,
+            "unit": "calendar days after reporting date",
+        },
+        {"value": 30},
+        "A cash flow counts as an inflow when it is due (0, 30] calendar days after the "
+        "reporting date (D-35 §2).",
+    ),
+    LCR_INFLOW_CAP: (
+        "Inflow cap as a share of outflows (illustrative)",
+        RuleCategory.FACTOR,
+        _factor_schema(keyed=False),
+        {"value": "0.75"},
+        "Inflows count up to 0.75 x outflows: inflows = min(inflows x rate, cap x outflows) "
+        "(D-35 §2).",
+    ),
+}

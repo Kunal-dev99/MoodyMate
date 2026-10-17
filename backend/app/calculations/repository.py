@@ -19,7 +19,9 @@ from app.calculations.models import (
     CalculationWarning,
     DatasetSnapshot,
     DatasetSnapshotMember,
+    HqlaAssetResult,
     IntermediateValue,
+    LcrResult,
     LiquidityGapResult,
 )
 from app.db.base import Base
@@ -183,6 +185,12 @@ class CalculationRepository(_Writes[CalculationRun]):
 
     async def gap_rows(self, run_id: uuid.UUID) -> list[LiquidityGapResult]:
         return await self._of_run(LiquidityGapResult, run_id)
+
+    async def lcr_rows(self, run_id: uuid.UUID) -> list[LcrResult]:
+        return await self._of_run(LcrResult, run_id)
+
+    async def hqla_assets(self, run_id: uuid.UUID) -> list[HqlaAssetResult]:
+        return await self._of_run(HqlaAssetResult, run_id)
 
     async def part_counts(self, run_id: uuid.UUID) -> list[tuple[uuid.UUID, str, str, str, int]]:
         """Per ladder row, direction, origin and classification: how many contributions."""
