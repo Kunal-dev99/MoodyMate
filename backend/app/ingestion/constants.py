@@ -151,6 +151,7 @@ class UploadRefusal(StrEnum):
     TOO_MANY_ROWS = "too_many_rows"
     TOO_MANY_COLUMNS = "too_many_columns"
     CELL_TOO_LONG = "cell_too_long"
+    CONTENT_TOO_LARGE = "content_too_large"  # D-25 §1: decoded characters, every format
     XLSX_UNCOMPRESSED_TOO_LARGE = "xlsx_uncompressed_too_large"
     XLSX_COMPRESSION_RATIO_TOO_HIGH = "xlsx_compression_ratio_too_high"
     UNSUPPORTED_FILE_TYPE = "unsupported_file_type"

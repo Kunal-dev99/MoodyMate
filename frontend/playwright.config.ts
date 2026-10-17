@@ -14,7 +14,9 @@ import { defineConfig, devices } from '@playwright/test'
 // 8000 (outside CI, reuseExistingServer would otherwise run the suite against whatever
 // answers there). Build the frontend with NEXT_PUBLIC_API_BASE_URL=http://localhost:<port>.
 const API_PORT = process.env.E2E_API_PORT ?? '8000'
-const WEB_PORT = 3000
+// The frontend's port: 3000 unless E2E_WEB_PORT is set, e.g. when another checkout's server
+// holds 3000 (D-03). The backend's CORS_ORIGINS must then include http://localhost:<port>.
+const WEB_PORT = process.env.E2E_WEB_PORT ?? '3000'
 const backendDb = process.env.E2E_DATABASE_URL ?? process.env.DATABASE_URL
 // CI installs the backend without a virtualenv; locally it runs from backend/.venv.
 const uvicorn = process.env.E2E_UVICORN ?? '.venv/bin/uvicorn'

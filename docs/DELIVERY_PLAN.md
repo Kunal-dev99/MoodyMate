@@ -1386,3 +1386,710 @@ verification suite and browser smoke tests in CI.
   added later, it needs its own permission and CSV-injection safe output.
 - **Client data in local, test or staging:** forbidden by D-14.
 - **Incumbent and benchmark reconciliation:** WS4 RO-04.
+
+---
+
+## Feature 03 — WS3 Financial Domain Model & Calculation Services
+
+Kickoff: `docs/prompts/kickoffs/03-ws3-financial-calculations.md` · Status: **APPROVED by the user 2026-10-17** (plan, D-28…D-35 active; fold 4 tests in BE-14.1; illustrative methodology seeds; BE-14.6 and FE-14.3 ship as a separate PR before Phase 14).
+
+Covers WS3 FC-01…FC-08 and the paired contracts FE-FC-01…05 / BE-FC-01…05. Numbering
+(D-08): Feature 03 uses global **Phases 14–18**, so its task IDs run from `BE-14.1`/`FE-14.1`
+to `BE-18.n`/`FE-18.n`. WS3-internal phases are cited as `WS3-P0…P6`.
+
+**Order.** A thin vertical slice comes first:
+- Phase 14 projects canonical records into the domain tables.
+- Phase 15 runs one deterministic module end to end: snapshot, pinned run, manifest, results
+  and lineage back to the source row.
+
+Breadth follows:
+- Phase 16: governed rule changes.
+- Phase 17: the LCR/HQLA prototype.
+- Phase 18: extension points and WS3 verification.
+
+**Parallel build.** In every phase, the backend lands the OpenAPI contract for that phase
+first: Pydantic schemas plus declared routes and permissions, exported to `openapi.json`. The
+frontend starts from `npm run gen:api` against that commit. The FE tasks need no hand-written
+payload types, and any mock is labelled as one (WS3 Definition of Done).
+
+**Methodology.** The client's real methodology is unknown (Data Model §11). Every finance
+parameter is therefore data in a versioned rule:
+- bucket boundaries;
+- cash-flow direction;
+- HQLA eligibility and haircuts;
+- run-off and inflow rates.
+
+The seeded versions are **ILLUSTRATIVE / PROVISIONAL** (D-11, D-35). Modules sit behind the
+pluggable interface of D-31. No output is labelled regulatory, validated or comparable to
+Moody's.
+
+Constraining decisions:
+- **D-01** Feature 03 only adds tables. No WS1 or WS2 table or column changes.
+- **D-02** Downgrades are tested, and they refuse while non-seed rows exist. Rows hide by
+  status and are never deleted. Every phase sits behind a switch:
+  - backend: `DOMAIN_PROJECTION_ENABLED`, `CALCULATIONS_ENABLED`, `RULE_CHANGE_ENABLED`;
+  - frontend: `NEXT_PUBLIC_DOMAIN_UI` and `NEXT_PUBLIC_CALCULATIONS_UI`. Turning these off
+    brings back the "planned" placeholders.
+- **D-03** Each phase is built in its own worktree, with a DB copy and a paired artifact
+  directory.
+- **D-04** Fail closed.
+  - Each endpoint names its permission (table below).
+  - Every domain and calculation table carries `tenant_id` and is read through
+    `ScopedRepository`.
+  - `canonical_record` has no `tenant_id` column, so the projection copies the tenant from
+    `import_job`, and a same-tenant insert trigger backs this up.
+- **D-05** The WS plan endpoint names are canonical. The endpoints added alongside them are
+  marked "added" in the table.
+- **D-06** Enums are UPPERCASE:
+  - `calculation_run.status` uses the Data Model §9 set;
+  - `rule_version.status` uses the §9 set plus `REJECTED`.
+
+  Each object has one transition table in code, mirrored by a DB trigger.
+- **D-07** Error envelope. **D-10/D-24 §4** Every WS3 mutation and every refused WS3 write is
+  audited.
+- **D-11** WS3 seeds are tagged and PROVISIONAL: permissions, instrument types, modules, rule
+  versions and the assumption set.
+- **D-13** New settings that matter in a deployment are validated at startup.
+- **D-14** Calculations read only data that was attested at upload, so non-production stays
+  synthetic.
+- **D-19 (spirit)** Rule parameters are typed data from a closed list of kinds. There are no
+  formulas, expressions or user code.
+- **D-22** This feature delivers the projection into the WS3 domain tables and the
+  cross-import `dataset_snapshot`. **D-27** A snapshot pins `import_manifest` rows.
+  **D-28** (active) The snapshot gate reads `reconciliation_run.outcome`.
+- **D-26** The backend suite stays under 50 tests. It has 49 now. Every phase states its
+  budget below.
+- **New, active:** D-29 (projection), D-30 (dataset snapshot), D-31 (calculation framework),
+  D-32 (rule, module and assumption registry), D-33 (classification of results), D-34 (WS3
+  permissions), D-35 (illustrative methodology seeds).
+
+Pre-plan findings (codebase at master `eebcaf6`):
+- **Modules.** `backend/app/domain`, `rules`, `calculations` and `lineage` are empty 7-file
+  stubs (e.g. `domain/models.py`, `calculations/service.py`) and are not mounted. The
+  migration head is `0016_reconciliation_and_drift`.
+- **Reuse rather than rebuild:**
+  - `canonical_record`: typed-string `payload` and `payload_sha256`.
+  - `record_lineage`: canonical → source record.
+  - `import_manifest`: append-only, unique per import, conservation CHECK.
+  - `reconciliation_run.outcome`.
+  - The seeded schemas (0007:58-108):
+    - `instrument` v1 is ACTIVE, and its `maturity_date` is **STRING free text**. v2, a DRAFT,
+      types it as DATE.
+    - `position` v1.
+    - `cashflow_event` v1 has **no direction field**, and every sample amount is positive.
+  - The seeded `MODULE "liquidity_gap (illustrative)"` dependents (0007:139-140).
+  - The synthetic samples: instrument CSV, position XLSX and cashflow_event JSON. They have
+    four currencies and the types LOAN, DEPOSIT and BOND.
+  - `ScopedRepository`, `require_permission`, `audit(...)` and `mask_model`.
+  - Exact Decimal contexts already exist in three places (`reconciliation/service.py:49`,
+    `mapping/transforms/engine.py:167`, `mapping/service.py:1218`). WS3 adds one shared
+    `core/decimals.py` for calculations and does not refactor WS2.
+  - Frontend: `startLoad`/`LoadFailed`, `StatusPill`, `MaskedValue`, `AuditTimeline` and
+    `RequirePermission`.
+- **The verification tests are generic.** Three existing tests iterate every protected
+  route:
+  - `test_ws1_verification.py::test_route_by_role_authorization_matrix`;
+  - `::test_another_tenant_sees_and_changes_nothing_here`;
+  - `::test_every_mutating_route_is_listed_and_emits_an_audit_event`.
+
+  WS3 routes join them once their ids are added to `ids` and their actions to `AUDITED`, at
+  no test cost.
+- **Frontend.** `/domain` and `/calculations` are `planned` entries
+  (`frontend/src/config/navigation.ts:55-70`), rendered by the `[workspace]` placeholder.
+- **Test budget.** There are 49 backend test functions and none is parametrised, so the suite
+  is at the D-26 cap. Phase 14 frees headroom by folding tests together (BE-14.1).
+- **Open gaps found (carried over, see below):**
+  - D-25 §1 is *active* but not implemented: no `content_too_large` exists anywhere in
+    `backend/`.
+  - The Phase 8 review's D2 and D3 are not fixed.
+  - `/schemas` stays loading forever on a non-403 error (`schemas/page.tsx:27-34`: it toasts,
+    and the state stays `loading`). `/schemas/proposals/new` does the same when the list
+    fails (`proposals/new/page.tsx:37-44,115`).
+- **Still open under Feature 01 (not prerequisites):** FE-2.2, BE-2.15, BE-2.16 and FE-2.5.
+
+### Carried over from Feature 02 (placed in Phase 14)
+
+These are open items from the Phase 7 and Phase 8 reviews. They are independent of WS3, so
+**BE-14.6 and FE-14.3 may ship as a separate small PR ahead of the rest of Phase 14.**
+
+- **Upload hardening:**
+  - the D-25 §1 decoded-content cap of 50 MiB (`content_too_large`), which is also the fix
+    for Phase 8 D1, XLSX shared-string amplification;
+  - D2, the row-number-gap DoS;
+  - D3, openpyxl warnings that carry cell values to stderr.
+
+  → BE-14.6.
+- **Endless loading** on `/schemas` and `/schemas/proposals/new` (Phase 7 report follow-up)
+  → FE-14.3.
+
+### WS3 endpoints and permissions (all under `/api/v1`)
+
+| Endpoint | Permission | Phase | Source |
+|---|---|---|---|
+| `POST imports/{import_id}/projection` | `domain:project` | 14 | added (D-29) |
+| `GET instruments`, `GET instruments/{instrument_id}` | `domain:read` | 14 | WS plan |
+| `POST dataset-snapshots` | `calc:run` | 15 | added (D-30) |
+| `GET dataset-snapshots`, `GET dataset-snapshots/{snapshot_id}` | `calc:read` | 15 | added |
+| `GET calculation-modules` | `rule:read` | 15 | WS plan |
+| `POST calculation-runs` | `calc:run` | 15 | WS plan |
+| `GET calculation-runs` | `calc:read` | 15 | added (list) |
+| `GET calculation-runs/{run_id}`, `GET …/{run_id}/results` | `calc:read` | 15 | WS plan |
+| `GET calculation-runs/{run_id}/maturity-ladder` | `calc:read` | 15 | WS plan |
+| `GET rules`, `GET rules/{rule_id}` | `rule:read` | 16 | WS plan |
+| `POST rules/{rule_id}/versions` | `rule:propose` | 16 | added (D-32) |
+| `POST rules/{rule_id}/versions/{version}/submit` | `rule:propose` | 16 | added |
+| `POST rules/{rule_id}/versions/{version}/approval` | `rule:approve` | 16 | added |
+| `GET assumption-sets`, `GET assumption-sets/{assumption_set_id}` | `rule:read` | 16 | WS plan |
+| `GET calculation-runs/{run_id}/liquidity` | `calc:read` | 17 | WS plan |
+
+`GET calculation-runs/{id}/lineage` (the generic lineage graph) belongs to WS4 RO-03. In this
+feature, the `results` responses carry the lineage references themselves (D-31 §6).
+
+### Role → permission matrix additions (seed, BE-14.2; PROVISIONAL, D-11, D-34)
+
+`ROLE_PERMISSIONS` becomes WS1 ∪ WS2 ∪ WS3.
+
+| Role | domain:read | domain:project | rule:read | rule:propose | rule:approve | calc:read | calc:run |
+|---|---|---|---|---|---|---|---|
+| platform_admin | ✓ | | ✓ | | | ✓ | |
+| data_steward | ✓ | ✓ | ✓ | | | ✓ | |
+| risk_analyst | ✓ | | ✓ | ✓ | | ✓ | ✓ |
+| approver | ✓ | | ✓ | | ✓ | ✓ | |
+| auditor | ✓ | | ✓ | | | ✓ | |
+
+- The data steward curates the data (projection).
+- The risk analyst owns methodology proposals and runs.
+- Only the approver activates rule versions (maker-checker).
+- platform_admin and auditor read only.
+
+Values are still masked by each role's clearance, with result classification per D-33. The
+final role model needs client approval (Arch §10).
+
+### Test budget (D-26)
+
+The suite is at **49** of the 49 allowed (the cap is under 50).
+
+| Phase | Change | Count after |
+|---|---|---|
+| 14 | −4 by folding (BE-14.1), +1 `test_domain.py` | 46 |
+| 15 | +1 `test_calculations.py` | 47 |
+| 16 | +1 `test_rules.py` | 48 |
+| 17 | +0 (folded into `test_calculations.py`) | 48 |
+| 18 | +0 (folded into the WS1 matrix, isolation and audit tests, marked `ws3`) | 48 |
+
+That leaves one slot spare. The count is checked with `pytest --collect-only -q`. Loops inside
+one test replace variants (D-26 §2). Frontend unit tests and Playwright are not capped.
+
+### Phase 14 — Domain projection and the instrument catalogue (FC-01, FC-02 data half; WS3-P0, WS3-P1)
+
+Goal: a data steward projects a validated import's accepted canonical records into immutable
+domain versions: `instrument`/`instrument_version`, `position`/`position_version` and
+`cashflow_event`. Each version keeps lineage to its canonical record. Everyone with
+`domain:read` can browse the instrument catalogue. The carried-over WS2 hardening also lands
+in this phase.
+
+- [ ] **BE-14.1** Test headroom (D-26). Fold four test functions into existing ones, keeping
+  every assertion:
+  - `test_profiling.py::test_the_extra_column_fixture_reports_in_contract_false` and
+    `::test_profile_values_are_masked_by_role` go into
+    `::test_golden_profile_of_the_synthetic_instrument_csv`;
+  - `test_imports.py::test_the_synthetic_attestation_is_required` goes into
+    `::test_over_the_byte_limit_is_413_with_nothing_left_behind`;
+  - `test_mappings.py::test_validate_dry_run` goes into `::test_create_list_get_and_versions`.
+
+  An equivalent fold is fine if it is named in the report.
+  - *Done-when:*
+    - `pytest --collect-only -q` reports 45 tests;
+    - the diff shows the folded bodies moved, with no assertion removed (the engineer lists
+      them, and the architect checks the diff);
+    - the full suite passes.
+- [ ] **BE-14.2** Migrations and models in `domain`, plus a tagged seed:
+  - `domain_projection`: one row per import, append-only, unique `import_job_id`, with
+    `projector_version` and a value-free `summary`;
+  - `instrument_type`: a seeded PROVISIONAL vocabulary (LOAN, DEPOSIT, BOND);
+  - `instrument`: stable id, unique per tenant, source system and business key;
+  - `instrument_version`;
+  - `instrument_attribute_definition` and `instrument_attribute_value`;
+  - `position` and `position_version`;
+  - `cashflow_event`.
+
+  Every version and event row:
+  - carries `tenant_id`, `import_job_id`, a unique `canonical_record_id`,
+    `schema_version_id` and `payload_sha256`;
+  - stores amounts as exact `NUMERIC` and dates as DATE.
+
+  The tables are append-only, including TRUNCATE. A same-tenant insert trigger checks the
+  import's tenant. CHECKs cover the enums.
+
+  The WS3 permissions (matrix above) and the role grants are a tagged seed migration.
+  - *Done-when:*
+    - the 0016 → head → 0016 → head round trip passes;
+    - `test_domain.py` (new, the phase's one test) proves UPDATE, DELETE and TRUNCATE are
+      refused on every version table and that the downgrade refuses while a projection
+      exists;
+    - `test_domain.py` compares the seeded `role_permission` join with a new
+      `WS3_ROLE_PERMISSIONS` in `governance/constants.py`, and that equals the table above
+      (checked by the architect).
+- [ ] **BE-14.3** Projection service, plus `POST /imports/{import_id}/projection`
+  (`domain:project`, audited `import.project`, D-29). It accepts:
+  - imports with a manifest and status COMPLETED, COMPLETED_WITH_WARNINGS or QUARANTINED
+    (accepted rows only);
+  - target schema codes `instrument`, `position` or `cashflow_event`.
+
+  It is idempotent: a second call returns the existing projection. Refusals:
+  - 409 `projection_unsupported` for another schema;
+  - 409 `not_validated`;
+  - 409 `domain_projection_disabled` while the switch is off.
+
+  Each refusal is audited DENIED. One version or event row is written per canonical record,
+  so the projection conserves rows.
+
+  Fields map through a frozen per-schema spec (`projector_version` 1):
+  - a STRING schema field is never parsed into a typed column, so `instrument` v1
+    `maturity_date` stays NULL with a `TYPE_NOT_PROJECTED` count;
+  - extension-eligible instrument fields go to attribute values;
+  - every other field stays reachable in `canonical_record` through lineage.
+  - *Done-when:* `test_domain.py` projects the synthetic instrument, position and cashflow
+    imports and proves:
+    - rows projected = `accepted_count` for each import;
+    - a second call writes nothing;
+    - every row's `canonical_record_id` resolves to a `record_lineage` row of that import;
+    - no stored payload value is a float (JSON type and Python type check);
+    - each refusal code appears with its DENIED audit event;
+    - with the switch off, a 409 and nothing written.
+- [ ] **BE-14.4** `GET /instruments` (paginated; filter by type, currency, source and import)
+  and `GET /instruments/{instrument_id}`. The detail holds the versions, each with:
+  - its attributes;
+  - its import id;
+  - its source row ordinal;
+  - its canonical record id;
+  - its cash flows from projected `cashflow_event` rows that match the instrument business
+    key in the same tenant.
+
+  Values are masked by classification from the pinned `schema_field`. Another tenant's id
+  gets the same 404 as a random id.
+  - *Done-when:*
+    - the WS1 matrix and isolation tests list both routes, with 2xx for every role;
+    - `test_domain.py` asserts `notional` is masked for `risk_analyst` and clear for
+      `data_steward`, and the version → source row chain on one instrument.
+- [ ] **BE-14.5** Contract and reversibility: the `openapi.json` export, the
+  `DOMAIN_PROJECTION_ENABLED` setting, AUDITED entries, and ARCHITECTURE.md module rows
+  updated once D-29 is active.
+  - *Done-when:*
+    - the CI OpenAPI drift check passes;
+    - the WS1 audit-completeness test lists `POST /imports/{import_id}/projection`.
+- [x] **BE-14.6** *(Carried over from Phase 8, may ship as a separate PR)* Upload hardening:
+  - (a) D-25 §1: a running total of decoded characters for every format, refused above
+    50 MiB with 422 `content_too_large` and audited DENIED. It is a hard ceiling;
+    `IMPORT_MAX_DECODED_CHARS` may only lower it.
+  - (b) An XLSX row number above 1,048,576 is `xlsx_invalid`. Collection stops after
+    `max_rows` consecutive blank rows.
+  - (c) openpyxl warnings are suppressed on the request path, and they are errors under
+    pytest (`filterwarnings` in `pyproject.toml`).
+  - *Done-when:* everything below is folded into existing tests (+0):
+    - `test_adapters.py::test_bad_files_and_limits_are_refused_with_their_own_code` gains a
+      shared-string workbook refused as `content_too_large` and a `<row r="2000000000">`
+      workbook refused as `xlsx_invalid` in under 2 s;
+    - `test_import_no_leak.py::test_no_sentinel_in_logs_error_bodies_or_audit` gains an
+      out-of-range-date XLSX whose sentinel never reaches stderr;
+    - the suite runs with openpyxl warnings as errors.
+  - *Built (hardening PR):* all three folded checks pass, and the suite stays at 49 tests. A
+    long blank run is not a hard stop. Once it passes `max_rows`, nothing more of it is kept,
+    and a later data row is refused as `too_many_rows`, so no data row is ever dropped
+    silently (D-20). The XLSX reader now uses openpyxl's private `WorkSheetParser`, still
+    pinned `<3.2`, instead of the old `_get_row` patch. Still open from the Phase 8 review: D4
+    (a row number that does not increase is skipped) and D5 (an out-of-range date becomes
+    `#VALUE!`).
+- [ ] **FE-14.1** Financial Domain workspace (`/domain`, gated on `domain:read`; the
+  `planned` entry is removed; `NEXT_PUBLIC_DOMAIN_UI=off` restores it):
+  - an instrument catalogue with filters;
+  - an instrument detail with versions, attributes and cash flows;
+  - `MaskedValue` for masked amounts;
+  - a lineage link per version to its import (`/ingestion/imports/{id}`) and source row
+    ordinal;
+  - a "Provisional / illustrative" badge on seeded vocabularies.
+  - *Done-when:*
+    - a Playwright test projects the synthetic instrument import, then browses the catalogue
+      to an instrument and its import, with no hand-written payload types (grep);
+    - `risk_analyst` sees `notional` as "masked".
+- [ ] **FE-14.2** A "Project to domain" action on the import detail page (gated on
+  `domain:project`, shown only for a validated import of a supported schema). It shows the
+  projection summary: counts and `TYPE_NOT_PROJECTED`.
+  - *Done-when:*
+    - a Playwright test: the steward projects, and the summary counts equal the manifest's
+      accepted count;
+    - a second click shows the same projection;
+    - `auditor` has no button and gets a backend 403 on a direct POST.
+- [x] **FE-14.3** *(Carried over from Phase 7, may ship with BE-14.6)* `/schemas` and
+  `/schemas/proposals/new` move to `startLoad`/`LoadFailed`, so a failed load shows "Try
+  again" instead of loading forever.
+  - *Done-when:*
+    - vitest covers both pages' failure → LoadFailed → retry → ready path;
+    - a Playwright test with `/api/v1/schemas` forced to 500 once shows "Try again", and one
+      click renders the list.
+
+*Test budget:* 49 → 45 (BE-14.1) → 46 (+`test_domain.py`). BE-14.6 is +0.
+*Reversibility:* additive tables and tagged seeds. The downgrade refuses while any projection
+exists. `DOMAIN_PROJECTION_ENABLED=false` stops new projections (409, audited), and existing
+domain rows stay readable. `NEXT_PUBLIC_DOMAIN_UI=off` restores the "planned" placeholder.
+BE-14.6 only tightens upload limits, and reverting it is a code revert under a new decision
+(D-25 §1 "only ever tightens").
+
+### Phase 15 — Snapshot, pinned run and one deterministic module end to end (FC-04, FC-07 registry read, FC-08 pinning; WS3-P2/P3/P4 thin slice)
+
+Goal: a risk analyst pins a dataset snapshot (projected imports) and runs the illustrative
+**maturity ladder v1** module for a reporting date. The run records an immutable manifest of
+every pinned version and its hash. Results per currency and bucket trace through intermediate
+values to cash-flow events, canonical records and source rows. Re-running with the same pins
+gives byte-identical results. All configuration in this phase is seeded (ACTIVE by seed,
+PROVISIONAL). Governed change comes in Phase 16.
+
+- [ ] **BE-15.1** Migrations and models for the `rules` registry (D-32):
+  - `calculation_module` and `module_version`: `implementation_status`
+    AVAILABLE/PLANNED, declared input and output contracts, `engine_version`;
+  - `rule_definition`: category, target module, `parameter_schema` from the closed kinds;
+  - `rule_version`: immutable `parameters`, `parameters_sha256`, the D-06 status set, author
+    and approver;
+  - `rule_set` and `rule_set_member`: content-addressed;
+  - `maturity_bucket_definition`: immutable rows materialised from a bucket rule version;
+  - `assumption_set`: versioned, with provenance and status.
+
+  It also has a tagged seed (D-35): module `maturity_ladder` v1 AVAILABLE, plus ACTIVE
+  ILLUSTRATIVE rule versions:
+  - `maturity_buckets`;
+  - `cashflow_direction` (instrument type → INFLOW/OUTFLOW);
+  - `past_due_treatment`.
+
+  The seed also adds an ACTIVE `baseline (illustrative)` assumption set, empty in v1.
+  - *Done-when:*
+    - the round trip passes;
+    - `test_calculations.py` (new, the phase's one test) proves rule and module versions
+      outside DRAFT are immutable (UPDATE, DELETE and TRUNCATE refused);
+    - at most one ACTIVE version exists per rule definition (DB);
+    - the seed rows are tagged `provisional` and illustrative;
+    - the downgrade refuses while a non-seed row exists.
+- [ ] **BE-15.2** Migrations and models in `calculations` (D-30, D-31):
+  - `dataset_snapshot` and `dataset_snapshot_member`: per member, the import, its
+    `manifest_sha256`, the projection id and the schema code; plus `content_sha256`;
+  - `calculation_run`: the Data Model §9 statuses, `reporting_date`, the module version,
+    `rule_set_id`, the assumption set, the snapshot, `engine_version`, `manifest` plus
+    `manifest_sha256`, `result_sha256`, `idempotency_key`, and start and end times;
+  - `calculation_input_ref`;
+  - `liquidity_gap_result`;
+  - `intermediate_value`;
+  - `calculation_warning`.
+
+  A run's status moves only RUNNING → one terminal status, once, by trigger. Results,
+  intermediates and warnings can be inserted only while the run is RUNNING, and are
+  append-only afterwards. Every table carries `tenant_id`.
+  - *Done-when:*
+    - the round trip passes;
+    - `test_calculations.py` proves that changing a terminal run, or inserting a result
+      under one, is refused, and that the downgrade refuses while a run exists.
+- [ ] **BE-15.3** `POST /dataset-snapshots`, `GET /dataset-snapshots` and
+  `GET /dataset-snapshots/{snapshot_id}` (D-30).
+  - A snapshot takes at most one projected import per schema code.
+  - It refuses with:
+    - 409 `not_projected`;
+    - 409 `reconciliation_broken` (D-28 BROKEN);
+    - 409 `duplicate_schema`;
+    - 409 `ambiguous_business_key`.
+  - It is content-addressed, so the same member set returns the existing snapshot.
+  - It is audited `dataset_snapshot.create`, and its refusals are audited DENIED.
+  - *Done-when:* `test_calculations.py` asserts:
+    - the same members give the same snapshot id;
+    - each refusal code;
+    - `content_sha256` equals the hash recomputed from the member manifests.
+- [ ] **BE-15.4** The module interface and engine (D-31), maturity ladder v1, and
+  `POST /calculation-runs` (`calc:run`, an `Idempotency-Key` header,
+  `CALCULATIONS_ENABLED`).
+  - **Module.** Modules live in `app/calculations/modules/`. A module is a pure function over
+    frozen typed inputs and pinned parameters. It does no I/O and reads no clock or
+    randomness. It uses no float and does Decimal arithmetic only, under a module-declared
+    context that traps inexact results unless an explicit quantize is declared.
+  - **Engine.** The engine:
+    1. resolves the pins (the ACTIVE rule versions → a content-addressed `rule_set`);
+    2. writes `calculation_input_ref` rows and the manifest;
+    3. runs the module;
+    4. runs the post-checks: every in-scope cash flow is bucketed once or excluded with a
+       warning code, and the bucket totals equal the sum of their contributions;
+    5. sets SUCCEEDED, SUCCEEDED_WITH_WARNINGS, FAILED (a post-check failed) or BLOCKED (the
+       input contract was not met).
+  - **Ladder v1.** Per currency, with no FX: buckets by calendar days after
+    `reporting_date`, direction by instrument type, and past-due cash flows per the rule.
+    Unmapped types and instruments missing from the snapshot are excluded with warnings,
+    never silently.
+  - **Refusals and audit.** Refusals are 409 `module_not_available`, 409
+    `calculations_disabled` and 422 for a bad body. The run is audited `calculation_run.create`.
+  - *Done-when:* `test_calculations.py` runs the synthetic snapshot and asserts:
+    - the hand-computed golden ladder for an engineering fixture with boundary cases: due on
+      a bucket edge, due on the reporting date, past due, a zero amount, an unmapped type and
+      an instrument missing from the snapshot;
+    - the status and the warning codes;
+    - a second run with identical pins has a new run id with the same `manifest_sha256` and
+      `result_sha256`;
+    - an `Idempotency-Key` replay returns the original run;
+    - no float anywhere in `app/calculations/` (source grep, as BE-11.2);
+    - `CALCULATIONS_ENABLED=false` gives 409 and writes nothing.
+- [ ] **BE-15.5** Reads:
+  - `GET /calculation-modules`;
+  - `GET /calculation-runs` (paginated, filter by module and status);
+  - `GET /calculation-runs/{run_id}`: the manifest with every pinned id and version;
+  - `GET …/results`: intermediate values with their lineage refs (cash-flow event →
+    canonical record → import and source row);
+  - `GET …/maturity-ladder`: per currency and bucket, inflows, outflows, net and cumulative
+    gap.
+
+  Every decimal is exact text (`format(d, "f")`). Masking follows D-33.
+  - *Done-when:*
+    - the WS1 matrix lists every route with 2xx for every role;
+    - `test_calculations.py` asserts one bucket's total = the sum of its `results`
+      contributions, and that each contribution resolves to a `source_record` of a member
+      import;
+    - contributions are masked for `risk_analyst` and aggregates are clear (D-33).
+- [ ] **FE-15.1** Calculations workspace (`/calculations`, gated on `calc:read`;
+  `NEXT_PUBLIC_CALCULATIONS_UI=off` restores the placeholder):
+  - a run list;
+  - a "New run" panel (gated on `calc:run`). It picks one projected import per schema to
+    build or reuse a snapshot, then a module (AVAILABLE only), then a reporting date.
+    **Before submitting**, it shows the versions that will be pinned: rule versions,
+    assumption set and engine.
+  - an "Illustrative prototype — not regulatory" banner.
+  - *Done-when:*
+    - a Playwright test: `risk_analyst` builds a snapshot and submits a run that reaches
+      SUCCEEDED or SUCCEEDED_WITH_WARNINGS;
+    - `approver` has no New-run button and gets a backend 403 on a direct POST;
+    - vitest covers the panel's state machine, including the 409 refusal toasts with the
+      correlation ID.
+- [ ] **FE-15.2** Run detail:
+  - a manifest panel with every pinned id, version and hash;
+  - a warnings table;
+  - a maturity ladder table per currency (inflows, outflows, net and cumulative gap);
+  - a contributions drill-down from a bucket to its cash-flow events, then to the
+    instrument, the import and the source row.
+
+  A run-status pill covers every `calculation_run` status (an enum test against
+  `openapi.json`).
+  - *Done-when:*
+    - a Playwright test opens the run, checks one bucket's displayed total against the sum of
+      its drill-down rows, and follows a row to its import;
+    - the pill-enum vitest passes.
+
+*Test budget:* 46 → 47 (+`test_calculations.py`). The matrix, isolation and audit coverage
+comes from the existing WS1 tests (+0).
+*Reversibility:* additive tables and a tagged seed. Downgrades refuse while non-seed rows
+exist. `CALCULATIONS_ENABLED=false` refuses new snapshots and runs (409, audited), and
+existing runs stay readable. The frontend switch restores the placeholder. Runs are never
+updated or deleted (Arch §6.2 step 7).
+
+### Phase 16 — Governed rule changes, rule and module registry, assumption sets (FC-07, FC-08; WS3-P2)
+
+Goal: methodology parameters change only through versioned, maker-checker-approved rule
+versions. A new run pins the new ACTIVE versions. An old run, and a re-run of it, stays
+reproducible on its original pins. Rules, modules and assumption sets can be browsed.
+
+- [ ] **BE-16.1** The parameter-kind allowlist (D-32):
+  - `DECIMAL(min, max, scale)`;
+  - `INTEGER(min, max)`;
+  - `ENUM(values)`;
+  - `DAY_BUCKETS`: ordered, contiguous half-open intervals with an open last bucket;
+  - `ENUM_MAP(key_vocabulary → value_enum)`;
+  - `DECIMAL_MAP(key_vocabulary → DECIMAL)`.
+
+  Each rule definition's `parameter_schema` is checked against it, and so is every proposed
+  version. There are no expressions and no free-form JSON.
+  - *Done-when:* `test_rules.py` (new, the phase's one test) loops over valid and invalid
+    parameter sets for each kind, and every invalid one gets 422 `invalid_parameters` with a
+    value-free message.
+- [ ] **BE-16.2** `GET /rules` and `GET /rules/{rule_id}` (versions, status, author,
+  approver, and the runs that pin each version). Also:
+  - `POST /rules/{rule_id}/versions`: a DRAFT copied from the ACTIVE version plus a
+    parameter patch; `no_change` is refused;
+  - `…/{version}/submit`;
+  - `…/{version}/approval` (APPROVE activates and SUPERSEDES the previous ACTIVE version in
+    one transaction; REJECT).
+
+  The approver must not be the author (409 `self_approval`). Everything is audited (`rule.*`),
+  refusals included. `RULE_CHANGE_ENABLED=false` gives 409 `rule_change_disabled`.
+  - *Done-when:* `test_rules.py` asserts:
+    - the author cannot approve;
+    - after approval there is exactly one ACTIVE version and the old one is SUPERSEDED;
+    - DRAFT → ACTIVE without submit is refused;
+    - the switch-off 409;
+    - the WS1 audit-completeness test lists the three POST routes.
+- [ ] **BE-16.3** Pinning across rule changes. A run submitted after an approval pins the
+  new version, in a new `rule_set`. `POST /calculation-runs` with `rerun_of: run_id`
+  re-executes on the original run's exact pins, even when they are SUPERSEDED. The new run
+  records `rerun_of`.
+  - *Done-when:* `test_rules.py` changes the bucket rule, then asserts:
+    - the new run differs in `rule_set_id` and `result_sha256`;
+    - the old run's rows are unchanged (row hash before and after);
+    - a re-run of the old run has the old run's `manifest_sha256` and `result_sha256`.
+- [ ] **BE-16.4** `GET /assumption-sets` and `GET /assumption-sets/{assumption_set_id}`
+  (versions, provenance, owner, effective dates, status). They are read-only in this
+  feature; authoring is deferred.
+  - *Done-when:* the WS1 matrix lists both with 2xx for every role, and the run manifest's
+    `assumption_set_id` resolves through the detail route.
+- [ ] **FE-16.1** Registry pages under `/domain`:
+  - rules: list and detail, with a version history, a parameter diff between versions, and
+    "used by N runs";
+  - modules: AVAILABLE and PLANNED shown distinctly, never as ready;
+  - assumption sets.
+  - *Done-when:* a Playwright test opens the seeded `maturity_buckets` rule and sees its
+    ILLUSTRATIVE badge and version history; a vitest snapshot shows the PLANNED-module
+    rendering.
+- [ ] **FE-16.2** Propose → submit → approve flow for a rule version: a typed parameter
+  editor per kind, with client-side checks mirroring BE-16.1 (cosmetic only). The approval
+  dialog has a required comment, and the approve button is hidden from the author.
+  - *Done-when:*
+    - a Playwright test: `risk_analyst` proposes new bucket boundaries and submits;
+    - `approver` approves;
+    - a new run shows the new version in its manifest, and the old run still shows the old
+      version;
+    - the author sees no Approve button and gets a backend 409 `self_approval` on a direct
+      POST.
+
+*Test budget:* 47 → 48 (+`test_rules.py`).
+*Reversibility:* no new tables beyond Phase 15. If a lifecycle trigger is needed, it ships as
+a migration with a tested downgrade. `RULE_CHANGE_ENABLED=false` freezes the rules at their
+ACTIVE versions: writes get 409 (audited), and runs keep working. Superseded versions are
+hidden by status, never deleted.
+
+### Phase 17 — LCR/HQLA prototype module (FC-03; WS3-P4)
+
+Goal: an illustrative `lcr_hqla` v1 module runs over the same snapshot model. Every parameter
+lives in ILLUSTRATIVE rule versions:
+- HQLA eligibility, level and haircut by instrument type;
+- outflow run-off by instrument type;
+- inflow rate, horizon days and inflow cap.
+
+It shows HQLA components, outflows, capped inflows and a per-currency ratio. It is labelled a
+prototype throughout.
+
+- [ ] **BE-17.1** Migration: `hqla_asset_result` and `lcr_result` (append-only, with the run
+  guards of BE-15.2). A tagged seed adds module `lcr_hqla` v1 AVAILABLE and its ACTIVE
+  ILLUSTRATIVE rule versions (D-35).
+  - *Done-when:* the round trip passes, and the Phase 15 guard assertions in
+    `test_calculations.py` also loop over the two new tables (+0).
+- [ ] **BE-17.2** Module `lcr_hqla` v1 (D-31 interface). Inputs: position versions (balance
+  as the value, PROVISIONAL), instrument versions (type) and cash flows within the horizon.
+  - HQLA = Σ eligible balance × (1 − haircut).
+  - Outflows = Σ balance × run-off.
+  - Inflows = min(Σ inflow × rate, cap × outflows).
+  - Ratio = HQLA / (outflows − inflows), quantized to 4 dp ROUND_HALF_EVEN (PROVISIONAL).
+  - A zero or negative denominator gives a NULL ratio plus the warning `LCR_DENOMINATOR_ZERO`.
+
+  Level caps (L2A/L2B) are not applied; this is a documented limitation and a warning.
+  - *Done-when:* the golden loop in `test_calculations.py` gains a hand-computed `lcr_hqla`
+    engineering fixture covering:
+    - an ineligible asset;
+    - the inflow cap binding;
+    - a zero denominator;
+    - mixed currencies.
+
+    A rerun gives an identical `result_sha256` (+0).
+- [ ] **BE-17.3** `GET /calculation-runs/{run_id}/liquidity`: per currency, HQLA by level
+  with its asset rows (inclusion or exclusion reason), outflows, inflows before and after
+  the cap, and the ratio. Exact decimal text, masking per D-33.
+  - *Done-when:* the WS1 matrix lists it with 2xx for every role, and
+    `test_calculations.py` asserts that the HQLA total equals the sum of the included asset
+    rows (+0).
+- [ ] **FE-17.1** Liquidity view in the run detail: HQLA components (included and excluded,
+  with reasons), outflows, inflows with the applied cap shown, the ratio or "not computable"
+  with the warning, and the prototype banner.
+  - *Done-when:* a Playwright test runs `lcr_hqla` on the synthetic snapshot and checks the
+    displayed HQLA total against its rows; a vitest covers the NULL-ratio rendering.
+
+*Test budget:* 48 → 48 (folded).
+*Reversibility:* additive tables and a tagged seed. The downgrade refuses while LCR results
+exist. Retiring the module version, which hides it by status, removes it from "New run", and
+existing runs stay readable.
+
+### Phase 18 — Extension points, domain validation pack and WS3 verification (FC-05, FC-06, WS3-P5/P6, WS3 Definition of Done)
+
+Goal: ALM/IRRBB, collateral and capital exist as declared contracts only, so they are never
+runnable or presented as ready. The calculation limitations and the golden cases are
+documented, awaiting a named domain expert. WS3 is proven by the verification suite and by
+Playwright in CI.
+
+- [ ] **BE-18.1** A tagged seed adds `alm_irrbb`, `collateral` and `capital` module versions
+  with `implementation_status=PLANNED` and declared input and output contracts.
+  `POST /calculation-runs` refuses them with 409 `module_not_available` (audited).
+  `docs/CALCULATION_MODULES.md` documents:
+  - the module interface;
+  - the input and output contracts;
+  - the planned contracts;
+  - the decimal and rounding policy;
+  - each module's limitations;
+  - the "not regulatory, no Moody's parity" statement.
+  - *Done-when:* the WS1 audit test shows a DENIED event for a PLANNED module run; the doc
+    exists and lists every module row in the seed (grep).
+- [ ] **BE-18.2** The domain validation pack: `backend/app/calculations/golden/*.json` holds
+  every engineering fixture with its expected outputs and the status `ENGINEERING — awaiting
+  domain-expert approval`. A README names who must approve them, along with the tolerance
+  policy (exact for v1, per metric, per Data Model §7).
+  - *Done-when:* the `test_calculations.py` golden loop reads the files rather than inline
+    literals, and every file carries the status field.
+- [ ] **BE-18.3** The WS3 verification marker `ws3`, as a CI step printing the matrix. It is
+  applied to:
+  - the WS1 matrix, isolation and audit tests (now covering every WS3 route and resource);
+  - `test_domain.py`, `test_calculations.py` and `test_rules.py`;
+  - the migration round trip.
+
+  `docs/RETENTION.md` gains PROVISIONAL rows for every WS3 table.
+  - *Done-when:*
+    - `pytest -m ws3` runs green in CI on the Phase 18 PR, with the matrix in the log;
+    - every WS3 table appears in RETENTION.md;
+    - `pytest --collect-only -q` reports 48 or fewer.
+- [ ] **FE-18.1** PLANNED modules appear in the registry and the New-run picker as disabled
+  "Planned — extension point" entries with their declared contracts. They are never
+  selectable.
+  - *Done-when:* a vitest and a Playwright check show they cannot be selected, and a direct
+    POST is refused by the backend.
+- [ ] **FE-18.2** Playwright WS3 smoke:
+  1. the steward projects the instrument, position and cashflow imports;
+  2. the analyst builds a snapshot and runs the maturity ladder and LCR;
+  3. a drill-down to a source row;
+  4. the analyst proposes a bucket change and the approver approves;
+  5. a new run differs, and the old run is unchanged.
+  - *Done-when:* the `e2e` job passes in CI with the WS3 specs, and the `playwright-report`
+    artifact exists.
+
+*Test budget:* 48 → 48 (marker and folds only).
+*Reversibility:* a seed, docs and tests. PLANNED rows are hidden by retiring them.
+
+### Deferred (out of scope for Feature 03)
+
+- **Real methodology and approved golden cases.** Bucket sets, direction rules, HQLA levels,
+  haircuts, run-off and inflow rates, rounding and tolerances all wait for the client's named
+  financial owner (Arch §12, §17 release gates). The seeded values are ILLUSTRATIVE.
+- **Regulatory LCR features:** L2A/L2B caps, significant-currency rules, a consolidated
+  reporting-currency LCR, and regulatory templates. FX and market data come first, and there
+  are no regulatory claims.
+- **FX conversion and `market_observation` feeds:** ladders and ratios are per currency.
+  Market data needs provenance and a feed (FC-08 has its interface only).
+- **Assumption-set authoring** (create, propose and approve versions). The sets are seeded
+  and read-only, and runs already pin them.
+- **Schedule generation from terms** (`contractual_term`, `cashflow_schedule`,
+  `cashflow_component`, day-count and business-day calendars): this is methodology. Cash
+  flows come from source data only.
+- **Reference entities** `legal_entity`, `counterparty`, `account` and `reference_data_item`:
+  they are business-key strings on versions until reference data exists. WS2's
+  reference-data checks wait for them too.
+- **ALM/IRRBB, collateral and capital calculations** (FC-05, FC-06): contracts only.
+  `collateral_asset`, `collateral_link`, `collateral_result` and `capital_result` tables are
+  not created yet (D-01 lets them be added later).
+- **Effective-dated "current" domain views and overlapping-version rules:** versions are
+  per-import snapshots, and time is chosen by pinning a snapshot (D-29).
+- **Merging several imports of one schema into a snapshot**, and source-of-truth precedence
+  across sources (Data Model §11).
+- **Async runs, queues and retries** (`workflow_job`), scenarios, the generic lineage graph
+  (`lineage_node`/`lineage_edge`, `GET …/lineage`), benchmark comparison and reports:
+  WS4 RO-01…RO-05.
+- **Projecting instrument v2 or other DRAFT schema versions:** only the ACTIVE versions the
+  projector spec knows. A new schema version needs a new `projector_version`.
+- **AI explanations of runs:** WS5 only. Never on the calculation path.
+- **Row scopes below tenant** (legal entity, portfolio): these wait for the client role
+  model.
+- **Exports of results:** these need their own permission and CSV-injection safe output
+  (WS4 reports).

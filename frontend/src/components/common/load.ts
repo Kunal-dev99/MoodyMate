@@ -44,3 +44,29 @@ export function startLoad<T>(
   )
   return controller
 }
+
+/** A page-level load's state: loading, the value, or why it failed. */
+export type Loaded<T> = { kind: 'loading' } | { kind: 'ready'; value: T } | LoadFailure
+
+/**
+ * `startLoad` with its state transitions and retry, outside React (FE-14.3). `load()` (also
+ * the "Try again" action) shows loading and starts the fetch again, cancelling the previous
+ * attempt; `abort()` cancels it on unmount. Pages hold one in `useMemo`; tests drive the
+ * same transitions without a DOM.
+ */
+export function createLoader<T>(
+  fetcher: (signal: AbortSignal) => Promise<T>,
+  setState: (state: Loaded<T>) => void,
+  failureTitle: string,
+): { load: () => void; abort: () => void } {
+  let request: AbortController | null = null
+  return {
+    load() {
+      setState({ kind: 'loading' })
+      request = startLoad(fetcher, { onReady: (value) => setState({ kind: 'ready', value }), onFailure: setState, failureTitle }, request)
+    },
+    abort() {
+      request?.abort()
+    },
+  }
+}

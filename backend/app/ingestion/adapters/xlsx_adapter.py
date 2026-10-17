@@ -7,6 +7,12 @@
 * openpyxl in `read_only=True, data_only=True` mode with defusedxml installed. Formulas are
   never evaluated: a formula cell yields its cached value and a flag (a second, formula-mode
   pass over the same rows tells which cells hold formulas).
+* Rows come from openpyxl's sheet parser directly (`_sheet_rows`), not from `iter_rows`,
+  which yields one padded row per missing row number. A row number beyond Excel's
+  1,048,576 rows is an invalid workbook, and a gap of missing rows is one blank draft
+  whatever its length (Phase 8 review D2).
+* openpyxl's warnings never leave the process: they can quote a cell value (an
+  out-of-range date serial) and would bypass the log redaction (Phase 8 review D3).
 * XLSX stores numbers as IEEE doubles: a numeric cell becomes `Decimal(repr(x))` (the
   shortest round trip), flagged beyond 15 significant digits. Dates become ISO strings.
 * One sheet: the profile's named sheet, else the first. The marker is the sheet name
@@ -15,6 +21,7 @@
 """
 
 import io
+import warnings
 import zipfile
 from collections.abc import Iterator
 from datetime import date, datetime, time
@@ -25,6 +32,7 @@ import openpyxl
 from openpyxl.cell.read_only import EMPTY_CELL, ReadOnlyCell
 from openpyxl.workbook.workbook import Workbook
 from openpyxl.worksheet._read_only import ReadOnlyWorksheet
+from openpyxl.worksheet._reader import WorkSheetParser
 
 from app.ingestion.adapters.base import (
     ZIP_MAGIC,
@@ -51,6 +59,20 @@ from app.ingestion.constants import (
 _PARTS = ("[Content_Types].xml", "xl/workbook.xml")
 _MACRO_TYPE = b"macroEnabled"
 _EXACT_DIGITS = 15  # a double holds 15 significant decimal digits exactly
+MAX_SHEET_ROWS = 1_048_576  # Excel's last row; a row number beyond it is not a workbook's
+OPENPYXL_MODULES = r"openpyxl(\..*)?\Z"
+
+
+def silence_openpyxl_warnings() -> None:
+    """Phase 8 review D3: drop every warning raised from openpyxl's modules. They go to raw
+    stderr, past the log redaction, and one quotes the serial value of an out-of-range date.
+    The filter is process-wide and installed when this module is imported: parsing runs in
+    a thread pool, where `warnings.catch_warnings` is not safe. Under pytest, the
+    `filterwarnings` setting in pyproject.toml makes the same warnings errors instead."""
+    warnings.filterwarnings("ignore", module=OPENPYXL_MODULES)
+
+
+silence_openpyxl_warnings()
 
 
 def _invalid() -> AdapterError:
@@ -85,29 +107,48 @@ def _text(cell: Any) -> tuple[str | None, list[RowFlagCode]]:
     return str(value), flags
 
 
-def _bounded_rows(ws: ReadOnlyWorksheet, limits: Limits) -> None:
-    """openpyxl pads every row up to its last present cell (styled or not). Bound that
-    width so a far-right cell cannot make each row 16,384 cells wide: the width counts
-    only cells holding a value, and more than the column limit is refused. Relies on
-    openpyxl 3.1's ReadOnlyWorksheet._get_row (pinned <3.2; a test covers it)."""
+Row = tuple[int, tuple[Any, ...]]  # (row number, cells)
 
-    def get_row(
-        row: list[dict[str, Any]],
-        min_col: int = 1,
-        max_col: int | None = None,
-        values_only: bool = False,
-    ) -> tuple[Any, ...]:
-        width = max((c["column"] for c in row if c["value"] is not None), default=0)
-        if width > limits.max_columns:
-            raise too_many_columns(limits, {"sheet": ws.title, "row": row[0]["row"]})
-        cells: list[Any] = [EMPTY_CELL] * width
-        for c in row:
-            if c["column"] <= width:
-                cells[c["column"] - 1] = ReadOnlyCell(ws, **c)
-        return tuple(cells)
 
-    ws.reset_dimensions()  # never pad to a declared (possibly huge) dimension
-    ws._get_row = get_row  # type: ignore[attr-defined]
+def _sheet_rows(ws: ReadOnlyWorksheet, limits: Limits) -> Iterator[Row]:
+    """(row number, cells) for each <row> element of the sheet, read through openpyxl's own
+    sheet parser (private API, pinned openpyxl <3.2), with the same cell conversion as
+    `iter_rows`. `iter_rows` is not used because it pads: one empty row per missing row
+    number (`<row r="2000000000">` is two billion rows) and every row up to its last
+    styled cell. Here:
+
+    * a row number beyond MAX_SHEET_ROWS is `xlsx_invalid`, before any padding;
+    * missing row numbers are left to the caller, as a gap;
+    * a row's width counts only the cells holding a value, refused above the column limit.
+
+    As in `iter_rows`, a row whose number does not increase is skipped (Phase 8 review D4,
+    an open follow-up)."""
+    sheet: Any = ws  # the stubs model Worksheet, not the read-only internals
+    wb: Any = ws.parent
+    with sheet._get_source() as src:
+        parser = WorkSheetParser(
+            src,
+            sheet._shared_strings,
+            data_only=wb.data_only,
+            epoch=wb.epoch,
+            date_formats=wb._date_formats,
+            timedelta_formats=wb._timedelta_formats,
+        )
+        previous = 0
+        for number, row in parser.parse():
+            if number > MAX_SHEET_ROWS:
+                raise _invalid()
+            if number <= previous:
+                continue
+            previous = number
+            width = max((c["column"] for c in row if c["value"] is not None), default=0)
+            if width > limits.max_columns:
+                raise too_many_columns(limits, {"sheet": ws.title, "row": number})
+            cells: list[Any] = [EMPTY_CELL] * width
+            for c in row:
+                if c["column"] <= width:
+                    cells[c["column"] - 1] = ReadOnlyCell(ws, **c)
+            yield number, tuple(cells)
 
 
 class XlsxAdapter(SourceAdapter):
@@ -137,9 +178,7 @@ class XlsxAdapter(SourceAdapter):
             raise _invalid() from None
         try:
             ws_v, ws_f = _sheet(values, options), _sheet(formulas, options)
-            for ws in (ws_v, ws_f):
-                _bounded_rows(ws, limits)
-            rows = _paired(_rows(ws_v), _rows(ws_f))
+            rows = _paired(_sheet_rows(ws_v, limits), _sheet_rows(ws_f, limits))
             header = next(rows, None)
             title = values.properties.title or ""
             marker = ws_v.title.startswith(XLSX_MARKER_SHEET) or title.startswith(SYNTHETIC_MARKER)
@@ -199,28 +238,22 @@ def _sheet(wb: Workbook, options: AdapterOptions) -> ReadOnlyWorksheet:
     return ws
 
 
-def _rows(ws: Any) -> Iterator[tuple[Any, ...]]:
-    """The sheet's rows of read-only cells (typed loosely: the stubs model Worksheet)."""
-    rows: Iterator[tuple[Any, ...]] = ws.iter_rows()
-    return rows
-
-
-def _paired(
-    values: Iterator[tuple[Any, ...]], formulas: Iterator[tuple[Any, ...]]
-) -> Iterator[tuple[tuple[Any, ...], tuple[Any, ...]]]:
+def _paired(values: Iterator[Row], formulas: Iterator[Row]) -> Iterator[tuple[Row, Row]]:
     """Each row from both passes. A parser failure mid-sheet is an invalid workbook."""
     try:
-        yield from zip(values, formulas, strict=True)
+        for row_v, row_f in zip(values, formulas, strict=True):
+            if row_v[0] != row_f[0]:
+                raise _invalid()
+            yield row_v, row_f
     except AdapterError:
         raise
     except Exception:
         raise _invalid() from None
 
 
-def _header(
-    header: tuple[tuple[Any, ...], tuple[Any, ...]] | None, sheet: str, limits: Limits
-) -> list[str]:
-    cells = [_text(c)[0] for c in header[0]] if header else []
+def _header(header: tuple[Row, Row] | None, sheet: str, limits: Limits) -> list[str]:
+    """Row 1. A sheet whose first row is a later one has a blank header row."""
+    cells = [_text(c)[0] for c in header[0][1]] if header and header[0][0] == 1 else []
     while cells and cells[-1] is None:
         cells.pop()
     if not cells:
@@ -229,14 +262,19 @@ def _header(
 
 
 def _drafts(
-    rows: Iterator[tuple[tuple[Any, ...], tuple[Any, ...]]],
+    rows: Iterator[tuple[Row, Row]],
     columns: list[str],
     sheet: str,
     limits: Limits,
     *workbooks: Workbook,
 ) -> Iterator[Draft]:
     try:
-        for number, (row_v, row_f) in enumerate(rows, start=2):
+        expected = 2  # the row after the header
+        for (number, row_v), (_, row_f) in rows:
+            if number > expected:  # missing row numbers: blank rows, as one draft
+                gap: Locator = {"sheet": sheet, "row": expected}
+                yield Draft(gap, {}, blank=True, count=number - expected)
+            expected = number + 1
             locator: Locator = {"sheet": sheet, "row": number}
             texts: list[str | None] = []
             flags: list[RowFlag] = []

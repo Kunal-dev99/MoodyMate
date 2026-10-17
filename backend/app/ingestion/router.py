@@ -401,6 +401,7 @@ def limits_from(settings: Settings) -> Limits:
         max_cell_chars=settings.IMPORT_MAX_CELL_CHARS,
         max_xlsx_uncompressed_bytes=settings.IMPORT_MAX_XLSX_UNCOMPRESSED_BYTES,
         max_xlsx_ratio=settings.IMPORT_MAX_XLSX_RATIO,
+        max_decoded_chars=settings.IMPORT_MAX_DECODED_CHARS,
     )
 
 

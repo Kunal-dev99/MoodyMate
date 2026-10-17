@@ -5,6 +5,7 @@ type, so the parts are written directly (as the synthetic sample generator does)
 is a tuple:
 
 * ("s", text): an inline string
+* ("ss", index): a reference to the workbook's `shared` strings
 * ("n", "12345.6"): a numeric cell holding exactly that text
 * ("d", serial): a date-formatted serial number
 * ("f", formula, cached): a formula with its cached numeric value (cached may be None)
@@ -50,6 +51,8 @@ def _cell(ref: str, cell: Cell) -> str:
         return (
             f'<c r="{ref}" t="inlineStr"><is><t xml:space="preserve">{escape(cell[1])}</t></is></c>'
         )
+    if kind == "ss":
+        return f'<c r="{ref}" t="s"><v>{cell[1]}</v></c>'
     if kind == "n":
         return f'<c r="{ref}"><v>{cell[1]}</v></c>'
     if kind == "d":
@@ -74,9 +77,11 @@ def xlsx(
     vba: bool = False,
     compression: int = zipfile.ZIP_STORED,
     padding: int = 0,
+    shared: tuple[str, ...] = (),
 ) -> bytes:
     """One worksheet with `rows` (plus empty `sheets` after it). `padding` adds that many
-    spaces of whitespace inside the sheet XML (for compression-ratio tests)."""
+    spaces of whitespace inside the sheet XML (for compression-ratio tests). `shared` is a
+    shared-strings part, which ("ss", index) cells reference."""
     body = "".join(
         f'<row r="{n}">' + "".join(_cell(f"{col(i)}{n}", c) for i, c in enumerate(r)) + "</row>"
         for n, r in enumerate(rows, start=1)
@@ -93,7 +98,13 @@ def xlsx(
         '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.'
         'relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>'
         f'<Override PartName="/xl/workbook.xml" ContentType="{main_type}"/>{overrides}'
-        '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-'
+        + (
+            '<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxml'
+            'formats-officedocument.spreadsheetml.sharedStrings+xml"/>'
+            if shared
+            else ""
+        )
+        + '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-'
         'officedocument.spreadsheetml.styles+xml"/><Override PartName="/docProps/core.xml" '
         'ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>',
         "_rels/.rels": HEAD + f'<Relationships xmlns="{PKG}">'
@@ -118,7 +129,13 @@ def xlsx(
             for i in range(1, len(names) + 1)
         )
         + f'<Relationship Id="rId{len(names) + 1}" Type="{REL}/styles" Target="styles.xml"/>'
-        "</Relationships>",
+        + (
+            f'<Relationship Id="rId{len(names) + 2}" Type="{REL}/sharedStrings"'
+            ' Target="sharedStrings.xml"/>'
+            if shared
+            else ""
+        )
+        + "</Relationships>",
         "xl/styles.xml": HEAD + f'<styleSheet xmlns="{MAIN}">'
         '<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>'
         '<fills count="1"><fill><patternFill patternType="none"/></fill></fills>'
@@ -126,12 +143,22 @@ def xlsx(
         '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/>'
         '</cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"'
         ' xfId="0"/><xf numFmtId="14" fontId="0" fillId="0" borderId="0" xfId="0"'
-        ' applyNumberFormat="1"/></cellXfs></styleSheet>',
+        ' applyNumberFormat="1"/></cellXfs>'
+        # The Normal style: without it openpyxl warns on every parse (an error under pytest).
+        '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
+        "</styleSheet>",
         "xl/worksheets/sheet1.xml": HEAD
         + f'<worksheet xmlns="{MAIN}"><sheetData>{body}</sheetData>'
         + " " * padding
         + "</worksheet>",
     }
+    if shared:
+        parts["xl/sharedStrings.xml"] = (
+            HEAD
+            + f'<sst xmlns="{MAIN}" count="{len(shared)}" uniqueCount="{len(shared)}">'
+            + "".join(f'<si><t xml:space="preserve">{escape(t)}</t></si>' for t in shared)
+            + "</sst>"
+        )
     for i in range(2, len(names) + 1):
         parts[f"xl/worksheets/sheet{i}.xml"] = (
             HEAD + f'<worksheet xmlns="{MAIN}"><sheetData/></worksheet>'
@@ -158,3 +185,17 @@ def rewrite(data: bytes, member: str, content: bytes) -> bytes:
         for info in src.infolist():
             dst.writestr(info.filename, content if info.filename == member else src.read(info))
     return out.getvalue()
+
+
+def raw_sheet(rows_xml: str) -> bytes:
+    """A workbook whose sheet data is exactly `rows_xml` (row numbers written by hand)."""
+    sheet = HEAD + f'<worksheet xmlns="{MAIN}"><sheetData>{rows_xml}</sheetData></worksheet>'
+    return rewrite(xlsx([[("s", "a")]]), "xl/worksheets/sheet1.xml", sheet.encode())
+
+
+def amplified(text: str, decoded: int, width: int = 20) -> bytes:
+    """Phase 8 review D1: a small workbook in which one shared string `text` fills enough
+    cells (`width` per row, under a header) to decode to more than `decoded` characters."""
+    rows = decoded // (width * len(text)) + 1
+    header: list[Cell] = [("s", col(i)) for i in range(width)]
+    return xlsx([header] + [[("ss", 0)] * width for _ in range(rows)], shared=(text,))

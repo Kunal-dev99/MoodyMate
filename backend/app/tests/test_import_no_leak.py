@@ -1,28 +1,39 @@
 """BE-8.6: no raw value leaks. Fixtures full of a sentinel string (an accepted file with
 malformed rows, and files that fail to parse in every adapter) are uploaded. The sentinel
 reaches source_record (proving the fixtures carry it) and nowhere else: not the captured
-logs at DEBUG, not any response body, not the audit details of the imports."""
+logs at DEBUG, not any response body, not the audit details of the imports.
+
+BE-14.6 (Phase 8 review D3): an accepted workbook with an out-of-range date, whose serial
+openpyxl quotes in a warning, is uploaded with the app's own warning filter in place and
+warnings printed to stderr as outside pytest: the serial never reaches stderr."""
 
 import json
 import logging
+import sys
 import uuid
+import warnings
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.core.config import Settings
 from app.core.logging import JsonFormatter
+from app.ingestion.adapters import HARD_LIMITS, AdapterOptions, parse_upload
+from app.ingestion.adapters.xlsx_adapter import silence_openpyxl_warnings
+from app.ingestion.constants import SourceFormat
 from app.main import create_app
 from app.tests.conftest import dev_token, sql
 from app.tests.helpers import IMPORTS, seeded_source_id, source_for, upload
-from app.tests.xlsx_kit import rewrite, xlsx
+from app.tests.xlsx_kit import Cell, amplified, rewrite, xlsx
 
 pytestmark = pytest.mark.db
 
 SENTINEL = "ZZQ-SENTINEL-4471"
 S = SENTINEL
+# A date-formatted serial far beyond Excel's dates: openpyxl's warning quotes it.
+DATE_SENTINEL = "4471447144714471"
 
 
 def accepted_csv() -> bytes:
@@ -63,7 +74,26 @@ def failing_files() -> list[tuple[str, bytes, str]]:
         ("XLSX", xlsx([[("s", S), ("s", S)], [("s", "1")]]), "invalid_header"),
         ("XLSX", _broken_sheet(), "xlsx_invalid"),
         ("XLSX", xlsx([[("s", S)], [("s", S)]])[:-40], "unsupported_file_type"),
+        # D-25 §1 (Phase 8 review D1): one shared string decoding past 50 MiB.
+        ("XLSX", amplified((S * 300)[:4000], HARD_LIMITS.max_decoded_chars), "content_too_large"),
     ]
+
+
+def out_of_range_date_xlsx() -> bytes:
+    header: list[Cell] = [("s", "instrument_id"), ("s", f"{S}_d")]
+    return xlsx([header, [("s", f"{S}-9"), ("d", DATE_SENTINEL)]])
+
+
+def _to_stderr(
+    message: Warning | str,
+    category: type[Warning],
+    filename: str,
+    lineno: int,
+    file: TextIO | None = None,
+    line: str | None = None,
+) -> None:
+    """Print a warning as Python does outside pytest (which records them instead)."""
+    sys.stderr.write(warnings.formatwarning(message, category, filename, lineno, line))
 
 
 def test_no_sentinel_in_logs_error_bodies_or_audit(
@@ -96,6 +126,19 @@ def test_no_sentinel_in_logs_error_bodies_or_audit(
         for fmt, data, code in failing_files():
             r = send(fmt, data)
             assert (r.status_code, r.json()["code"]) == (422, code), (fmt, code, r.text)
+        # D3: without the app's filter, openpyxl's warning would quote the serial...
+        with warnings.catch_warnings(record=True) as seen:
+            warnings.simplefilter("always")
+            options = AdapterOptions()
+            parse_upload(out_of_range_date_xlsx(), SourceFormat.XLSX, options, HARD_LIMITS)
+        assert any(DATE_SENTINEL in str(w.message) for w in seen)
+        # ...and with it, on the request path, nothing reaches stderr (checked below).
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.showwarning = _to_stderr
+            silence_openpyxl_warnings()  # as installed when the app imports the adapter
+            r = send("XLSX", out_of_range_date_xlsx())
+        assert r.status_code == 201, r.text
         # Request-level refusals with the same file: replay conflict, attestation, size.
         r = send("CSV", accepted_csv(), key="leak-key")
         assert r.status_code == 201
@@ -117,7 +160,9 @@ def test_no_sentinel_in_logs_error_bodies_or_audit(
             )
             assert (r.status_code, r.json()["code"]) == (422, "validation_error")
             bodies.append(r.text)
-        for i in json.loads(api.get(IMPORTS, headers=steward).text)["items"]:
+        items = json.loads(api.get(IMPORTS, headers=steward).text)["items"]
+        assert len(items) == 3  # D-25 §3: a refused upload persists no import
+        for i in items:
             bodies.append(api.get(f"{IMPORTS}/{i['id']}", headers=steward).text)
             # The profile shows column names (headers) and, to a cleared role, values; a
             # role not cleared for the source's class sees neither values nor bounds.
@@ -146,6 +191,7 @@ def test_no_sentinel_in_logs_error_bodies_or_audit(
     assert logged, "nothing was logged: the check would be vacuous"
     assert all(S not in line for line in logged)
     assert S not in out and S not in err
+    assert all(DATE_SENTINEL not in text for text in (*logged, *bodies, out, err))
 
     # Audit details of every import request (success and DENIED).
     events = sql(
@@ -158,7 +204,9 @@ def test_no_sentinel_in_logs_error_bodies_or_audit(
     assert len([e for e in events if e["action"] == "import.create"]) == len(correlations)
     # Phase 9: the accepted uploads were profiled in the same requests (the profile holds
     # the sentinel's columns and values), and the profile's audit holds none of them.
-    assert len([e for e in events if e["action"] == "import.profile"]) == 2
+    assert len([e for e in events if e["action"] == "import.profile"]) == 3
     profiles = sql(db, "SELECT columns::text AS c FROM data_profile_snapshot")
     assert profiles and all(S in p["c"] for p in profiles)
-    assert all(S not in e["d"] for e in events)
+    assert all(S not in e["d"] and DATE_SENTINEL not in e["d"] for e in events)
+    refused = [e for e in events if e["outcome"] == "DENIED" and "content_too_large" in e["d"]]
+    assert len(refused) == 1, "the content_too_large refusal is audited DENIED"

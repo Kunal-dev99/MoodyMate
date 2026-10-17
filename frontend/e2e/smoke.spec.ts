@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page, type Route } from '@playwright/test'
 
 /** FE-6.2 smoke: sign-in per role, the 403 page, schema compare and the proposal flow. */
 
@@ -48,6 +48,58 @@ test('schema compare shows every change with its badge', async ({ page }) => {
     ].sort(),
   )
   await expect(page.getByTestId('diff-overall').getByTestId('compatibility-badge')).toHaveAttribute('data-compatibility', 'BREAKING')
+})
+
+/**
+ * FE-14.3: GET /schemas answers 500 once (the real response, status and body replaced); the
+ * page shows "Try again" instead of loading forever, and one click renders the list.
+ */
+async function failSchemaListOnce(page: Page) {
+  const forced = { count: 0 }
+  await page.route('**/api/v1/schemas', async (route: Route) => {
+    if (route.request().method() !== 'GET' || forced.count > 0) return route.fallback()
+    forced.count += 1
+    const response = await route.fetch()
+    await route.fulfill({
+      response,
+      status: 500,
+      json: { code: 'internal_error', message: 'Forced by the e2e test.', details: null, correlation_id: 'e2e-fe-14-3', retryable: false },
+    })
+  })
+  return forced
+}
+
+test('FE-14.3: /schemas recovers from a failed load with one "Try again"', async ({ page }) => {
+  await signIn(page, 'Risk analyst')
+  const forced = await failSchemaListOnce(page)
+  await page.goto('/schemas')
+  const retry = page.getByTestId('load-retry')
+  await expect(retry).toHaveText('Try again')
+  await expect(page.getByText('The schemas could not be loaded')).toBeVisible()
+  await expect(page.getByText('The request did not complete. Correlation ID: e2e-fe-14-3')).toBeVisible()
+  await expect(page.getByTestId('schema-row')).toHaveCount(0)
+  expect(forced.count).toBe(1)
+
+  await retry.click()
+  await expect(page.getByTestId('schema-row').filter({ hasText: 'instrument' })).toBeVisible()
+  await expect(retry).toHaveCount(0)
+  expect(forced.count).toBe(1)
+})
+
+test('FE-14.3: /schemas/proposals/new recovers from a failed load with one "Try again"', async ({ page }) => {
+  await signIn(page, 'Data steward')
+  const forced = await failSchemaListOnce(page)
+  await page.goto('/schemas/proposals/new')
+  const retry = page.getByTestId('load-retry')
+  await expect(retry).toHaveText('Try again')
+  await expect(page.getByText('The schemas could not be loaded')).toBeVisible()
+  await expect(page.getByLabel('Schema', { exact: true })).toHaveCount(0)
+
+  await retry.click()
+  await expect(page.getByLabel('Schema', { exact: true }).locator('option', { hasText: '(instrument)' })).toHaveCount(1)
+  await expect(page.getByTestId('field-row').first()).toBeVisible()
+  await expect(retry).toHaveCount(0)
+  expect(forced.count).toBe(1)
 })
 
 test('proposal flow: steward proposes, approver approves', async ({ browser }) => {

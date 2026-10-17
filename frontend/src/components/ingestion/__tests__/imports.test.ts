@@ -202,6 +202,7 @@ describe('upload error titles', () => {
     'too_many_rows',
     'too_many_columns',
     'cell_too_long',
+    'content_too_large',
     'xlsx_uncompressed_too_large',
     'xlsx_compression_ratio_too_high',
     'unsupported_file_type',

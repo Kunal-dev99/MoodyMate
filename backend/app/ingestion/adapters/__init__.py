@@ -82,7 +82,7 @@ def parse_upload(
             )
         raise AdapterError(UploadRefusal.UNSUPPORTED_FILE_TYPE, f"The file is not a {fmt} file.")
     stream = adapter.iter_rows(data, options, limits)
-    rows = collect(stream.drafts, limits)
+    rows = collect(stream.drafts, limits, sum(map(len, stream.columns)))
     return ParsedUpload(
         fmt, adapter.media_type, stream.columns, rows, stream.marker_present, stream.sheet_name
     )
