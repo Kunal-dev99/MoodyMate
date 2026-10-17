@@ -1,8 +1,6 @@
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import type { components } from '../src/api/schema'
-import { API, SAMPLES, bearer, ensureActiveMapping, signIn, uploadSample } from './support'
+import { API, bearer, cashflowImportReady, ensureActiveMapping, registerInstrumentSource, signIn, uploadSample, validateAndProject } from './support'
 
 /**
  * Feature 03 Phase 15 browser checks against the real stack (backend ENV=test, synthetic).
@@ -80,112 +78,6 @@ function sumDecimals(values: string[]): string {
   const digits = (negative ? -total : total).toString().padStart(scale + 1, '0')
   const text = scale === 0 ? digits : `${digits.slice(0, -scale)}.${digits.slice(-scale)}`
   return negative ? `-${text}` : text
-}
-
-// --- setup through the API (not under test) ----------------------------------------------------
-
-/** A new source whose contract copies the seeded core_banking one (it fits instrument.csv). */
-async function registerInstrumentSource(request: APIRequestContext, steward: Record<string, string>) {
-  const list: Schemas['SourcePage'] = await (await request.get(`${API}/api/v1/sources?limit=200`, { headers: steward })).json()
-  const core = list.items.find((s) => s.code === 'core_banking')
-  expect(core?.current_contract).toBeTruthy()
-  const contract = core!.current_contract!
-  const profile = core!.profile
-  const body: Schemas['SourceCreate'] = {
-    code: `e2e_calc_instr_${Date.now()}`,
-    name: 'Calculations instruments (e2e)',
-    kind: 'FILE_DROP',
-    profile: {
-      format: profile.format,
-      encoding: profile.encoding,
-      delimiter: profile.delimiter,
-      owner: profile.owner,
-      default_classification: profile.default_classification,
-    },
-    contract: {
-      schema_id: contract.schema_id,
-      expected_columns: contract.expected_columns,
-      business_key_columns: contract.business_key_columns,
-      control_total_columns: contract.control_total_columns,
-    },
-  }
-  const r = await request.post(`${API}/api/v1/sources`, { headers: steward, data: body })
-  expect(r.status(), await r.text()).toBe(201)
-  const source: Schemas['SourceDetail'] = await r.json()
-  return { sourceId: source.id, contractId: source.current_contract!.id }
-}
-
-/**
- * A JSON source for the synthetic cash-flow sample (its own columns, business key
- * `cashflow_id`), and a mapping of every column to the same-named `cashflow_event` v1 field
- * (decimals and dates parsed), made ACTIVE against the import (as the backend's
- * `validated_sample` helper does).
- */
-async function cashflowImportReady(request: APIRequestContext, steward: Record<string, string>) {
-  const schemas: Schemas['SchemaList'] = await (await request.get(`${API}/api/v1/schemas`, { headers: steward })).json()
-  const schema = schemas.items.find((s) => s.code === 'cashflow_event')
-  expect(schema).toBeTruthy()
-  const sample: { records: Record<string, unknown>[] } = JSON.parse(readFileSync(join(SAMPLES, 'cashflow_event.json'), 'utf8'))
-  const columns = Object.keys(sample.records[0])
-  const body: Schemas['SourceCreate'] = {
-    code: `e2e_calc_cf_${Date.now()}`,
-    name: 'Calculations cash flows (e2e)',
-    kind: 'FILE_DROP',
-    profile: { format: 'JSON', encoding: 'UTF-8', owner: 'Treasury data team (e2e)', default_classification: 'confidential' },
-    contract: {
-      schema_id: schema!.id,
-      expected_columns: columns.map((name) => ({ name, required: true })),
-      business_key_columns: ['cashflow_id'],
-      control_total_columns: [],
-    },
-  }
-  const created = await request.post(`${API}/api/v1/sources`, { headers: steward, data: body })
-  expect(created.status(), await created.text()).toBe(201)
-  const source: Schemas['SourceDetail'] = await created.json()
-  const uploaded: Schemas['ImportDetail'] = await uploadSample(request, steward, source.id, 'cashflow_event.json', 'application/json')
-  expect(uploaded.schema_code).toBe('cashflow_event')
-
-  const versions: Schemas['SchemaVersionList'] = await (await request.get(`${API}/api/v1/schemas/${schema!.id}/versions`, { headers: steward })).json()
-  const pinned = versions.items.find((v) => v.id === uploaded.schema_version_id)
-  expect(pinned, 'the import pins a listed schema version').toBeTruthy()
-  const types = new Map(pinned!.fields.map((f) => [f.name, f.data_type]))
-  const rules: Schemas['RuleIn'][] = columns.map((column) => {
-    const type = types.get(column)
-    expect(type, `cashflow_event v${pinned!.version} has a field ${column}`).toBeTruthy()
-    let transform: Schemas['RuleIn']['transform'] = { code: 'COPY', params: {} }
-    if (type === 'DECIMAL') transform = { code: 'PARSE_DECIMAL' }
-    else if (type === 'DATE') transform = { code: 'PARSE_DATE', params: { format: 'YYYY-MM-DD' } }
-    return { source_column: column, target_field: column, column_policy: 'MAP', null_policy: 'ALLOW_NULL', transform }
-  })
-  const mapping: Schemas['MappingCreate'] = {
-    code: `e2e_calc_cf_${Date.now()}`,
-    name: 'Calculations cash flows (e2e)',
-    source_contract_id: source.current_contract!.id,
-    rules,
-  }
-  const m = await request.post(`${API}/api/v1/mappings`, { headers: steward, data: mapping })
-  expect(m.status(), await m.text()).toBe(201)
-  const version: Schemas['MappingVersionOut'] = (await m.json()).versions[0]
-  const dry = await request.post(`${API}/api/v1/imports/${uploaded.id}/mappings/validate`, { headers: steward, data: { mapping_version_id: version.id } })
-  expect(dry.status(), await dry.text()).toBe(201)
-  expect((await dry.json()).ok).toBe(true)
-  const base = `${API}/api/v1/mappings/${version.mapping_id}/versions/${version.version}`
-  expect((await request.post(`${base}/submit`, { headers: steward, data: {} })).status()).toBe(200)
-  const approved = await request.post(`${base}/approval`, { headers: await bearer(request, 'approver'), data: { decision: 'APPROVE' } })
-  expect(approved.status(), await approved.text()).toBe(200)
-  return uploaded.id
-}
-
-/** Validate (COMPLETED or with warnings) and project an import, as the steward. */
-async function validateAndProject(request: APIRequestContext, steward: Record<string, string>, importId: string) {
-  const validated = await request.post(`${API}/api/v1/imports/${importId}/validate`, { headers: steward })
-  expect(validated.status(), await validated.text()).toBe(200)
-  const job: Schemas['ImportDetail'] = await validated.json()
-  expect(['COMPLETED', 'COMPLETED_WITH_WARNINGS']).toContain(job.status)
-  const projected = await request.post(`${API}/api/v1/imports/${importId}/projection`, { headers: steward })
-  expect(projected.status(), await projected.text()).toBe(201)
-  const projection: Schemas['ProjectionOut'] = await projected.json()
-  expect(projection.projected_count).toBe(job.manifest!.quality.accepted_records)
 }
 
 const isPost = (page: Page, url: string) => page.waitForResponse((r) => r.request().method() === 'POST' && r.url() === url)

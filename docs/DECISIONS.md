@@ -774,6 +774,17 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
 - **Consequences:** datasets are small enough for synchronous runs under the D-16 bounds.
   Async execution comes with WS4.
 
+- **Amendment (2026-10-17, Phases 15–16 build):**
+  - **§1 module check:** there is no start-up registry check, because the app starts without
+    a database. A module version that is unregistered or not AVAILABLE is refused when a run
+    is submitted (409 `module_not_available`, audited).
+  - **PLANNED versions:** these are seeded with no code. The seeded rows are a superset of
+    the code registry.
+  - **§5 re-runs:** a re-run (`rerun_of`) must reproduce the original `result_sha256`.
+    Otherwise it ends FAILED with a `POST_CHECK_FAILED` warning
+    (`{"check": "RERUN_REPRODUCED"}`) and stores no results. A re-run whose pins can no
+    longer be resolved gets 409 `rerun_not_reproducible`.
+
 ## D-32 Rule, module and assumption registry: parameters, lifecycle and maker-checker
 
 - **Status:** active (Feature 03 plan approved by the user, 2026-10-17)
@@ -820,6 +831,20 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
   - Free-form JSON parameters. Rejected: they cannot be governed or validated.
   - Formula strings. Rejected: Arch §7 and the WS cross-cutting rules forbid them.
   - Hand-authored rule sets. Deferred: content addressing is enough for pinning.
+
+- **Amendment (2026-10-17, Phase 16 build):**
+  - **DECIMAL storage:** DECIMAL and DECIMAL_MAP values are stored as JSON strings of exact
+    decimal text, padded to the declared scale; extra places are refused, never rounded.
+    Any fractional or exponent JSON number in parameters is refused (`inexact_number`).
+  - **Bucket boundaries:** DAY_BUCKETS may start at a lower bound of -1, so the first bucket
+    can hold a flow due on the reporting date (day 0). The seeded v1 starts at 0, which
+    leaves day 0 open as a methodology item.
+  - **Bucket definitions:** these are written when a version is submitted, while it is
+    still DRAFT.
+  - **Maker-checker:**
+    - only the author may submit a version (409 `not_author`);
+    - a decider who is the author gets 409 `self_approval`;
+    - approving a version proposed before another activation gets 409 `stale_version`.
 
 ## D-33 Classification and masking of calculation outputs
 

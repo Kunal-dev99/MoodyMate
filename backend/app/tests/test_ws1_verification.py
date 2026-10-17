@@ -31,6 +31,7 @@ from app.tests.helpers import (
     INSTRUMENTS,
     MODULES,
     PROPOSALS,
+    RULES,
     RUNS,
     SNAPSHOTS,
     SOURCES,
@@ -41,6 +42,7 @@ from app.tests.helpers import (
     module_version_id,
     projected_instruments,
     removal_proposal,
+    rule_id,
     schema_id,
     seeded_source_id,
     source_body,
@@ -148,10 +150,15 @@ def test_route_by_role_authorization_matrix(api: TestClient, db: str) -> None:
         "source_id": seeded_source_id(db),
         "import_id": imported.json()["id"],
         "mapping_id": projected["mapping_id"],
+        "rule_id": rule_id(db, "maturity_buckets"),  # Phase 16: GET /rules/{rule_id}
         "batch_id": imported.json()["batches"][0]["id"],  # Phase 11: GET /quarantine/{batch_id}
         "instrument_id": projected["instrument_id"],  # Phase 14: GET /instruments/{id}
         "snapshot_id": calculated["snapshot_id"],  # Phase 15: GET /dataset-snapshots/{id}
         "run_id": calculated["run_id"],  # Phase 15: GET /calculation-runs/{id}[/...]
+        # Phase 16 (BE-16.4): the run manifest's pin resolves through the detail route.
+        "assumption_set_id": api.get(f"{RUNS}/{calculated['run_id']}", headers=steward).json()[
+            "manifest"
+        ]["assumption_set"]["assumption_set_id"],
     }
     tokens = {role: dev_token(api, role) for role in ROLES}
     failures = []
@@ -218,6 +225,8 @@ def test_route_by_role_authorization_matrix(api: TestClient, db: str) -> None:
         ("GET /api/v1/calculation-runs/{run_id}", "calc:read"),
         ("GET /api/v1/calculation-runs/{run_id}/results", "calc:read"),
         ("GET /api/v1/calculation-runs/{run_id}/maturity-ladder", "calc:read"),
+        ("GET /api/v1/assumption-sets", "rule:read"),  # BE-16.4
+        ("GET /api/v1/assumption-sets/{assumption_set_id}", "rule:read"),
     ):
         [row] = [r for r in WS1_MATRIX if r["route"] == route]
         assert row["permission"] == permission, route
@@ -227,6 +236,23 @@ def test_route_by_role_authorization_matrix(api: TestClient, db: str) -> None:
         assert row["permission"] == "calc:run", route
         assert {role: row[role] for role in ROLES} == {
             role: 422 if role == "risk_analyst" else 403 for role in ROLES
+        }, row
+    # BE-16.2: the rule reads are rule:read, 2xx for every seeded role; propose and submit are
+    # rule:propose (risk_analyst only), the decision rule:approve (approver only): their empty
+    # body or unknown version is a 422, everyone else a 403.
+    for route in ("GET /api/v1/rules", "GET /api/v1/rules/{rule_id}"):
+        [row] = [r for r in WS1_MATRIX if r["route"] == route]
+        assert row["permission"] == "rule:read", route
+        assert all(row[role] == 200 for role in ROLES), row
+    for route, permission, writer in (
+        ("POST /api/v1/rules/{rule_id}/versions", "rule:propose", "risk_analyst"),
+        ("POST /api/v1/rules/{rule_id}/versions/{version}/submit", "rule:propose", "risk_analyst"),
+        ("POST /api/v1/rules/{rule_id}/versions/{version}/approval", "rule:approve", "approver"),
+    ):
+        [row] = [r for r in WS1_MATRIX if r["route"] == route]
+        assert row["permission"] == permission, route
+        assert {role: row[role] for role in ROLES} == {
+            role: 422 if role == writer else 403 for role in ROLES
         }, row
     assert len(WS1_MATRIX) >= 12
 
@@ -249,6 +275,8 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
     here_module = sql(
         db, "SELECT id FROM module_version WHERE implementation_status = 'AVAILABLE'"
     )[0]["id"]
+    here_rule = rule_id(db, "past_due_treatment")  # Phase 16
+    here_assumption_set = sql(db, "SELECT id FROM assumption_set")[0]["id"]
 
     other_tenant = insert_tenant(db, f"other-{uuid.uuid4().hex[:6]}")
     outsider = token_for(
@@ -269,9 +297,11 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
         # a projected instrument import).
         f"{IMPORTS}?projected=true&schema_code=instrument",
         INSTRUMENTS,
+        RULES,  # Phase 16: the rule registry is per tenant
         SNAPSHOTS,
         RUNS,
         MODULES,
+        "/api/v1/assumption-sets",  # BE-16.4
     ):
         assert api.get(path, headers=outsider).json()["total"] == 0, path
     audit = api.get("/api/v1/audit-events", params={"limit": 200}, headers=outsider).json()
@@ -304,6 +334,8 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
         (f"/api/v1/users/{here_user}", f"/api/v1/users/{uuid.uuid4()}"),
         # Phase 14: the instrument catalogue and the projection read.
         (f"{INSTRUMENTS}/{here_instrument}", f"{INSTRUMENTS}/{uuid.uuid4()}"),
+        # Phase 16: this tenant's seeded rule.
+        (f"{RULES}/{here_rule}", f"{RULES}/{uuid.uuid4()}"),
         (
             f"{IMPORTS}/{here_projected['import_id']}/projection",
             f"{IMPORTS}/{uuid.uuid4()}/projection",
@@ -315,6 +347,11 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
         (
             f"{RUNS}/{here_calculated['run_id']}/maturity-ladder",
             f"{RUNS}/{uuid.uuid4()}/maturity-ladder",
+        ),
+        # BE-16.4: this tenant's seeded assumption set.
+        (
+            f"/api/v1/assumption-sets/{here_assumption_set}",
+            f"/api/v1/assumption-sets/{uuid.uuid4()}",
         ),
     ):
         mine, absent = api.get(real, headers=outsider), api.get(random_id, headers=outsider)
@@ -378,6 +415,34 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
         assert (r.status_code, r.json()["code"]) == (404, "not_found")
         [denied] = events(db, correlation)
         assert (denied["action"], denied["outcome"]) == ("calculation_run.create", "DENIED")
+    # Phase 16: re-running this tenant's run, and every rule write on this tenant's rule, are
+    # the same 404 as absent ones, audited DENIED.
+    rule_writes: tuple[tuple[str, str, dict[str, Any]], ...] = (
+        ("versions", "rule.propose", {"parameters_patch": {}, "change_summary": "x"}),
+        ("versions/1/submit", "rule.submit", {}),
+        ("versions/1/approval", "rule.approve", {"decision": "APPROVE", "comment": "x"}),
+    )
+    for target in (here_rule, str(uuid.uuid4())):
+        for path, action, payload in rule_writes:
+            correlation = cid()
+            r = api.post(
+                f"{RULES}/{target}/{path}",
+                json=payload,
+                headers={**outsider, "X-Correlation-ID": correlation},
+            )
+            assert (r.status_code, r.json()["code"]) == (404, "not_found"), path
+            [denied] = events(db, correlation)
+            assert (denied["action"], denied["outcome"]) == (action, "DENIED")
+    for run_id in (here_calculated["run_id"], str(uuid.uuid4())):
+        correlation = cid()
+        r = api.post(
+            RUNS,
+            json={"rerun_of": run_id},
+            headers={**outsider, "X-Correlation-ID": correlation, "Idempotency-Key": cid()},
+        )
+        assert (r.status_code, r.json()["code"]) == (404, "not_found")
+        [denied] = events(db, correlation)
+        assert (denied["action"], denied["outcome"]) == ("calculation_run.create", "DENIED")
     correlation = cid()
     r = upload(api, outsider, here_source, b"instrument_id\nA\n", cid=correlation)
     assert (r.status_code, r.json()["code"]) == (404, "not_found")
@@ -393,6 +458,7 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
         "dataset_snapshot",
         "calculation_run",
         "rule_set",
+        "rule_version",
     ):
         n = sql(db, f"SELECT count(*) AS n FROM {table} WHERE tenant_id = $1", other_tenant)
         assert n[0]["n"] == 0, table
@@ -443,6 +509,10 @@ AUDITED = {
     # Phase 15 (BE-15.3, BE-15.4): dataset snapshots and calculation runs.
     "POST /api/v1/dataset-snapshots": "dataset_snapshot.create",
     "POST /api/v1/calculation-runs": "calculation_run.create",
+    # Phase 16 (BE-16.2): governed rule changes.
+    "POST /api/v1/rules/{rule_id}/versions": "rule.propose",
+    "POST /api/v1/rules/{rule_id}/versions/{version}/submit": "rule.submit",
+    "POST /api/v1/rules/{rule_id}/versions/{version}/approval": "rule.approve",
 }
 
 
@@ -596,6 +666,26 @@ def test_every_mutating_route_is_listed_and_emits_an_audit_event(api: TestClient
     assert r.json()["details"]["reason"] == "planned"
     [denied] = events(db, correlation)
     assert (denied["action"], denied["outcome"]) == ("calculation_run.create", "DENIED")
+    # Phase 16: propose, submit and approve a rule version (maker-checker: two people).
+    rule = f"{RULES}/{rule_id(db, 'past_due_treatment')}"
+    proposed = call(
+        "POST /api/v1/rules/{rule_id}/versions",
+        analyst,
+        f"{rule}/versions",
+        {
+            "parameters_patch": {"value": "INCLUDE_IN_FIRST_BUCKET"},
+            "change_summary": "Audit check: count past-due flows in the first bucket.",
+        },
+    )
+    version = f"{rule}/versions/{proposed['version']}"
+    call("POST /api/v1/rules/{rule_id}/versions/{version}/submit", analyst, f"{version}/submit", {})
+    approved = call(
+        "POST /api/v1/rules/{rule_id}/versions/{version}/approval",
+        approver,
+        f"{version}/approval",
+        {"decision": "APPROVE", "comment": "Audit check."},
+    )
+    assert approved["status"] == "ACTIVE", approved
     wider = upload(
         api,
         steward,

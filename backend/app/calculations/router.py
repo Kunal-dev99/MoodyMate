@@ -52,6 +52,7 @@ from app.calculations.schemas import (
     RunModuleRef,
     RunOutcome,
     RunPage,
+    RunRerun,
     RunSummary,
     SnapshotCreate,
     SnapshotMemberOut,
@@ -63,6 +64,7 @@ from app.calculations.schemas import (
 from app.calculations.service import (
     CalculationService,
     ContributionRow,
+    RerunSpec,
     RunRow,
     RunSpec,
     SnapshotService,
@@ -263,7 +265,7 @@ def _detail(row: RunRow) -> RunDetail:
 async def create_calculation_run(
     request: Request,
     response: Response,
-    body: RunCreate,
+    body: RunCreate | RunRerun,
     principal: CalcRunner,
     session: SessionDep,
     idempotency_key: Annotated[
@@ -284,13 +286,19 @@ async def create_calculation_run(
     assumption set, the module and engine versions and the snapshot's members, writes the
     run RUNNING with its manifest, runs the module and the post-checks, and ends it
     SUCCEEDED, SUCCEEDED_WITH_WARNINGS, FAILED (a post-check failed) or BLOCKED (the input
-    contract was not met). No AI is involved. Refusals: 404 `not_found` (snapshot), 409
+    contract was not met). No AI is involved. A body of `rerun_of` alone re-runs that run on
+    its exact original pins (BE-16.3), recording `rerun_of_run_id`. Refusals: 404 `not_found`
+    (snapshot, or the run to re-run), 409 `rerun_not_reproducible`, 409
     `module_not_available` (absent, PLANNED, not implemented, or a rule without an ACTIVE
     version), 409 `calculations_disabled`, 409 `idempotency_conflict`; each audited DENIED. A
     replay whose run is still RUNNING after CALC_RUN_STALE_SECONDS ends it FAILED
     (ENGINE_ERROR) and returns it."""
     settings = request.app.state.settings
-    spec = RunSpec(body.dataset_snapshot_id, body.module_version_id, body.reporting_date)
+    spec: RunSpec | RerunSpec = (
+        RerunSpec(body.rerun_of)
+        if isinstance(body, RunRerun)
+        else RunSpec(body.dataset_snapshot_id, body.module_version_id, body.reporting_date)
+    )
     row, created = await CalculationService(session, principal).create(
         spec, idempotency_key, settings.CALCULATIONS_ENABLED, settings.CALC_RUN_STALE_SECONDS
     )

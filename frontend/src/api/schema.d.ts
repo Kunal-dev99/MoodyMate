@@ -4,6 +4,47 @@
  */
 
 export interface paths {
+    "/api/v1/assumption-sets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Assumption Sets
+         * @description Every assumption set version of the caller's tenant (read-only in Feature 03).
+         */
+        get: operations["listAssumptionSets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/assumption-sets/{assumption_set_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Assumption Set
+         * @description One assumption set version with its provenance, owner, effective dates, status and
+         *     every version of the same code. 404 alike for an absent and a foreign id (D-04).
+         */
+        get: operations["getAssumptionSet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/audit-events": {
         parameters: {
             query?: never;
@@ -80,7 +121,9 @@ export interface paths {
          *     assumption set, the module and engine versions and the snapshot's members, writes the
          *     run RUNNING with its manifest, runs the module and the post-checks, and ends it
          *     SUCCEEDED, SUCCEEDED_WITH_WARNINGS, FAILED (a post-check failed) or BLOCKED (the input
-         *     contract was not met). No AI is involved. Refusals: 404 `not_found` (snapshot), 409
+         *     contract was not met). No AI is involved. A body of `rerun_of` alone re-runs that run on
+         *     its exact original pins (BE-16.3), recording `rerun_of_run_id`. Refusals: 404 `not_found`
+         *     (snapshot, or the run to re-run), 409 `rerun_not_reproducible`, 409
          *     `module_not_available` (absent, PLANNED, not implemented, or a rule without an ACTIVE
          *     version), 409 `calculations_disabled`, 409 `idempotency_conflict`; each audited DENIED. A
          *     replay whose run is still RUNNING after CALC_RUN_STALE_SECONDS ends it FAILED
@@ -714,6 +757,120 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Rules
+         * @description The rule definitions of the caller's tenant, by code, with their ACTIVE version. Every
+         *     seeded rule is an illustrative prototype (D-35).
+         */
+        get: operations["listRules"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rules/{rule_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Rule
+         * @description One rule with every version (status, author, approver, parameters) and the runs that
+         *     pin each version. 404 alike for an absent and a foreign id (D-04).
+         */
+        get: operations["getRule"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rules/{rule_id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Rule Version
+         * @description A new DRAFT version: the ACTIVE version's parameters with `parameters_patch` applied,
+         *     checked against the rule's parameter kind (D-32 §1). Refusals, each audited DENIED
+         *     (`rule.propose`): 404 `not_found`, 409 `rule_change_disabled`, 409 `no_active_version`,
+         *     409 `invalid_parameter_schema`, 422 `invalid_parameters` (value-free problems), 422
+         *     `no_change`.
+         */
+        post: operations["createRuleVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rules/{rule_id}/versions/{version}/approval": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decide Rule Version
+         * @description Maker-checker (D-32 §3). APPROVE makes an IN_REVIEW version ACTIVE and the previous
+         *     ACTIVE version SUPERSEDED, in one transaction (one ACTIVE version per rule); REJECT ends
+         *     it REJECTED. Refusals, audited (`rule.approve` / `rule.reject`): 404 `not_found`, 409
+         *     `rule_change_disabled`, 409 `invalid_status` (e.g. a DRAFT that was never submitted), 409
+         *     `self_approval` (the author), 409 `stale_version` (another version was activated after
+         *     this one was proposed: propose again from the current ACTIVE version).
+         */
+        post: operations["decideRuleVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rules/{rule_id}/versions/{version}/submit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit Rule Version
+         * @description DRAFT -> IN_REVIEW; a DAY_BUCKETS version's bucket definitions are materialised in the
+         *     same transaction (D-32 §5). Only the version's author submits it. Refusals, audited
+         *     (`rule.submit`): 404 `not_found`, 409 `rule_change_disabled`, 409 `invalid_status`, 409
+         *     `not_author`, 422 `invalid_parameters`.
+         */
+        post: operations["submitRuleVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/schema-change-proposals": {
         parameters: {
             query?: never;
@@ -990,6 +1147,113 @@ export interface components {
             /** Size Bytes */
             size_bytes: number;
         };
+        /** AssumptionSetDetailOut */
+        AssumptionSetDetailOut: {
+            /** Approved At */
+            approved_at: string | null;
+            /** Approved By */
+            approved_by: string | null;
+            /**
+             * Assumption Keys
+             * @description Keys only, never values (empty in v1).
+             */
+            assumption_keys: string[];
+            /**
+             * Assumption Set Id
+             * Format: uuid
+             * @description The id a run manifest pins.
+             */
+            assumption_set_id: string;
+            /** Authored By */
+            authored_by: string;
+            /** Code */
+            code: string;
+            /** Content Sha256 */
+            content_sha256: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Effective From */
+            effective_from: string | null;
+            /** Effective To */
+            effective_to: string | null;
+            /** Illustrative */
+            illustrative: boolean;
+            /** Name */
+            name: string;
+            /** Owner */
+            owner: string;
+            /** Provenance */
+            provenance: string;
+            /** Provisional */
+            provisional: boolean;
+            status: components["schemas"]["RuleVersionStatus"];
+            /** Version */
+            version: number;
+            /**
+             * Versions
+             * @description Every version of the same code, by version number.
+             */
+            versions: components["schemas"]["AssumptionSetVersionSummary"][];
+        };
+        /** AssumptionSetItem */
+        AssumptionSetItem: {
+            /** Approved At */
+            approved_at: string | null;
+            /** Approved By */
+            approved_by: string | null;
+            /**
+             * Assumption Keys
+             * @description Keys only, never values (empty in v1).
+             */
+            assumption_keys: string[];
+            /**
+             * Assumption Set Id
+             * Format: uuid
+             * @description The id a run manifest pins.
+             */
+            assumption_set_id: string;
+            /** Authored By */
+            authored_by: string;
+            /** Code */
+            code: string;
+            /** Content Sha256 */
+            content_sha256: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Effective From */
+            effective_from: string | null;
+            /** Effective To */
+            effective_to: string | null;
+            /** Illustrative */
+            illustrative: boolean;
+            /** Name */
+            name: string;
+            /** Owner */
+            owner: string;
+            /** Provenance */
+            provenance: string;
+            /** Provisional */
+            provisional: boolean;
+            status: components["schemas"]["RuleVersionStatus"];
+            /** Version */
+            version: number;
+        };
+        /** AssumptionSetList */
+        AssumptionSetList: {
+            /**
+             * Items
+             * @description By code, then version.
+             */
+            items: components["schemas"]["AssumptionSetItem"][];
+            /** Total */
+            total: number;
+        };
         /**
          * AssumptionSetPin
          * @description The ACTIVE version of the baseline assumption set (D-32 §6): every run pins one.
@@ -1025,6 +1289,23 @@ export interface components {
             provenance: string;
             /** Provisional */
             provisional: boolean;
+            status: components["schemas"]["RuleVersionStatus"];
+            /** Version */
+            version: number;
+        };
+        /** AssumptionSetVersionSummary */
+        AssumptionSetVersionSummary: {
+            /** Approved At */
+            approved_at: string | null;
+            /**
+             * Assumption Set Id
+             * Format: uuid
+             */
+            assumption_set_id: string;
+            /** Effective From */
+            effective_from: string | null;
+            /** Effective To */
+            effective_to: string | null;
             status: components["schemas"]["RuleVersionStatus"];
             /** Version */
             version: number;
@@ -2489,7 +2770,7 @@ export interface components {
             contribution_count: number;
             /**
              * Cumulative Gap
-             * @description Running sum of net_gap over the buckets so far.
+             * @description Running sum of net_gap over the buckets so far. Once a net gap of the currency is masked, every later cumulative gap is masked, even when it is exactly zero (D-33: masked wins over 'zeros stay clear').
              */
             cumulative_gap: string | components["schemas"]["MaskedValue"];
             /** Inflows */
@@ -3301,11 +3582,35 @@ export interface components {
          */
         Permission: "schema:read" | "schema:propose" | "schema:approve" | "audit:read" | "admin:read" | "source:read" | "source:manage" | "import:read" | "import:write" | "mapping:read" | "mapping:propose" | "mapping:approve" | "quarantine:read" | "quality:review" | "domain:read" | "domain:project" | "rule:read" | "rule:propose" | "rule:approve" | "calc:read" | "calc:run";
         /**
+         * PinningRun
+         * @description A calculation run that pins a rule version (through its rule set).
+         */
+        PinningRun: {
+            /**
+             * Reporting Date
+             * Format: date
+             */
+            reporting_date: string;
+            /** Rerun Of Run Id */
+            rerun_of_run_id: string | null;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            status: components["schemas"]["CalculationRunStatus"];
+        };
+        /**
          * PostCheck
          * @description The engine's post-run checks (D-31 §3, Arch §6.2 step 5).
          * @enum {string}
          */
-        PostCheck: "COVERAGE" | "BUCKET_DEFINED" | "BUCKET_TOTALS" | "CUMULATIVE_GAP";
+        PostCheck: "COVERAGE" | "BUCKET_DEFINED" | "BUCKET_TOTALS" | "CUMULATIVE_GAP" | "RERUN_REPRODUCED";
         /** PostCheckOut */
         PostCheckOut: {
             check: components["schemas"]["PostCheck"];
@@ -3927,6 +4232,61 @@ export interface components {
          * @enum {string}
          */
         RuleCategory: "BUCKETING" | "CLASSIFICATION" | "TREATMENT" | "FACTOR";
+        /** RuleDetail */
+        RuleDetail: {
+            /** Active Rule Version Id */
+            active_rule_version_id: string | null;
+            /** Active Version */
+            active_version: number | null;
+            category: components["schemas"]["RuleCategory"];
+            /**
+             * Change Enabled
+             * @description RULE_CHANGE_ENABLED: false means 409 on writes.
+             */
+            change_enabled: boolean;
+            /** Code */
+            code: string;
+            /** Description */
+            description: string | null;
+            /** Illustrative */
+            illustrative: boolean;
+            /** Name */
+            name: string;
+            /** Owner */
+            owner: string;
+            /**
+             * Parameter Schema
+             * @description One closed parameter kind (D-32 §1): `kind` is DECIMAL (min, max, scale), INTEGER (min, max), ENUM (values), DAY_BUCKETS, ENUM_MAP (key_vocabulary, values) or DECIMAL_MAP (key_vocabulary, min, max, scale); an optional `unit`.
+             */
+            parameter_schema: {
+                [key: string]: unknown;
+            };
+            /** Provisional */
+            provisional: boolean;
+            /**
+             * Rule Id
+             * Format: uuid
+             */
+            rule_id: string;
+            /**
+             * Statement
+             * @description The D-35 label: not regulatory, no vendor parity.
+             */
+            statement: string;
+            target_module: components["schemas"]["RuleModuleRef"];
+            /** Version Count */
+            version_count: number;
+            /**
+             * Versions
+             * @description Every version, by version number.
+             */
+            versions: components["schemas"]["RuleVersionOut"][];
+            /**
+             * Vocabulary
+             * @description The codes of the parameter schema's key vocabulary (map kinds), else [].
+             */
+            vocabulary: string[];
+        };
         /**
          * RuleIn
          * @description One rule. MAP: `source_column` (none for CONSTANT) → `target_field` through
@@ -3955,6 +4315,18 @@ export interface components {
             /** Transform */
             transform?: components["schemas"]["CopyTransform"] | components["schemas"]["TrimTransform"] | components["schemas"]["UpperTransform"] | components["schemas"]["LowerTransform"] | components["schemas"]["ParseDecimalTransform"] | components["schemas"]["ScaleTransform"] | components["schemas"]["ParseDateTransform"] | components["schemas"]["ParseBooleanTransform"] | components["schemas"]["MapValuesTransform"] | components["schemas"]["DefaultTransform"] | components["schemas"]["ConstantTransform"];
         };
+        /** RuleModuleRef */
+        RuleModuleRef: {
+            /** Code */
+            code: string;
+            /**
+             * Module Id
+             * Format: uuid
+             */
+            module_id: string;
+            /** Name */
+            name: string;
+        };
         /** RuleOut */
         RuleOut: {
             column_policy: components["schemas"]["ColumnPolicy"];
@@ -3968,6 +4340,16 @@ export interface components {
             /** Target Field */
             target_field: string | null;
             transform: components["schemas"]["TransformOut"];
+        };
+        /** RulePage */
+        RulePage: {
+            /**
+             * Items
+             * @description By rule code.
+             */
+            items: components["schemas"]["RuleSummary"][];
+            /** Total */
+            total: number;
         };
         /**
          * RuleResult
@@ -4004,6 +4386,148 @@ export interface components {
             target_field: string | null;
             target_type: components["schemas"]["FieldType"] | null;
             transform: components["schemas"]["TransformCode"];
+        };
+        /** RuleSummary */
+        RuleSummary: {
+            /** Active Rule Version Id */
+            active_rule_version_id: string | null;
+            /** Active Version */
+            active_version: number | null;
+            category: components["schemas"]["RuleCategory"];
+            /** Code */
+            code: string;
+            /** Description */
+            description: string | null;
+            /** Illustrative */
+            illustrative: boolean;
+            /** Name */
+            name: string;
+            /** Owner */
+            owner: string;
+            /**
+             * Parameter Schema
+             * @description One closed parameter kind (D-32 §1): `kind` is DECIMAL (min, max, scale), INTEGER (min, max), ENUM (values), DAY_BUCKETS, ENUM_MAP (key_vocabulary, values) or DECIMAL_MAP (key_vocabulary, min, max, scale); an optional `unit`.
+             */
+            parameter_schema: {
+                [key: string]: unknown;
+            };
+            /** Provisional */
+            provisional: boolean;
+            /**
+             * Rule Id
+             * Format: uuid
+             */
+            rule_id: string;
+            target_module: components["schemas"]["RuleModuleRef"];
+            /** Version Count */
+            version_count: number;
+        };
+        /**
+         * RuleVersionCreate
+         * @description A new DRAFT: a copy of the rule's ACTIVE version's parameters with this patch applied.
+         */
+        RuleVersionCreate: {
+            /** Change Summary */
+            change_summary: string;
+            /**
+             * Parameters Patch
+             * @description A JSON merge patch (RFC 7386) over the ACTIVE version's parameters: an object merges key by key, `null` removes a key (e.g. a map entry), anything else replaces (e.g. the whole `buckets` list). The result must fit the rule's parameter kind (D-32 §1): DECIMAL values are strings of decimal text, never JSON numbers. Otherwise 422 invalid_parameters (value-free details); an unchanged result is 422 no_change.
+             */
+            parameters_patch: {
+                [key: string]: unknown;
+            };
+        };
+        /** RuleVersionDecision */
+        RuleVersionDecision: {
+            /** Comment */
+            comment: string;
+            /** @description APPROVE activates the version and supersedes the previous ACTIVE one, in one transaction; REJECT ends it. */
+            decision: components["schemas"]["ProposalDecision"];
+        };
+        /** RuleVersionOut */
+        RuleVersionOut: {
+            /** Approved At */
+            approved_at: string | null;
+            /**
+             * Approved By
+             * @description Who activated it (set once it was ACTIVE).
+             */
+            approved_by: string | null;
+            /**
+             * Author User Id
+             * @description The author's user id (None for a seeded version): an author never decides on their own version (409 self_approval).
+             */
+            author_user_id: string | null;
+            /**
+             * Authored By
+             * @description The author's actor id, or the seed tag (D-32 §7).
+             */
+            authored_by: string;
+            /** Change Summary */
+            change_summary: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Decided At */
+            decided_at: string | null;
+            /**
+             * Decided By
+             * @description Who approved or rejected it.
+             */
+            decided_by: string | null;
+            /** Decision Comment */
+            decision_comment: string | null;
+            /** Effective From */
+            effective_from: string | null;
+            /** Effective To */
+            effective_to: string | null;
+            /** Illustrative */
+            illustrative: boolean;
+            /**
+             * Parameters
+             * @description Typed by the rule's parameter schema (D-32 §1). Decimals are exact decimal text at the declared scale, never JSON numbers.
+             */
+            parameters: {
+                [key: string]: unknown;
+            };
+            /**
+             * Parameters Sha256
+             * @description SHA-256 of the canonical JSON of `parameters`.
+             */
+            parameters_sha256: string;
+            /** Provisional */
+            provisional: boolean;
+            /** Rule Code */
+            rule_code: string;
+            /**
+             * Rule Id
+             * Format: uuid
+             */
+            rule_id: string;
+            /**
+             * Rule Version Id
+             * Format: uuid
+             */
+            rule_version_id: string;
+            /**
+             * Run Count
+             * @description Runs that pin this version.
+             */
+            run_count: number;
+            /**
+             * Runs
+             * @description The newest pinning runs, at most 20.
+             */
+            runs: components["schemas"]["PinningRun"][];
+            /** Seeded */
+            seeded: boolean;
+            status: components["schemas"]["RuleVersionStatus"];
+            /** Superseded At */
+            superseded_at: string | null;
+            /** Version */
+            version: number;
         };
         /**
          * RuleVersionPin
@@ -4050,6 +4574,11 @@ export interface components {
          * @enum {string}
          */
         RuleVersionStatus: "DRAFT" | "IN_REVIEW" | "APPROVED" | "ACTIVE" | "SUPERSEDED" | "RETIRED" | "REJECTED";
+        /** RuleVersionSubmit */
+        RuleVersionSubmit: {
+            /** Comment */
+            comment?: string | null;
+        };
         /** RunCreate */
         RunCreate: {
             /**
@@ -4116,7 +4645,7 @@ export interface components {
             reporting_date: string;
             /**
              * Rerun Of Run Id
-             * @description Reserved for re-runs (BE-16.3).
+             * @description Set on a re-run (BE-16.3): the run whose pins it repeats.
              */
             rerun_of_run_id: string | null;
             /**
@@ -4234,6 +4763,21 @@ export interface components {
             /** Total */
             total: number;
         };
+        /**
+         * RunRerun
+         * @description A re-run (D-31 §5, BE-16.3): a new run on exactly the original run's pins (snapshot,
+         *     reporting date, module and engine versions, rule set and assumption set), even when those
+         *     rule versions are SUPERSEDED. It reproduces the original's manifest_sha256 and
+         *     result_sha256.
+         */
+        RunRerun: {
+            /**
+             * Rerun Of
+             * Format: uuid
+             * @description The run to re-run (404 alike for an absent and a foreign id). 409 rerun_not_reproducible when the engine or manifest version changed since.
+             */
+            rerun_of: string;
+        };
         /** RunSummary */
         RunSummary: {
             /**
@@ -4270,7 +4814,7 @@ export interface components {
             reporting_date: string;
             /**
              * Rerun Of Run Id
-             * @description Reserved for re-runs (BE-16.3).
+             * @description Set on a re-run (BE-16.3): the run whose pins it repeats.
              */
             rerun_of_run_id: string | null;
             /**
@@ -4954,6 +5498,84 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    listAssumptionSets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssumptionSetList"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    getAssumptionSet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assumption_set_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssumptionSetDetailOut"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     listAuditEvents: {
         parameters: {
             query?: {
@@ -5136,7 +5758,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["RunCreate"];
+                "application/json": components["schemas"]["RunCreate"] | components["schemas"]["RunRerun"];
             };
         };
         responses: {
@@ -6589,6 +7211,218 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QuarantineItemOut"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    listRules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RulePage"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    getRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuleDetail"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    createRuleVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RuleVersionCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuleVersionOut"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    decideRuleVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rule_id: string;
+                version: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RuleVersionDecision"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuleVersionOut"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    submitRuleVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rule_id: string;
+                version: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RuleVersionSubmit"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuleVersionOut"];
                 };
             };
             /** @description Client error (standard envelope) */

@@ -2,15 +2,16 @@
 
 The only code that touches the DB session for the registry. Every query filters on the
 caller's tenant (D-04): every registry table carries `tenant_id`. Nothing here updates or
-deletes (definitions, module versions, rule sets and bucket definitions are append-only;
-rule version moves arrive with Phase 16).
+deletes (definitions, module versions, rule sets and bucket definitions are append-only).
+The only update is a rule version's status move along the D-06 table (`move`, Phase 16),
+which the DB lifecycle trigger also enforces.
 """
 
 import uuid
 from collections.abc import Sequence
 from typing import Any
 
-from sqlalchemy import insert, select, text
+from sqlalchemy import func, insert, select, text, update
 
 from app.db.base import Base
 from app.db.repository import ScopedRepository
@@ -22,6 +23,7 @@ from app.rules.models import (
     ModuleVersion,
     RuleDefinition,
     RuleSet,
+    RuleSetMember,
     RuleVersion,
 )
 
@@ -116,4 +118,95 @@ class RulesRepository(ScopedRepository[RuleDefinition]):
             await self.session.execute(insert(model), rows)
 
     async def flush(self) -> None:
+        await self.session.flush()
+
+    # --- Phase 16 (BE-16.2, BE-16.3) ------------------------------------------------------
+
+    async def all_definitions(self) -> list[RuleDefinition]:
+        result = await self.session.execute(self.scoped().order_by(RuleDefinition.code))
+        return list(result.scalars())
+
+    async def versions(
+        self, definition_ids: Sequence[uuid.UUID], fresh: bool = False
+    ) -> list[RuleVersion]:
+        """Every version of these definitions, by definition then version number."""
+        if not definition_ids:
+            return []
+        query = (
+            select(RuleVersion)
+            .where(
+                RuleVersion.tenant_id == self.scope.tenant_id,
+                RuleVersion.rule_definition_id.in_(definition_ids),
+            )
+            .order_by(RuleVersion.rule_definition_id, RuleVersion.version)
+        )
+        if fresh:
+            query = query.execution_options(populate_existing=True)
+        result = await self.session.execute(query)
+        return list(result.scalars())
+
+    async def rule_set_ids(
+        self, version_ids: Sequence[uuid.UUID]
+    ) -> list[tuple[uuid.UUID, uuid.UUID]]:
+        """(rule version id, rule set id) for every rule set holding one of these versions."""
+        if not version_ids:
+            return []
+        result = await self.session.execute(
+            select(RuleSetMember.rule_version_id, RuleSetMember.rule_set_id).where(
+                RuleSetMember.tenant_id == self.scope.tenant_id,
+                RuleSetMember.rule_version_id.in_(version_ids),
+            )
+        )
+        return [(r[0], r[1]) for r in result]
+
+    async def rule_set_versions(
+        self, rule_set_id: uuid.UUID
+    ) -> list[tuple[RuleDefinition, RuleVersion]]:
+        result = await self.session.execute(
+            select(RuleDefinition, RuleVersion)
+            .join(RuleSetMember, RuleSetMember.rule_version_id == RuleVersion.id)
+            .join(RuleDefinition, RuleDefinition.id == RuleVersion.rule_definition_id)
+            .where(
+                RuleSetMember.tenant_id == self.scope.tenant_id,
+                RuleSetMember.rule_set_id == rule_set_id,
+                RuleVersion.tenant_id == self.scope.tenant_id,
+                RuleDefinition.tenant_id == self.scope.tenant_id,
+            )
+            .order_by(RuleDefinition.code)
+        )
+        return [(r[0], r[1]) for r in result]
+
+    async def assumption_set(self, assumption_set_id: uuid.UUID) -> AssumptionSet | None:
+        result = await self.session.execute(
+            select(AssumptionSet).where(
+                AssumptionSet.tenant_id == self.scope.tenant_id,
+                AssumptionSet.id == assumption_set_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def move(
+        self,
+        version_id: uuid.UUID,
+        status: RuleVersionStatus,
+        decided_by: str | None = None,
+        comment: str | None = None,
+    ) -> None:
+        """A rule version's one status move; a decision records who, when (database clock)
+        and why. The lifecycle trigger refuses any other change."""
+        values: dict[str, object] = {"status": status.value, "updated_at": func.now()}
+        if decided_by is not None:
+            values |= {
+                "approved_by": decided_by,
+                "approved_at": func.clock_timestamp(),
+                "decision_comment": comment,
+            }
+        result = await self.session.execute(
+            update(RuleVersion)
+            .where(RuleVersion.id == version_id, RuleVersion.tenant_id == self.scope.tenant_id)
+            .values(**values)
+            .execution_options(synchronize_session=False)
+        )
+        if getattr(result, "rowcount", 1) != 1:
+            raise RuntimeError("rule version not found in scope")
         await self.session.flush()

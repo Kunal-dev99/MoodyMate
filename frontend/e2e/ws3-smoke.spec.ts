@@ -14,16 +14,16 @@ import { API, SAMPLES, bearer, ensureActiveMapping, signIn, uploadSample } from 
  *      selected, and a direct POST of one is refused (409 module_not_available) (FE-18.1);
  *   4. the analyst runs the maturity ladder, and (Phase 17) LCR with its liquidity view;
  *   5. the ladder, and a drill-down from a bucket to a contribution's source row;
- *   6. (Phase 16) the analyst proposes a bucket change and the approver approves it;
+ *   6. (Phase 16, FE-16.2) the analyst proposes a bucket change and the approver approves it;
  *   7. (Phase 16) a new run differs, and the old run is unchanged;
- *   8. (Phase 16) the module registry lists the PLANNED modules as planned, never as ready.
+ *   8. (Phase 16 FE-16.1, FE-18.1) the module registry lists the PLANNED modules with the
+ *      PlannedModuleBadge and their contracts, never as ready.
  *
- * Steps 4b, 6, 7 and 8 need the Phase 16 registry and rule-change UI or the Phase 17 liquidity
- * view. Until those are merged into this branch they skip themselves on a feature check (the
- * page or module is absent), each with a TODO naming its phase: they are never silently green.
+ * Step 4b needs the Phase 17 liquidity view. Until that is merged into this branch it skips
+ * itself on a feature check (no AVAILABLE lcr_hqla module), with a TODO naming its phase: it is
+ * never silently green.
  *
- * Every payload type is the generated one (src/api/schema.d.ts); none is written here. The
- * Phase 16 rule payloads are read as untyped JSON until their generated types exist here.
+ * Every payload type is the generated one (src/api/schema.d.ts); none is written here.
  *
  * Ordering: this file sorts after smoke.spec, whose applied proposal moves the `instrument`
  * schema past v1, which projector v1 refuses (`projection_unsupported`). The position and
@@ -50,12 +50,6 @@ const POSITION_COLUMNS = ['position_id', 'instrument_id', 'account_id', 'legal_e
 
 const isPost = (page: Page, url: string) => page.waitForResponse((r) => r.request().method() === 'POST' && r.url() === url)
 const isGet = (page: Page, url: string) => page.waitForResponse((r) => r.request().method() === 'GET' && r.url() === url)
-
-/** Feature check for a guarded step: does this branch serve the page? (Next answers 404 for an unknown route.) */
-async function routeExists(page: Page, path: string): Promise<boolean> {
-  const response = await page.goto(path)
-  return response !== null && response.status() !== 404
-}
 
 // --- setup through the API (not under test) ----------------------------------------------------
 
@@ -433,59 +427,81 @@ test('FE-18.2: WS3 smoke: project → catalogue → snapshot (PLANNED not select
     if (process.env.WS3_SMOKE_SCREENSHOT) await approver.screenshot({ path: `${process.env.WS3_SMOKE_SCREENSHOT}/source-import.png`, fullPage: true })
   })
 
-  // Phase 16: the rule registry and its maker-checker flow. Feature check: the page is served.
-  const rulesLive = await routeExists(analyst, '/domain/rules')
+  // Phase 16: the rule registry and its maker-checker flow (FE-16.2).
   const bucketsRule = ladder!.rules.find((r) => r.code === 'maturity_buckets')
   const oldBuckets = run!.manifest.rule_set.members.find((r) => r.rule_code === 'maturity_buckets')
   let newBucketsVersionId = ''
 
-  await test.step('6. the analyst proposes a bucket change and the approver approves it (Phase 16)', async (step) => {
-    // TODO(Phase 16, FE-16.2): enable after the merge; confirm the selectors against the merged
-    // propose page and RuleVersionActions, and type the rule payloads with the generated schema.
-    step.skip(!rulesLive, 'Phase 16 is not on this branch: /domain/rules is not served')
+  await test.step('6. the analyst proposes a bucket change and the approver approves it (Phase 16, FE-16.2)', async () => {
     expect(bucketsRule && oldBuckets).toBeTruthy()
     const ruleId = bucketsRule!.rule_id
     const versionsUrl = `${API}/api/v1/rules/${ruleId}/versions`
+    // The run of step 4 pinned the ACTIVE version: the proposal starts from it.
+    const before: Schemas['RuleDetail'] = await (await request.get(`${API}/api/v1/rules/${ruleId}`, { headers: analystApi })).json()
+    expect(before.change_enabled, 'RULE_CHANGE_ENABLED is on').toBe(true)
+    expect(before.active_rule_version_id).toBe(oldBuckets!.rule_version_id)
 
-    // The analyst narrows bucket 3: a new boundary between its lower and upper bounds.
+    // The analyst narrows the third bucket: a new upper bound strictly inside it.
     await analyst.goto(`/domain/rules/${ruleId}/propose`)
+    const editor = analyst.getByTestId('parameter-editor')
+    await expect(editor).toHaveAttribute('data-kind', 'DAY_BUCKETS')
     await expect(analyst.getByTestId('rule-propose')).toHaveAttribute('data-base-version', String(oldBuckets!.version))
-    const lower = Number(await analyst.getByLabel('Bucket 2 upper bound').inputValue())
-    const upperInput = analyst.getByLabel('Bucket 3 upper bound')
+    await expect(analyst.getByTestId('propose-submit')).toBeDisabled()
+    const third = editor.locator('[data-testid="bucket-row"][data-index="2"]')
+    const fourth = editor.locator('[data-testid="bucket-row"][data-index="3"]')
+    const upperInput = third.getByTestId('bucket-upper')
+    const lower = Number(await third.getByTestId('bucket-lower').innerText())
     const upper = Number(await upperInput.inputValue())
     const boundary = Math.floor((lower + upper) / 2)
     expect(boundary).toBeGreaterThan(lower)
+    expect(boundary).toBeLessThan(upper)
     await upperInput.fill(String(boundary))
+    // Contiguous by construction: the fourth bucket now starts where the third ends.
+    await expect(fourth.getByTestId('bucket-lower')).toHaveText(String(boundary))
+    await expect(third.getByTestId('bucket-label')).toHaveText(`(${lower},${boundary}]`)
+    await analyst.getByTestId('change-summary').fill(`WS3 smoke: the third bucket ends at day ${boundary} (${stamp})`)
     await expect(analyst.getByTestId('parameter-problem')).toHaveCount(0)
     const proposedResponse = isPost(analyst, versionsUrl)
     await analyst.getByTestId('propose-submit').click()
     const proposedAnswer = await proposedResponse
     expect(proposedAnswer.status(), await proposedAnswer.text()).toBe(201)
-    const proposed: Record<string, unknown> = await proposedAnswer.json()
-    const version = Number(proposed.version)
-    newBucketsVersionId = String(proposed.rule_version_id)
-    await expect(analyst.getByTestId('propose-result')).toHaveAttribute('data-version', String(version))
+    const proposed: Schemas['RuleVersionOut'] = await proposedAnswer.json()
+    expect(proposed.status).toBe('DRAFT')
+    expect(proposed.version).toBeGreaterThan(oldBuckets!.version)
+    newBucketsVersionId = proposed.rule_version_id
+    await expect(analyst.getByTestId('propose-result')).toHaveAttribute('data-version', String(proposed.version))
 
-    const submitted = isPost(analyst, `${versionsUrl}/${version}/submit`)
-    await analyst.getByTestId('version-submit').click()
-    expect((await submitted).status()).toBe(200)
-    // Maker-checker: the author has no Approve button.
-    await expect(analyst.getByTestId('version-approve')).toHaveCount(0)
+    // Submit the DRAFT from the open versions.
+    const mine = analyst.locator(`[data-testid="open-version"][data-version="${proposed.version}"]`)
+    await expect(mine).toHaveAttribute('data-status', 'DRAFT')
+    const submitted = isPost(analyst, `${versionsUrl}/${proposed.version}/submit`)
+    await mine.getByTestId('version-submit').click()
+    const submittedAnswer = await submitted
+    expect(submittedAnswer.status(), await submittedAnswer.text()).toBe(200)
+    await expect(mine).toHaveAttribute('data-status', 'IN_REVIEW')
+    // Maker-checker: the author has no Approve button, and is told why.
+    await expect(mine.getByTestId('version-approve')).toHaveCount(0)
+    await expect(mine.getByTestId('self-approval-blocked')).toBeVisible()
 
     await approver.goto(`/domain/rules/${ruleId}`)
-    await approver.getByTestId('version-approve').click()
+    const review = approver.locator(`[data-testid="open-version"][data-version="${proposed.version}"]`)
+    await expect(review).toHaveAttribute('data-status', 'IN_REVIEW')
+    await expect(review).toHaveAttribute('data-mine', 'false')
+    await review.getByTestId('version-approve').click()
     const dialog = approver.getByTestId('decision-dialog')
-    await dialog.getByTestId('decision-comment').fill(`WS3 smoke: bucket 3 ends at ${boundary} days (${stamp}).`)
-    const decided = isPost(approver, `${versionsUrl}/${version}/approval`)
+    await expect(dialog).toHaveAttribute('data-decision', 'APPROVE')
+    await dialog.getByTestId('decision-comment').fill(`WS3 smoke: the third bucket ends at day ${boundary} (${stamp}).`)
+    const decided = isPost(approver, `${versionsUrl}/${proposed.version}/approval`)
     await dialog.getByTestId('decision-confirm').click()
     const decision = await decided
     expect(decision.status(), await decision.text()).toBe(200)
-    expect((await decision.json()).status).toBe('ACTIVE')
+    const approved: Schemas['RuleVersionOut'] = await decision.json()
+    expect(approved.status).toBe('ACTIVE')
+    expect(approved.rule_version_id).toBe(newBucketsVersionId)
+    await expect(approver.getByTestId('rule-step-result')).toHaveAttribute('data-status', 'ACTIVE')
   })
 
-  await test.step('7. a new run differs, and the old run is unchanged (Phase 16)', async (step) => {
-    // TODO(Phase 16, FE-16.2): enable with step 6.
-    step.skip(!rulesLive, 'Phase 16 is not on this branch: no rule change to run against')
+  await test.step('7. a new run differs, and the old run is unchanged (Phase 16)', async () => {
     expect(newBucketsVersionId).not.toBe('')
     const old = run!
     await analyst.goto('/calculations/new')
@@ -511,16 +527,22 @@ test('FE-18.2: WS3 smoke: project → catalogue → snapshot (PLANNED not select
     await expect(analyst.locator('[data-testid="manifest-rule"][data-rule="maturity_buckets"]')).toHaveAttribute('data-rule-version-id', oldBuckets!.rule_version_id)
   })
 
-  await test.step('8. the module registry lists the PLANNED modules as planned, never as ready (Phase 16, FE-18.1)', async (step) => {
-    // TODO(Phase 16, FE-16.1): enable after the merge; the registry should render PLANNED rows
-    // with PlannedModuleBadge (src/components/calculations/PlannedModuleBadge.tsx) and carry
-    // data-module-version-id on each row.
-    const live = await routeExists(analyst, '/domain/modules')
-    step.skip(!live, 'Phase 16 is not on this branch: /domain/modules is not served')
-    for (const m of modules.items.filter((x) => x.implementation_status === 'PLANNED')) {
-      const entry = analyst.locator(`[data-module-version-id="${m.module_version_id}"]`)
+  await test.step('8. the module registry lists the PLANNED modules as planned, never as ready (Phase 16, FE-18.1)', async () => {
+    const planned = modules.items.filter((x) => x.implementation_status === 'PLANNED')
+    await analyst.goto('/domain/modules')
+    await expect(analyst.getByTestId('modules-PLANNED').getByTestId('registry-module')).toHaveCount(planned.length)
+    for (const m of planned) {
+      const entry = analyst.locator(`[data-testid="registry-module"][data-module-version-id="${m.module_version_id}"]`)
+      await expect(entry).toHaveAttribute('data-status', 'PLANNED')
       await expect(entry.getByTestId('planned-module-badge')).toHaveText('Planned — extension point')
-      await expect(entry.getByText(/Available|ready/)).toHaveCount(0)
+      await expect(entry.getByTestId('module-implementation')).toHaveCount(0)
+      await expect(entry.getByTestId('module-runnable')).toHaveCount(0)
+      await expect(entry.getByTestId('module-planned-note')).toContainText('not production-ready')
+      // Its declared contracts, as the server sent them.
+      await expect(entry.getByTestId('contract-rules')).toHaveText(m.input_contract.rules.length ? m.input_contract.rules.join(', ') : '—')
+      await expect(entry.getByTestId('contract-results')).toHaveText(m.output_contract.results.length ? m.output_contract.results.join(', ') : '—')
+      await expect(entry.getByText(/Available|Runnable now/)).toHaveCount(0)
     }
+    if (process.env.WS3_SMOKE_SCREENSHOT) await analyst.screenshot({ path: `${process.env.WS3_SMOKE_SCREENSHOT}/registry-planned.png`, fullPage: true })
   })
 })

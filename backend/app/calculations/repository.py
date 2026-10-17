@@ -217,3 +217,17 @@ class CalculationRepository(_Writes[CalculationRun]):
             query.order_by(IntermediateValue.sequence).limit(limit).offset(offset)
         )
         return list(result.scalars()), int(total or 0)
+
+    # --- Phase 16: runs pinning a rule set ----------------------------
+
+    async def in_rule_sets(
+        self, rule_set_ids: Sequence[uuid.UUID], limit: int
+    ) -> tuple[int, list[CalculationRun]]:
+        if not rule_set_ids:
+            return 0, []
+        query = self.scoped().where(CalculationRun.rule_set_id.in_(rule_set_ids))
+        total = await self.session.scalar(select(func.count()).select_from(query.subquery()))
+        result = await self.session.execute(
+            query.order_by(CalculationRun.started_at.desc(), CalculationRun.id).limit(limit)
+        )
+        return int(total or 0), list(result.scalars())
