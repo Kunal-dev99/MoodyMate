@@ -16,7 +16,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
-import { ImplementationPill, RunStatusPill } from './RunStatusPill'
+import { ModuleOption } from './ModuleOption'
+import { RunStatusPill } from './RunStatusPill'
 import { SnapshotMembers } from './SnapshotMembers'
 import {
   CANDIDATES_PER_SCHEMA,
@@ -194,7 +195,7 @@ function SnapshotResult({ snapshot, origin }: { snapshot: Snapshot; origin: 'cre
   )
 }
 
-/** Step 2: an AVAILABLE module. PLANNED modules are listed as planned and cannot be picked. */
+/** Step 2: an AVAILABLE module. PLANNED modules are disabled "Planned — extension point" entries (FE-18.1). */
 function ModuleStep({
   state,
   loaded,
@@ -219,57 +220,16 @@ function ModuleStep({
     const snapshot = state.snapshot.kind === 'built' ? state.snapshot.snapshot : null
     body = (
       <ul className="space-y-2" data-testid="module-list" role="radiogroup" aria-label="Module">
-        {loaded.value.items.map((m) => {
-          const selectable = isSelectable(m)
-          const checked = state.moduleVersionId === m.module_version_id
-          const missing = snapshot ? missingSchemas(m, snapshot) : []
-          return (
-            <li
-              key={m.module_version_id}
-              className={cn('rounded-md border border-border px-3 py-2', checked && 'border-primary', !selectable && 'opacity-70')}
-              data-testid="module-option"
-              data-code={m.code}
-              data-module-version-id={m.module_version_id}
-              data-status={m.implementation_status}
-            >
-              <label className={cn('flex items-start gap-3', selectable ? 'cursor-pointer' : 'cursor-not-allowed')}>
-                <input
-                  type="radio"
-                  name="module"
-                  className="mt-1"
-                  value={m.module_version_id}
-                  checked={checked}
-                  disabled={!selectable || state.submit.kind === 'submitting'}
-                  onChange={() => dispatch({ type: 'module', moduleVersionId: m.module_version_id })}
-                  data-testid="module-radio"
-                />
-                <span className="min-w-0 flex-1 space-y-1">
-                  <span className="flex flex-wrap items-center gap-2">
-                    <span className="font-medium">{m.name}</span>
-                    <span className="font-mono text-xs text-muted-foreground">
-                      {m.code} v{m.version} · engine {m.engine_version}
-                    </span>
-                    <ImplementationPill status={m.implementation_status} />
-                    {selectable && !m.runnable && (
-                      <span className="text-xs text-destructive" data-testid="module-not-runnable">
-                        Not runnable now: a rule has no ACTIVE version or no baseline assumption set is ACTIVE (the server answers 409 module_not_available).
-                      </span>
-                    )}
-                  </span>
-                  {m.description && <span className="block text-xs text-muted-foreground">{m.description}</span>}
-                  <span className="block text-xs text-[hsl(var(--warning))]" data-testid="module-statement">
-                    {m.statement}
-                  </span>
-                  {checked && missing.length > 0 && (
-                    <span className="block text-xs text-destructive" data-testid="module-missing-schemas">
-                      The snapshot lacks {missing.join(', ')}, which this module requires: the server will end the run BLOCKED.
-                    </span>
-                  )}
-                </span>
-              </label>
-            </li>
-          )
-        })}
+        {loaded.value.items.map((m) => (
+          <ModuleOption
+            key={m.module_version_id}
+            module={m}
+            checked={state.moduleVersionId === m.module_version_id}
+            busy={state.submit.kind === 'submitting'}
+            missing={snapshot ? missingSchemas(m, snapshot) : []}
+            onPick={(moduleVersionId) => dispatch({ type: 'module', moduleVersionId })}
+          />
+        ))}
       </ul>
     )
   }

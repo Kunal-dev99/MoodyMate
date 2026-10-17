@@ -214,6 +214,7 @@ def other_schema_import(api: TestClient, db: str, steward: dict[str, str]) -> st
     return str(r.json()["id"])
 
 
+@pytest.mark.ws3
 def test_domain_projection_catalogue_and_guards(
     api: TestClient, db: str, artifact_dir: Path
 ) -> None:

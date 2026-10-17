@@ -36,6 +36,17 @@ def _db_reachable(url: str) -> bool:
 WS1_MATRIX: list[dict[str, Any]] = []
 WS2_MATRIX: list[dict[str, Any]] = []
 
+# BE-18.3: the WS3 matrix is the WS1 matrix's rows for WS3 routes, picked by path, so WS3
+# routes added later join it with no list to keep in step.
+WS3_PREFIXES = ("/instruments", "/dataset-snapshots", "/calculation-", "/rules", "/assumption-sets")
+
+
+def is_ws3_route(route: str) -> bool:
+    """A "METHOD /api/v1/..." matrix route that belongs to WS3."""
+    path = route.split(" ", 1)[1].removeprefix("/api/v1")
+    projection = path.startswith("/imports/") and path.endswith("/projection")
+    return path.startswith(WS3_PREFIXES) or projection
+
 
 def _print_matrix(tr: Any, title: str, matrix: list[dict[str, Any]]) -> None:
     roles = [k for k in matrix[0] if k not in ("route", "permission")]
@@ -54,6 +65,10 @@ def pytest_terminal_summary(terminalreporter: Any) -> None:
     if WS2_MATRIX:
         title = "WS2 authorization matrix (route x role, HTTP status; 403 = denied)"
         _print_matrix(terminalreporter, title, WS2_MATRIX)
+    ws3 = [row for row in WS1_MATRIX if is_ws3_route(row["route"])]
+    if ws3:
+        title = "WS3 authorization matrix (route x role, HTTP status; 403 = denied)"
+        _print_matrix(terminalreporter, title, ws3)
 
 
 @pytest.fixture(scope="session")

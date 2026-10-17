@@ -84,8 +84,15 @@ export const hasResults = (status: RunStatus): boolean => RESULT_STATUSES.includ
 /** `module_version.implementation_status`: PLANNED is an extension point, never shown as ready. */
 export const IMPLEMENTATION_STYLE: Record<ImplementationStatus, { label: string; className: string }> = {
   AVAILABLE: { label: 'Available · illustrative prototype', className: 'status-building' },
-  PLANNED: { label: 'Planned · not runnable', className: 'status-draft' },
+  PLANNED: { label: 'Planned — extension point', className: 'status-draft' },
 }
+
+/**
+ * FE-18.1: why a PLANNED module cannot be picked. It is a declared extension point (D-31 §1):
+ * its contracts are fixed, no engine implements it, and the server refuses a run of it.
+ */
+export const PLANNED_MODULE_REASON =
+  'Not selectable: a declared extension point. Its input and output contracts are fixed, but no engine implements it in this release, and the server refuses a run of it (409 module_not_available).'
 
 export const SEVERITY_VARIANT: Record<WarningSeverity, 'info' | 'warning' | 'destructive'> = {
   INFO: 'info',
