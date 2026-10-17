@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { Check, Database, FileUp, ShieldCheck } from 'lucide-react'
@@ -35,7 +36,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
-import { IMPORTS_UI_ENABLED } from '@/config/features'
+import { IMPORTS_UI_ENABLED, VALIDATION_UI_ENABLED } from '@/config/features'
 import { cn } from '@/lib/utils'
 
 const SOURCE_PAGE = 200
@@ -139,8 +140,11 @@ function Wizard() {
   const router = useRouter()
   const params = useSearchParams()
   const [state, setState] = useState<State>({ kind: 'loading' })
-  const [step, setStep] = useState(0)
-  const [draft, setDraftState] = useState<ImportDraft>(() => emptyImportDraft(params.get('source') ?? ''))
+  // FE-11.2: "Retry with corrected file" opens the wizard with ?source=&retry_of= (D-20 §3).
+  const retrySource = params.get('source') ?? ''
+  const retryOf = VALIDATION_UI_ENABLED ? params.get('retry_of') ?? '' : ''
+  const [step, setStep] = useState(retryOf && retrySource ? 1 : 0)
+  const [draft, setDraftState] = useState<ImportDraft>(() => emptyImportDraft(retrySource, retryOf))
   // One Idempotency-Key per upload attempt (D-21): kept for a retry of the same attempt,
   // dropped as soon as the form changes, so a different upload never reuses it.
   const [attemptKey, setAttemptKey] = useState<string | null>(null)
@@ -210,7 +214,7 @@ function Wizard() {
           sources={sources}
           total={total}
           sourceId={draft.sourceId}
-          onChoose={(id) => setDraft({ ...emptyImportDraft(id) })}
+          onChoose={(id) => setDraft({ ...emptyImportDraft(id, id === retrySource ? retryOf : '') })}
           onContinue={() => setStep(1)}
         />
       </>
@@ -254,6 +258,17 @@ function Wizard() {
           }
         >
           <div className="grid gap-3 md:grid-cols-[200px_1fr]">
+            {draft.retryOfImportId && (
+              <>
+                <span className="text-sm font-medium">Retry of</span>
+                <span className="text-sm" data-testid="import-retry-of" data-import-id={draft.retryOfImportId}>
+                  <Link href={`/ingestion/imports/${draft.retryOfImportId}?tab=quarantine`} className="font-mono text-xs text-primary hover:underline">
+                    {draft.retryOfImportId}
+                  </Link>
+                  <span className="text-muted-foreground"> · the corrected file is a new import; the original rows are never edited.</span>
+                </span>
+              </>
+            )}
             <label className="text-sm font-medium" htmlFor="import-file">
               File
             </label>
