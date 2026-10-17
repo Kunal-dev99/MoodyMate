@@ -311,6 +311,20 @@ class ImportRepository(ScopedRepository[ImportJob]):
         )
         return result.scalar_one_or_none()
 
+    async def canonical_records(self, import_id: uuid.UUID) -> list[CanonicalRecord]:
+        """An import's canonical records (its accepted rows) in source order, through an
+        import of the caller's tenant (Phase 14 projection, D-29)."""
+        result = await self.session.execute(
+            select(CanonicalRecord)
+            .join(ImportJob, ImportJob.id == CanonicalRecord.import_job_id)
+            .where(
+                CanonicalRecord.import_job_id == import_id,
+                ImportJob.tenant_id == self.scope.tenant_id,
+            )
+            .order_by(CanonicalRecord.ordinal, CanonicalRecord.id)
+        )
+        return list(result.scalars())
+
     def _issues(
         self, import_id: uuid.UUID, severity: str | None, code: str | None, field: str | None
     ) -> Select[tuple[ValidationIssue]]:

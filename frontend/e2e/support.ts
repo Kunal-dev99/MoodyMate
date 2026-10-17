@@ -70,8 +70,15 @@ export const INSTRUMENT_RULES = [
  * Makes sure the core_banking contract has an ACTIVE mapping version, as e2e/mappings.spec.ts
  * does through the UI: create (or add a version), dry-run against `importId`, submit as the
  * steward, approve as the approver. A mapping already ACTIVE (e.g. from mappings.spec) is kept.
+ * `code` names a new mapping; a spec with its own source passes its own (codes are unique).
  */
-export async function ensureActiveMapping(request: APIRequestContext, contractId: string, sourceId: string, importId: string) {
+export async function ensureActiveMapping(
+  request: APIRequestContext,
+  contractId: string,
+  sourceId: string,
+  importId: string,
+  code = 'e2e_core_instrument',
+) {
   const steward = await bearer(request, 'data_steward')
   const approver = await bearer(request, 'approver')
   const list = await request.get(`${API}/api/v1/mappings?source_id=${sourceId}&limit=200`, { headers: steward })
@@ -92,7 +99,7 @@ export async function ensureActiveMapping(request: APIRequestContext, contractId
       ? request.post(`${API}/api/v1/mappings/${existing.id}/versions`, { headers: steward, data })
       : request.post(`${API}/api/v1/mappings`, {
           headers: steward,
-          data: { code: 'e2e_core_instrument', name: 'Core banking instruments (e2e)', source_contract_id: contractId, ...data },
+          data: { code, name: 'Core banking instruments (e2e)', source_contract_id: contractId, ...data },
         })
   let r = await post({ rules })
   if (r.status() === 422) {

@@ -214,6 +214,33 @@ ALTER TABLE data_drift_event ENABLE TRIGGER data_drift_event_guard;
 COMMIT;
 """
 
+# WS3 domain rows (Phase 14) reference imports, canonical records, sources and schema
+# versions: removed first. Append-only (TRUNCATE included), so the triggers are lifted for
+# this one transaction; the seeded instrument types stay.
+_DOMAIN_TABLES = (
+    "instrument_attribute_value",
+    "instrument_attribute_definition",
+    "cashflow_event",
+    "position_version",
+    "instrument_version",
+    "position",
+    "instrument",
+    "instrument_type",
+    "domain_projection",
+)
+_DOMAIN_CLEANUP = "\n".join(
+    [
+        "BEGIN;",
+        *(f"ALTER TABLE {t} DISABLE TRIGGER {t}_append_only;" for t in _DOMAIN_TABLES),
+        *(
+            f"DELETE FROM {t}" + (" WHERE seeded_by IS NULL;" if t == "instrument_type" else ";")
+            for t in _DOMAIN_TABLES
+        ),
+        *(f"ALTER TABLE {t} ENABLE TRIGGER {t}_append_only;" for t in _DOMAIN_TABLES),
+        "COMMIT;",
+    ]
+)
+
 # Deletes everything that is not seed data (D-11), children first.
 _CLEANUP = [
     "DELETE FROM user_role",
@@ -221,6 +248,7 @@ _CLEANUP = [
     "DELETE FROM role_permission WHERE seeded_by IS NULL",
     "DELETE FROM role WHERE seeded_by IS NULL",
     "DELETE FROM permission WHERE seeded_by IS NULL",
+    _DOMAIN_CLEANUP,
     _PHASE12_CLEANUP,
     _VALIDATION_CLEANUP,
     _MAPPING_CLEANUP,
@@ -270,6 +298,7 @@ def script(url: str, statements: str) -> None:
 def clean(url: str) -> None:
     for statement in _CLEANUP:
         if statement in (
+            _DOMAIN_CLEANUP,
             _INGESTION_CLEANUP,
             _IMPORT_CLEANUP,
             _PROFILE_CLEANUP,

@@ -1,12 +1,13 @@
-"""Phase 10 (BE-10.1 – BE-10.6): the versioned mapping workbench, in six essential tests.
+"""Phase 10 (BE-10.1 – BE-10.6): the versioned mapping workbench, in five essential tests.
 
 1. DB immutability of non-DRAFT versions and their rules (TRUNCATE included, no SET-based
    bypass) and the downgrade refusal.
 2. The D-19 transform allowlist: every transform, Decimal only, 422 for unknown/bad params.
-3. Create/list/get, a new version leaves the previous unchanged, cross-tenant 404, 403 audited.
-4. The dry run: BLOCKER, unmapped-column issue, ok with per-rule counts, no values in issues.
-5. Submit and maker-checker approval, activation/deprecation, impact analysis, schema change.
-6. MAPPING_CHANGE_ENABLED off: 409 audited on writes, reads work.
+3. Create/list/get, a new version leaves the previous unchanged, cross-tenant 404, 403 audited;
+   then (folded in by BE-14.1) the dry run: BLOCKER, unmapped-column issue, ok with per-rule
+   counts, no values in issues.
+4. Submit and maker-checker approval, activation/deprecation, impact analysis, schema change.
+5. MAPPING_CHANGE_ENABLED off: 409 audited on writes, reads work.
 
 Self-contained on purpose: it uses only the shared conftest fixtures and helpers.
 """
@@ -589,13 +590,8 @@ def test_create_list_get_and_versions(mapi: TestClient, mdb: str) -> None:
     assert r.status_code == 403 and r.json()["details"]["required_permission"] == "mapping:propose"
     assert [e["outcome"] for e in events(mdb, c)] == ["DENIED"]
 
-
-# --- 4. The dry run (BE-10.4) ---------------------------------------------------------------------
-
-
-def test_validate_dry_run(mapi: TestClient, mdb: str) -> None:
-    steward = dev_token(mapi, "data_steward")
-    source = seeded_contract(mdb)["source_id"]
+    # BE-14.1 fold (was test_validate_dry_run, BE-10.4): the dry run, on the mapping above.
+    source = contract["source_id"]
     header = (
         "instrument_id,instrument_type,currency,counterparty_id,product_family,notional,"
         "interest_rate,maturity_date,book_code\n"
@@ -608,9 +604,8 @@ def test_validate_dry_run(mapi: TestClient, mdb: str) -> None:
          f"A2,LOAN,EUR,CP-2,RETAIL,{SENTINEL},1.5,2030-01-01,BK-1\n"
          f"A2,LOAN,EUR,CP-2,RETAIL,5.123,{SENTINEL},2030-01-01,BK-1\n").encode(),
     )  # fmt: skip
-    # v1: notional (required) unmapped, book_code without MAP or PRESERVE.
-    partial = [r for r in FULL_RULES if r["source_column"] not in ("notional", "book_code")]
-    mapping = create_mapping(mapi, mdb, steward, partial)
+    # v1 (FULL_RULES[:3]): notional (required) unmapped, book_code without MAP or PRESERVE.
+    mapping = created
     records = sql(mdb, "SELECT count(*) AS n FROM source_record")[0]["n"]
     status = sql(mdb, "SELECT status FROM import_job WHERE id = $1", uuid.UUID(bad["id"]))[0][
         "status"
@@ -628,10 +623,7 @@ def test_validate_dry_run(mapi: TestClient, mdb: str) -> None:
     assert [e["action"] for e in events(mdb, c)] == ["mapping.validate"]
 
     # v2: every column covered; the sentinel cells fail their rules, counted, never echoed.
-    r = mapi.post(
-        f"{MAPPINGS}/{mapping['id']}/versions", json={"rules": FULL_RULES}, headers=steward
-    )
-    v2 = r.json()
+    # (v2 above is FULL_RULES.)
     r = validate(mapi, steward, bad["id"], v2["id"])
     result = r.json()
     assert result["outcome"] == "FAILED"
@@ -670,7 +662,7 @@ def test_validate_dry_run(mapi: TestClient, mdb: str) -> None:
     assert r.status_code == 404
 
 
-# --- 5. Submit and approval (BE-10.5) ------------------------------------------------------------
+# --- 4. Submit and approval (BE-10.5) ---------------------------------------------------------
 
 
 def test_submit_and_maker_checker_approval(mapi: TestClient, mdb: str) -> None:
@@ -792,7 +784,7 @@ def test_submit_and_maker_checker_approval(mapi: TestClient, mdb: str) -> None:
     assert sample_import(mapi, mdb, steward)["status"] == "MAPPING_REQUIRED"
 
 
-# --- 6. The switch (BE-10.6) ----------------------------------------------------------------------
+# --- 5. The switch (BE-10.6) ----------------------------------------------------------------------
 
 
 def test_mapping_change_switch(mdb: str, artifact_dir: Path) -> None:

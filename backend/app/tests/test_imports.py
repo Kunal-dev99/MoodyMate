@@ -1,7 +1,7 @@
 """Imports (Phase 8, D-15, D-16, D-21, D-24 §4): one upload per format reaches its end
-state; the byte limit is enforced while streaming with nothing left behind; Idempotency-Key
-replays and conflicts; the synthetic attestation is required; import and profile tables are
-append-only."""
+state; the byte limit is enforced while streaming and the synthetic attestation is required,
+with nothing left behind (one test since BE-14.1); Idempotency-Key replays and conflicts;
+import and profile tables are append-only."""
 
 import asyncio
 import hashlib
@@ -171,6 +171,22 @@ def test_over_the_byte_limit_is_413_with_nothing_left_behind(
     assert counts(db) == dict.fromkeys(counts(db), 0)
     assert stored_files(artifact_dir) == []
 
+    # BE-14.1 fold (was test_the_synthetic_attestation_is_required): an upload without the
+    # synthetic attestation is refused, audited, with nothing left behind either.
+    for attested in (False, None):
+        correlation = cid()
+        r = upload(
+            api,
+            steward,
+            seeded_source_id(db),
+            b"instrument_id\nA\n",
+            attested=attested,
+            cid=correlation,
+        )
+        assert (r.status_code, r.json()["code"]) == (422, "synthetic_attestation_required")
+        assert_denied(db, correlation, "synthetic_attestation_required")
+    assert counts(db)["import_job"] == 0 and stored_files(artifact_dir) == []
+
 
 def test_idempotent_replay_and_conflict(api: TestClient, db: str, artifact_dir: Path) -> None:
     steward = dev_token(api, "data_steward")
@@ -199,25 +215,6 @@ def test_idempotent_replay_and_conflict(api: TestClient, db: str, artifact_dir: 
         assert r.json()["details"] == {"import_id": first.json()["id"]}
         assert_denied(db, correlation, "idempotency_conflict")
     assert counts(db)["import_job"] == 1
-
-
-def test_the_synthetic_attestation_is_required(
-    api: TestClient, db: str, artifact_dir: Path
-) -> None:
-    steward = dev_token(api, "data_steward")
-    for attested in (False, None):
-        correlation = cid()
-        r = upload(
-            api,
-            steward,
-            seeded_source_id(db),
-            b"instrument_id\nA\n",
-            attested=attested,
-            cid=correlation,
-        )
-        assert (r.status_code, r.json()["code"]) == (422, "synthetic_attestation_required")
-        assert_denied(db, correlation, "synthetic_attestation_required")
-    assert counts(db)["import_job"] == 0 and stored_files(artifact_dir) == []
 
 
 APPEND_ONLY = {

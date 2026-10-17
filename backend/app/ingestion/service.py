@@ -569,6 +569,21 @@ class ImportService:
             versions,
         )
 
+    async def source_codes(self, ids: set[uuid.UUID]) -> dict[uuid.UUID, str]:
+        """Source id -> code, within the caller's tenant (for the WS3 domain catalogue)."""
+        return await self.repo.source_codes(ids)
+
+    # --- for the WS3 projection (Phase 14, D-29): read only ---------------------------------
+
+    async def locked(self, import_id: uuid.UUID) -> ImportJob | None:
+        """The import locked for the caller's transaction, or None when it is absent or in
+        another tenant (the caller refuses both alike, D-04)."""
+        return await self.repo.lock(import_id)
+
+    async def accepted_records(self, job: ImportJob) -> list[CanonicalRecord]:
+        """The import's accepted rows (canonical records) in source order."""
+        return await self.repo.canonical_records(job.id)
+
     # --- writes -------------------------------------------------------------------------
 
     async def refuse(

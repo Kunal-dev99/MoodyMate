@@ -41,3 +41,11 @@ export const RECONCILIATION_UI_ENABLED = process.env.NEXT_PUBLIC_RECONCILIATION_
  * DRIFT_DETECTION_ENABLED (no new events) and INGESTION_ENABLED (reviews refused, 409).
  */
 export const DRIFT_UI_ENABLED = process.env.NEXT_PUBLIC_DRIFT_UI !== 'off'
+
+/**
+ * NEXT_PUBLIC_DOMAIN_UI=off (FE-14.1/14.2): the Financial Domain nav entry and /domain go back
+ * to the "planned" placeholder, and the import page loses its "Project to domain" section,
+ * restoring the Phase 13 UI exactly. The backend's own switch is DOMAIN_PROJECTION_ENABLED,
+ * which refuses new projections (409); projected rows stay readable either way.
+ */
+export const DOMAIN_UI_ENABLED = process.env.NEXT_PUBLIC_DOMAIN_UI !== 'off'

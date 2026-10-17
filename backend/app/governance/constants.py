@@ -24,6 +24,14 @@ class Permission(StrEnum):
     MAPPING_APPROVE = "mapping:approve"
     QUARANTINE_READ = "quarantine:read"
     QUALITY_REVIEW = "quality:review"
+    # WS3 domain, rules and calculations (BE-14.2, D-34, Feature 03 matrix; seeded by 0017).
+    DOMAIN_READ = "domain:read"
+    DOMAIN_PROJECT = "domain:project"
+    RULE_READ = "rule:read"
+    RULE_PROPOSE = "rule:propose"
+    RULE_APPROVE = "rule:approve"
+    CALC_READ = "calc:read"
+    CALC_RUN = "calc:run"
 
 
 class Role(StrEnum):
@@ -98,9 +106,24 @@ WS2_ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
     ),
 }
 
-# The full seeded matrix (0003 + 0010). Authorization reads the database, not this table.
+# docs/DELIVERY_PLAN.md Feature 03 "Role → permission matrix additions (seed, BE-14.2;
+# PROVISIONAL, D-11, D-34)", seeded by migration 0017 (frozen copy there). Every role reads
+# the domain, the rules and the runs; only data_steward projects; only risk_analyst
+# proposes rule versions and runs calculations; only approver activates rule versions.
+_WS3_READ = frozenset({Permission.DOMAIN_READ, Permission.RULE_READ, Permission.CALC_READ})
+WS3_ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
+    Role.PLATFORM_ADMIN: _WS3_READ,
+    Role.DATA_STEWARD: _WS3_READ | {Permission.DOMAIN_PROJECT},
+    Role.RISK_ANALYST: _WS3_READ | {Permission.RULE_PROPOSE, Permission.CALC_RUN},
+    Role.APPROVER: _WS3_READ | {Permission.RULE_APPROVE},
+    Role.AUDITOR: _WS3_READ,
+}
+
+# The full seeded matrix (0003 + 0010 + 0017). Authorization reads the database, not this
+# table.
 ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
-    role: WS1_ROLE_PERMISSIONS[role] | WS2_ROLE_PERMISSIONS[role] for role in Role
+    role: WS1_ROLE_PERMISSIONS[role] | WS2_ROLE_PERMISSIONS[role] | WS3_ROLE_PERMISSIONS[role]
+    for role in Role
 }
 
 DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-4000-8000-000000000001")

@@ -16,6 +16,7 @@ import { MaskedValue, isMasked } from '@/components/common/MaskedValue'
 import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
 import { startLoad, type LoadFailure } from '@/components/common/load'
+import { ProjectToDomain } from '@/components/domain/ProjectToDomain'
 import { ImportDriftTab } from '@/components/ingestion/ImportDriftTab'
 import { ImportProfileTab } from '@/components/ingestion/ImportProfileTab'
 import { ImportQuarantineTab } from '@/components/ingestion/ImportQuarantineTab'
@@ -29,6 +30,7 @@ import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
+  DOMAIN_UI_ENABLED,
   DRIFT_UI_ENABLED,
   IMPORT_PROFILE_UI_ENABLED,
   IMPORTS_UI_ENABLED,
@@ -284,6 +286,9 @@ function ImportView({ importId }: { importId: string }) {
           )}
         </dl>
       </PageSection>
+
+      {/* FE-14.2: behind DOMAIN_UI_ENABLED; off, the Status tab is the Phase 13 layout (D-02). */}
+      {DOMAIN_UI_ENABLED && <ProjectToDomain job={job} />}
 
       {totals.length > 0 && (
         <PageSection icon={FileCheck2} title="Declared control totals" description="As declared at upload; checked against the file in a later phase.">

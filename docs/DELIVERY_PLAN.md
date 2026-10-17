@@ -1528,6 +1528,7 @@ These are open items from the Phase 7 and Phase 8 reviews. They are independent 
 |---|---|---|---|
 | `POST imports/{import_id}/projection` | `domain:project` | 14 | added (D-29) |
 | `GET instruments`, `GET instruments/{instrument_id}` | `domain:read` | 14 | WS plan |
+| `GET imports/{import_id}/projection` | `domain:read` | 14 | added (Phase 14 build; read-only, same body as the POST) |
 | `POST dataset-snapshots` | `calc:run` | 15 | added (D-30) |
 | `GET dataset-snapshots`, `GET dataset-snapshots/{snapshot_id}` | `calc:read` | 15 | added |
 | `GET calculation-modules` | `rule:read` | 15 | WS plan |
@@ -1588,7 +1589,7 @@ domain versions: `instrument`/`instrument_version`, `position`/`position_version
 `domain:read` can browse the instrument catalogue. The carried-over WS2 hardening also lands
 in this phase.
 
-- [ ] **BE-14.1** Test headroom (D-26). Fold four test functions into existing ones, keeping
+- [x] **BE-14.1** Test headroom (D-26). Fold four test functions into existing ones, keeping
   every assertion:
   - `test_profiling.py::test_the_extra_column_fixture_reports_in_contract_false` and
     `::test_profile_values_are_masked_by_role` go into
@@ -1603,7 +1604,7 @@ in this phase.
     - the diff shows the folded bodies moved, with no assertion removed (the engineer lists
       them, and the architect checks the diff);
     - the full suite passes.
-- [ ] **BE-14.2** Migrations and models in `domain`, plus a tagged seed:
+- [x] **BE-14.2** Migrations and models in `domain`, plus a tagged seed:
   - `domain_projection`: one row per import, append-only, unique `import_job_id`, with
     `projector_version` and a value-free `summary`;
   - `instrument_type`: a seeded PROVISIONAL vocabulary (LOAN, DEPOSIT, BOND);
@@ -1630,7 +1631,7 @@ in this phase.
     - `test_domain.py` compares the seeded `role_permission` join with a new
       `WS3_ROLE_PERMISSIONS` in `governance/constants.py`, and that equals the table above
       (checked by the architect).
-- [ ] **BE-14.3** Projection service, plus `POST /imports/{import_id}/projection`
+- [x] **BE-14.3** Projection service, plus `POST /imports/{import_id}/projection`
   (`domain:project`, audited `import.project`, D-29). It accepts:
   - imports with a manifest and status COMPLETED, COMPLETED_WITH_WARNINGS or QUARANTINED
     (accepted rows only);
@@ -1657,7 +1658,7 @@ in this phase.
     - no stored payload value is a float (JSON type and Python type check);
     - each refusal code appears with its DENIED audit event;
     - with the switch off, a 409 and nothing written.
-- [ ] **BE-14.4** `GET /instruments` (paginated; filter by type, currency, source and import)
+- [x] **BE-14.4** `GET /instruments` (paginated; filter by type, currency, source and import)
   and `GET /instruments/{instrument_id}`. The detail holds the versions, each with:
   - its attributes;
   - its import id;
@@ -1672,7 +1673,7 @@ in this phase.
     - the WS1 matrix and isolation tests list both routes, with 2xx for every role;
     - `test_domain.py` asserts `notional` is masked for `risk_analyst` and clear for
       `data_steward`, and the version → source row chain on one instrument.
-- [ ] **BE-14.5** Contract and reversibility: the `openapi.json` export, the
+- [x] **BE-14.5** Contract and reversibility: the `openapi.json` export, the
   `DOMAIN_PROJECTION_ENABLED` setting, AUDITED entries, and ARCHITECTURE.md module rows
   updated once D-29 is active.
   - *Done-when:*
@@ -1700,7 +1701,7 @@ in this phase.
     pinned `<3.2`, instead of the old `_get_row` patch. Still open from the Phase 8 review: D4
     (a row number that does not increase is skipped) and D5 (an out-of-range date becomes
     `#VALUE!`).
-- [ ] **FE-14.1** Financial Domain workspace (`/domain`, gated on `domain:read`; the
+- [x] **FE-14.1** Financial Domain workspace (`/domain`, gated on `domain:read`; the
   `planned` entry is removed; `NEXT_PUBLIC_DOMAIN_UI=off` restores it):
   - an instrument catalogue with filters;
   - an instrument detail with versions, attributes and cash flows;
@@ -1712,7 +1713,7 @@ in this phase.
     - a Playwright test projects the synthetic instrument import, then browses the catalogue
       to an instrument and its import, with no hand-written payload types (grep);
     - `risk_analyst` sees `notional` as "masked".
-- [ ] **FE-14.2** A "Project to domain" action on the import detail page (gated on
+- [x] **FE-14.2** A "Project to domain" action on the import detail page (gated on
   `domain:project`, shown only for a validated import of a supported schema). It shows the
   projection summary: counts and `TYPE_NOT_PROJECTED`.
   - *Done-when:*
