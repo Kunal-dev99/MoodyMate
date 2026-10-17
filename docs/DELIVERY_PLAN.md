@@ -1972,12 +1972,12 @@ lives in ILLUSTRATIVE rule versions:
 It shows HQLA components, outflows, capped inflows and a per-currency ratio. It is labelled a
 prototype throughout.
 
-- [ ] **BE-17.1** Migration: `hqla_asset_result` and `lcr_result` (append-only, with the run
+- [x] **BE-17.1** Migration: `hqla_asset_result` and `lcr_result` (append-only, with the run
   guards of BE-15.2). A tagged seed adds module `lcr_hqla` v1 AVAILABLE and its ACTIVE
   ILLUSTRATIVE rule versions (D-35).
   - *Done-when:* the round trip passes, and the Phase 15 guard assertions in
     `test_calculations.py` also loop over the two new tables (+0).
-- [ ] **BE-17.2** Module `lcr_hqla` v1 (D-31 interface). Inputs: position versions (balance
+- [x] **BE-17.2** Module `lcr_hqla` v1 (D-31 interface). Inputs: position versions (balance
   as the value, PROVISIONAL), instrument versions (type) and cash flows within the horizon.
   - HQLA = Σ eligible balance × (1 − haircut).
   - Outflows = Σ balance × run-off.
@@ -1994,13 +1994,13 @@ prototype throughout.
     - mixed currencies.
 
     A rerun gives an identical `result_sha256` (+0).
-- [ ] **BE-17.3** `GET /calculation-runs/{run_id}/liquidity`: per currency, HQLA by level
+- [x] **BE-17.3** `GET /calculation-runs/{run_id}/liquidity`: per currency, HQLA by level
   with its asset rows (inclusion or exclusion reason), outflows, inflows before and after
   the cap, and the ratio. Exact decimal text, masking per D-33.
   - *Done-when:* the WS1 matrix lists it with 2xx for every role, and
     `test_calculations.py` asserts that the HQLA total equals the sum of the included asset
     rows (+0).
-- [ ] **FE-17.1** Liquidity view in the run detail: HQLA components (included and excluded,
+- [x] **FE-17.1** Liquidity view in the run detail: HQLA components (included and excluded,
   with reasons), outflows, inflows with the applied cap shown, the ratio or "not computable"
   with the warning, and the prototype banner.
   - *Done-when:* a Playwright test runs `lcr_hqla` on the synthetic snapshot and checks the

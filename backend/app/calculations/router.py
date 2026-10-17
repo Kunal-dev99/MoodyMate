@@ -15,8 +15,9 @@ The WS3 calculation endpoints of Phase 15 (the Feature 03 endpoint table, D-34):
   body. Audited `calculation_run.create` (and `calculation_run.finish`).
 - GET /calculation-runs (paginated; filter by module and status),
   GET /calculation-runs/{run_id} (the manifest of every pin, the input refs, the warnings),
-  GET /calculation-runs/{run_id}/results (contributions with lineage) and
-  GET /calculation-runs/{run_id}/maturity-ladder (`calc:read`).
+  GET /calculation-runs/{run_id}/results (contributions with lineage),
+  GET /calculation-runs/{run_id}/maturity-ladder and (Phase 17, BE-17.3)
+  GET /calculation-runs/{run_id}/liquidity (`calc:read`).
 
 Every decimal is exact text (`format(d, "f")`). Masking follows D-33: aggregates are
 `internal`, contributions carry the most sensitive classification of the fields they read.
@@ -33,16 +34,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.calculations.constants import (
     CalculationRunStatus,
     CalculationWarningCode,
+    HqlaExclusionReason,
     InputRefType,
     IntermediateCode,
+    LcrWarningCode,
     WarningSeverity,
 )
 from app.calculations.schemas import (
     BucketOut,
     ContributionLineage,
+    HqlaAssetLineage,
+    HqlaAssetOut,
+    HqlaLevelOut,
     InputRefOut,
     LadderCurrency,
     LadderRow,
+    LiquidityCurrency,
+    LiquidityOut,
     MaturityLadderOut,
     ResultItem,
     ResultPage,
@@ -62,6 +70,7 @@ from app.calculations.schemas import (
     WarningOut,
 )
 from app.calculations.service import (
+    AssetRow,
     CalculationService,
     ContributionRow,
     RerunSpec,
@@ -78,7 +87,7 @@ from app.db.session import get_session
 from app.domain.constants import CashflowOrigin, DomainSchemaCode
 from app.governance.constants import Permission
 from app.reconciliation.constants import ReconciliationOutcome
-from app.rules.constants import ILLUSTRATIVE_STATEMENT, CashflowDirection
+from app.rules.constants import ILLUSTRATIVE_STATEMENT, CashflowDirection, HqlaLevel
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 CalcReader = Annotated[Principal, Depends(require_permission(Permission.CALC_READ))]
@@ -485,6 +494,164 @@ async def get_maturity_ladder(
         ],
         currencies=[LadderCurrency(currency=c, rows=rows) for c, rows in currencies.items()],
         min_aggregate_count=view.min_aggregate_count,
+        illustrative=True,
+        statement=ILLUSTRATIVE_STATEMENT,
+    )
+
+
+# --- liquidity: the lcr_hqla read (BE-17.3) ---------------------------------------------------
+
+LCR_LIMITATIONS = [
+    "Level 2A/2B caps are not applied (LCR_LEVEL_CAPS_NOT_APPLIED when a Level 2 asset is "
+    "included).",
+    "The value of an asset is its position balance: the schema has no market value "
+    "(PROVISIONAL).",
+    "Per currency, with no FX conversion and no all-currency total.",
+    "Inflows are cash flows due (0, horizon] calendar days after the reporting date; "
+    "outflows are position balances x run-off. No other LCR categories are modelled.",
+]
+
+
+def _asset(a: AssetRow, clear: frozenset[str]) -> HqlaAssetOut:
+    v = a.value
+    pc, ic = a.position_classes, a.instrument_classes
+    shown = mask_mapping(
+        {
+            "balance": decimal_text(v.balance),
+            "hqla_value": decimal_text(v.hqla_value),
+            "position_business_key": a.position_key,
+            "instrument_business_key": a.instrument_key or "",
+            "instrument_type": v.instrument_type,
+        },
+        {
+            "balance": v.classification,
+            "hqla_value": v.classification,
+            "position_business_key": pc.get("position_id", UNCLASSIFIED),
+            "instrument_business_key": ic.get("instrument_id", UNCLASSIFIED),
+            "instrument_type": ic.get("instrument_type", UNCLASSIFIED),
+        },
+        clear,
+    )
+    return HqlaAssetOut(
+        hqla_asset_result_id=v.id,
+        sequence=v.sequence,
+        included=v.included,
+        level=HqlaLevel(v.level) if v.level else None,
+        exclusion_reason=HqlaExclusionReason(v.exclusion_reason) if v.exclusion_reason else None,
+        instrument_type=shown["instrument_type"],
+        balance=shown["balance"],
+        haircut=decimal_text(v.haircut) if v.haircut is not None else None,
+        # An excluded row's value is 0 by rule, not an amount (D-33: zeros stay clear).
+        hqla_value=shown["hqla_value"] if v.included else decimal_text(v.hqla_value),
+        classification=v.classification,
+        rule_version_ids=[uuid.UUID(i) for i in v.rule_version_ids],
+        lineage=HqlaAssetLineage(
+            position_version_id=v.position_version_id,
+            position_id=a.position.position_id,
+            position_business_key=shown["position_business_key"],
+            instrument_id=a.instrument.instrument_id if a.instrument else None,
+            instrument_version_id=v.instrument_version_id,
+            instrument_business_key=shown["instrument_business_key"],
+            canonical_record_id=v.canonical_record_id,
+            import_id=v.import_job_id,
+            source_record_id=v.source_record_id,
+            source_ordinal=v.source_ordinal,
+        ),
+    )
+
+
+@router.get(
+    "/calculation-runs/{run_id}/liquidity",
+    response_model=LiquidityOut,
+    operation_id="getLiquidity",
+)
+async def get_liquidity(
+    request: Request, run_id: uuid.UUID, principal: CalcReader, session: SessionDep
+) -> LiquidityOut:
+    """An lcr_hqla run's liquidity coverage, per currency: HQLA by level with its asset rows
+    (included, or excluded with the reason), outflows, inflows before and after the cap, the
+    denominator and the ratio (None, with LCR_DENOMINATOR_ZERO, when it is not computable).
+    Exact decimal text. Aggregates are `internal`, asset rows carry the most sensitive
+    classification they read, and a figure built from fewer than CALC_MIN_AGGREGATE_COUNT
+    contributions is masked like them (D-33). An illustrative prototype, not regulatory
+    (D-35). 404 alike for an absent and a foreign run; 404 `liquidity_not_found` for a run of
+    another module."""
+    minimum = request.app.state.settings.CALC_MIN_AGGREGATE_COUNT
+    view = await CalculationService(session, principal).liquidity(run_id, minimum)
+    clear = principal.clear_classifications
+    currencies = []
+    for r in view.rows:
+        classes = view.classes[r.id]
+        figures = {
+            name: decimal_text(getattr(r, name))
+            for name in (
+                "hqla_level1",
+                "hqla_level2a",
+                "hqla_level2b",
+                "hqla_total",
+                "outflow_balance",
+                "outflows",
+                "inflows_gross",
+                "inflows_before_cap",
+                "inflow_cap_amount",
+                "inflows_after_cap",
+                "net_outflows",
+            )
+        }
+        shown = mask_mapping(figures, classes, clear)
+        ratio: Value | None = None
+        if r.ratio is not None:
+            ratio = mask_mapping({"ratio": decimal_text(r.ratio)}, classes, clear)["ratio"]
+        applied = mask_mapping(
+            {"applied": r.inflow_cap_applied}, {"applied": classes["inflow_cap_applied"]}, clear
+        )
+        levels = (
+            (HqlaLevel.L1, "hqla_level1", r.level1_count),
+            (HqlaLevel.L2A, "hqla_level2a", r.level2a_count),
+            (HqlaLevel.L2B, "hqla_level2b", r.level2b_count),
+        )
+        currencies.append(
+            LiquidityCurrency(
+                lcr_result_id=r.id,
+                currency=r.currency,
+                classification=r.classification,
+                hqla_total=shown["hqla_total"],
+                hqla_levels=[
+                    HqlaLevelOut(
+                        level=level,
+                        total=shown[name],
+                        asset_count=count,
+                        classification=classes[name],
+                    )
+                    for level, name, count in levels
+                ],
+                assets=[_asset(a, clear) for a in view.assets if a.value.lcr_result_id == r.id],
+                excluded_asset_count=r.excluded_asset_count,
+                outflow_balance=shown["outflow_balance"],
+                outflows=shown["outflows"],
+                outflow_count=r.outflow_count,
+                inflows_gross=shown["inflows_gross"],
+                inflows_before_cap=shown["inflows_before_cap"],
+                inflow_cap_rate=decimal_text(r.inflow_cap_rate),
+                inflow_cap_amount=shown["inflow_cap_amount"],
+                inflows_after_cap=shown["inflows_after_cap"],
+                inflow_cap_applied=applied["applied"],
+                inflow_count=r.inflow_count,
+                net_outflows=shown["net_outflows"],
+                ratio=ratio,
+                warnings=[LcrWarningCode(w) for w in r.warning_codes],
+            )
+        )
+    return LiquidityOut(
+        run_id=view.row.run.id,
+        status=CalculationRunStatus(view.row.run.status),
+        reporting_date=view.row.run.reporting_date,
+        module=_module(view.row),
+        inflow_horizon_days=view.horizon_days,
+        currencies=currencies,
+        min_aggregate_count=view.min_aggregate_count,
+        limitations=LCR_LIMITATIONS,
+        prototype=True,
         illustrative=True,
         statement=ILLUSTRATIVE_STATEMENT,
     )

@@ -883,6 +883,14 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
   - **Residual risk:** comparing clear totals from two runs whose reporting dates move one
     flow between buckets can still reveal an amount. Closing that needs option C, or a
     limit on reporting dates. This is an open item for the client before production.
+- **Amendment (2026-10-17, Phase 17 review):**
+  - **Non-zero contributions only:** only non-zero contributions count toward
+    `CALC_MIN_AGGREGATE_COUNT`. Dormant zero-balance or zero-amount rows would otherwise let
+    one real amount show in clear. This applies to the maturity ladder and to LCR
+    (`lcr_result.*_nonzero_count`).
+  - **LCR figures:** they follow the same rule. An HQLA level, outflows or inflows built from
+    fewer than N non-zero contributions are masked, and so is every figure derived from
+    them. Per-asset rows are masked by their own classification.
 
 ## D-34 WS3 permissions and role grants
 

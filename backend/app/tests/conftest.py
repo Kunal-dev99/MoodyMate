@@ -244,8 +244,11 @@ _DOMAIN_CLEANUP = "\n".join(
 # WS3 snapshots, runs and the rule registry (Phase 15) reference domain rows, imports and
 # reconciliation runs: removed first. Append-only or lifecycle-guarded (TRUNCATE included),
 # so every user trigger of these tables is lifted for this one transaction. The tagged seed
-# stays, put back to its seeded status.
+# stays, put back to its seeded status. Phase 17's LCR outputs (0020) go first: an asset
+# row references its LCR row, and both reference their run.
 _CALC_TABLES = (
+    "hqla_asset_result",
+    "lcr_result",
     "calculation_warning",
     "intermediate_value",
     "liquidity_gap_result",

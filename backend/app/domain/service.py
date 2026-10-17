@@ -574,6 +574,12 @@ class DomainService:
     async def import_instruments(self, import_id: uuid.UUID) -> list[tuple[InstrumentVersion, str]]:
         return await self.repo.import_instruments(import_id)
 
+    async def import_positions(self, import_id: uuid.UUID) -> list[tuple[PositionVersion, str]]:
+        return await self.repo.import_positions(import_id)
+
+    async def positions_by_id(self, ids: Sequence[uuid.UUID]) -> list[tuple[PositionVersion, str]]:
+        return await self.repo.positions_by_id(ids)
+
     async def cash_flows_by_id(self, ids: Sequence[uuid.UUID]) -> list[CashflowEvent]:
         return await self.repo.cash_flows_by_id(ids)
 

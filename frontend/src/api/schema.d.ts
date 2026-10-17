@@ -157,6 +157,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/calculation-runs/{run_id}/liquidity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Liquidity
+         * @description An lcr_hqla run's liquidity coverage, per currency: HQLA by level with its asset rows
+         *     (included, or excluded with the reason), outflows, inflows before and after the cap, the
+         *     denominator and the ratio (None, with LCR_DENOMINATOR_ZERO, when it is not computable).
+         *     Exact decimal text. Aggregates are `internal`, asset rows carry the most sensitive
+         *     classification they read, and a figure built from fewer than CALC_MIN_AGGREGATE_COUNT
+         *     contributions is masked like them (D-33). An illustrative prototype, not regulatory
+         *     (D-35). 404 alike for an absent and a foreign run; 404 `liquidity_not_found` for a run of
+         *     another module.
+         */
+        get: operations["getLiquidity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/calculation-runs/{run_id}/maturity-ladder": {
         parameters: {
             query?: never;
@@ -2045,6 +2072,125 @@ export interface components {
             /** Version */
             version: string;
         };
+        /**
+         * HqlaAssetLineage
+         * @description position version -> canonical record -> source row -> import (D-31 §6).
+         */
+        HqlaAssetLineage: {
+            /**
+             * Canonical Record Id
+             * Format: uuid
+             */
+            canonical_record_id: string;
+            /**
+             * Import Id
+             * Format: uuid
+             */
+            import_id: string;
+            /** Instrument Business Key */
+            instrument_business_key: string | components["schemas"]["MaskedValue"];
+            /** Instrument Id */
+            instrument_id: string | null;
+            /**
+             * Instrument Version Id
+             * Format: uuid
+             */
+            instrument_version_id: string;
+            /** Position Business Key */
+            position_business_key: string | components["schemas"]["MaskedValue"];
+            /**
+             * Position Id
+             * Format: uuid
+             */
+            position_id: string;
+            /**
+             * Position Version Id
+             * Format: uuid
+             */
+            position_version_id: string;
+            /** Source Ordinal */
+            source_ordinal: number;
+            /**
+             * Source Record Id
+             * Format: uuid
+             */
+            source_record_id: string;
+        };
+        /**
+         * HqlaAssetOut
+         * @description One asset position considered for HQLA: included at its level, or excluded with its
+         *     reason. Positions whose type has a run-off rate are outflows, not asset rows.
+         */
+        HqlaAssetOut: {
+            /**
+             * Balance
+             * @description The position balance (the value, PROVISIONAL), or masked.
+             */
+            balance: string | components["schemas"]["MaskedValue"];
+            /**
+             * Classification
+             * @description The most sensitive classification it reads (D-33).
+             */
+            classification: string;
+            /** @description Set when excluded. */
+            exclusion_reason: components["schemas"]["HqlaExclusionReason"] | null;
+            /**
+             * Haircut
+             * @description The pinned haircut, exact text; None when excluded.
+             */
+            haircut: string | null;
+            /**
+             * Hqla Asset Result Id
+             * Format: uuid
+             */
+            hqla_asset_result_id: string;
+            /**
+             * Hqla Value
+             * @description balance x (1 - haircut) when included, 0 when excluded; or masked.
+             */
+            hqla_value: string | components["schemas"]["MaskedValue"];
+            /** Included */
+            included: boolean;
+            /** Instrument Type */
+            instrument_type: string | components["schemas"]["MaskedValue"];
+            /** @description Set when included. */
+            level: components["schemas"]["HqlaLevel"] | null;
+            lineage: components["schemas"]["HqlaAssetLineage"];
+            /**
+             * Rule Version Ids
+             * @description The rule versions that placed it.
+             */
+            rule_version_ids: string[];
+            /** Sequence */
+            sequence: number;
+        };
+        /**
+         * HqlaExclusionReason
+         * @description `hqla_asset_result.exclusion_reason` (BE-17.1): why an asset row adds nothing to HQLA.
+         *     Inputs that cannot be read at all are excluded with a run warning instead.
+         * @enum {string}
+         */
+        HqlaExclusionReason: "NOT_HQLA_ELIGIBLE";
+        /**
+         * HqlaLevel
+         * @description The values of the `hqla_level` ENUM_MAP (D-35 §2): an instrument type's HQLA level. A
+         *     type that is not a key of the map is not HQLA.
+         * @enum {string}
+         */
+        HqlaLevel: "L1" | "L2A" | "L2B";
+        /** HqlaLevelOut */
+        HqlaLevelOut: {
+            /** Asset Count */
+            asset_count: number;
+            /** Classification */
+            classification: string;
+            level: components["schemas"]["HqlaLevel"];
+            /**
+             * Total
+             * @description Sum of the included asset rows' HQLA values at this level.
+             */
+            total: string | components["schemas"]["MaskedValue"];
+        };
         /** ImpactAnalysis */
         ImpactAnalysis: {
             /**
@@ -2795,6 +2941,153 @@ export interface components {
             outflows_behavioural: string | components["schemas"]["MaskedValue"];
             /** Outflows Contractual */
             outflows_contractual: string | components["schemas"]["MaskedValue"];
+        };
+        /**
+         * LcrWarningCode
+         * @description `lcr_result.warning_codes` (BE-17.2): value-free warnings about one currency's LCR.
+         *     Kept on the LCR row (a closed list, CHECK-constrained by migration 0020) because
+         *     `calculation_warning.code` is a closed CHECK of migration 0018, which D-01 does not let a
+         *     forward migration widen. A run with any of them ends SUCCEEDED_WITH_WARNINGS.
+         * @enum {string}
+         */
+        LcrWarningCode: "LCR_DENOMINATOR_ZERO" | "LCR_LEVEL_CAPS_NOT_APPLIED";
+        /**
+         * LiquidityCurrency
+         * @description One currency's LCR, no FX (D-35 §2). Every figure is exact decimal text or masked: a
+         *     figure built from fewer than `min_aggregate_count` contributions (but at least one), and
+         *     every figure derived from it, takes the contributions' classification (D-33). Zero
+         *     figures and a NULL ratio stay clear.
+         */
+        LiquidityCurrency: {
+            /**
+             * Assets
+             * @description Included and excluded, in run order.
+             */
+            assets: components["schemas"]["HqlaAssetOut"][];
+            /**
+             * Classification
+             * @description `internal`: an aggregate (D-33).
+             */
+            classification: string;
+            /** Currency */
+            currency: string;
+            /** Excluded Asset Count */
+            excluded_asset_count: number;
+            /**
+             * Hqla Levels
+             * @description L1, L2A and L2B, in that order.
+             */
+            hqla_levels: components["schemas"]["HqlaLevelOut"][];
+            /**
+             * Hqla Total
+             * @description L1 + L2A + L2B: the sum of the included asset rows.
+             */
+            hqla_total: string | components["schemas"]["MaskedValue"];
+            /**
+             * Inflow Cap Amount
+             * @description inflow_cap_rate x outflows.
+             */
+            inflow_cap_amount: string | components["schemas"]["MaskedValue"];
+            /**
+             * Inflow Cap Applied
+             * @description True when the cap binds (inflows_before_cap > inflow_cap_amount).
+             */
+            inflow_cap_applied: boolean | components["schemas"]["MaskedValue"];
+            /**
+             * Inflow Cap Rate
+             * @description The pinned cap, a share of outflows.
+             */
+            inflow_cap_rate: string;
+            /** Inflow Count */
+            inflow_count: number;
+            /**
+             * Inflows After Cap
+             * @description min(inflows_before_cap, inflow_cap_amount).
+             */
+            inflows_after_cap: string | components["schemas"]["MaskedValue"];
+            /**
+             * Inflows Before Cap
+             * @description Sum of amount x inflow rate.
+             */
+            inflows_before_cap: string | components["schemas"]["MaskedValue"];
+            /**
+             * Inflows Gross
+             * @description Sum of the in-horizon inflow cash flows' amounts.
+             */
+            inflows_gross: string | components["schemas"]["MaskedValue"];
+            /**
+             * Lcr Result Id
+             * Format: uuid
+             */
+            lcr_result_id: string;
+            /**
+             * Net Outflows
+             * @description outflows - inflows_after_cap: the denominator.
+             */
+            net_outflows: string | components["schemas"]["MaskedValue"];
+            /**
+             * Outflow Balance
+             * @description Sum of the outflow positions' balances.
+             */
+            outflow_balance: string | components["schemas"]["MaskedValue"];
+            /** Outflow Count */
+            outflow_count: number;
+            /**
+             * Outflows
+             * @description Sum of balance x run-off.
+             */
+            outflows: string | components["schemas"]["MaskedValue"];
+            /**
+             * Ratio
+             * @description hqla_total / net_outflows, 4 dp ROUND_HALF_EVEN (PROVISIONAL). None (not computable) when net_outflows <= 0, with LCR_DENOMINATOR_ZERO.
+             */
+            ratio: string | components["schemas"]["MaskedValue"] | null;
+            /** Warnings */
+            warnings: components["schemas"]["LcrWarningCode"][];
+        };
+        /** LiquidityOut */
+        LiquidityOut: {
+            /**
+             * Currencies
+             * @description Per currency, no FX (D-35). Empty unless the run SUCCEEDED (with or without warnings).
+             */
+            currencies: components["schemas"]["LiquidityCurrency"][];
+            /** Illustrative */
+            illustrative: boolean;
+            /**
+             * Inflow Horizon Days
+             * @description The pinned horizon: inflows are cash flows due (0, n] days after the reporting date.
+             */
+            inflow_horizon_days: number | null;
+            /**
+             * Limitations
+             * @description Documented limitations of this module version.
+             */
+            limitations: string[];
+            /**
+             * Min Aggregate Count
+             * @description D-33 minimum aggregation (CALC_MIN_AGGREGATE_COUNT, PROVISIONAL).
+             */
+            min_aggregate_count: number;
+            module: components["schemas"]["RunModuleRef"];
+            /**
+             * Prototype
+             * @description Always true: an illustrative LCR/HQLA prototype.
+             */
+            prototype: boolean;
+            /**
+             * Reporting Date
+             * Format: date
+             */
+            reporting_date: string;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Statement */
+            statement: string;
+            status: components["schemas"]["CalculationRunStatus"];
         };
         /** LowerTransform */
         LowerTransform: {
@@ -3610,7 +3903,7 @@ export interface components {
          * @description The engine's post-run checks (D-31 §3, Arch §6.2 step 5).
          * @enum {string}
          */
-        PostCheck: "COVERAGE" | "BUCKET_DEFINED" | "BUCKET_TOTALS" | "CUMULATIVE_GAP" | "RERUN_REPRODUCED";
+        PostCheck: "COVERAGE" | "BUCKET_DEFINED" | "BUCKET_TOTALS" | "CUMULATIVE_GAP" | "HQLA_TOTALS" | "LCR_FIGURES" | "RERUN_REPRODUCED";
         /** PostCheckOut */
         PostCheckOut: {
             check: components["schemas"]["PostCheck"];
@@ -4724,15 +5017,21 @@ export interface components {
          * @description Value-free counts of a finished run.
          */
         RunOutcome: {
-            /** Bucketed */
+            /**
+             * Bucketed
+             * @description Inputs used: bucketed cash flows (maturity_ladder); asset rows, outflow positions and inflow cash flows (lcr_hqla).
+             */
             bucketed: number;
             /** Currencies */
             currencies: string[];
-            /** Excluded */
+            /**
+             * Excluded
+             * @description Inputs excluded with a warning code.
+             */
             excluded: number;
             /**
              * In Scope
-             * @description Cash flows in scope: every row of the cash-flow member.
+             * @description Inputs in scope: every cash flow (maturity_ladder); every position and cash flow (lcr_hqla).
              */
             in_scope: number;
             /**
@@ -4742,6 +5041,12 @@ export interface components {
             inputs: {
                 [key: string]: number;
             };
+            /**
+             * Out Of Scope
+             * @description lcr_hqla: cash flows that are not inflows by rule (type without an inflow rate, or due outside the horizon). Always 0 for maturity_ladder.
+             * @default 0
+             */
+            out_of_scope: number;
             /** Post Checks */
             post_checks: components["schemas"]["PostCheckOut"][];
             /** Warnings By Code */
@@ -5818,6 +6123,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RunDetail"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    getLiquidity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LiquidityOut"];
                 };
             };
             /** @description Client error (standard envelope) */
