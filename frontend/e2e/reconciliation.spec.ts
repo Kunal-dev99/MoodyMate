@@ -1,6 +1,16 @@
-import { join } from 'node:path'
-import { expect, test, type Page } from '@playwright/test'
-import { API, SAMPLES, bearer, coreBanking, ensureActiveMapping, signIn, uploadSample } from './support'
+import { expect, test } from '@playwright/test'
+import {
+  API,
+  bearer,
+  coreBanking,
+  ensureActiveMapping,
+  shownFigure as shown,
+  signIn,
+  uploadInBrowser,
+  uploadSample,
+  validateInBrowser,
+  type ReconItem as Item,
+} from './support'
 
 /**
  * Feature 02 Phase 12 browser checks against the real stack (backend ENV=test, synthetic).
@@ -20,38 +30,8 @@ import { API, SAMPLES, bearer, coreBanking, ensureActiveMapping, signIn, uploadS
 
 test.describe.configure({ mode: 'serial' })
 
-type Figure = string | { masked: true; classification: string } | null
-type Item = { sequence: number; check: string; column: string | null; status: string; source: Figure; target: Figure; held: Figure; variance: Figure; tolerance: string }
-
 let mixedId = ''
 let cleanId = ''
-
-/** Upload a sample through the import wizard; returns the server's import. */
-async function uploadInBrowser(page: Page, sourceId: string, file: string) {
-  await page.goto(`/ingestion/imports/new?source=${sourceId}`)
-  await page.getByTestId('import-continue').click()
-  await page.getByTestId('import-file').setInputFiles(join(SAMPLES, file))
-  await page.getByTestId('synthetic-attested').click()
-  const uploaded = page.waitForResponse((r) => r.request().method() === 'POST' && r.url() === `${API}/api/v1/imports`)
-  await page.getByTestId('import-upload').click()
-  const response = await uploaded
-  expect(response.status()).toBe(201)
-  const job = await response.json()
-  await page.waitForURL(`**/ingestion/imports/${job.id}**`)
-  return job as { id: string; status: string }
-}
-
-/** Validate the open import from its Validation tab; returns the server's import. */
-async function validateInBrowser(page: Page, importId: string) {
-  await page.getByTestId('import-tab-validation').click()
-  const validated = page.waitForResponse((r) => r.request().method() === 'POST' && r.url() === `${API}/api/v1/imports/${importId}/validate`)
-  await page.getByTestId('import-validate').click()
-  const response = await validated
-  expect(response.status(), await response.text()).toBe(200)
-  return response.json()
-}
-
-const shown = (v: Figure) => (v === null ? '—' : typeof v === 'string' ? v : 'masked')
 
 test('FE-12.1: the quarantine fixture reconciles REVIEW_REQUIRED; every figure, the variance included, is the API string', async ({ page, request }) => {
   // Setup through the API: an ACTIVE mapping (dry-run on a clean import), then the quarantine fixture.

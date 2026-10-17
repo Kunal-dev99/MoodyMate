@@ -440,6 +440,8 @@ def test_every_mutating_route_is_listed_and_emits_an_audit_event(api: TestClient
 # --- 4. Migrations -------------------------------------------------------------------------------
 
 
+# BE-13.2: the WS2 suite's base -> head round trip is this test (one test, both suites).
+@pytest.mark.ws2
 def test_migration_round_trip_and_downgrade_guards(api: TestClient, db: str) -> None:
     head = str(ScriptDirectory.from_config(Config("alembic.ini")).get_current_head())
 
