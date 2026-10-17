@@ -31,6 +31,7 @@ const ROUTE_LABELS: Record<string, string> = {
   mappings: 'Mappings',
   domain: 'Financial Domain',
   calculations: 'Calculations',
+  runs: 'Runs',
   scenarios: 'Reconciliation & Scenarios',
   reports: 'Reports',
   assistant: 'AI Assistant',

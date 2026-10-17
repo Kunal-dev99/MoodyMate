@@ -546,6 +546,38 @@ class DomainService:
             await self._pins(),
         )
 
+    # --- for WS3 dataset snapshots and runs (Phase 15, D-30, D-31): read only -------------
+
+    async def schema_pins(self) -> SchemaPins:
+        """Every schema version of the tenant with its fields' types and classifications."""
+        return await self._pins()
+
+    async def projected_import_ids(self) -> list[uuid.UUID]:
+        """The tenant's projected imports (the GET /imports `projected` filter)."""
+        return await self.repo.projected_import_ids()
+
+    async def projection_of(self, job: ImportJob) -> DomainProjection | None:
+        """The projection of an import already reached through this scope."""
+        return await self.repo.projection_for(job.id)
+
+    async def ambiguous_keys(self, projection: DomainProjection) -> int:
+        """Business keys with more than one version in the projection (D-30 §3)."""
+        return await self.repo.ambiguous_keys(projection)
+
+    async def import_cash_flows(self, import_id: uuid.UUID) -> list[CashflowEvent]:
+        return await self.repo.import_cash_flows(import_id)
+
+    async def import_instruments(self, import_id: uuid.UUID) -> list[tuple[InstrumentVersion, str]]:
+        return await self.repo.import_instruments(import_id)
+
+    async def cash_flows_by_id(self, ids: Sequence[uuid.UUID]) -> list[CashflowEvent]:
+        return await self.repo.cash_flows_by_id(ids)
+
+    async def instrument_versions_by_id(
+        self, ids: Sequence[uuid.UUID]
+    ) -> list[tuple[InstrumentVersion, str]]:
+        return await self.repo.instrument_versions_by_id(ids)
+
     async def instrument(self, instrument_id: uuid.UUID) -> InstrumentView:
         """One instrument with its versions, attributes and cash flows: 404 alike for an
         absent and a foreign id (D-04)."""

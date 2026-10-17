@@ -549,8 +549,28 @@ class ImportService:
         offset: int,
         source_id: uuid.UUID | None = None,
         status: ImportStatus | None = None,
+        schema_code: str | None = None,
+        projected_ids: Sequence[uuid.UUID] | None = None,
+        projected: bool | None = None,
     ) -> tuple[list[ImportJob], int]:
-        return await self.repo.page_filtered(limit, offset, source_id, status)
+        """Newest first. `schema_code` keeps imports pinned to a version of that schema (in
+        the caller's tenant). `projected` keeps the imports in (True) or not in (False)
+        `projected_ids`: the tenant's projected imports, which the caller reads from the
+        domain module (Phase 15, for the new-run panel)."""
+        versions = None
+        if schema_code is not None:
+            versions = [
+                v.id
+                for s in await self.schemas.list_schemas()
+                if s.code == schema_code
+                for v in s.versions
+            ]
+        ids = None
+        if projected is not None:
+            ids = list(projected_ids or [])
+        return await self.repo.page_filtered(
+            limit, offset, source_id, status, versions, ids, exclude_ids=projected is False
+        )
 
     async def get(self, import_id: uuid.UUID) -> ImportJob:
         job = await self.repo.fresh(import_id)
@@ -583,6 +603,13 @@ class ImportService:
     async def accepted_records(self, job: ImportJob) -> list[CanonicalRecord]:
         """The import's accepted rows (canonical records) in source order."""
         return await self.repo.canonical_records(job.id)
+
+    # --- for WS3 dataset snapshots (Phase 15, D-30): read only -----------------------------
+
+    async def find(self, import_id: uuid.UUID) -> ImportJob | None:
+        """The import, or None when it is absent or in another tenant (the caller refuses
+        both alike, D-04)."""
+        return await self.repo.fresh(import_id)
 
     # --- writes -------------------------------------------------------------------------
 

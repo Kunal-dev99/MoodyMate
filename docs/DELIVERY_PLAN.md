@@ -1529,6 +1529,7 @@ These are open items from the Phase 7 and Phase 8 reviews. They are independent 
 | `POST imports/{import_id}/projection` | `domain:project` | 14 | added (D-29) |
 | `GET instruments`, `GET instruments/{instrument_id}` | `domain:read` | 14 | WS plan |
 | `GET imports/{import_id}/projection` | `domain:read` | 14 | added (Phase 14 build; read-only, same body as the POST) |
+| `GET imports?projected=&schema_code=` (filters on the existing list) | `import:read` | 15 | added (Phase 15 build; feeds the New-run panel) |
 | `POST dataset-snapshots` | `calc:run` | 15 | added (D-30) |
 | `GET dataset-snapshots`, `GET dataset-snapshots/{snapshot_id}` | `calc:read` | 15 | added |
 | `GET calculation-modules` | `rule:read` | 15 | WS plan |
@@ -1745,7 +1746,7 @@ values to cash-flow events, canonical records and source rows. Re-running with t
 gives byte-identical results. All configuration in this phase is seeded (ACTIVE by seed,
 PROVISIONAL). Governed change comes in Phase 16.
 
-- [ ] **BE-15.1** Migrations and models for the `rules` registry (D-32):
+- [x] **BE-15.1** Migrations and models for the `rules` registry (D-32):
   - `calculation_module` and `module_version`: `implementation_status`
     AVAILABLE/PLANNED, declared input and output contracts, `engine_version`;
   - `rule_definition`: category, target module, `parameter_schema` from the closed kinds;
@@ -1769,7 +1770,7 @@ PROVISIONAL). Governed change comes in Phase 16.
     - at most one ACTIVE version exists per rule definition (DB);
     - the seed rows are tagged `provisional` and illustrative;
     - the downgrade refuses while a non-seed row exists.
-- [ ] **BE-15.2** Migrations and models in `calculations` (D-30, D-31):
+- [x] **BE-15.2** Migrations and models in `calculations` (D-30, D-31):
   - `dataset_snapshot` and `dataset_snapshot_member`: per member, the import, its
     `manifest_sha256`, the projection id and the schema code; plus `content_sha256`;
   - `calculation_run`: the Data Model §9 statuses, `reporting_date`, the module version,
@@ -1787,7 +1788,7 @@ PROVISIONAL). Governed change comes in Phase 16.
     - the round trip passes;
     - `test_calculations.py` proves that changing a terminal run, or inserting a result
       under one, is refused, and that the downgrade refuses while a run exists.
-- [ ] **BE-15.3** `POST /dataset-snapshots`, `GET /dataset-snapshots` and
+- [x] **BE-15.3** `POST /dataset-snapshots`, `GET /dataset-snapshots` and
   `GET /dataset-snapshots/{snapshot_id}` (D-30).
   - A snapshot takes at most one projected import per schema code.
   - It refuses with:
@@ -1801,7 +1802,7 @@ PROVISIONAL). Governed change comes in Phase 16.
     - the same members give the same snapshot id;
     - each refusal code;
     - `content_sha256` equals the hash recomputed from the member manifests.
-- [ ] **BE-15.4** The module interface and engine (D-31), maturity ladder v1, and
+- [x] **BE-15.4** The module interface and engine (D-31), maturity ladder v1, and
   `POST /calculation-runs` (`calc:run`, an `Idempotency-Key` header,
   `CALCULATIONS_ENABLED`).
   - **Module.** Modules live in `app/calculations/modules/`. A module is a pure function over
@@ -1832,7 +1833,7 @@ PROVISIONAL). Governed change comes in Phase 16.
     - an `Idempotency-Key` replay returns the original run;
     - no float anywhere in `app/calculations/` (source grep, as BE-11.2);
     - `CALCULATIONS_ENABLED=false` gives 409 and writes nothing.
-- [ ] **BE-15.5** Reads:
+- [x] **BE-15.5** Reads:
   - `GET /calculation-modules`;
   - `GET /calculation-runs` (paginated, filter by module and status);
   - `GET /calculation-runs/{run_id}`: the manifest with every pinned id and version;
@@ -1848,7 +1849,7 @@ PROVISIONAL). Governed change comes in Phase 16.
       contributions, and that each contribution resolves to a `source_record` of a member
       import;
     - contributions are masked for `risk_analyst` and aggregates are clear (D-33).
-- [ ] **FE-15.1** Calculations workspace (`/calculations`, gated on `calc:read`;
+- [x] **FE-15.1** Calculations workspace (`/calculations`, gated on `calc:read`;
   `NEXT_PUBLIC_CALCULATIONS_UI=off` restores the placeholder):
   - a run list;
   - a "New run" panel (gated on `calc:run`). It picks one projected import per schema to
@@ -1862,7 +1863,7 @@ PROVISIONAL). Governed change comes in Phase 16.
     - `approver` has no New-run button and gets a backend 403 on a direct POST;
     - vitest covers the panel's state machine, including the 409 refusal toasts with the
       correlation ID.
-- [ ] **FE-15.2** Run detail:
+- [x] **FE-15.2** Run detail:
   - a manifest panel with every pinned id, version and hash;
   - a warnings table;
   - a maturity ladder table per currency (inflows, outflows, net and cumulative gap);

@@ -1,5 +1,135 @@
 """calculations.constants
 
-Module constants and lifecycle enums (D-06).
-Empty until a delivery-plan task fills it.
+Enums, transition table and constants of dataset snapshots and calculation runs (D-06, D-30,
+D-31, D-33). Every enum column is CHECK-constrained in the database (migration 0018, which
+holds frozen copies kept equal by test_calculations).
 """
+
+from enum import StrEnum
+
+from app.governance.constants import ClassificationCode
+
+
+class CalculationRunStatus(StrEnum):
+    """Data Model §9 `calculation_run.status` (D-06, D-31 §3). Runs are synchronous in the
+    MVP, so QUEUED and CANCELLED are reserved for WS4."""
+
+    QUEUED = "QUEUED"
+    RUNNING = "RUNNING"
+    SUCCEEDED = "SUCCEEDED"
+    SUCCEEDED_WITH_WARNINGS = "SUCCEEDED_WITH_WARNINGS"
+    FAILED = "FAILED"  # a post-check failed (or the engine did): never a silent success
+    CANCELLED = "CANCELLED"
+    BLOCKED = "BLOCKED"  # the input contract was not met
+
+
+TERMINAL_STATUSES = frozenset(
+    {
+        CalculationRunStatus.SUCCEEDED,
+        CalculationRunStatus.SUCCEEDED_WITH_WARNINGS,
+        CalculationRunStatus.FAILED,
+        CalculationRunStatus.CANCELLED,
+        CalculationRunStatus.BLOCKED,
+    }
+)
+# D-06 transition table (D-31 §5), mirrored by the DB trigger: a run is written RUNNING and
+# moves once, to one terminal status; nothing moves after that.
+RUN_TRANSITIONS: dict[CalculationRunStatus, frozenset[CalculationRunStatus]] = {
+    CalculationRunStatus.QUEUED: frozenset(),
+    CalculationRunStatus.RUNNING: TERMINAL_STATUSES,
+    **{s: frozenset() for s in TERMINAL_STATUSES},
+}
+
+
+class WarningSeverity(StrEnum):
+    INFO = "INFO"
+    WARNING = "WARNING"
+    ERROR = "ERROR"
+
+
+class CalculationWarningCode(StrEnum):
+    """`calculation_warning.code`. Messages and details are value-free (codes, counts, ids).
+
+    - Exclusions (WARNING): the input is in scope but not used, never silently.
+    - BLOCKED (ERROR): the input contract or the pinned configuration was not met.
+    - FAILED (ERROR): a post-check or the engine failed.
+    """
+
+    INSTRUMENT_NOT_IN_SNAPSHOT = "INSTRUMENT_NOT_IN_SNAPSHOT"
+    UNMAPPED_INSTRUMENT_TYPE = "UNMAPPED_INSTRUMENT_TYPE"
+    PAST_DUE_EXCLUDED = "PAST_DUE_EXCLUDED"
+    PAST_DUE_IN_FIRST_BUCKET = "PAST_DUE_IN_FIRST_BUCKET"
+    OUTSIDE_BUCKETS = "OUTSIDE_BUCKETS"
+    MISSING_VALUE = "MISSING_VALUE"
+    NEGATIVE_AMOUNT = "NEGATIVE_AMOUNT"
+    UNKNOWN_ORIGIN = "UNKNOWN_ORIGIN"
+    INPUT_SCHEMA_MISSING = "INPUT_SCHEMA_MISSING"
+    PARAMETERS_INVALID = "PARAMETERS_INVALID"
+    BUCKET_DEFINITIONS_MISMATCH = "BUCKET_DEFINITIONS_MISMATCH"
+    AMBIGUOUS_INSTRUMENT_KEY = "AMBIGUOUS_INSTRUMENT_KEY"
+    POST_CHECK_FAILED = "POST_CHECK_FAILED"
+    ENGINE_ERROR = "ENGINE_ERROR"
+
+
+class PostCheck(StrEnum):
+    """The engine's post-run checks (D-31 §3, Arch §6.2 step 5)."""
+
+    COVERAGE = "COVERAGE"  # every in-scope input is used once or excluded with a warning
+    BUCKET_DEFINED = "BUCKET_DEFINED"  # every contribution lands in a pinned bucket
+    BUCKET_TOTALS = "BUCKET_TOTALS"  # every aggregate equals the sum of its contributions
+    CUMULATIVE_GAP = "CUMULATIVE_GAP"  # the cumulative gap is the running sum of net gaps
+
+
+class InputRefType(StrEnum):
+    """`calculation_input_ref.ref_type`: one row per pin of a run (D-31 §4)."""
+
+    DATASET_SNAPSHOT = "DATASET_SNAPSHOT"
+    IMPORT_MANIFEST = "IMPORT_MANIFEST"
+    DOMAIN_PROJECTION = "DOMAIN_PROJECTION"
+    SCHEMA_VERSION = "SCHEMA_VERSION"
+    MAPPING_VERSION = "MAPPING_VERSION"
+    MODULE_VERSION = "MODULE_VERSION"
+    ENGINE = "ENGINE"
+    RULE_SET = "RULE_SET"
+    RULE_VERSION = "RULE_VERSION"
+    ASSUMPTION_SET = "ASSUMPTION_SET"
+
+
+class IntermediateCode(StrEnum):
+    """`intermediate_value.code`."""
+
+    # One bucketed cash flow: its amount, in its currency, counted in one bucket's inflows or
+    # outflows (D-31 §6: it references the cash-flow event, and so its lineage).
+    CASHFLOW_CONTRIBUTION = "CASHFLOW_CONTRIBUTION"
+
+
+class SnapshotRefusal(StrEnum):
+    """409 refusals of POST /dataset-snapshots, each audited DENIED (D-30 §3)."""
+
+    CALCULATIONS_DISABLED = "calculations_disabled"
+    NOT_PROJECTED = "not_projected"
+    DUPLICATE_SCHEMA = "duplicate_schema"
+    RECONCILIATION_BROKEN = "reconciliation_broken"
+    AMBIGUOUS_BUSINESS_KEY = "ambiguous_business_key"
+
+
+class RunRefusal(StrEnum):
+    """409 refusals of POST /calculation-runs, each audited DENIED (D-31 §3, §7)."""
+
+    CALCULATIONS_DISABLED = "calculations_disabled"
+    MODULE_NOT_AVAILABLE = "module_not_available"
+    IDEMPOTENCY_CONFLICT = "idempotency_conflict"
+
+
+# Audit actions (D-10, D-24 §4): the create and each of its refusals share one action.
+CREATE_SNAPSHOT = "dataset_snapshot.create"
+CREATE_RUN = "calculation_run.create"
+FINISH_RUN = "calculation_run.finish"
+
+# The calculation engine's version, pinned by every run (D-31 §4). A change to the engine's
+# pinning, post-checks or hashing is a new engine version.
+ENGINE_VERSION = "1"
+MANIFEST_VERSION = 1
+# D-33 option A: aggregates (bucket and currency totals, gaps) are internal; per-input
+# contributions carry the most sensitive classification among the fields they read.
+AGGREGATE_CLASSIFICATION = ClassificationCode.INTERNAL.value

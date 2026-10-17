@@ -49,3 +49,11 @@ export const DRIFT_UI_ENABLED = process.env.NEXT_PUBLIC_DRIFT_UI !== 'off'
  * which refuses new projections (409); projected rows stay readable either way.
  */
 export const DOMAIN_UI_ENABLED = process.env.NEXT_PUBLIC_DOMAIN_UI !== 'off'
+
+/**
+ * NEXT_PUBLIC_CALCULATIONS_UI=off (FE-15.1/15.2): the Calculations nav entry and every
+ * /calculations route go back to the "planned" placeholder, restoring the Phase 14 UI exactly.
+ * The backend's own switch is CALCULATIONS_ENABLED, which refuses new snapshots and runs (409
+ * `calculations_disabled`); existing runs stay readable either way.
+ */
+export const CALCULATIONS_UI_ENABLED = process.env.NEXT_PUBLIC_CALCULATIONS_UI !== 'off'

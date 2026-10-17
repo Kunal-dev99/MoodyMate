@@ -38,6 +38,176 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/calculation-modules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Calculation Modules
+         * @description The calculation modules of the caller's tenant, AVAILABLE and PLANNED, with exactly
+         *     the versions a run submitted now would pin. Every seeded module is an illustrative
+         *     prototype: not a regulatory calculation, no vendor parity claimed (D-35).
+         */
+        get: operations["listCalculationModules"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/calculation-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Calculation Runs
+         * @description The caller's tenant's runs, newest first.
+         */
+        get: operations["listCalculationRuns"];
+        put?: never;
+        /**
+         * Create Calculation Run
+         * @description Run a module on a dataset snapshot for a reporting date, synchronously (D-31). The
+         *     engine pins the ACTIVE rule versions (as a content-addressed rule set), the baseline
+         *     assumption set, the module and engine versions and the snapshot's members, writes the
+         *     run RUNNING with its manifest, runs the module and the post-checks, and ends it
+         *     SUCCEEDED, SUCCEEDED_WITH_WARNINGS, FAILED (a post-check failed) or BLOCKED (the input
+         *     contract was not met). No AI is involved. Refusals: 404 `not_found` (snapshot), 409
+         *     `module_not_available` (absent, PLANNED, not implemented, or a rule without an ACTIVE
+         *     version), 409 `calculations_disabled`, 409 `idempotency_conflict`; each audited DENIED. A
+         *     replay whose run is still RUNNING after CALC_RUN_STALE_SECONDS ends it FAILED
+         *     (ENGINE_ERROR) and returns it.
+         */
+        post: operations["createCalculationRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/calculation-runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Calculation Run
+         * @description One run: its manifest with every pinned id and version, its input refs, warnings and
+         *     outcome counts. 404 alike for an absent and a foreign id (D-04).
+         */
+        get: operations["getCalculationRun"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/calculation-runs/{run_id}/maturity-ladder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Maturity Ladder
+         * @description The run's maturity ladder: per currency and bucket, inflows, outflows, net gap and
+         *     cumulative gap, with the contractual and behavioural parts (D-35). Aggregates are
+         *     `internal` (D-33). 404 `maturity_ladder_not_found` for a run of another module.
+         */
+        get: operations["getMaturityLadder"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/calculation-runs/{run_id}/results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Calculation Run Results
+         * @description The run's intermediate values (one contribution per bucketed cash flow), each with its
+         *     lineage: cash-flow event -> canonical record -> import and source row (D-31 §6). Filter
+         *     by currency and bucket to drill down from a ladder row. The value is masked unless the
+         *     caller is cleared for the most sensitive field it reads (D-33).
+         */
+        get: operations["getCalculationRunResults"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dataset-snapshots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Dataset Snapshots
+         * @description The caller's tenant's snapshots, newest first.
+         */
+        get: operations["listDatasetSnapshots"];
+        put?: never;
+        /**
+         * Create Dataset Snapshot
+         * @description Pin projected imports as one immutable dataset snapshot (D-30), at most one per schema
+         *     code. QUARANTINED imports are allowed; their held counts travel into run manifests.
+         *     Refusals (409, each audited DENIED): `not_projected`, `duplicate_schema`,
+         *     `reconciliation_broken` (a D-28 BROKEN member), `ambiguous_business_key` (a business key
+         *     with two versions in the snapshot) and `calculations_disabled`; 404 `not_found` alike for
+         *     an absent and a foreign import.
+         */
+        post: operations["createDatasetSnapshot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dataset-snapshots/{snapshot_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Dataset Snapshot
+         * @description One snapshot and its members; 404 alike for an absent and a foreign id (D-04).
+         */
+        get: operations["getDatasetSnapshot"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/dev/personas": {
         parameters: {
             query?: never;
@@ -120,7 +290,8 @@ export interface paths {
         };
         /**
          * List Imports
-         * @description Newest first; filter by source and status.
+         * @description Newest first; filter by source, status, schema code and projection (the Phase 15
+         *     new-run panel lists projected imports per schema with one call).
          */
         get: operations["listImports"];
         put?: never;
@@ -819,6 +990,45 @@ export interface components {
             /** Size Bytes */
             size_bytes: number;
         };
+        /**
+         * AssumptionSetPin
+         * @description The ACTIVE version of the baseline assumption set (D-32 §6): every run pins one.
+         */
+        AssumptionSetPin: {
+            /**
+             * Assumption Set Id
+             * Format: uuid
+             */
+            assumption_set_id: string;
+            /**
+             * Assumptions
+             * @description Empty in v1 (no module reads one yet).
+             */
+            assumptions: {
+                [key: string]: unknown;
+            };
+            /** Code */
+            code: string;
+            /** Content Sha256 */
+            content_sha256: string;
+            /** Effective From */
+            effective_from: string | null;
+            /** Effective To */
+            effective_to: string | null;
+            /** Illustrative */
+            illustrative: boolean;
+            /** Name */
+            name: string;
+            /** Owner */
+            owner: string;
+            /** Provenance */
+            provenance: string;
+            /** Provisional */
+            provisional: boolean;
+            status: components["schemas"]["RuleVersionStatus"];
+            /** Version */
+            version: number;
+        };
         /** AttributeOut */
         AttributeOut: {
             /**
@@ -917,6 +1127,44 @@ export interface components {
             /** Sheet Name */
             sheet_name: string | null;
         };
+        /** BucketOut */
+        BucketOut: {
+            /**
+             * Bucket Definition Id
+             * Format: uuid
+             */
+            bucket_definition_id: string;
+            /** Code */
+            code: string;
+            /** Label */
+            label: string;
+            /** Lower Exclusive Days */
+            lower_exclusive_days: number;
+            /** Sequence */
+            sequence: number;
+            /**
+             * Upper Inclusive Days
+             * @description None: the open last bucket.
+             */
+            upper_inclusive_days: number | null;
+        };
+        /**
+         * CalculationRunStatus
+         * @description Data Model §9 `calculation_run.status` (D-06, D-31 §3). Runs are synchronous in the
+         *     MVP, so QUEUED and CANCELLED are reserved for WS4.
+         * @enum {string}
+         */
+        CalculationRunStatus: "QUEUED" | "RUNNING" | "SUCCEEDED" | "SUCCEEDED_WITH_WARNINGS" | "FAILED" | "CANCELLED" | "BLOCKED";
+        /**
+         * CalculationWarningCode
+         * @description `calculation_warning.code`. Messages and details are value-free (codes, counts, ids).
+         *
+         *     - Exclusions (WARNING): the input is in scope but not used, never silently.
+         *     - BLOCKED (ERROR): the input contract or the pinned configuration was not met.
+         *     - FAILED (ERROR): a post-check or the engine failed.
+         * @enum {string}
+         */
+        CalculationWarningCode: "INSTRUMENT_NOT_IN_SNAPSHOT" | "UNMAPPED_INSTRUMENT_TYPE" | "PAST_DUE_EXCLUDED" | "PAST_DUE_IN_FIRST_BUCKET" | "OUTSIDE_BUCKETS" | "MISSING_VALUE" | "NEGATIVE_AMOUNT" | "UNKNOWN_ORIGIN" | "INPUT_SCHEMA_MISSING" | "PARAMETERS_INVALID" | "BUCKET_DEFINITIONS_MISMATCH" | "AMBIGUOUS_INSTRUMENT_KEY" | "POST_CHECK_FAILED" | "ENGINE_ERROR";
         /** CashFlowOut */
         CashFlowOut: {
             /**
@@ -957,6 +1205,18 @@ export interface components {
             /** Source Ordinal */
             source_ordinal: number;
         };
+        /**
+         * CashflowDirection
+         * @description The values of the `cashflow_direction` ENUM_MAP (D-35 §1).
+         * @enum {string}
+         */
+        CashflowDirection: "INFLOW" | "OUTFLOW";
+        /**
+         * CashflowOrigin
+         * @description `cashflow_event` v1 `origin` (the seeded schema's description).
+         * @enum {string}
+         */
+        CashflowOrigin: "CONTRACTUAL" | "BEHAVIOURAL";
         /**
          * ColumnPolicy
          * @description D-23 `mapping_rule.column_policy`: a source column is mapped to a target field, or
@@ -1183,6 +1443,44 @@ export interface components {
          * @enum {string}
          */
         ContractStatus: "PROVISIONAL" | "IN_REVIEW" | "APPROVED" | "SUPERSEDED";
+        /**
+         * ContributionLineage
+         * @description cash-flow event -> canonical record -> source row -> import (D-31 §6).
+         */
+        ContributionLineage: {
+            /**
+             * Canonical Record Id
+             * Format: uuid
+             */
+            canonical_record_id: string;
+            /** Cashflow Business Key */
+            cashflow_business_key: string | components["schemas"]["MaskedValue"];
+            /**
+             * Cashflow Event Id
+             * Format: uuid
+             */
+            cashflow_event_id: string;
+            /** Due Date */
+            due_date: string | components["schemas"]["MaskedValue"];
+            /**
+             * Import Id
+             * Format: uuid
+             */
+            import_id: string;
+            /** Instrument Business Key */
+            instrument_business_key: string | components["schemas"]["MaskedValue"] | null;
+            /** Instrument Id */
+            instrument_id: string | null;
+            /** Instrument Version Id */
+            instrument_version_id: string | null;
+            /** Source Ordinal */
+            source_ordinal: number;
+            /**
+             * Source Record Id
+             * Format: uuid
+             */
+            source_record_id: string;
+        };
         /** CopyTransform */
         CopyTransform: {
             /**
@@ -1508,6 +1806,13 @@ export interface components {
              */
             via: string[];
         };
+        /**
+         * ImplementationStatus
+         * @description `module_version.implementation_status`: only AVAILABLE versions can run (D-31 §1).
+         *     PLANNED versions are declared extension points (Phase 18) and never run.
+         * @enum {string}
+         */
+        ImplementationStatus: "AVAILABLE" | "PLANNED";
         /** ImportDetail */
         ImportDetail: {
             artifact: components["schemas"]["ArtifactOut"];
@@ -1843,6 +2148,30 @@ export interface components {
              */
             updated_at: string;
         };
+        /** InputRefOut */
+        InputRefOut: {
+            /**
+             * Label
+             * @description What the pin is, e.g. `instrument v1` or an engine version.
+             */
+            label: string;
+            /** Ref Id */
+            ref_id: string | null;
+            ref_type: components["schemas"]["InputRefType"];
+            /** Sequence */
+            sequence: number;
+            /**
+             * Sha256
+             * @description The pinned content's hash, where it has one.
+             */
+            sha256: string | null;
+        };
+        /**
+         * InputRefType
+         * @description `calculation_input_ref.ref_type`: one row per pin of a run (D-31 §4).
+         * @enum {string}
+         */
+        InputRefType: "DATASET_SNAPSHOT" | "IMPORT_MANIFEST" | "DOMAIN_PROJECTION" | "SCHEMA_VERSION" | "MAPPING_VERSION" | "MODULE_VERSION" | "ENGINE" | "RULE_SET" | "RULE_VERSION" | "ASSUMPTION_SET";
         /** InstrumentDetail */
         InstrumentDetail: {
             /** Business Key */
@@ -2036,6 +2365,12 @@ export interface components {
             version_id: string;
         };
         /**
+         * IntermediateCode
+         * @description `intermediate_value.code`.
+         * @enum {string}
+         */
+        IntermediateCode: "CASHFLOW_CONTRIBUTION";
+        /**
          * IssueCode
          * @description Dry-run issue codes. An issue names rules, fields and columns, never a value.
          * @enum {string}
@@ -2127,6 +2462,59 @@ export interface components {
          * @enum {string}
          */
         IssueSeverity: "BLOCKER" | "ERROR" | "WARNING";
+        /** LadderCurrency */
+        LadderCurrency: {
+            /** Currency */
+            currency: string;
+            /**
+             * Rows
+             * @description Every bucket, in bucket order.
+             */
+            rows: components["schemas"]["LadderRow"][];
+        };
+        /** LadderRow */
+        LadderRow: {
+            /** Bucket Code */
+            bucket_code: string;
+            /** Bucket Label */
+            bucket_label: string;
+            /** Bucket Sequence */
+            bucket_sequence: number;
+            /**
+             * Classification
+             * @description `internal`: an aggregate (D-33). A figure built from fewer than `min_aggregate_count` contributions (but at least one), and every figure derived from it, takes the contributions' classification and is masked for a role not cleared for it.
+             */
+            classification: string;
+            /** Contribution Count */
+            contribution_count: number;
+            /**
+             * Cumulative Gap
+             * @description Running sum of net_gap over the buckets so far.
+             */
+            cumulative_gap: string | components["schemas"]["MaskedValue"];
+            /** Inflows */
+            inflows: string | components["schemas"]["MaskedValue"];
+            /** Inflows Behavioural */
+            inflows_behavioural: string | components["schemas"]["MaskedValue"];
+            /** Inflows Contractual */
+            inflows_contractual: string | components["schemas"]["MaskedValue"];
+            /**
+             * Liquidity Gap Result Id
+             * Format: uuid
+             */
+            liquidity_gap_result_id: string;
+            /**
+             * Net Gap
+             * @description inflows - outflows.
+             */
+            net_gap: string | components["schemas"]["MaskedValue"];
+            /** Outflows */
+            outflows: string | components["schemas"]["MaskedValue"];
+            /** Outflows Behavioural */
+            outflows_behavioural: string | components["schemas"]["MaskedValue"];
+            /** Outflows Contractual */
+            outflows_contractual: string | components["schemas"]["MaskedValue"];
+        };
         /** LowerTransform */
         LowerTransform: {
             /**
@@ -2147,6 +2535,93 @@ export interface components {
             sha256: string;
             /** Size Bytes */
             size_bytes: number;
+        };
+        /** ManifestAssumptionSet */
+        ManifestAssumptionSet: {
+            /**
+             * Assumption Set Id
+             * Format: uuid
+             */
+            assumption_set_id: string;
+            /** Code */
+            code: string;
+            /** Content Sha256 */
+            content_sha256: string;
+            /** Version */
+            version: number;
+        };
+        /** ManifestLabels */
+        ManifestLabels: {
+            /** Illustrative */
+            illustrative: boolean;
+            /** Provisional */
+            provisional: boolean;
+            /** Statement */
+            statement: string;
+        };
+        /** ManifestMember */
+        ManifestMember: {
+            /** Accepted Count */
+            accepted_count: number;
+            /**
+             * Import Id
+             * Format: uuid
+             */
+            import_id: string;
+            /**
+             * Import Manifest Id
+             * Format: uuid
+             */
+            import_manifest_id: string;
+            /** Manifest Sha256 */
+            manifest_sha256: string;
+            /**
+             * Mapping Version Id
+             * Format: uuid
+             */
+            mapping_version_id: string;
+            /**
+             * Projection Id
+             * Format: uuid
+             */
+            projection_id: string;
+            /** Projector Version */
+            projector_version: number;
+            /** Quarantined Count */
+            quarantined_count: number;
+            reconciliation_outcome: components["schemas"]["ReconciliationOutcome"];
+            /** Rejected Count */
+            rejected_count: number;
+            schema_code: components["schemas"]["DomainSchemaCode"];
+            /** Schema Version */
+            schema_version: number | null;
+            /**
+             * Schema Version Id
+             * Format: uuid
+             */
+            schema_version_id: string;
+        };
+        /** ManifestModule */
+        ManifestModule: {
+            /** Code */
+            code: string;
+            /**
+             * Engine Version
+             * @description The engine version the module version declares.
+             */
+            engine_version: string;
+            /**
+             * Module Id
+             * Format: uuid
+             */
+            module_id: string;
+            /**
+             * Module Version Id
+             * Format: uuid
+             */
+            module_version_id: string;
+            /** Version */
+            version: number;
         };
         /** ManifestProfile */
         ManifestProfile: {
@@ -2182,6 +2657,62 @@ export interface components {
              * @description WARNING-severity issues (file- and row-level).
              */
             warnings: number;
+        };
+        /** ManifestRuleSet */
+        ManifestRuleSet: {
+            /**
+             * Content Sha256
+             * @description SHA-256 of the sorted rule version ids (D-32 §4).
+             */
+            content_sha256: string;
+            /**
+             * Members
+             * @description By rule code.
+             */
+            members: components["schemas"]["ManifestRuleVersion"][];
+            /**
+             * Rule Set Id
+             * Format: uuid
+             */
+            rule_set_id: string;
+        };
+        /** ManifestRuleVersion */
+        ManifestRuleVersion: {
+            /** Parameters */
+            parameters: {
+                [key: string]: unknown;
+            };
+            /** Parameters Sha256 */
+            parameters_sha256: string;
+            /** Rule Code */
+            rule_code: string;
+            /**
+             * Rule Id
+             * Format: uuid
+             */
+            rule_id: string;
+            /**
+             * Rule Version Id
+             * Format: uuid
+             */
+            rule_version_id: string;
+            /** Version */
+            version: number;
+        };
+        /** ManifestSnapshot */
+        ManifestSnapshot: {
+            /** Content Sha256 */
+            content_sha256: string;
+            /**
+             * Dataset Snapshot Id
+             * Format: uuid
+             */
+            dataset_snapshot_id: string;
+            /**
+             * Members
+             * @description By schema code.
+             */
+            members: components["schemas"]["ManifestMember"][];
         };
         /** MapValuesParams */
         MapValuesParams: {
@@ -2490,6 +3021,42 @@ export interface components {
              */
             masked: true;
         };
+        /** MaturityLadderOut */
+        MaturityLadderOut: {
+            /**
+             * Bucket Rule Version Id
+             * Format: uuid
+             */
+            bucket_rule_version_id: string;
+            /** Buckets */
+            buckets: components["schemas"]["BucketOut"][];
+            /**
+             * Currencies
+             * @description Per currency, no FX (D-35). Empty unless the run SUCCEEDED (with or without warnings).
+             */
+            currencies: components["schemas"]["LadderCurrency"][];
+            /** Illustrative */
+            illustrative: boolean;
+            /**
+             * Min Aggregate Count
+             * @description D-33 minimum aggregation (CALC_MIN_AGGREGATE_COUNT, PROVISIONAL): a figure from 1 to this many minus one contributions is masked like them.
+             */
+            min_aggregate_count: number;
+            module: components["schemas"]["RunModuleRef"];
+            /**
+             * Reporting Date
+             * Format: date
+             */
+            reporting_date: string;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Statement */
+            statement: string;
+            status: components["schemas"]["CalculationRunStatus"];
+        };
         /** Me */
         Me: {
             /** Display Name */
@@ -2508,6 +3075,140 @@ export interface components {
              * Format: uuid
              */
             user_id: string;
+        };
+        /**
+         * ModuleInputContract
+         * @description What a module reads (D-31 §1).
+         */
+        ModuleInputContract: {
+            /**
+             * Assumption Keys
+             * @description The assumption keys it reads (none in v1).
+             */
+            assumption_keys: string[];
+            /**
+             * Parameters
+             * @description Run parameters, e.g. `reporting_date`.
+             */
+            parameters: string[];
+            /**
+             * Rules
+             * @description The rule definition codes the module reads.
+             */
+            rules: string[];
+            /** Schemas */
+            schemas: components["schemas"]["SchemaRequirement"][];
+        };
+        /**
+         * ModuleOutputContract
+         * @description What a module writes (D-31 §1).
+         */
+        ModuleOutputContract: {
+            /**
+             * Intermediates
+             * @description Intermediate value codes.
+             */
+            intermediates: string[];
+            /**
+             * Results
+             * @description Result tables.
+             */
+            results: string[];
+            /**
+             * Warning Codes
+             * @description Warning codes it may raise.
+             */
+            warning_codes: string[];
+        };
+        /** ModulePage */
+        ModulePage: {
+            /**
+             * Items
+             * @description By module code, then version.
+             */
+            items: components["schemas"]["ModuleVersionOut"][];
+            /** Total */
+            total: number;
+        };
+        /** ModuleRuleOut */
+        ModuleRuleOut: {
+            /** @description None: the rule has no ACTIVE version, so the module cannot run. */
+            active_version: components["schemas"]["RuleVersionPin"] | null;
+            category: components["schemas"]["RuleCategory"];
+            /** Code */
+            code: string;
+            /** Description */
+            description: string | null;
+            /** Name */
+            name: string;
+            /** Owner */
+            owner: string;
+            /**
+             * Parameter Schema
+             * @description A closed parameter kind (D-32 §1).
+             */
+            parameter_schema: {
+                [key: string]: unknown;
+            };
+            /**
+             * Rule Id
+             * Format: uuid
+             */
+            rule_id: string;
+        };
+        /** ModuleVersionOut */
+        ModuleVersionOut: {
+            assumption_set: components["schemas"]["AssumptionSetPin"] | null;
+            /** Code */
+            code: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Description */
+            description: string | null;
+            /**
+             * Engine Version
+             * @description The engine a run of this version pins.
+             */
+            engine_version: string;
+            /** Illustrative */
+            illustrative: boolean;
+            implementation_status: components["schemas"]["ImplementationStatus"];
+            input_contract: components["schemas"]["ModuleInputContract"];
+            /**
+             * Module Id
+             * Format: uuid
+             */
+            module_id: string;
+            /**
+             * Module Version Id
+             * Format: uuid
+             */
+            module_version_id: string;
+            /** Name */
+            name: string;
+            output_contract: components["schemas"]["ModuleOutputContract"];
+            /** Provisional */
+            provisional: boolean;
+            /**
+             * Rules
+             * @description The rules the module reads, in contract order.
+             */
+            rules: components["schemas"]["ModuleRuleOut"][];
+            /**
+             * Runnable
+             * @description AVAILABLE, implemented in this release, every rule it reads has an ACTIVE version and a baseline assumption set is ACTIVE. Otherwise POST /calculation-runs answers 409 module_not_available.
+             */
+            runnable: boolean;
+            /**
+             * Statement
+             * @description The D-35 label: not regulatory, no vendor parity.
+             */
+            statement: string;
+            /** Version */
+            version: number;
         };
         /** MyPermissions */
         MyPermissions: {
@@ -2599,6 +3300,18 @@ export interface components {
          * @enum {string}
          */
         Permission: "schema:read" | "schema:propose" | "schema:approve" | "audit:read" | "admin:read" | "source:read" | "source:manage" | "import:read" | "import:write" | "mapping:read" | "mapping:propose" | "mapping:approve" | "quarantine:read" | "quality:review" | "domain:read" | "domain:project" | "rule:read" | "rule:propose" | "rule:approve" | "calc:read" | "calc:run";
+        /**
+         * PostCheck
+         * @description The engine's post-run checks (D-31 §3, Arch §6.2 step 5).
+         * @enum {string}
+         */
+        PostCheck: "COVERAGE" | "BUCKET_DEFINED" | "BUCKET_TOTALS" | "CUMULATIVE_GAP";
+        /** PostCheckOut */
+        PostCheckOut: {
+            check: components["schemas"]["PostCheck"];
+            /** Passed */
+            passed: boolean;
+        };
         /**
          * ProfileIn
          * @description A new source's profile. Always provisional on create (D2): only the client's approval,
@@ -3127,6 +3840,75 @@ export interface components {
          * @enum {string}
          */
         ReconciliationOutcome: "MATCHED" | "REVIEW_REQUIRED" | "BROKEN";
+        /** ResultItem */
+        ResultItem: {
+            /** Bucket Code */
+            bucket_code: string;
+            /** Bucket Sequence */
+            bucket_sequence: number;
+            /**
+             * Classification
+             * @description The most sensitive classification it reads.
+             */
+            classification: string;
+            code: components["schemas"]["IntermediateCode"];
+            /** Currency */
+            currency: string;
+            /** Days After Reporting Date */
+            days_after_reporting_date: number | components["schemas"]["MaskedValue"];
+            direction: components["schemas"]["CashflowDirection"];
+            /**
+             * Intermediate Value Id
+             * Format: uuid
+             */
+            intermediate_value_id: string;
+            lineage: components["schemas"]["ContributionLineage"];
+            /**
+             * Liquidity Gap Result Id
+             * Format: uuid
+             */
+            liquidity_gap_result_id: string;
+            origin: components["schemas"]["CashflowOrigin"];
+            /**
+             * Rule Version Ids
+             * @description The rule versions that placed it.
+             */
+            rule_version_ids: string[];
+            /** Sequence */
+            sequence: number;
+            /**
+             * Unit
+             * @description The ISO 4217 currency of the value.
+             */
+            unit: string;
+            /**
+             * Value
+             * @description Exact decimal text in `unit`, or masked (D-33).
+             */
+            value: string | components["schemas"]["MaskedValue"];
+        };
+        /** ResultPage */
+        ResultPage: {
+            /**
+             * Items
+             * @description In run order.
+             */
+            items: components["schemas"]["ResultItem"][];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Statement */
+            statement: string;
+            status: components["schemas"]["CalculationRunStatus"];
+            /** Total */
+            total: number;
+        };
         /**
          * RetentionState
          * @description `import_artifact.retention_state`. D-20 §4 (PROVISIONAL): artifacts are kept
@@ -3139,6 +3921,12 @@ export interface components {
          * @enum {string}
          */
         Role: "platform_admin" | "data_steward" | "risk_analyst" | "approver" | "auditor";
+        /**
+         * RuleCategory
+         * @description What a rule decides (`rule_definition.category`).
+         * @enum {string}
+         */
+        RuleCategory: "BUCKETING" | "CLASSIFICATION" | "TREATMENT" | "FACTOR";
         /**
          * RuleIn
          * @description One rule. MAP: `source_column` (none for CONSTANT) → `target_field` through
@@ -3216,6 +4004,298 @@ export interface components {
             target_field: string | null;
             target_type: components["schemas"]["FieldType"] | null;
             transform: components["schemas"]["TransformCode"];
+        };
+        /**
+         * RuleVersionPin
+         * @description The ACTIVE version of a rule: what a run submitted now pins.
+         */
+        RuleVersionPin: {
+            /** Approved At */
+            approved_at: string | null;
+            /**
+             * Approved By
+             * @description The approver, or the seed tag (D-32 §7).
+             */
+            approved_by: string | null;
+            /** Authored By */
+            authored_by: string;
+            /** Effective From */
+            effective_from: string | null;
+            /** Illustrative */
+            illustrative: boolean;
+            /**
+             * Parameters
+             * @description Typed by the definition's parameter schema.
+             */
+            parameters: {
+                [key: string]: unknown;
+            };
+            /** Parameters Sha256 */
+            parameters_sha256: string;
+            /** Provisional */
+            provisional: boolean;
+            /**
+             * Rule Version Id
+             * Format: uuid
+             */
+            rule_version_id: string;
+            status: components["schemas"]["RuleVersionStatus"];
+            /** Version */
+            version: number;
+        };
+        /**
+         * RuleVersionStatus
+         * @description Data Model §9 `rule_version.status` plus REJECTED (D-06, D-32 §2). Also the status set
+         *     of `assumption_set` versions.
+         * @enum {string}
+         */
+        RuleVersionStatus: "DRAFT" | "IN_REVIEW" | "APPROVED" | "ACTIVE" | "SUPERSEDED" | "RETIRED" | "REJECTED";
+        /** RunCreate */
+        RunCreate: {
+            /**
+             * Dataset Snapshot Id
+             * Format: uuid
+             */
+            dataset_snapshot_id: string;
+            /**
+             * Module Version Id
+             * Format: uuid
+             * @description An AVAILABLE module version from GET /calculation-modules.
+             */
+            module_version_id: string;
+            /**
+             * Reporting Date
+             * Format: date
+             * @description Buckets count calendar days after this date.
+             */
+            reporting_date: string;
+        };
+        /** RunDetail */
+        RunDetail: {
+            /**
+             * Assumption Set Id
+             * Format: uuid
+             */
+            assumption_set_id: string;
+            /** Correlation Id */
+            correlation_id: string | null;
+            /** Created By */
+            created_by: string;
+            /**
+             * Dataset Snapshot Id
+             * Format: uuid
+             */
+            dataset_snapshot_id: string;
+            /** Ended At */
+            ended_at: string | null;
+            /** Engine Version */
+            engine_version: string;
+            /**
+             * Illustrative
+             * @description Always true in Feature 03 (D-35).
+             */
+            illustrative: boolean;
+            /**
+             * Input Refs
+             * @description One row per pin (D-31 §4).
+             */
+            input_refs: components["schemas"]["InputRefOut"][];
+            manifest: components["schemas"]["RunManifest"];
+            /**
+             * Manifest Sha256
+             * @description SHA-256 of the canonical JSON of `manifest`: the pinned content only, never the run id, actor or times, so a run on the same pins has the same hash (D-31 §4).
+             */
+            manifest_sha256: string;
+            module: components["schemas"]["RunModuleRef"];
+            /** @description Set when the run ends. */
+            outcome: components["schemas"]["RunOutcome"] | null;
+            /**
+             * Reporting Date
+             * Format: date
+             */
+            reporting_date: string;
+            /**
+             * Rerun Of Run Id
+             * @description Reserved for re-runs (BE-16.3).
+             */
+            rerun_of_run_id: string | null;
+            /**
+             * Result Sha256
+             * @description SHA-256 of the canonical serialisation of every output (ladder rows, contributions, warnings); set when the run ends. Equal across runs on the same pins.
+             */
+            result_sha256: string | null;
+            /**
+             * Rule Set Id
+             * Format: uuid
+             */
+            rule_set_id: string;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /**
+             * Statement
+             * @description The D-35 label: not regulatory, no vendor parity.
+             */
+            statement: string;
+            status: components["schemas"]["CalculationRunStatus"];
+            /** Warning Count */
+            warning_count: number;
+            /** Warnings */
+            warnings: components["schemas"]["WarningOut"][];
+        };
+        /**
+         * RunManifest
+         * @description Every version a run pinned (D-31 §4), written once with the run. Statuses, times and
+         *     the actor are not part of it (they are on the run).
+         */
+        RunManifest: {
+            assumption_set: components["schemas"]["ManifestAssumptionSet"];
+            dataset_snapshot: components["schemas"]["ManifestSnapshot"];
+            /** Engine Version */
+            engine_version: string;
+            labels: components["schemas"]["ManifestLabels"];
+            /** Manifest Version */
+            manifest_version: number;
+            module: components["schemas"]["ManifestModule"];
+            /**
+             * Reporting Date
+             * Format: date
+             */
+            reporting_date: string;
+            rule_set: components["schemas"]["ManifestRuleSet"];
+        };
+        /** RunModuleRef */
+        RunModuleRef: {
+            /** Code */
+            code: string;
+            /**
+             * Module Id
+             * Format: uuid
+             */
+            module_id: string;
+            /**
+             * Module Version Id
+             * Format: uuid
+             */
+            module_version_id: string;
+            /** Name */
+            name: string;
+            /** Version */
+            version: number;
+        };
+        /**
+         * RunOutcome
+         * @description Value-free counts of a finished run.
+         */
+        RunOutcome: {
+            /** Bucketed */
+            bucketed: number;
+            /** Currencies */
+            currencies: string[];
+            /** Excluded */
+            excluded: number;
+            /**
+             * In Scope
+             * @description Cash flows in scope: every row of the cash-flow member.
+             */
+            in_scope: number;
+            /**
+             * Inputs
+             * @description Rows read per schema code.
+             */
+            inputs: {
+                [key: string]: number;
+            };
+            /** Post Checks */
+            post_checks: components["schemas"]["PostCheckOut"][];
+            /** Warnings By Code */
+            warnings_by_code: {
+                [key: string]: number;
+            };
+        };
+        /** RunPage */
+        RunPage: {
+            /**
+             * Items
+             * @description Newest first.
+             */
+            items: components["schemas"]["RunSummary"][];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /** Total */
+            total: number;
+        };
+        /** RunSummary */
+        RunSummary: {
+            /**
+             * Assumption Set Id
+             * Format: uuid
+             */
+            assumption_set_id: string;
+            /** Created By */
+            created_by: string;
+            /**
+             * Dataset Snapshot Id
+             * Format: uuid
+             */
+            dataset_snapshot_id: string;
+            /** Ended At */
+            ended_at: string | null;
+            /** Engine Version */
+            engine_version: string;
+            /**
+             * Illustrative
+             * @description Always true in Feature 03 (D-35).
+             */
+            illustrative: boolean;
+            /**
+             * Manifest Sha256
+             * @description SHA-256 of the canonical JSON of `manifest`: the pinned content only, never the run id, actor or times, so a run on the same pins has the same hash (D-31 §4).
+             */
+            manifest_sha256: string;
+            module: components["schemas"]["RunModuleRef"];
+            /**
+             * Reporting Date
+             * Format: date
+             */
+            reporting_date: string;
+            /**
+             * Rerun Of Run Id
+             * @description Reserved for re-runs (BE-16.3).
+             */
+            rerun_of_run_id: string | null;
+            /**
+             * Result Sha256
+             * @description SHA-256 of the canonical serialisation of every output (ladder rows, contributions, warnings); set when the run ends. Equal across runs on the same pins.
+             */
+            result_sha256: string | null;
+            /**
+             * Rule Set Id
+             * Format: uuid
+             */
+            rule_set_id: string;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            status: components["schemas"]["CalculationRunStatus"];
+            /** Warning Count */
+            warning_count: number;
         };
         /** ScaleParams */
         ScaleParams: {
@@ -3340,6 +4420,24 @@ export interface components {
             /** Total */
             total: number;
         };
+        /** SchemaRequirement */
+        SchemaRequirement: {
+            /**
+             * Fields
+             * @description The schema fields the module reads.
+             */
+            fields: string[];
+            /**
+             * Required
+             * @description Missing from the snapshot: the run is BLOCKED.
+             */
+            required: boolean;
+            /**
+             * Schema Code
+             * @description A canonical schema a snapshot member provides.
+             */
+            schema_code: string;
+        };
         /** SchemaSummary */
         SchemaSummary: {
             /** Code */
@@ -3420,6 +4518,111 @@ export interface components {
          * @enum {string}
          */
         SchemaVersionStatus: "DRAFT" | "IN_REVIEW" | "APPROVED" | "ACTIVE" | "DEPRECATED" | "RETIRED" | "REJECTED";
+        /** SnapshotCreate */
+        SnapshotCreate: {
+            /**
+             * Import Ids
+             * @description Projected imports, at most one per schema code (D-30 §1). The order does not matter: the same set always gives the same snapshot.
+             */
+            import_ids: string[];
+        };
+        /** SnapshotMemberOut */
+        SnapshotMemberOut: {
+            /** Accepted Count */
+            accepted_count: number;
+            /**
+             * Import Id
+             * Format: uuid
+             */
+            import_id: string;
+            /**
+             * Import Manifest Id
+             * Format: uuid
+             */
+            import_manifest_id: string;
+            /**
+             * Manifest Sha256
+             * @description The pinned import manifest's hash (D-27 §1).
+             */
+            manifest_sha256: string;
+            /**
+             * Mapping Version Id
+             * Format: uuid
+             */
+            mapping_version_id: string;
+            /**
+             * Projection Id
+             * Format: uuid
+             */
+            projection_id: string;
+            /** Projector Version */
+            projector_version: number;
+            /**
+             * Quarantined Count
+             * @description Held rows: carried into run manifests (D-30 §3).
+             */
+            quarantined_count: number;
+            /** @description MATCHED or REVIEW_REQUIRED: a BROKEN import is refused (D-28, D-30 §3). */
+            reconciliation_outcome: components["schemas"]["ReconciliationOutcome"];
+            /** Rejected Count */
+            rejected_count: number;
+            schema_code: components["schemas"]["DomainSchemaCode"];
+            /** Schema Version */
+            schema_version: number | null;
+            /**
+             * Schema Version Id
+             * Format: uuid
+             */
+            schema_version_id: string;
+            /** Source Code */
+            source_code: string;
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+        };
+        /** SnapshotOut */
+        SnapshotOut: {
+            /**
+             * Content Sha256
+             * @description SHA-256 of the canonical JSON of the members' (schema_code, import_id, manifest_sha256), sorted by schema code: the snapshot's identity (D-30 §2).
+             */
+            content_sha256: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by: string;
+            /** Member Count */
+            member_count: number;
+            /**
+             * Members
+             * @description By schema code.
+             */
+            members: components["schemas"]["SnapshotMemberOut"][];
+            /**
+             * Snapshot Id
+             * Format: uuid
+             */
+            snapshot_id: string;
+        };
+        /** SnapshotPage */
+        SnapshotPage: {
+            /**
+             * Items
+             * @description Newest first.
+             */
+            items: components["schemas"]["SnapshotOut"][];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /** Total */
+            total: number;
+        };
         /** SourceCreate */
         SourceCreate: {
             /**
@@ -3711,6 +4914,37 @@ export interface components {
             /** Value */
             value: string;
         };
+        /** WarningOut */
+        WarningOut: {
+            code: components["schemas"]["CalculationWarningCode"];
+            /**
+             * Details
+             * @description Value-free: codes, counts and field names.
+             */
+            details: {
+                [key: string]: unknown;
+            };
+            /** Entity Id */
+            entity_id: string | null;
+            /**
+             * Entity Type
+             * @description e.g. `cashflow_event`.
+             */
+            entity_type: string | null;
+            /**
+             * Message
+             * @description Value-free.
+             */
+            message: string;
+            /** Sequence */
+            sequence: number;
+            severity: components["schemas"]["WarningSeverity"];
+        };
+        /**
+         * WarningSeverity
+         * @enum {string}
+         */
+        WarningSeverity: "INFO" | "WARNING" | "ERROR";
     };
     responses: never;
     parameters: never;
@@ -3786,6 +5020,399 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AuthConfig"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    listCalculationModules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModulePage"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    listCalculationRuns: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                /** @description Runs of this module (any version). */
+                module_code?: string | null;
+                status?: components["schemas"]["CalculationRunStatus"] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunPage"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    createCalculationRun: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Unique per run request (per user). A retry with the same key and the same body returns the original run; with a different body, 409 idempotency_conflict (D-31 §5). */
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunCreate"];
+            };
+        };
+        responses: {
+            /** @description Idempotent replay: this key was used for the same request; the original run is returned (header Idempotent-Replayed: true). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunDetail"];
+                };
+            };
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunDetail"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    getCalculationRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunDetail"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    getMaturityLadder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MaturityLadderOut"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    getCalculationRunResults: {
+        parameters: {
+            query?: {
+                currency?: string | null;
+                bucket_code?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResultPage"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    listDatasetSnapshots: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SnapshotPage"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    createDatasetSnapshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SnapshotCreate"];
+            };
+        };
+        responses: {
+            /** @description The same members already form a snapshot: it is returned and nothing is written (header Idempotent-Replayed: true). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SnapshotOut"];
+                };
+            };
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SnapshotOut"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    getDatasetSnapshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                snapshot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SnapshotOut"];
                 };
             };
             /** @description Client error (standard envelope) */
@@ -3977,6 +5604,10 @@ export interface operations {
                 offset?: number;
                 source_id?: string | null;
                 status?: components["schemas"]["ImportStatus"] | null;
+                /** @description Imports pinned to a version of this schema. */
+                schema_code?: string | null;
+                /** @description true: imports projected into the WS3 domain (D-29); false: imports not projected. Omitted: both. */
+                projected?: boolean | null;
             };
             header?: never;
             path?: never;

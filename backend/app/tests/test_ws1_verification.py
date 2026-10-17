@@ -6,7 +6,7 @@ separate step and the route x role matrix is printed in the test report.
    token.
 2. Cross-tenant isolation: a user of another tenant sees and changes nothing here, and
    another tenant's resource is the same 404 as a random id (WS3 instruments and the
-   projection included, Phase 14).
+   projection included, Phase 14; dataset snapshots, runs and their results, Phase 15).
 3. Audit completeness: every mutating route is listed and emits its audit event.
 4. Migrations: base -> head round trip with the seed; the downgrade refuses while user data
    or audit rows exist.
@@ -29,8 +29,12 @@ from app.tests.helpers import (
     FIELD_KEYS,
     IMPORTS,
     INSTRUMENTS,
+    MODULES,
     PROPOSALS,
+    RUNS,
+    SNAPSHOTS,
     SOURCES,
+    blocked_run,
     cid,
     contract_body,
     events,
@@ -132,6 +136,9 @@ def test_route_by_role_authorization_matrix(api: TestClient, db: str) -> None:
     projected = projected_instruments(api, db, steward, dev_token(api, "approver"))
     imported = api.get(f"{IMPORTS}/{projected['import_id']}", headers=steward)
     assert imported.status_code == 200, imported.text
+    # Phase 15: a snapshot of that import and a run on it (BLOCKED: no cash flows), so the
+    # calculation reads answer 2xx.
+    calculated = blocked_run(api, projected["import_id"])
     ids = {
         "schema_id": str(schema_id(db, "instrument")),
         "proposal_id": proposal["id"],
@@ -141,6 +148,8 @@ def test_route_by_role_authorization_matrix(api: TestClient, db: str) -> None:
         "mapping_id": projected["mapping_id"],
         "batch_id": imported.json()["batches"][0]["id"],  # Phase 11: GET /quarantine/{batch_id}
         "instrument_id": projected["instrument_id"],  # Phase 14: GET /instruments/{id}
+        "snapshot_id": calculated["snapshot_id"],  # Phase 15: GET /dataset-snapshots/{id}
+        "run_id": calculated["run_id"],  # Phase 15: GET /calculation-runs/{id}[/...]
     }
     tokens = {role: dev_token(api, role) for role in ROLES}
     failures = []
@@ -196,6 +205,27 @@ def test_route_by_role_authorization_matrix(api: TestClient, db: str) -> None:
     assert {role: projection[role] for role in ROLES} == {
         role: 200 if role == "data_steward" else 403 for role in ROLES
     }
+    # BE-15.5: every calculation read is 2xx for every seeded role (calc:read, and rule:read
+    # for the module registry); BE-15.3/15.4: the two writes are calc:run, risk_analyst only
+    # (its empty body is a 422, everyone else a 403).
+    for route, permission in (
+        ("GET /api/v1/calculation-modules", "rule:read"),
+        ("GET /api/v1/dataset-snapshots", "calc:read"),
+        ("GET /api/v1/dataset-snapshots/{snapshot_id}", "calc:read"),
+        ("GET /api/v1/calculation-runs", "calc:read"),
+        ("GET /api/v1/calculation-runs/{run_id}", "calc:read"),
+        ("GET /api/v1/calculation-runs/{run_id}/results", "calc:read"),
+        ("GET /api/v1/calculation-runs/{run_id}/maturity-ladder", "calc:read"),
+    ):
+        [row] = [r for r in WS1_MATRIX if r["route"] == route]
+        assert row["permission"] == permission, route
+        assert all(row[role] == 200 for role in ROLES), row
+    for route in ("POST /api/v1/dataset-snapshots", "POST /api/v1/calculation-runs"):
+        [row] = [r for r in WS1_MATRIX if r["route"] == route]
+        assert row["permission"] == "calc:run", route
+        assert {role: row[role] for role in ROLES} == {
+            role: 422 if role == "risk_analyst" else 403 for role in ROLES
+        }, row
     assert len(WS1_MATRIX) >= 12
 
 
@@ -212,18 +242,33 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
     # Phase 14: a projected import and one of its instruments.
     here_projected = projected_instruments(api, db, steward, dev_token(api, "approver"))
     here_instrument = here_projected["instrument_id"]
+    # Phase 15: a snapshot and a run on it.
+    here_calculated = blocked_run(api, here_projected["import_id"])
+    here_module = sql(db, "SELECT id FROM module_version")[0]["id"]
 
     other_tenant = insert_tenant(db, f"other-{uuid.uuid4().hex[:6]}")
     outsider = token_for(
         db,
         "dev:outsider",
-        ("platform_admin", "auditor", "data_steward", "approver"),
+        ("platform_admin", "auditor", "data_steward", "approver", "risk_analyst"),
         tenant_id=other_tenant,
     )
     # Lists hold only the outsider's own tenant.
     users = api.get("/api/v1/users", headers=outsider).json()["items"]
     assert len(users) == 1 and users[0]["display_name"].endswith("dev:outsider")
-    for path in ("/api/v1/schemas", PROPOSALS, SOURCES, IMPORTS, INSTRUMENTS):
+    for path in (
+        "/api/v1/schemas",
+        PROPOSALS,
+        SOURCES,
+        IMPORTS,
+        # Phase 15: the new-run panel's filters stay in the caller's tenant (this tenant has
+        # a projected instrument import).
+        f"{IMPORTS}?projected=true&schema_code=instrument",
+        INSTRUMENTS,
+        SNAPSHOTS,
+        RUNS,
+        MODULES,
+    ):
         assert api.get(path, headers=outsider).json()["total"] == 0, path
     audit = api.get("/api/v1/audit-events", params={"limit": 200}, headers=outsider).json()
     theirs = {
@@ -258,6 +303,14 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
         (
             f"{IMPORTS}/{here_projected['import_id']}/projection",
             f"{IMPORTS}/{uuid.uuid4()}/projection",
+        ),
+        # Phase 15: snapshots, runs, their results and their ladder.
+        (f"{SNAPSHOTS}/{here_calculated['snapshot_id']}", f"{SNAPSHOTS}/{uuid.uuid4()}"),
+        (f"{RUNS}/{here_calculated['run_id']}", f"{RUNS}/{uuid.uuid4()}"),
+        (f"{RUNS}/{here_calculated['run_id']}/results", f"{RUNS}/{uuid.uuid4()}/results"),
+        (
+            f"{RUNS}/{here_calculated['run_id']}/maturity-ladder",
+            f"{RUNS}/{uuid.uuid4()}/maturity-ladder",
         ),
     ):
         mine, absent = api.get(real, headers=outsider), api.get(random_id, headers=outsider)
@@ -294,6 +347,33 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
         assert (r.status_code, r.json()["code"]) == (404, "not_found")
         [denied] = events(db, correlation)
         assert (denied["outcome"], str(denied["tenant_id"])) == ("DENIED", str(other_tenant))
+    # Phase 15: a snapshot of this tenant's import, and a run on this tenant's snapshot, are
+    # the same 404 as absent ones, audited DENIED.
+    for import_id in (here_projected["import_id"], str(uuid.uuid4())):
+        correlation = cid()
+        r = api.post(
+            SNAPSHOTS,
+            json={"import_ids": [import_id]},
+            headers={**outsider, "X-Correlation-ID": correlation},
+        )
+        assert (r.status_code, r.json()["code"]) == (404, "not_found")
+        [denied] = events(db, correlation)
+        assert (denied["action"], denied["outcome"]) == ("dataset_snapshot.create", "DENIED")
+    for snapshot_id in (here_calculated["snapshot_id"], str(uuid.uuid4())):
+        correlation = cid()
+        body = {
+            "dataset_snapshot_id": snapshot_id,
+            "module_version_id": str(here_module),
+            "reporting_date": "2026-12-31",
+        }
+        r = api.post(
+            RUNS,
+            json=body,
+            headers={**outsider, "X-Correlation-ID": correlation, "Idempotency-Key": cid()},
+        )
+        assert (r.status_code, r.json()["code"]) == (404, "not_found")
+        [denied] = events(db, correlation)
+        assert (denied["action"], denied["outcome"]) == ("calculation_run.create", "DENIED")
     correlation = cid()
     r = upload(api, outsider, here_source, b"instrument_id\nA\n", cid=correlation)
     assert (r.status_code, r.json()["code"]) == (404, "not_found")
@@ -306,6 +386,9 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
         "domain_projection",
         "instrument",
         "instrument_version",
+        "dataset_snapshot",
+        "calculation_run",
+        "rule_set",
     ):
         n = sql(db, f"SELECT count(*) AS n FROM {table} WHERE tenant_id = $1", other_tenant)
         assert n[0]["n"] == 0, table
@@ -353,6 +436,9 @@ AUDITED = {
     "POST /api/v1/drift-events/{drift_event_id}/review": "drift_event.review",
     # Phase 14 (BE-14.3, BE-14.5): projection into the WS3 domain.
     "POST /api/v1/imports/{import_id}/projection": "import.project",
+    # Phase 15 (BE-15.3, BE-15.4): dataset snapshots and calculation runs.
+    "POST /api/v1/dataset-snapshots": "dataset_snapshot.create",
+    "POST /api/v1/calculation-runs": "calculation_run.create",
 }
 
 
@@ -474,6 +560,23 @@ def test_every_mutating_route_is_listed_and_emits_an_audit_event(api: TestClient
         f"{IMPORTS}/{cash_flows['id']}/projection",
     )
     assert projected["projected_count"] == projected["accepted_count"] == 25, projected
+    # Phase 15: a snapshot of the projected cash flows and a run on it (BLOCKED: no
+    # instruments in the snapshot, still a 201 and audited).
+    analyst = dev_token(api, "risk_analyst")
+    snapshot = call(
+        "POST /api/v1/dataset-snapshots", analyst, body={"import_ids": [cash_flows["id"]]}
+    )
+    module = api.get(MODULES, headers=analyst).json()["items"][0]["module_version_id"]
+    run = call(
+        "POST /api/v1/calculation-runs",
+        {**analyst, "Idempotency-Key": cid()},
+        body={
+            "dataset_snapshot_id": snapshot["snapshot_id"],
+            "module_version_id": module,
+            "reporting_date": "2026-12-31",
+        },
+    )
+    assert run["status"] == "BLOCKED", run
     wider = upload(
         api,
         steward,

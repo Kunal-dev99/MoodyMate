@@ -842,6 +842,22 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
     model, which the client must approve.
 - **Consequences of A:** an analyst sees aggregates and runs the module, but not
   instrument-level amounts. The client must confirm this before production.
+- **Amendment (2026-10-17, Phase 15 review):** an aggregate built from very few inputs
+  would show an instrument-level amount. For example, a reporting date chosen so that one
+  cash flow sits alone in a bucket makes that bucket's total equal to the flow's
+  confidential amount. So a minimum-aggregation rule applies:
+  - **The rule:** a ladder figure built from fewer than `CALC_MIN_AGGREGATE_COUNT`
+    contributions takes its contributions' classification. The setting defaults to 3,
+    is PROVISIONAL, and turns the rule off at 1.
+  - **Derived figures:** inflows, outflows and net take the most sensitive part they are
+    built from.
+  - **Cumulative gap:** once one net gap in a currency is masked, the cumulative gap stays
+    masked for the rest of that currency.
+  - **Zeros:** zero figures stay clear.
+  - **Where it applies:** on read. Stored results and `result_sha256` do not change.
+  - **Residual risk:** comparing clear totals from two runs whose reporting dates move one
+    flow between buckets can still reveal an amount. Closing that needs option C, or a
+    limit on reporting dates. This is an open item for the client before production.
 
 ## D-34 WS3 permissions and role grants
 

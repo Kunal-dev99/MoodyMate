@@ -32,6 +32,7 @@ from app.core.config import Settings
 from app.core.errors import ApiError
 from app.core.principal import Principal
 from app.db.session import get_session
+from app.domain.service import DomainService
 from app.governance.constants import Permission
 from app.governance.service import record_denial
 from app.ingestion.adapters import Limits
@@ -569,10 +570,28 @@ async def list_imports(
     offset: Annotated[int, Query(ge=0)] = 0,
     source_id: uuid.UUID | None = None,
     status: ImportStatus | None = None,
+    schema_code: Annotated[
+        str | None,
+        Query(max_length=100, description="Imports pinned to a version of this schema."),
+    ] = None,
+    projected: Annotated[
+        bool | None,
+        Query(
+            description="true: imports projected into the WS3 domain (D-29); false: imports "
+            "not projected. Omitted: both."
+        ),
+    ] = None,
 ) -> ImportPage:
-    """Newest first; filter by source and status."""
+    """Newest first; filter by source, status, schema code and projection (the Phase 15
+    new-run panel lists projected imports per schema with one call)."""
     service = ImportService(session, principal)
-    jobs, total = await service.page(limit, offset, source_id, status)
+    projected_ids = None
+    if projected is not None:
+        # The domain module owns projections; its service reads them in the same tenant.
+        projected_ids = await DomainService(session, principal).projected_import_ids()
+    jobs, total = await service.page(
+        limit, offset, source_id, status, schema_code, projected_ids, projected
+    )
     labels = await service.labels(jobs)
     return ImportPage(
         items=[_import_fields(j, labels, principal) for j in jobs],

@@ -241,6 +241,44 @@ _DOMAIN_CLEANUP = "\n".join(
     ]
 )
 
+# WS3 snapshots, runs and the rule registry (Phase 15) reference domain rows, imports and
+# reconciliation runs: removed first. Append-only or lifecycle-guarded (TRUNCATE included),
+# so every user trigger of these tables is lifted for this one transaction. The tagged seed
+# stays, put back to its seeded status.
+_CALC_TABLES = (
+    "calculation_warning",
+    "intermediate_value",
+    "liquidity_gap_result",
+    "calculation_input_ref",
+    "calculation_run",
+    "dataset_snapshot_member",
+    "dataset_snapshot",
+    "rule_set_member",
+    "rule_set",
+)
+_RULE_REGISTRY_TABLES = (
+    "maturity_bucket_definition",
+    "rule_version",
+    "rule_definition",
+    "assumption_set",
+    "module_version",
+    "calculation_module",
+)
+_CALC_CLEANUP = "\n".join(
+    [
+        "BEGIN;",
+        *(f"ALTER TABLE {t} DISABLE TRIGGER USER;" for t in _CALC_TABLES + _RULE_REGISTRY_TABLES),
+        *(f"DELETE FROM {t};" for t in _CALC_TABLES),
+        *(f"DELETE FROM {t} WHERE seeded_by IS NULL;" for t in _RULE_REGISTRY_TABLES),
+        "UPDATE rule_version SET status = 'ACTIVE' WHERE seeded_by IS NOT NULL"
+        " AND status <> 'ACTIVE';",
+        "UPDATE assumption_set SET status = 'ACTIVE' WHERE seeded_by IS NOT NULL"
+        " AND status <> 'ACTIVE';",
+        *(f"ALTER TABLE {t} ENABLE TRIGGER USER;" for t in _CALC_TABLES + _RULE_REGISTRY_TABLES),
+        "COMMIT;",
+    ]
+)
+
 # Deletes everything that is not seed data (D-11), children first.
 _CLEANUP = [
     "DELETE FROM user_role",
@@ -248,6 +286,7 @@ _CLEANUP = [
     "DELETE FROM role_permission WHERE seeded_by IS NULL",
     "DELETE FROM role WHERE seeded_by IS NULL",
     "DELETE FROM permission WHERE seeded_by IS NULL",
+    _CALC_CLEANUP,
     _DOMAIN_CLEANUP,
     _PHASE12_CLEANUP,
     _VALIDATION_CLEANUP,
@@ -298,6 +337,7 @@ def script(url: str, statements: str) -> None:
 def clean(url: str) -> None:
     for statement in _CLEANUP:
         if statement in (
+            _CALC_CLEANUP,
             _DOMAIN_CLEANUP,
             _INGESTION_CLEANUP,
             _IMPORT_CLEANUP,
