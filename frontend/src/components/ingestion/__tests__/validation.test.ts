@@ -61,6 +61,11 @@ describe('quarantine view (FE-11.2)', () => {
   it('"Retry with corrected file" pre-fills the wizard and the upload sends retry_of_import_id', () => {
     const job = { id: 'imp-1', source_id: 'src-1' }
     expect(retryHref(job)).toBe('/ingestion/imports/new?source=src-1&retry_of=imp-1')
+    // D-27 §4: on a retry import's own quarantine, the retry targets that import (which holds
+    // the items), never the import it retried.
+    expect(retryHref({ id: 'imp-2', source_id: 'src-1', retry_of_import_id: 'imp-1' } as { id: string; source_id: string })).toBe(
+      '/ingestion/imports/new?source=src-1&retry_of=imp-2',
+    )
     const file = new File(['a'], 'fixed.csv')
     expect(toImportFields({ ...emptyImportDraft('src-1', 'imp-1'), file, attested: true }, file, 'synthetic')).toMatchObject({
       source_id: 'src-1',
