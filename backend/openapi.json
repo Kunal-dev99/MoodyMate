@@ -74,6 +74,297 @@
         "title": "ArtifactOut",
         "type": "object"
       },
+      "AssumptionSetDetailOut": {
+        "properties": {
+          "approved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved At"
+          },
+          "approved_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved By"
+          },
+          "assumption_keys": {
+            "description": "Keys only, never values (empty in v1).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Assumption Keys",
+            "type": "array"
+          },
+          "assumption_set_id": {
+            "description": "The id a run manifest pins.",
+            "format": "uuid",
+            "title": "Assumption Set Id",
+            "type": "string"
+          },
+          "authored_by": {
+            "title": "Authored By",
+            "type": "string"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "content_sha256": {
+            "title": "Content Sha256",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "effective_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective From"
+          },
+          "effective_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective To"
+          },
+          "illustrative": {
+            "title": "Illustrative",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "provenance": {
+            "title": "Provenance",
+            "type": "string"
+          },
+          "provisional": {
+            "title": "Provisional",
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RuleVersionStatus"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          },
+          "versions": {
+            "description": "Every version of the same code, by version number.",
+            "items": {
+              "$ref": "#/components/schemas/AssumptionSetVersionSummary"
+            },
+            "title": "Versions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "assumption_set_id",
+          "code",
+          "name",
+          "version",
+          "status",
+          "owner",
+          "provenance",
+          "effective_from",
+          "effective_to",
+          "authored_by",
+          "approved_by",
+          "approved_at",
+          "assumption_keys",
+          "content_sha256",
+          "provisional",
+          "illustrative",
+          "created_at",
+          "versions"
+        ],
+        "title": "AssumptionSetDetailOut",
+        "type": "object"
+      },
+      "AssumptionSetItem": {
+        "properties": {
+          "approved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved At"
+          },
+          "approved_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved By"
+          },
+          "assumption_keys": {
+            "description": "Keys only, never values (empty in v1).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Assumption Keys",
+            "type": "array"
+          },
+          "assumption_set_id": {
+            "description": "The id a run manifest pins.",
+            "format": "uuid",
+            "title": "Assumption Set Id",
+            "type": "string"
+          },
+          "authored_by": {
+            "title": "Authored By",
+            "type": "string"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "content_sha256": {
+            "title": "Content Sha256",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "effective_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective From"
+          },
+          "effective_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective To"
+          },
+          "illustrative": {
+            "title": "Illustrative",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "provenance": {
+            "title": "Provenance",
+            "type": "string"
+          },
+          "provisional": {
+            "title": "Provisional",
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RuleVersionStatus"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "assumption_set_id",
+          "code",
+          "name",
+          "version",
+          "status",
+          "owner",
+          "provenance",
+          "effective_from",
+          "effective_to",
+          "authored_by",
+          "approved_by",
+          "approved_at",
+          "assumption_keys",
+          "content_sha256",
+          "provisional",
+          "illustrative",
+          "created_at"
+        ],
+        "title": "AssumptionSetItem",
+        "type": "object"
+      },
+      "AssumptionSetList": {
+        "properties": {
+          "items": {
+            "description": "By code, then version.",
+            "items": {
+              "$ref": "#/components/schemas/AssumptionSetItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "AssumptionSetList",
+        "type": "object"
+      },
       "AssumptionSetPin": {
         "description": "The ACTIVE version of the baseline assumption set (D-32 \u00a76): every run pins one.",
         "properties": {
@@ -164,6 +455,68 @@
           "illustrative"
         ],
         "title": "AssumptionSetPin",
+        "type": "object"
+      },
+      "AssumptionSetVersionSummary": {
+        "properties": {
+          "approved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved At"
+          },
+          "assumption_set_id": {
+            "format": "uuid",
+            "title": "Assumption Set Id",
+            "type": "string"
+          },
+          "effective_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective From"
+          },
+          "effective_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective To"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RuleVersionStatus"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "assumption_set_id",
+          "version",
+          "status",
+          "effective_from",
+          "effective_to",
+          "approved_at"
+        ],
+        "title": "AssumptionSetVersionSummary",
         "type": "object"
       },
       "AttributeOut": {
@@ -3452,7 +3805,7 @@
                 "$ref": "#/components/schemas/MaskedValue"
               }
             ],
-            "description": "Running sum of net_gap over the buckets so far.",
+            "description": "Running sum of net_gap over the buckets so far. Once a net gap of the currency is masked, every later cumulative gap is masked, even when it is exactly zero (D-33: masked wins over 'zeros stay clear').",
             "title": "Cumulative Gap"
           },
           "inflows": {
@@ -5246,13 +5599,58 @@
         "title": "Permission",
         "type": "string"
       },
+      "PinningRun": {
+        "description": "A calculation run that pins a rule version (through its rule set).",
+        "properties": {
+          "reporting_date": {
+            "format": "date",
+            "title": "Reporting Date",
+            "type": "string"
+          },
+          "rerun_of_run_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rerun Of Run Id"
+          },
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CalculationRunStatus"
+          }
+        },
+        "required": [
+          "run_id",
+          "status",
+          "reporting_date",
+          "rerun_of_run_id",
+          "started_at"
+        ],
+        "title": "PinningRun",
+        "type": "object"
+      },
       "PostCheck": {
         "description": "The engine's post-run checks (D-31 \u00a73, Arch \u00a76.2 step 5).",
         "enum": [
           "COVERAGE",
           "BUCKET_DEFINED",
           "BUCKET_TOTALS",
-          "CUMULATIVE_GAP"
+          "CUMULATIVE_GAP",
+          "RERUN_REPRODUCED"
         ],
         "title": "PostCheck",
         "type": "string"
@@ -6544,6 +6942,132 @@
         "title": "RuleCategory",
         "type": "string"
       },
+      "RuleDetail": {
+        "properties": {
+          "active_rule_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Rule Version Id"
+          },
+          "active_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Version"
+          },
+          "category": {
+            "$ref": "#/components/schemas/RuleCategory"
+          },
+          "change_enabled": {
+            "description": "RULE_CHANGE_ENABLED: false means 409 on writes.",
+            "title": "Change Enabled",
+            "type": "boolean"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "illustrative": {
+            "title": "Illustrative",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "parameter_schema": {
+            "additionalProperties": true,
+            "description": "One closed parameter kind (D-32 \u00a71): `kind` is DECIMAL (min, max, scale), INTEGER (min, max), ENUM (values), DAY_BUCKETS, ENUM_MAP (key_vocabulary, values) or DECIMAL_MAP (key_vocabulary, min, max, scale); an optional `unit`.",
+            "title": "Parameter Schema",
+            "type": "object"
+          },
+          "provisional": {
+            "title": "Provisional",
+            "type": "boolean"
+          },
+          "rule_id": {
+            "format": "uuid",
+            "title": "Rule Id",
+            "type": "string"
+          },
+          "statement": {
+            "description": "The D-35 label: not regulatory, no vendor parity.",
+            "title": "Statement",
+            "type": "string"
+          },
+          "target_module": {
+            "$ref": "#/components/schemas/RuleModuleRef"
+          },
+          "version_count": {
+            "title": "Version Count",
+            "type": "integer"
+          },
+          "versions": {
+            "description": "Every version, by version number.",
+            "items": {
+              "$ref": "#/components/schemas/RuleVersionOut"
+            },
+            "title": "Versions",
+            "type": "array"
+          },
+          "vocabulary": {
+            "description": "The codes of the parameter schema's key vocabulary (map kinds), else [].",
+            "items": {
+              "type": "string"
+            },
+            "title": "Vocabulary",
+            "type": "array"
+          }
+        },
+        "required": [
+          "rule_id",
+          "code",
+          "name",
+          "category",
+          "owner",
+          "description",
+          "target_module",
+          "parameter_schema",
+          "active_version",
+          "active_rule_version_id",
+          "version_count",
+          "provisional",
+          "illustrative",
+          "versions",
+          "vocabulary",
+          "change_enabled",
+          "statement"
+        ],
+        "title": "RuleDetail",
+        "type": "object"
+      },
       "RuleIn": {
         "description": "One rule. MAP: `source_column` (none for CONSTANT) \u2192 `target_field` through\n`transform`. PRESERVE: `source_column` is kept as it is, with no target and COPY.",
         "properties": {
@@ -6655,6 +7179,30 @@
         "title": "RuleIn",
         "type": "object"
       },
+      "RuleModuleRef": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "module_id": {
+            "format": "uuid",
+            "title": "Module Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "module_id",
+          "code",
+          "name"
+        ],
+        "title": "RuleModuleRef",
+        "type": "object"
+      },
       "RuleOut": {
         "properties": {
           "column_policy": {
@@ -6714,6 +7262,28 @@
           "default_value"
         ],
         "title": "RuleOut",
+        "type": "object"
+      },
+      "RulePage": {
+        "properties": {
+          "items": {
+            "description": "By rule code.",
+            "items": {
+              "$ref": "#/components/schemas/RuleSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "RulePage",
         "type": "object"
       },
       "RuleResult": {
@@ -6802,6 +7372,365 @@
           "failures"
         ],
         "title": "RuleResult",
+        "type": "object"
+      },
+      "RuleSummary": {
+        "properties": {
+          "active_rule_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Rule Version Id"
+          },
+          "active_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Version"
+          },
+          "category": {
+            "$ref": "#/components/schemas/RuleCategory"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "illustrative": {
+            "title": "Illustrative",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "parameter_schema": {
+            "additionalProperties": true,
+            "description": "One closed parameter kind (D-32 \u00a71): `kind` is DECIMAL (min, max, scale), INTEGER (min, max), ENUM (values), DAY_BUCKETS, ENUM_MAP (key_vocabulary, values) or DECIMAL_MAP (key_vocabulary, min, max, scale); an optional `unit`.",
+            "title": "Parameter Schema",
+            "type": "object"
+          },
+          "provisional": {
+            "title": "Provisional",
+            "type": "boolean"
+          },
+          "rule_id": {
+            "format": "uuid",
+            "title": "Rule Id",
+            "type": "string"
+          },
+          "target_module": {
+            "$ref": "#/components/schemas/RuleModuleRef"
+          },
+          "version_count": {
+            "title": "Version Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "rule_id",
+          "code",
+          "name",
+          "category",
+          "owner",
+          "description",
+          "target_module",
+          "parameter_schema",
+          "active_version",
+          "active_rule_version_id",
+          "version_count",
+          "provisional",
+          "illustrative"
+        ],
+        "title": "RuleSummary",
+        "type": "object"
+      },
+      "RuleVersionCreate": {
+        "additionalProperties": false,
+        "description": "A new DRAFT: a copy of the rule's ACTIVE version's parameters with this patch applied.",
+        "properties": {
+          "change_summary": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Change Summary",
+            "type": "string"
+          },
+          "parameters_patch": {
+            "additionalProperties": true,
+            "description": "A JSON merge patch (RFC 7386) over the ACTIVE version's parameters: an object merges key by key, `null` removes a key (e.g. a map entry), anything else replaces (e.g. the whole `buckets` list). The result must fit the rule's parameter kind (D-32 \u00a71): DECIMAL values are strings of decimal text, never JSON numbers. Otherwise 422 invalid_parameters (value-free details); an unchanged result is 422 no_change.",
+            "title": "Parameters Patch",
+            "type": "object"
+          }
+        },
+        "required": [
+          "parameters_patch",
+          "change_summary"
+        ],
+        "title": "RuleVersionCreate",
+        "type": "object"
+      },
+      "RuleVersionDecision": {
+        "additionalProperties": false,
+        "properties": {
+          "comment": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Comment",
+            "type": "string"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/ProposalDecision",
+            "description": "APPROVE activates the version and supersedes the previous ACTIVE one, in one transaction; REJECT ends it."
+          }
+        },
+        "required": [
+          "decision",
+          "comment"
+        ],
+        "title": "RuleVersionDecision",
+        "type": "object"
+      },
+      "RuleVersionOut": {
+        "properties": {
+          "approved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved At"
+          },
+          "approved_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who activated it (set once it was ACTIVE).",
+            "title": "Approved By"
+          },
+          "author_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The author's user id (None for a seeded version): an author never decides on their own version (409 self_approval).",
+            "title": "Author User Id"
+          },
+          "authored_by": {
+            "description": "The author's actor id, or the seed tag (D-32 \u00a77).",
+            "title": "Authored By",
+            "type": "string"
+          },
+          "change_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Summary"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "decided_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who approved or rejected it.",
+            "title": "Decided By"
+          },
+          "decision_comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Comment"
+          },
+          "effective_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective From"
+          },
+          "effective_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective To"
+          },
+          "illustrative": {
+            "title": "Illustrative",
+            "type": "boolean"
+          },
+          "parameters": {
+            "additionalProperties": true,
+            "description": "Typed by the rule's parameter schema (D-32 \u00a71). Decimals are exact decimal text at the declared scale, never JSON numbers.",
+            "title": "Parameters",
+            "type": "object"
+          },
+          "parameters_sha256": {
+            "description": "SHA-256 of the canonical JSON of `parameters`.",
+            "title": "Parameters Sha256",
+            "type": "string"
+          },
+          "provisional": {
+            "title": "Provisional",
+            "type": "boolean"
+          },
+          "rule_code": {
+            "title": "Rule Code",
+            "type": "string"
+          },
+          "rule_id": {
+            "format": "uuid",
+            "title": "Rule Id",
+            "type": "string"
+          },
+          "rule_version_id": {
+            "format": "uuid",
+            "title": "Rule Version Id",
+            "type": "string"
+          },
+          "run_count": {
+            "description": "Runs that pin this version.",
+            "title": "Run Count",
+            "type": "integer"
+          },
+          "runs": {
+            "description": "The newest pinning runs, at most 20.",
+            "items": {
+              "$ref": "#/components/schemas/PinningRun"
+            },
+            "title": "Runs",
+            "type": "array"
+          },
+          "seeded": {
+            "title": "Seeded",
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RuleVersionStatus"
+          },
+          "superseded_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Superseded At"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "rule_version_id",
+          "rule_id",
+          "rule_code",
+          "version",
+          "status",
+          "parameters",
+          "parameters_sha256",
+          "change_summary",
+          "authored_by",
+          "author_user_id",
+          "approved_by",
+          "approved_at",
+          "decided_by",
+          "decided_at",
+          "decision_comment",
+          "superseded_at",
+          "effective_from",
+          "effective_to",
+          "provisional",
+          "illustrative",
+          "seeded",
+          "created_at",
+          "run_count",
+          "runs"
+        ],
+        "title": "RuleVersionOut",
         "type": "object"
       },
       "RuleVersionPin": {
@@ -6907,6 +7836,26 @@
         ],
         "title": "RuleVersionStatus",
         "type": "string"
+      },
+      "RuleVersionSubmit": {
+        "additionalProperties": false,
+        "properties": {
+          "comment": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          }
+        },
+        "title": "RuleVersionSubmit",
+        "type": "object"
       },
       "RunCreate": {
         "additionalProperties": false,
@@ -7030,7 +7979,7 @@
                 "type": "null"
               }
             ],
-            "description": "Reserved for re-runs (BE-16.3).",
+            "description": "Set on a re-run (BE-16.3): the run whose pins it repeats.",
             "title": "Rerun Of Run Id"
           },
           "result_sha256": {
@@ -7277,6 +8226,23 @@
         "title": "RunPage",
         "type": "object"
       },
+      "RunRerun": {
+        "additionalProperties": false,
+        "description": "A re-run (D-31 \u00a75, BE-16.3): a new run on exactly the original run's pins (snapshot,\nreporting date, module and engine versions, rule set and assumption set), even when those\nrule versions are SUPERSEDED. It reproduces the original's manifest_sha256 and\nresult_sha256.",
+        "properties": {
+          "rerun_of": {
+            "description": "The run to re-run (404 alike for an absent and a foreign id). 409 rerun_not_reproducible when the engine or manifest version changed since.",
+            "format": "uuid",
+            "title": "Rerun Of",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rerun_of"
+        ],
+        "title": "RunRerun",
+        "type": "object"
+      },
       "RunSummary": {
         "properties": {
           "assumption_set_id": {
@@ -7337,7 +8303,7 @@
                 "type": "null"
               }
             ],
-            "description": "Reserved for re-runs (BE-16.3).",
+            "description": "Set on a re-run (BE-16.3): the run whose pins it repeats.",
             "title": "Rerun Of Run Id"
           },
           "result_sha256": {
@@ -8986,6 +9952,112 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/assumption-sets": {
+      "get": {
+        "description": "Every assumption set version of the caller's tenant (read-only in Feature 03).",
+        "operationId": "listAssumptionSets",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssumptionSetList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Assumption Sets",
+        "tags": [
+          "rules"
+        ]
+      }
+    },
+    "/api/v1/assumption-sets/{assumption_set_id}": {
+      "get": {
+        "description": "One assumption set version with its provenance, owner, effective dates, status and\nevery version of the same code. 404 alike for an absent and a foreign id (D-04).",
+        "operationId": "getAssumptionSet",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "assumption_set_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Assumption Set Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssumptionSetDetailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Assumption Set",
+        "tags": [
+          "rules"
+        ]
+      }
+    },
     "/api/v1/audit-events": {
       "get": {
         "operationId": "listAuditEvents",
@@ -9390,7 +10462,7 @@
         ]
       },
       "post": {
-        "description": "Run a module on a dataset snapshot for a reporting date, synchronously (D-31). The\nengine pins the ACTIVE rule versions (as a content-addressed rule set), the baseline\nassumption set, the module and engine versions and the snapshot's members, writes the\nrun RUNNING with its manifest, runs the module and the post-checks, and ends it\nSUCCEEDED, SUCCEEDED_WITH_WARNINGS, FAILED (a post-check failed) or BLOCKED (the input\ncontract was not met). No AI is involved. Refusals: 404 `not_found` (snapshot), 409\n`module_not_available` (absent, PLANNED, not implemented, or a rule without an ACTIVE\nversion), 409 `calculations_disabled`, 409 `idempotency_conflict`; each audited DENIED. A\nreplay whose run is still RUNNING after CALC_RUN_STALE_SECONDS ends it FAILED\n(ENGINE_ERROR) and returns it.",
+        "description": "Run a module on a dataset snapshot for a reporting date, synchronously (D-31). The\nengine pins the ACTIVE rule versions (as a content-addressed rule set), the baseline\nassumption set, the module and engine versions and the snapshot's members, writes the\nrun RUNNING with its manifest, runs the module and the post-checks, and ends it\nSUCCEEDED, SUCCEEDED_WITH_WARNINGS, FAILED (a post-check failed) or BLOCKED (the input\ncontract was not met). No AI is involved. A body of `rerun_of` alone re-runs that run on\nits exact original pins (BE-16.3), recording `rerun_of_run_id`. Refusals: 404 `not_found`\n(snapshot, or the run to re-run), 409 `rerun_not_reproducible`, 409\n`module_not_available` (absent, PLANNED, not implemented, or a rule without an ACTIVE\nversion), 409 `calculations_disabled`, 409 `idempotency_conflict`; each audited DENIED. A\nreplay whose run is still RUNNING after CALC_RUN_STALE_SECONDS ends it FAILED\n(ENGINE_ERROR) and returns it.",
         "operationId": "createCalculationRun",
         "parameters": [
           {
@@ -9412,7 +10484,15 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RunCreate"
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/RunCreate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RunRerun"
+                  }
+                ],
+                "title": "Body"
               }
             }
           },
@@ -11908,6 +12988,341 @@
         "summary": "Disposition Quarantine Item",
         "tags": [
           "ingestion"
+        ]
+      }
+    },
+    "/api/v1/rules": {
+      "get": {
+        "description": "The rule definitions of the caller's tenant, by code, with their ACTIVE version. Every\nseeded rule is an illustrative prototype (D-35).",
+        "operationId": "listRules",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RulePage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Rules",
+        "tags": [
+          "rules"
+        ]
+      }
+    },
+    "/api/v1/rules/{rule_id}": {
+      "get": {
+        "description": "One rule with every version (status, author, approver, parameters) and the runs that\npin each version. 404 alike for an absent and a foreign id (D-04).",
+        "operationId": "getRule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Rule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Rule",
+        "tags": [
+          "rules"
+        ]
+      }
+    },
+    "/api/v1/rules/{rule_id}/versions": {
+      "post": {
+        "description": "A new DRAFT version: the ACTIVE version's parameters with `parameters_patch` applied,\nchecked against the rule's parameter kind (D-32 \u00a71). Refusals, each audited DENIED\n(`rule.propose`): 404 `not_found`, 409 `rule_change_disabled`, 409 `no_active_version`,\n409 `invalid_parameter_schema`, 422 `invalid_parameters` (value-free problems), 422\n`no_change`.",
+        "operationId": "createRuleVersion",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Rule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleVersionCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleVersionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Rule Version",
+        "tags": [
+          "rules"
+        ]
+      }
+    },
+    "/api/v1/rules/{rule_id}/versions/{version}/approval": {
+      "post": {
+        "description": "Maker-checker (D-32 \u00a73). APPROVE makes an IN_REVIEW version ACTIVE and the previous\nACTIVE version SUPERSEDED, in one transaction (one ACTIVE version per rule); REJECT ends\nit REJECTED. Refusals, audited (`rule.approve` / `rule.reject`): 404 `not_found`, 409\n`rule_change_disabled`, 409 `invalid_status` (e.g. a DRAFT that was never submitted), 409\n`self_approval` (the author), 409 `stale_version` (another version was activated after\nthis one was proposed: propose again from the current ACTIVE version).",
+        "operationId": "decideRuleVersion",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Rule Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "maximum": 1000000,
+              "minimum": 1,
+              "title": "Version",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleVersionDecision"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleVersionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Decide Rule Version",
+        "tags": [
+          "rules"
+        ]
+      }
+    },
+    "/api/v1/rules/{rule_id}/versions/{version}/submit": {
+      "post": {
+        "description": "DRAFT -> IN_REVIEW; a DAY_BUCKETS version's bucket definitions are materialised in the\nsame transaction (D-32 \u00a75). Only the version's author submits it. Refusals, audited\n(`rule.submit`): 404 `not_found`, 409 `rule_change_disabled`, 409 `invalid_status`, 409\n`not_author`, 422 `invalid_parameters`.",
+        "operationId": "submitRuleVersion",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Rule Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "maximum": 1000000,
+              "minimum": 1,
+              "title": "Version",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleVersionSubmit"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleVersionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Submit Rule Version",
+        "tags": [
+          "rules"
         ]
       }
     },

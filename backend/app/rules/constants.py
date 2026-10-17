@@ -155,3 +155,62 @@ SEEDED_RULES: dict[str, tuple[str, RuleCategory, dict[str, Any], dict[str, Any],
 }
 SEEDED_RULE_OWNER = "Methodology owner (risk_analyst), provisional"
 SEEDED_ASSUMPTION_SET_NAME = "baseline (illustrative)"
+
+# --- Phase 16: governed rule changes (BE-16.1, BE-16.2, D-32 §1, §3) -------------------------
+
+# The key vocabularies a map kind may name (D-32 §1): instrument_type is the tenant's
+# `instrument_type` codes (domain, seeded PROVISIONAL).
+PARAMETER_VOCABULARIES = ("instrument_type",)
+MAX_BUCKETS = 50
+MAX_MAP_ENTRIES = 200
+MAX_DECIMAL_SCALE = 18
+MAX_DAYS = 36_600  # bucket bounds: about 100 years of calendar days
+
+
+class RuleRefusal(StrEnum):
+    """Refused rule writes, each audited DENIED with this code as its reason (D-32 §3)."""
+
+    RULE_CHANGE_DISABLED = "rule_change_disabled"  # 409: RULE_CHANGE_ENABLED=false
+    INVALID_PARAMETERS = "invalid_parameters"  # 422: not the definition's kind (BE-16.1)
+    INVALID_PARAMETER_SCHEMA = "invalid_parameter_schema"  # 409: the definition's own schema
+    NO_CHANGE = "no_change"  # 422: the patch leaves the ACTIVE parameters as they are
+    NO_ACTIVE_VERSION = "no_active_version"  # 409: nothing to copy a DRAFT from
+    INVALID_STATUS = "invalid_status"  # 409: e.g. approving a DRAFT (not submitted)
+    SELF_APPROVAL = "self_approval"  # 409: the author decides on their own version
+    NOT_AUTHOR = "not_author"  # 409: only the author submits (releases) their DRAFT
+    STALE_VERSION = "stale_version"  # 409: another version was activated since this one
+
+
+class ParameterProblem(StrEnum):
+    """Value-free problem codes of `invalid_parameters` (and of a bad parameter schema)."""
+
+    NOT_AN_OBJECT = "not_an_object"
+    UNKNOWN_KEY = "unknown_key"
+    MISSING_KEY = "missing_key"
+    INEXACT_NUMBER = "inexact_number"  # a JSON number with a fraction or exponent
+    NOT_DECIMAL_TEXT = "not_decimal_text"
+    NOT_INTEGER = "not_integer"
+    NOT_TEXT = "not_text"
+    OUT_OF_RANGE = "out_of_range"
+    SCALE_EXCEEDED = "scale_exceeded"
+    NOT_IN_VALUES = "not_in_values"
+    NOT_IN_VOCABULARY = "not_in_vocabulary"
+    EMPTY = "empty"
+    TOO_MANY = "too_many"
+    INVALID_CODE = "invalid_code"
+    DUPLICATE = "duplicate"
+    BOUNDS_ORDER = "bounds_order"
+    NOT_CONTIGUOUS = "not_contiguous"
+    LAST_NOT_OPEN = "last_not_open"
+    LABEL_MISMATCH = "label_mismatch"
+    UNKNOWN_KIND = "unknown_kind"
+    UNKNOWN_VOCABULARY = "unknown_vocabulary"
+
+
+# Audit actions (D-10, D-24 §4): every step and every refusal (`rule.*`).
+PROPOSE_RULE = "rule.propose"
+SUBMIT_RULE = "rule.submit"
+APPROVE_RULE = "rule.approve"
+REJECT_RULE = "rule.reject"
+ACTIVATE_RULE = "rule.activate"
+SUPERSEDE_RULE = "rule.supersede"

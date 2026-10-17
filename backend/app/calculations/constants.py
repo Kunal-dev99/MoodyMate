@@ -78,6 +78,9 @@ class PostCheck(StrEnum):
     BUCKET_DEFINED = "BUCKET_DEFINED"  # every contribution lands in a pinned bucket
     BUCKET_TOTALS = "BUCKET_TOTALS"  # every aggregate equals the sum of its contributions
     CUMULATIVE_GAP = "CUMULATIVE_GAP"  # the cumulative gap is the running sum of net gaps
+    # A re-run only (D-31 §5, BE-16.3): its result_sha256 equals its original's. Otherwise the
+    # re-run ends FAILED (POST_CHECK_FAILED, details check=RERUN_REPRODUCED), no result kept.
+    RERUN_REPRODUCED = "RERUN_REPRODUCED"
 
 
 class InputRefType(StrEnum):
@@ -119,6 +122,7 @@ class RunRefusal(StrEnum):
     CALCULATIONS_DISABLED = "calculations_disabled"
     MODULE_NOT_AVAILABLE = "module_not_available"
     IDEMPOTENCY_CONFLICT = "idempotency_conflict"
+    RERUN_NOT_REPRODUCIBLE = "rerun_not_reproducible"  # BE-16.3: engine or manifest changed
 
 
 # Audit actions (D-10, D-24 §4): the create and each of its refusals share one action.
