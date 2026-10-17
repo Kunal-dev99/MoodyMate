@@ -944,3 +944,39 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
 ---
 
 <!-- Never renumber existing IDs. New decisions are appended as D-05, D-06, … -->
+
+## D-36 Phase build protocol: parallel agent swarm and auto-resolved questions
+
+- **Status:** active (requested by the user, 2026-10-17)
+- **Context:** in Feature 03, phases moved fastest with parallel agents, the API contract
+  landing first, CI as the full e2e run, and parallel phases built in separate worktrees.
+  The user asked for this to be the default, and for in-phase questions not to stop the
+  build.
+- **Decision:**
+  - **Protocol.** Every phase follows the "Phase build protocol (parallel agent swarm)" in
+    `CLAUDE.md`:
+    - contract first;
+    - a one-message fan-out, with each agent owning its own files;
+    - isolation per D-03;
+    - targeted tests per agent, the full backend suite run once by the coordinator, and CI as
+      the full Playwright run;
+    - D-26 still applies;
+    - one review alongside e2e: MAJOR and MEDIUM findings fixed before merge, LOW ones logged;
+    - pre-numbered migrations for parallel phases, which the coordinator re-chains.
+
+    `.claude/workflows/phase-build.js` runs it.
+  - **Open questions.** They go to the read-only `decision-resolver` agent. It follows
+    existing decisions; where none applies, it takes the safer or stricter option. Each
+    ruling is recorded as **auto-resolved**: as a dated amendment here, or as a phase-report
+    note.
+  - **Hard stops,** sent to the user in one message at the end of a phase:
+    - deleting data, or anything irreversible on shared systems;
+    - a D-01 exception;
+    - a change to roles, permissions or who approves what;
+    - real client data, regulatory claims or vendor-parity claims;
+    - client decisions needed before production (listed as open items; they don't block the
+      build).
+  - **Standing approval.** "Build Phase N" means run the workflow, merge on green CI, and
+    report once at the end.
+- **Consequences:** fewer interruptions, and every auto-resolved ruling stays traceable. Hard
+  stops never get resolved automatically.
