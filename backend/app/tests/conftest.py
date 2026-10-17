@@ -190,6 +190,23 @@ ALTER TABLE quarantine_item ENABLE TRIGGER quarantine_item_guard;
 COMMIT;
 """
 
+# Reconciliation runs and drift events (Phase 12) reference imports, profiles and validated
+# results: removed first. Append-only (events: review only), so the triggers are lifted for
+# this one transaction.
+_PHASE12_CLEANUP = """
+BEGIN;
+ALTER TABLE reconciliation_item DISABLE TRIGGER reconciliation_item_append_only;
+ALTER TABLE reconciliation_run DISABLE TRIGGER reconciliation_run_append_only;
+ALTER TABLE data_drift_event DISABLE TRIGGER data_drift_event_guard;
+DELETE FROM reconciliation_item;
+DELETE FROM reconciliation_run;
+DELETE FROM data_drift_event;
+ALTER TABLE reconciliation_item ENABLE TRIGGER reconciliation_item_append_only;
+ALTER TABLE reconciliation_run ENABLE TRIGGER reconciliation_run_append_only;
+ALTER TABLE data_drift_event ENABLE TRIGGER data_drift_event_guard;
+COMMIT;
+"""
+
 # Deletes everything that is not seed data (D-11), children first.
 _CLEANUP = [
     "DELETE FROM user_role",
@@ -197,6 +214,7 @@ _CLEANUP = [
     "DELETE FROM role_permission WHERE seeded_by IS NULL",
     "DELETE FROM role WHERE seeded_by IS NULL",
     "DELETE FROM permission WHERE seeded_by IS NULL",
+    _PHASE12_CLEANUP,
     _VALIDATION_CLEANUP,
     _MAPPING_CLEANUP,
     _PROFILE_CLEANUP,
@@ -250,6 +268,7 @@ def clean(url: str) -> None:
             _PROFILE_CLEANUP,
             _MAPPING_CLEANUP,
             _VALIDATION_CLEANUP,
+            _PHASE12_CLEANUP,
         ):
             try:
                 script(url, statement)

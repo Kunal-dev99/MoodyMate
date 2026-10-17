@@ -14,6 +14,11 @@ Database guards (migration 0014), none of them unlocked by any session setting:
 - a rule may be inserted, changed or deleted only while its version is DRAFT;
 - a validation is append-only;
 - TRUNCATE is refused on all four tables.
+
+Drift events (migration 0016, BE-12.1): `data_drift_event` records how an import's profile
+differs from its baseline's. It is never deleted or truncated; its content is frozen and
+only its review (status, reviewer, comment, time) is written, once, OPEN -> ACKNOWLEDGED |
+ACTION_REQUIRED. Detection never changes a schema, contract or mapping (DI-06).
 """
 
 import uuid
@@ -37,6 +42,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import AuditColumns, Base, ScopedModel
 from app.mapping.constants import (
     ColumnPolicy,
+    DriftStatus,
+    DriftType,
     MappingVersionStatus,
     NullPolicy,
     TransformCode,
@@ -216,3 +223,74 @@ class MappingValidation(AuditColumns, Base):
     warning_count: Mapped[int] = mapped_column(Integer, nullable=False)
     issues: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
     rule_results: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
+
+
+# --- Phase 12: drift events (BE-12.1, BE-12.3, BE-12.4) ------------------------------------------
+
+
+class DataDriftEvent(ScopedModel, Base):
+    """One difference between an import's profile and its baseline's (the latest COMPLETED
+    or COMPLETED_WITH_WARNINGS import of the same source), for a person to review. It never
+    changes a schema, contract or mapping.
+
+    Summaries hold the profile's statistics for the column (types, counts, null rate, and
+    for numbers, dates and timestamps the min and max, which are data and are masked by the
+    column's classification on read); never top values. COLUMN_ADDED has no baseline
+    summary and COLUMN_REMOVED no observed one (CHECK)."""
+
+    __tablename__ = "data_drift_event"
+    __table_args__ = (
+        UniqueConstraint("import_job_id", "sequence"),
+        UniqueConstraint("import_job_id", "drift_type", "column_name"),
+        CheckConstraint(_in("drift_type", DriftType), name="drift_type"),
+        CheckConstraint(_in("status", DriftStatus), name="status"),
+        CheckConstraint("sequence >= 1", name="sequence"),
+        CheckConstraint("detector_version >= 1", name="detector_version"),
+        CheckConstraint("baseline_import_id <> import_job_id", name="baseline"),
+        CheckConstraint(
+            "(status = 'OPEN') = (reviewed_by IS NULL)"
+            " AND (reviewed_by IS NULL) = (reviewed_at IS NULL)"
+            " AND (reviewed_by IS NULL) = (review_comment IS NULL)",
+            name="review",
+        ),
+        CheckConstraint(
+            "(observed_summary IS NULL) = (drift_type = 'COLUMN_REMOVED')"
+            " AND (baseline_summary IS NULL) = (drift_type = 'COLUMN_ADDED')",
+            name="summaries",
+        ),
+        CheckConstraint(
+            "coalesce(jsonb_typeof(observed_summary), 'object') = 'object'"
+            " AND coalesce(jsonb_typeof(baseline_summary), 'object') = 'object'"
+            " AND jsonb_typeof(thresholds) = 'object'",
+            name="json",
+        ),
+    )
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenant.id"), index=True, nullable=False
+    )
+    import_job_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("import_job.id"), index=True, nullable=False
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    baseline_import_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("import_job.id"), nullable=False
+    )
+    observed_snapshot_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("data_profile_snapshot.id"), nullable=False
+    )
+    baseline_snapshot_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("data_profile_snapshot.id"), nullable=False
+    )
+    drift_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    column_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    # none_as_null: an absent side is SQL NULL (the `summaries` CHECK), not JSON null.
+    observed_summary: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
+    baseline_summary: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
+    # The PROVISIONAL thresholds applied, as decimal text.
+    thresholds: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    detector_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    reviewed_by: Mapped[str | None] = mapped_column(String(255))
+    review_comment: Mapped[str | None] = mapped_column(String(1000))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

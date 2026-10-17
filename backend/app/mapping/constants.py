@@ -124,3 +124,35 @@ MAX_RULES = 500
 MAX_MAP_VALUES = 500  # MAP_VALUES table entries
 MAX_PARAM_TEXT = 200  # any text parameter (a value, a separator, a table key)
 SCALE_MAX_POWER = 18  # SCALE(power_of_ten) in -18..18
+
+
+# --- Phase 12: drift detection and review (BE-12.1, BE-12.3, BE-12.4, D-23) -------------------
+
+
+class DriftType(StrEnum):
+    """D-23 `data_drift_event.drift_type`: how an import's profile differs from its
+    baseline's (the latest COMPLETED or COMPLETED_WITH_WARNINGS import of the same source)."""
+
+    COLUMN_ADDED = "COLUMN_ADDED"
+    COLUMN_REMOVED = "COLUMN_REMOVED"
+    TYPE_CHANGED = "TYPE_CHANGED"
+    NULL_RATE_SHIFT = "NULL_RATE_SHIFT"
+    RANGE_SHIFT = "RANGE_SHIFT"
+
+
+class DriftStatus(StrEnum):
+    """D-23 `data_drift_event.status`. A person reviews an OPEN event once."""
+
+    OPEN = "OPEN"
+    ACKNOWLEDGED = "ACKNOWLEDGED"
+    ACTION_REQUIRED = "ACTION_REQUIRED"
+
+
+# D-06 transition table (migration 0016 holds a frozen copy): one review, then final.
+DRIFT_TRANSITIONS: dict[DriftStatus, frozenset[DriftStatus]] = {
+    DriftStatus.OPEN: frozenset({DriftStatus.ACKNOWLEDGED, DriftStatus.ACTION_REQUIRED}),
+    DriftStatus.ACKNOWLEDGED: frozenset(),
+    DriftStatus.ACTION_REQUIRED: frozenset(),
+}
+# Part of every event: a change to the detection rules is a new version.
+DRIFT_DETECTOR_VERSION = 1
