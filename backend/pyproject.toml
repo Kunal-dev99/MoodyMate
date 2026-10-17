@@ -68,6 +68,12 @@ disallow_untyped_defs = false
 testpaths = ["app/tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+# BE-14.6 (c), Phase 8 review D3: a warning from openpyxl is an error under pytest. The app
+# drops them (app.ingestion.adapters.xlsx_adapter.silence_openpyxl_warnings), so a test
+# never sees one unless a workbook would have printed one in production.
+filterwarnings = [
+    'error::Warning:openpyxl(\..*)?\Z',
+]
 markers = [
     "db: needs a reachable PostgreSQL (DATABASE_URL); required when REQUIRE_DB=1",
     "ws1: WS1 verification suite (BE-6.3); prints the route x role matrix",

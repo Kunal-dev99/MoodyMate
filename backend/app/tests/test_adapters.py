@@ -12,6 +12,7 @@ import inspect
 import io
 import json
 import sys
+import time
 import zipfile
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, replace
@@ -36,7 +37,7 @@ from app.ingestion.adapters import (
 from app.ingestion.adapters.base import collect
 from app.ingestion.constants import RowFlagCode, SourceFormat, UploadRefusal
 from app.tests import fake_feed, xlsx_kit
-from app.tests.xlsx_kit import rewrite, xlsx
+from app.tests.xlsx_kit import raw_sheet, rewrite, xlsx
 from scripts.make_synthetic_samples import OUT
 
 CSV, XLSX, JSON = SourceFormat.CSV, SourceFormat.XLSX, SourceFormat.JSON
@@ -49,6 +50,16 @@ def refused(data: bytes, fmt: SourceFormat, **limits: Any) -> AdapterError:
     return caught.value
 
 
+def _row(number: int, text: str) -> str:
+    cell = f'<c r="A{number}" t="inlineStr"><is><t>{text}</t></is></c>'
+    return f'<row r="{number}">{cell}</row>'
+
+
+def gap(number: int) -> bytes:
+    """A header row, then one data row numbered `number`."""
+    return raw_sheet(_row(1, "a") + _row(number, "x"))
+
+
 def test_bad_files_and_limits_are_refused_with_their_own_code() -> None:
     exact = "12345678901234.123456"
     parsed = parse_upload(f"a\n{exact}\n".encode(), CSV, AdapterOptions(), HARD_LIMITS)
@@ -59,6 +70,7 @@ def test_bad_files_and_limits_are_refused_with_their_own_code() -> None:
     zip_not_workbook = io.BytesIO()
     with zipfile.ZipFile(zip_not_workbook, "w") as zf:
         zf.writestr("hello.txt", "hi")
+    amplifying = xlsx_kit.amplified("x" * HARD_LIMITS.max_cell_chars, HARD_LIMITS.max_decoded_chars)
     entity_bomb = (
         b'<?xml version="1.0"?><!DOCTYPE lolz [<!ENTITY lol "lol">'
         b'<!ENTITY lol2 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">]>'
@@ -159,11 +171,46 @@ def test_bad_files_and_limits_are_refused_with_their_own_code() -> None:
             R.CELL_TOO_LONG,
         ),
         ("huge CSV field", b"a\n" + b"x" * 200_000 + b"\n", CSV, {}, R.CELL_TOO_LONG),
+        # D-25 §1: decoded characters, header included, every format. Settings may lower it.
+        ("decoded CSV", b"a\n1234\n", CSV, {"max_decoded_chars": 4}, R.CONTENT_TOO_LARGE),
+        ("decoded JSON", b'[{"a": "1234"}]', JSON, {"max_decoded_chars": 4}, R.CONTENT_TOO_LARGE),
+        (
+            "decoded XLSX header",
+            xlsx_kit.table(["abcde"], ["1"]),
+            XLSX,
+            {"max_decoded_chars": 4},
+            R.CONTENT_TOO_LARGE,
+        ),
+        # Phase 8 review D1: one 4,000-character shared string in ~13k cells of a stored
+        # (uncompressed) workbook under 1 MiB decodes past the 50 MiB hard ceiling.
+        ("shared-string amplification", amplifying, XLSX, {}, R.CONTENT_TOO_LARGE),
+        # Phase 8 review D2: a row number beyond Excel's last row; a gap past the row limit.
+        ("row 2,000,000,000", gap(2_000_000_000), XLSX, {}, R.XLSX_INVALID),
+        ("row 1,048,577", gap(1_048_577), XLSX, {}, R.XLSX_INVALID),
+        ("gap beyond the row limit", gap(1_048_576), XLSX, {}, R.TOO_MANY_ROWS),
     ]
+    assert len(amplifying) < 1024 * 1024
     for name, data, fmt, limits, code in cases:
+        started = time.perf_counter()
         error = refused(data, fmt, **limits)
         assert error.code == code, f"{name}: {error.code}, expected {code}"
         assert error.status_code == (413 if code == R.PAYLOAD_TOO_LARGE else 422), name
+        assert time.perf_counter() - started < 2, f"{name}: refused too slowly"
+
+    # A row-number gap between data rows is that many BLANK_ROW rows; after the last data
+    # row it is not rows at all. Either way it costs one draft, not one per missing row.
+    rows = parse_upload(
+        raw_sheet(_row(1, "a") + _row(2, "x") + _row(5, "y") + '<row r="1048576"/>'),
+        XLSX,
+        AdapterOptions(),
+        HARD_LIMITS,
+    ).rows
+    assert [(r.locator["row"], r.values, r.flags) for r in rows] == [
+        (2, {"a": "x"}, []),
+        (3, {}, [RowFlag(RowFlagCode.BLANK_ROW)]),
+        (4, {}, [RowFlag(RowFlagCode.BLANK_ROW)]),
+        (5, {"a": "y"}, []),
+    ]
     assert openpyxl.DEFUSEDXML is True
 
     secret = "SENTINEL-VALUE-7731"

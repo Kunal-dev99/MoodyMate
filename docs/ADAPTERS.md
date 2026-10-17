@@ -32,7 +32,8 @@ the interface and the test fake exist.
 | `sheet_name` | `str \| None` | XLSX only: the sheet that was read. Recorded on `import_batch`. |
 
 `Draft` is a row as the adapter read it, before numbering. It has `locator`, `values`,
-`extras`, `flags`, and `blank` (an empty row).
+`extras`, `flags`, `blank` (an empty row) and `count` (how many consecutive blank rows a
+blank draft stands for; 1 unless an adapter skips a gap, as XLSX does).
 
 `AdapterOptions` comes from the source profile. It has `delimiter` (CSV) and `sheet_name`
 (XLSX). Adapters ignore options they do not use.
@@ -69,8 +70,8 @@ service uses (`ImportService`, run in a thread pool). It works in this order:
    - another registered adapter detects the data → `format_mismatch`, with details
      `{expected, detected}`;
    - no adapter detects it → `unsupported_file_type`.
-4. `iter_rows`, then `collect(drafts, limits)`. This numbers the rows and applies the row
-   limit.
+4. `iter_rows`, then `collect(drafts, limits, header_chars)`. This numbers the rows and
+   applies the row limit and the decoded-characters total (header included).
 
 `ParsedUpload` has `format`, `media_type`, `columns`, `rows: list[SourceRow]`,
 `marker_present` and `sheet_name`.
@@ -111,11 +112,19 @@ The `IMPORT_MAX_*` settings may lower them and may never raise them.
 | `max_cell_chars` | 4,000 characters | `cell_too_long` | every header name and cell |
 | `max_xlsx_uncompressed_bytes` | 50 MiB | `xlsx_uncompressed_too_large` | XLSX archive, before decompression |
 | `max_xlsx_ratio` | 100 | `xlsx_compression_ratio_too_high` | XLSX archive, before decompression |
+| `max_decoded_chars` | 50 MiB (52,428,800 characters) | `content_too_large` | every adapter (`collect`): a running total of the header's and every cell's decoded characters (D-25 §1) |
 
 Every adapter must enforce `max_rows`, `max_columns` and `max_cell_chars`, with these codes.
 The contract test checks all three. A streaming adapter should refuse as soon as a limit is
 crossed, without reading the rest of the input. The whole input is already bounded by
-`max_bytes`.
+`max_bytes`, but what it decodes to is not (one XLSX shared string can fill any number of
+cells), so `collect` also keeps the `max_decoded_chars` total for every adapter.
+
+`collect` stops collecting a run of blank rows once it is longer than `max_rows`: no row of
+it is kept, and a data row after it is `too_many_rows`. A blank `Draft` may stand for
+`count` consecutive blank rows; the XLSX adapter emits a row-number gap that way, so a gap
+costs one draft whatever its length. An XLSX row number above Excel's 1,048,576 is
+`xlsx_invalid`.
 
 ## 5. Error codes
 
@@ -130,6 +139,7 @@ contract test plants a sentinel value and checks that no refusal carries it.
 |---|---|
 | `payload_too_large` (413) | Over `max_bytes`. |
 | `too_many_rows`, `too_many_columns`, `cell_too_long` | Over a D-16 limit. |
+| `content_too_large` | Over `max_decoded_chars` (D-25 §1). |
 | `xlsx_uncompressed_too_large`, `xlsx_compression_ratio_too_high` | XLSX zip-bomb guard. |
 | `unsupported_file_type` | No registered adapter detects the content. |
 | `format_mismatch` | Another registered adapter detects the content. |
@@ -142,7 +152,7 @@ contract test plants a sentinel value and checks that no refusal carries it.
 | `csv_malformed` | A CSV quoting error (`line`). |
 | `json_malformed`, `json_invalid_shape`, `json_nested_value` | Bad JSON, the wrong top-level shape, or a nested value. |
 | `sheet_not_found` | The profile names a sheet the workbook does not have. |
-| `xlsx_invalid` | Any workbook parser failure, including XML entity attacks. |
+| `xlsx_invalid` | Any workbook parser failure, including XML entity attacks, or a row number above 1,048,576. |
 
 A new adapter reuses these codes where they fit. A new code is added to `UploadRefusal`
 (and the OpenAPI contract), never invented ad hoc.

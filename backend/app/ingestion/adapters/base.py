@@ -8,9 +8,10 @@ touches the database or the artifact store:
   carries the ILLUSTRATIVE / SYNTHETIC marker (D-24), and a lazy iterator of `Draft` rows,
   each a locator plus `dict[str, str]` of values. Values are always strings, never floats.
 
-`collect` turns the drafts into numbered `SourceRow`s and applies the row limit. Every
-refusal is an `AdapterError` with its own code (`UploadRefusal`) and details that name
-positions (line, row, index, column number), never a cell value or a column name.
+`collect` turns the drafts into numbered `SourceRow`s and applies the row limit and the
+running total of decoded characters (D-25 §1). Every refusal is an `AdapterError` with its
+own code (`UploadRefusal`) and details that name positions (line, row, index, column
+number), never a cell value or a column name.
 """
 
 import codecs
@@ -40,6 +41,7 @@ class Limits:
     max_cell_chars: int = IMPORT_HARD_LIMITS["IMPORT_MAX_CELL_CHARS"]
     max_xlsx_uncompressed_bytes: int = IMPORT_HARD_LIMITS["IMPORT_MAX_XLSX_UNCOMPRESSED_BYTES"]
     max_xlsx_ratio: int = IMPORT_HARD_LIMITS["IMPORT_MAX_XLSX_RATIO"]
+    max_decoded_chars: int = IMPORT_HARD_LIMITS["IMPORT_MAX_DECODED_CHARS"]
 
 
 HARD_LIMITS = Limits()
@@ -61,13 +63,16 @@ class RowFlag:
 
 @dataclass
 class Draft:
-    """A row as an adapter read it, before numbering."""
+    """A row as an adapter read it, before numbering. A blank draft may stand for `count`
+    consecutive blank rows (an XLSX row-number gap): its locator is the first of them, and
+    the "row" of each next one counts up."""
 
     locator: Locator
     values: dict[str, str]
     extras: list[str] = field(default_factory=list)
     flags: list[RowFlag] = field(default_factory=list)
     blank: bool = False
+    count: int = 1
 
 
 @dataclass(frozen=True)
@@ -227,13 +232,42 @@ def too_many_rows(limits: Limits) -> AdapterError:
     )
 
 
-def collect(drafts: Iterator[Draft], limits: Limits) -> list[SourceRow]:
+def content_too_large(limits: Limits) -> AdapterError:
+    return AdapterError(
+        UploadRefusal.CONTENT_TOO_LARGE,
+        f"The file decodes to more than {limits.max_decoded_chars} characters.",
+        {"limit": limits.max_decoded_chars},
+    )
+
+
+def _nth(locator: Locator, k: int) -> Locator:
+    """The k-th (0-based) row of a blank run that starts at `locator`."""
+    if k == 0:
+        return locator
+    row = locator["row"]
+    assert isinstance(row, int)  # only XLSX gaps (sheet and row locators) span rows
+    return {**locator, "row": row + k}
+
+
+def collect(drafts: Iterator[Draft], limits: Limits, header_chars: int = 0) -> list[SourceRow]:
     """Number the rows. A blank row between data rows is kept (flagged BLANK_ROW); blank
     rows after the last data row carry nothing and are not rows (D-20: nothing with data
-    is ever dropped)."""
+    is ever dropped).
+
+    The work is bounded whatever the file claims:
+
+    * D-25 §1: the decoded characters (the header's `header_chars`, then every value and
+      extra cell) are a running total, refused above `max_decoded_chars` as soon as it is
+      crossed;
+    * blank rows stop being collected after `max_rows` of them in a row: none is kept or
+      numbered, a gap costs one draft whatever its length, and a data row after the run is
+      `too_many_rows` (it would be beyond the row limit)."""
+    if header_chars > limits.max_decoded_chars:
+        raise content_too_large(limits)
+    decoded = header_chars
     rows: list[SourceRow] = []
-    pending: list[Locator] = []
-    pending_beyond = 0  # blank rows past the limit, counted, not kept
+    pending: list[Draft] = []  # the current blank run, while it fits within the row limit
+    run = 0  # rows in the current blank run
 
     def add(locator: Locator, draft: Draft | None) -> None:
         if len(rows) >= limits.max_rows:
@@ -245,15 +279,21 @@ def collect(drafts: Iterator[Draft], limits: Limits) -> list[SourceRow]:
 
     for draft in drafts:
         if draft.blank:
-            if len(rows) + len(pending) < limits.max_rows:
-                pending.append(draft.locator)
+            run += draft.count
+            if len(rows) + run <= limits.max_rows:
+                pending.append(draft)
             else:
-                pending_beyond += 1
+                pending.clear()  # collection of the run stops here
             continue
-        if pending_beyond:
-            raise too_many_rows(limits)
-        for locator in pending:
-            add(locator, None)
+        if run and len(rows) + run >= limits.max_rows:
+            raise too_many_rows(limits)  # the run's rows and this one exceed the limit
+        for blank in pending:
+            for k in range(blank.count):
+                add(_nth(blank.locator, k), None)
         pending.clear()
+        run = 0
+        decoded += sum(map(len, draft.values.values())) + sum(map(len, draft.extras))
+        if decoded > limits.max_decoded_chars:
+            raise content_too_large(limits)
         add(draft.locator, draft)
     return rows

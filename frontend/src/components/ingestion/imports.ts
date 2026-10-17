@@ -153,6 +153,7 @@ const ERROR_TITLES: Record<string, string> = {
   too_many_rows: 'The file has too many rows',
   too_many_columns: 'The file has too many columns',
   cell_too_long: 'A cell is too long',
+  content_too_large: 'The file holds too much content once decoded',
   xlsx_uncompressed_too_large: 'The workbook is too large when unpacked',
   xlsx_compression_ratio_too_high: 'The workbook is compressed too much',
   unsupported_file_type: 'Unsupported file type',

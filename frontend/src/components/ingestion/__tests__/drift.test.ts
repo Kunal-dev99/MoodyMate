@@ -88,10 +88,14 @@ describe('drift review (FE-12.2)', () => {
     // The server's ProposalLink.href format (backend: f"/schemas/proposals/new?schema={id}").
     expect(schemas.ProposalLink.properties.href.description).toContain('/schemas/proposals/new?schema={id}')
     expect(driftProposalHref({ schema_id: id })).toBe(`/schemas/proposals/new?schema=${id}`)
-    // That route exists and prefills the schema from ?schema= (and nothing else from the query).
+    // That route exists and its editor (FE-14.3: moved out of the page) prefills the schema
+    // from ?schema= (and nothing else from the query), else the first schema listed.
     const page = readFileSync(join(__dirname, '..', '..', '..', 'app', '(platform)', 'schemas', 'proposals', 'new', 'page.tsx'), 'utf8')
-    expect(page).toContain("useState(params.get('schema') ?? '')")
-    expect(page.match(/params\.get\(/g)).toHaveLength(1)
+    expect(page).toContain('<NewProposalView ')
+    expect(page).not.toMatch(/params\.get\(/)
+    const editor = readFileSync(join(__dirname, '..', '..', 'schemas', 'ProposalEditor.tsx'), 'utf8')
+    expect(editor).toContain("useState(() => params.get('schema') || schemas[0]?.id || '')")
+    expect(editor.match(/params\.get\(/g)).toHaveLength(1)
   })
 
   it('reads the PROVISIONAL thresholds as text', () => {

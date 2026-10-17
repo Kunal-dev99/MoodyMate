@@ -36,6 +36,10 @@ IMPORT_HARD_LIMITS: dict[str, int] = {
     "IMPORT_MAX_CELL_CHARS": 4_000,
     "IMPORT_MAX_XLSX_UNCOMPRESSED_BYTES": 50 * _MIB,
     "IMPORT_MAX_XLSX_RATIO": 100,
+    # D-25 §1: decoded cell characters (header included) of one upload, every format. One
+    # XLSX shared string can be referenced by any number of cells, so the file size alone
+    # does not bound what a workbook decodes to.
+    "IMPORT_MAX_DECODED_CHARS": 50 * _MIB,
 }
 
 
@@ -104,6 +108,7 @@ class Settings(BaseSettings):
         "IMPORT_MAX_XLSX_UNCOMPRESSED_BYTES"
     ]
     IMPORT_MAX_XLSX_RATIO: int = IMPORT_HARD_LIMITS["IMPORT_MAX_XLSX_RATIO"]
+    IMPORT_MAX_DECODED_CHARS: int = IMPORT_HARD_LIMITS["IMPORT_MAX_DECODED_CHARS"]
 
     # D-09 dev mode: HS256 tokens signed with this local secret (local/test only).
     AUTH_DEV_SECRET: str = DEV_SECRET_DEFAULT

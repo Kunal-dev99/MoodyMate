@@ -1678,7 +1678,7 @@ in this phase.
   - *Done-when:*
     - the CI OpenAPI drift check passes;
     - the WS1 audit-completeness test lists `POST /imports/{import_id}/projection`.
-- [ ] **BE-14.6** *(Carried over from Phase 8, may ship as a separate PR)* Upload hardening:
+- [x] **BE-14.6** *(Carried over from Phase 8, may ship as a separate PR)* Upload hardening:
   - (a) D-25 §1: a running total of decoded characters for every format, refused above
     50 MiB with 422 `content_too_large` and audited DENIED. It is a hard ceiling;
     `IMPORT_MAX_DECODED_CHARS` may only lower it.
@@ -1693,6 +1693,13 @@ in this phase.
     - `test_import_no_leak.py::test_no_sentinel_in_logs_error_bodies_or_audit` gains an
       out-of-range-date XLSX whose sentinel never reaches stderr;
     - the suite runs with openpyxl warnings as errors.
+  - *Built (hardening PR):* all three folded checks pass, and the suite stays at 49 tests. A
+    long blank run is not a hard stop. Once it passes `max_rows`, nothing more of it is kept,
+    and a later data row is refused as `too_many_rows`, so no data row is ever dropped
+    silently (D-20). The XLSX reader now uses openpyxl's private `WorkSheetParser`, still
+    pinned `<3.2`, instead of the old `_get_row` patch. Still open from the Phase 8 review: D4
+    (a row number that does not increase is skipped) and D5 (an out-of-range date becomes
+    `#VALUE!`).
 - [ ] **FE-14.1** Financial Domain workspace (`/domain`, gated on `domain:read`; the
   `planned` entry is removed; `NEXT_PUBLIC_DOMAIN_UI=off` restores it):
   - an instrument catalogue with filters;
@@ -1713,7 +1720,7 @@ in this phase.
       accepted count;
     - a second click shows the same projection;
     - `auditor` has no button and gets a backend 403 on a direct POST.
-- [ ] **FE-14.3** *(Carried over from Phase 7, may ship with BE-14.6)* `/schemas` and
+- [x] **FE-14.3** *(Carried over from Phase 7, may ship with BE-14.6)* `/schemas` and
   `/schemas/proposals/new` move to `startLoad`/`LoadFailed`, so a failed load shows "Try
   again" instead of loading forever.
   - *Done-when:*
