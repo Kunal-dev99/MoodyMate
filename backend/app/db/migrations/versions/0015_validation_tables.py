@@ -603,6 +603,10 @@ def upgrade() -> None:
             "severity IN ('INFO', 'WARNING', 'ERROR', 'BLOCKER')",
             name=op.f("ck_validation_issue_severity"),
         ),
+        sa.CheckConstraint(  # review P11-1: the issue code is an enum (frozen copy of the seed)
+            "code IN (" + ", ".join(f"'{c}'" for c in sorted(DEFAULT_RULES)) + ")",
+            name=op.f("ck_validation_issue_code"),
+        ),
         sa.CheckConstraint(
             "source_record_id IS NOT NULL OR disposition IN ('FILE_BLOCKED', 'ACCEPTED_WITH_WARNING')",
             name=op.f("ck_validation_issue_file_level"),

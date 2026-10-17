@@ -250,8 +250,28 @@ def test_quarantine_masking_dispositions_and_retry(api: TestClient, db: str) -> 
     assert counted[-1] == 7 and counted == sorted(counted)
     assert sql(db, "SELECT count(*) AS n FROM source_record")[0]["n"] == 25 + 26 + 2
 
+    # Review P11-6: with INGESTION_ENABLED off, validate and dispositions are refused (409,
+    # audited DENIED) and the quarantine stays readable.
+    from app.core.config import Settings
+    from app.main import create_app
 
-# --- 5. The manifest, stable after later changes (BE-11.5) ----------------------------------------
+    with TestClient(
+        create_app(Settings(ENV="test", DATABASE_URL=db, INGESTION_ENABLED=False))
+    ) as off:
+        steward_off = dev_token(off, "data_steward")
+        item = next(iter(rows.values()))
+        for path, body in (
+            (f"/api/v1/imports/{held['id']}/validate", None),
+            (f"{base}/items/{item['id']}/disposition", {"status": "UNDER_REVIEW"}),
+        ):
+            c = f"p11-off-{uuid.uuid4().hex[:8]}"
+            r = off.post(path, json=body, headers={**steward_off, "X-Correlation-ID": c})
+            assert (r.status_code, r.json()["code"]) == (409, "ingestion_disabled"), path
+            assert [e["outcome"] for e in events(db, c)] == ["DENIED"], path
+        assert off.get(base, headers=steward_off).status_code == 200
+
+
+# --- 5. The manifest, stable after later changes (BE-11.5) ----------------------------------
 
 
 def test_manifest_is_stable_after_mapping_and_schema_changes(api: TestClient, db: str) -> None:

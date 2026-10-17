@@ -198,6 +198,15 @@ def test_validation_tables_are_guarded_in_the_database(api: TestClient, db: str)
             job,
             seeded["id"],
         )
+    with pytest.raises(asyncpg.CheckViolationError, match="ck_validation_issue_code"):
+        sql(  # Review P11-1: the issue code is an enum too.
+            db,
+            "INSERT INTO validation_issue (id, import_job_id, sequence, code, severity,"
+            " disposition, validation_profile_id, message, created_by) VALUES"
+            " (gen_random_uuid(), $1, 998, 'X', 'BLOCKER', 'FILE_BLOCKED', $2, 'm', 't')",
+            job,
+            seeded["id"],
+        )
 
     # The downgrade refuses while results exist, and changes nothing.
     tables = ("canonical_record", "quarantine_item", "validation_issue", "import_manifest")
