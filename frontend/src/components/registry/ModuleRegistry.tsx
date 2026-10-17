@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { CalendarClock, Puzzle } from 'lucide-react'
 import { api, call } from '@/api/client'
 import { Forbidden } from '@/components/auth/Forbidden'
+import { ModuleContracts, PlannedModuleBadge } from '@/components/calculations/PlannedModuleBadge'
 import { ImplementationPill } from '@/components/calculations/RunStatusPill'
 import { EmptyState } from '@/components/common/EmptyState'
 import { LoadFailed } from '@/components/common/LoadFailed'
@@ -50,7 +51,8 @@ function ModuleRules({ module: m }: { module: ModuleVersion }) {
 /**
  * One module version. AVAILABLE ones are illustrative prototypes (D-35) and say whether they can
  * run now. PLANNED ones are declared extension points: shown as planned, never as ready, with no
- * run affordance (D-31 §1, Phase 18).
+ * run affordance (D-31 §1). FE-18.1: a PLANNED one carries the shared PlannedModuleBadge and its
+ * declared contracts (ModuleContracts), as the New-run picker shows it.
  */
 export function ModuleCard({ module: m }: { module: ModuleVersion }) {
   const planned = m.implementation_status === 'PLANNED'
@@ -68,7 +70,7 @@ export function ModuleCard({ module: m }: { module: ModuleVersion }) {
         <span className="font-mono text-xs text-muted-foreground">
           {m.code} v{m.version}
         </span>
-        <ImplementationPill status={m.implementation_status} />
+        {planned ? <PlannedModuleBadge /> : <ImplementationPill status={m.implementation_status} />}
         <LabelBadges illustrative={m.illustrative} provisional={m.provisional} />
       </div>
       {m.description && <p className="mt-1 text-sm text-muted-foreground">{m.description}</p>}
@@ -89,21 +91,24 @@ export function ModuleCard({ module: m }: { module: ModuleVersion }) {
           </p>
         </>
       )}
+      {planned && <ModuleContracts module={m} className="mt-3" />}
       <dl className="mt-3 grid grid-cols-[160px_1fr] gap-y-1 text-sm">
         {!planned && (
-          <Row label="Engine">
-            <span className="font-mono text-xs">{m.engine_version}</span>
-          </Row>
+          <>
+            <Row label="Engine">
+              <span className="font-mono text-xs">{m.engine_version}</span>
+            </Row>
+            <Row label="Input schemas">
+              {m.input_contract.schemas.length === 0 ? (
+                <span className="text-muted-foreground">None declared</span>
+              ) : (
+                <span className="font-mono text-xs">
+                  {m.input_contract.schemas.map((s) => `${s.schema_code}${s.required ? '' : ' (optional)'}`).join(', ')}
+                </span>
+              )}
+            </Row>
+          </>
         )}
-        <Row label="Input schemas">
-          {m.input_contract.schemas.length === 0 ? (
-            <span className="text-muted-foreground">None declared</span>
-          ) : (
-            <span className="font-mono text-xs">
-              {m.input_contract.schemas.map((s) => `${s.schema_code}${s.required ? '' : ' (optional)'}`).join(', ')}
-            </span>
-          )}
-        </Row>
         <Row label="Rules">
           <ModuleRules module={m} />
         </Row>

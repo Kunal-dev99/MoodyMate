@@ -169,9 +169,18 @@ describe('modules: AVAILABLE and PLANNED are shown apart, PLANNED never as ready
     const html = renderToStaticMarkup(createElement(ModuleCard, { module: PLANNED }))
     expect(html).toMatchSnapshot()
     expect(html).toContain('data-status="PLANNED"')
-    expect(html).toContain('Planned · not runnable')
     expect(html).toContain('not production-ready')
     expect(html).not.toMatch(/Runnable now|Available|module-runnable|Engine/)
+  })
+
+  it('a PLANNED row carries the shared PlannedModuleBadge and its declared contracts (FE-18.1)', () => {
+    const html = renderToStaticMarkup(createElement(ModuleCard, { module: PLANNED }))
+    expect(html).toContain('data-testid="planned-module-badge"')
+    expect(html).toContain('Planned — extension point')
+    expect(html).toContain('module_not_available')
+    expect(html).not.toContain('data-testid="module-implementation"')
+    expect(html).toContain('data-testid="module-contracts"')
+    expect(html).toContain('instrument (required): instrument_id')
   })
 
   it('renders an AVAILABLE module as an illustrative prototype, with whether it can run now', () => {
@@ -180,6 +189,9 @@ describe('modules: AVAILABLE and PLANNED are shown apart, PLANNED never as ready
     expect(html).toContain('data-testid="illustrative-badge"')
     expect(html).toContain('Runnable now')
     expect(html).toContain('no parity with any vendor system is claimed')
+    // Unchanged by FE-18.1: the implementation pill, no planned badge, no contracts block.
+    expect(html).toContain('data-testid="module-implementation"')
+    expect(html).not.toMatch(/planned-module-badge|module-contracts/)
   })
 })
 

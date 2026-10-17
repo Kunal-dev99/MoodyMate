@@ -2018,7 +2018,7 @@ runnable or presented as ready. The calculation limitations and the golden cases
 documented, awaiting a named domain expert. WS3 is proven by the verification suite and by
 Playwright in CI.
 
-- [ ] **BE-18.1** A tagged seed adds `alm_irrbb`, `collateral` and `capital` module versions
+- [x] **BE-18.1** A tagged seed adds `alm_irrbb`, `collateral` and `capital` module versions
   with `implementation_status=PLANNED` and declared input and output contracts.
   `POST /calculation-runs` refuses them with 409 `module_not_available` (audited).
   `docs/CALCULATION_MODULES.md` documents:
@@ -2030,13 +2030,13 @@ Playwright in CI.
   - the "not regulatory, no Moody's parity" statement.
   - *Done-when:* the WS1 audit test shows a DENIED event for a PLANNED module run; the doc
     exists and lists every module row in the seed (grep).
-- [ ] **BE-18.2** The domain validation pack: `backend/app/calculations/golden/*.json` holds
+- [x] **BE-18.2** The domain validation pack: `backend/app/calculations/golden/*.json` holds
   every engineering fixture with its expected outputs and the status `ENGINEERING — awaiting
   domain-expert approval`. A README names who must approve them, along with the tolerance
   policy (exact for v1, per metric, per Data Model §7).
   - *Done-when:* the `test_calculations.py` golden loop reads the files rather than inline
     literals, and every file carries the status field.
-- [ ] **BE-18.3** The WS3 verification marker `ws3`, as a CI step printing the matrix. It is
+- [x] **BE-18.3** The WS3 verification marker `ws3`, as a CI step printing the matrix. It is
   applied to:
   - the WS1 matrix, isolation and audit tests (now covering every WS3 route and resource);
   - `test_domain.py`, `test_calculations.py` and `test_rules.py`;
@@ -2047,12 +2047,12 @@ Playwright in CI.
     - `pytest -m ws3` runs green in CI on the Phase 18 PR, with the matrix in the log;
     - every WS3 table appears in RETENTION.md;
     - `pytest --collect-only -q` reports 48 or fewer.
-- [ ] **FE-18.1** PLANNED modules appear in the registry and the New-run picker as disabled
+- [x] **FE-18.1** PLANNED modules appear in the registry and the New-run picker as disabled
   "Planned — extension point" entries with their declared contracts. They are never
   selectable.
   - *Done-when:* a vitest and a Playwright check show they cannot be selected, and a direct
     POST is refused by the backend.
-- [ ] **FE-18.2** Playwright WS3 smoke:
+- [x] **FE-18.2** Playwright WS3 smoke:
   1. the steward projects the instrument, position and cashflow imports;
   2. the analyst builds a snapshot and runs the maturity ladder and LCR;
   3. a drill-down to a source row;

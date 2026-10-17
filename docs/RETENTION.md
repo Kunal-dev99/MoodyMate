@@ -4,7 +4,7 @@
 
 **Deliberately absent:** numeric retention periods and recovery objectives (RPO/RTO). Architecture §11 and §18 say not to set these until the client agrees them. Where a number would go, this document names who decides it.
 
-**Scope:** the artifact classes that exist after Feature 01 (WS1 foundation), Feature 02 (WS2 ingestion, BE-13.3: migrations 0009–0016 and the raw artifact store) and Feature 03 so far (WS3: the domain projection, migration 0017; the rule registry, snapshots and runs, migration 0018). Later features (calculation runs and results, reports, AI requests) add their own rows when they are built (Data Model "Define retention/deletion for raw artifacts, derived records, AI requests and logs").
+**Scope:** the artifact classes that exist after Feature 01 (WS1 foundation), Feature 02 (WS2 ingestion, BE-13.3: migrations 0009–0016 and the raw artifact store) and Feature 03 (WS3, BE-18.3: the domain projection, migration 0017; the rule registry, snapshots, runs and their results, migration 0018; the LCR and HQLA results of Phase 17, BE-17.1). Every WS3 table is in a PROVISIONAL row below. Later features (reports, AI requests) add their own rows when they are built (Data Model "Define retention/deletion for raw artifacts, derived records, AI requests and logs").
 
 ## Principles that already hold in the code
 
@@ -66,7 +66,7 @@ For audit events the evidence is written *before* the rows are removed, so the t
   2. Run `alembic current` and confirm it shows the expected head.
   3. Confirm the protective triggers and functions exist: `audit_event_*`, `schema_version_immutable`, `schema_field_immutable`, `schema_dependency_same_tenant`, the `*_no_truncate` triggers and `schema_change_proposal_*`, and for WS2 the `source_*`, `import_*`, `*_append_only`, `*_guard`, `*_immutable`, `*_checks`, `*_same_tenant` and `import_job_mapping_pin` triggers on the tables above.
   4. Restore the artifact store from the backup taken with the database, then **check that the artifact store hashes match `import_artifact`**: for every `import_artifact` row, the object at `storage_ref` exists, its SHA-256 equals `sha256` and its size equals `size_bytes`; and list any object without a row. A missing or mismatched object is a failed restore (the application fails closed on it with `artifact_integrity_error`, D-15); it is not repaired silently.
-  5. Run the WS1 and WS2 verification suites (`pytest -m ws1`, `pytest -m ws2`) against it.
+  5. Run the WS1, WS2 and WS3 verification suites (`pytest -m ws1`, `pytest -m ws2`, `pytest -m ws3`) against it.
   6. Reconcile row counts per class against the backup manifest.
   7. Only then switch traffic.
   8. Record the restore as an operational event, with timings, so the agreed RTO can be measured.

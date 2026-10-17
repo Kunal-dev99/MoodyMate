@@ -6,7 +6,9 @@ maturity ladder end to end, in one essential test (D-26), in six parts:
    AVAILABLE and registered in code; the rule versions are ACTIVE, tagged, PROVISIONAL and
    ILLUSTRATIVE, approved by the seed tag, with recomputable hashes; the buckets are
    materialised; the baseline assumption set is ACTIVE and empty; GET /calculation-modules
-   shows what a run would pin, with the D-35 statement.
+   shows what a run would pin, with the D-35 statement. The PLANNED extension points of
+   migration 0021 (BE-18.1) are listed with their contracts, never runnable, and refused
+   409 module_not_available with a DENIED audit (in part 4).
 2. Module purity (BE-15.4): no float and no AI import anywhere in app/calculations/ (source
    grep, as BE-11.2); the exact context traps rounding; the past-due alternative and an
    invalid bucket rule, through the pure function.
@@ -14,7 +16,7 @@ maturity ladder end to end, in one essential test (D-26), in six parts:
    duplicate_schema, reconciliation_broken, calculations_disabled) with its DENIED audit and
    nothing written; the same members (in any order) give the same snapshot; content_sha256
    equals the hash recomputed from the member manifests.
-4. Runs (BE-15.4): the golden loop (hand-computed engineering fixtures, D-35 §4) checks the
+4. Runs (BE-15.4): the golden loop (the BE-18.2 pack files, D-35 §4) checks the
    ladder, the status and the warning codes; an Idempotency-Key replay returns the original
    run and a changed body is a conflict; a second run on the same pins has a new id and the
    same manifest_sha256 and result_sha256; module_not_available, a missing snapshot, a bad
@@ -37,8 +39,9 @@ maturity ladder end to end, in one essential test (D-26), in six parts:
 Phase 17 (BE-17.1 – BE-17.3), folded in (+0): part 1 checks the 0020 frozen seed and the
 second module (`lcr_hqla` v1); part 2 runs it purely (levels, haircuts, uncapped L2 flagged,
 a zero denominator with outflows, a JSON-number parameter refused); part 5b runs the
-hand-computed LCR golden case (lcr_kit.py) and reads GET …/liquidity (HQLA total = its
-included asset rows, D-33 masking, a rerun's hashes, 404 for a run of another module); part 6
+hand-computed LCR golden case (the lcr_hqla pack file, BE-18.2) and reads GET …/liquidity
+(HQLA total = its included asset rows, D-33 masking, a rerun's hashes, 404 for a run of
+another module); part 6
 loops the output guards over hqla_asset_result and lcr_result, and 0020 refuses its downgrade
 while LCR results exist.
 """
@@ -105,6 +108,7 @@ from app.rules.constants import (
     LCR_SEED_TAG,
     LCR_SEEDED_RULES,
     MATURITY_BUCKETS,
+    MATURITY_LADDER,
     PAST_DUE_TREATMENT,
     RULE_VERSION_TRANSITIONS,
     RULES_SEED_TAG,
@@ -144,7 +148,6 @@ from app.tests.helpers import (
     validate_import,
 )
 from app.tests.lcr_kit import (
-    LCR_GOLDEN,
     LCR_OUTPUT_TABLES,
     POSITION_COLUMNS,
     position_csv,
@@ -208,97 +211,6 @@ INSTRUMENT_RULES = [
 ]
 
 
-def _zero(cumulative: str) -> tuple[str, ...]:
-    return ("0", "0", "0", cumulative, "0", "0", "0", "0")
-
-
-# Engineering golden cases (D-35 §4): hand-computed, ENGINEERING — awaiting domain-expert
-# approval, not "approved golden cases". BE-18.2 moves them to app/calculations/golden/.
-# Ladder rows: inflows, outflows, net gap, cumulative gap, inflows contractual / behavioural,
-# outflows contractual / behavioural, then the number of contributions.
-GOLDEN: list[dict[str, Any]] = [
-    {
-        "name": "maturity_ladder v1 boundary cases",
-        "status": "ENGINEERING — awaiting domain-expert approval",
-        "reporting_date": date(2026, 12, 31),
-        # instrument_id, instrument_type, currency, notional
-        "instruments": [
-            ("GL-LOAN", "LOAN", "EUR", "1000.00"),
-            ("GL-DEP", "DEPOSIT", "EUR", "500.00"),
-            ("GL-BOND", "BOND", "USD", "2000.00"),
-            ("GL-DEPU", "DEPOSIT", "USD", "800.00"),
-            ("GL-SWAP", "SWAP", "EUR", "100.00"),  # a type the direction rule does not map
-        ],
-        # cashflow_id, instrument_id, days after the reporting date, amount, currency, type,
-        # origin
-        "cash_flows": [
-            ("CF-01", "GL-LOAN", 1, "100.00", "EUR", "PRINCIPAL", "CONTRACTUAL"),  # B01 edge
-            ("CF-02", "GL-DEP", 7, "40.50", "EUR", "PRINCIPAL", "CONTRACTUAL"),  # B02 edge
-            ("CF-03", "GL-LOAN", 8, "25.25", "EUR", "INTEREST", "BEHAVIOURAL"),  # past an edge
-            ("CF-04", "GL-DEP", 0, "10.00", "EUR", "PRINCIPAL", "CONTRACTUAL"),  # on the date
-            ("CF-05", "GL-LOAN", -3, "55.00", "EUR", "PRINCIPAL", "CONTRACTUAL"),  # past due
-            ("CF-06", "GL-DEP", 30, "0.00", "EUR", "FEE", "CONTRACTUAL"),  # zero, B03 edge
-            ("CF-07", "GL-SWAP", 10, "70.00", "EUR", "PRINCIPAL", "CONTRACTUAL"),  # unmapped
-            ("CF-08", "GL-NONE", 10, "80.00", "EUR", "PRINCIPAL", "CONTRACTUAL"),  # no instrument
-            ("CF-09", "GL-BOND", 731, "1000.00", "USD", "PRINCIPAL", "CONTRACTUAL"),  # open B08
-            ("CF-10", "GL-DEPU", 730, "300.00", "USD", "PRINCIPAL", "CONTRACTUAL"),  # B07 edge
-            ("CF-11", "GL-LOAN", 365, "12.34", "EUR", "INTEREST", "BEHAVIOURAL"),  # B06 edge
-            ("CF-12", "GL-DEP", 2, "9.99", "EUR", "INTEREST", "BEHAVIOURAL"),
-        ],
-        "run_status": "SUCCEEDED_WITH_WARNINGS",
-        "excluded": {
-            "CF-04": "OUTSIDE_BUCKETS",
-            "CF-05": "PAST_DUE_EXCLUDED",
-            "CF-07": "UNMAPPED_INSTRUMENT_TYPE",
-            "CF-08": "INSTRUMENT_NOT_IN_SNAPSHOT",
-        },
-        # D-33 minimum aggregation (CALC_MIN_AGGREGATE_COUNT 3): the figures an `internal`
-        # role sees masked. Only non-zero contributions count: every part here with one has 1
-        # or 2, so it is masked with what is derived from it; empty parts, and EUR B03's
-        # outflows (only CF-06's 0.00), stay clear (0); a cumulative gap stays masked once one
-        # net gap of its currency is.
-        "masked_for_internal": {
-            "EUR": {
-                "B01": {"inflows_contractual", "inflows", "net_gap", "cumulative_gap"},
-                "B02": {
-                    "outflows_contractual",
-                    "outflows_behavioural",
-                    "outflows",
-                    "net_gap",
-                    "cumulative_gap",
-                },
-                "B03": {"inflows_behavioural", "inflows", "net_gap", "cumulative_gap"},
-                "B04": {"cumulative_gap"},
-                "B05": {"cumulative_gap"},
-                "B06": {"inflows_behavioural", "inflows", "net_gap", "cumulative_gap"},
-                "B07": {"cumulative_gap"},
-                "B08": {"cumulative_gap"},
-            },
-            "USD": {
-                **{f"B0{i}": set() for i in range(1, 7)},
-                "B07": {"outflows_contractual", "outflows", "net_gap", "cumulative_gap"},
-                "B08": {"inflows_contractual", "inflows", "net_gap", "cumulative_gap"},
-            },
-        },  # fmt: skip
-        "ladder": {
-            "EUR": {
-                "B01": (("100.00", "0", "100.00", "100.00", "100.00", "0", "0", "0"), 1),
-                "B02": (("0", "50.49", "-50.49", "49.51", "0", "0", "40.50", "9.99"), 2),
-                "B03": (("25.25", "0.00", "25.25", "74.76", "0", "25.25", "0.00", "0"), 2),
-                "B04": (_zero("74.76"), 0),
-                "B05": (_zero("74.76"), 0),
-                "B06": (("12.34", "0", "12.34", "87.10", "0", "12.34", "0", "0"), 1),
-                "B07": (_zero("87.10"), 0),
-                "B08": (_zero("87.10"), 0),
-            },
-            "USD": {
-                **{f"B0{i}": (_zero("0"), 0) for i in range(1, 7)},
-                "B07": (("0", "300.00", "-300.00", "-300.00", "0", "0", "300.00", "0"), 1),
-                "B08": (("1000.00", "0", "1000.00", "700.00", "1000.00", "0", "0", "0"), 1),
-            },
-        },
-    }
-]
 AMOUNTS = (
     "inflows",
     "outflows",
@@ -309,6 +221,80 @@ AMOUNTS = (
     "outflows_contractual",
     "outflows_behavioural",
 )
+# The domain validation pack (BE-18.2, D-35 §4): one hand-computed engineering case per JSON
+# file in app/calculations/golden/, ENGINEERING — awaiting domain-expert approval, not
+# "approved golden cases" (see its README). Each file is exact per metric (tolerance "0").
+GOLDEN_DIR = APP / "calculations" / "golden"
+GOLDEN_STATUS = "ENGINEERING — awaiting domain-expert approval"
+CASHFLOW_FIELDS = (
+    "cashflow_id",
+    "instrument_id",
+    "days_after_reporting_date",
+    "amount",
+    "currency",
+    "cashflow_type",
+    "origin",
+)
+GOLDEN_POSITION_FIELDS = ("position_id", "instrument_id", "balance", "currency")
+
+
+def no_fraction(text: str) -> Any:
+    raise AssertionError(f"a JSON fraction in the golden pack: {text}")  # amounts are text
+
+
+LCR_TOLERANCE = (
+    *LCR_FIGURES,
+    "ratio",
+    "levels",
+    "excluded_asset_count",
+    "outflow_count",
+    "inflow_count",
+)
+
+
+def golden_case(path: Path) -> dict[str, Any]:
+    """A pack file in its module's loop shape. maturity_ladder v1: input rows as CSV tuples,
+    ladder rows as (the AMOUNTS, the number of contributions). lcr_hqla v1: input rows as CSV
+    tuples, the per-currency figures under "lcr", asset keys as sets."""
+    case = json.loads(path.read_text(encoding="utf-8"), parse_float=no_fraction)
+    assert case["status"] == GOLDEN_STATUS, path
+    inputs, expected = case["inputs"], case["expected"]
+    common = {
+        **case,
+        "reporting_date": date.fromisoformat(inputs["reporting_date"]),
+        "instruments": [tuple(i[c] for c in INSTRUMENT_COLUMNS) for i in inputs["instruments"]],
+        "cash_flows": [tuple(f[c] for c in CASHFLOW_FIELDS) for f in inputs["cash_flows"]],
+    }
+    if case["module"] == {"code": LCR_HQLA, "version": 1}:
+        assert case["tolerance"] == dict.fromkeys(LCR_TOLERANCE, "0"), path
+        return {
+            **common,
+            "positions": [tuple(p[c] for c in GOLDEN_POSITION_FIELDS) for p in inputs["positions"]],
+            "lcr": expected["currencies"],
+            "outcome": expected["outcome"],
+            "included_assets": {k: set(v) for k, v in expected["included_assets"].items()},
+            "excluded_assets": set(expected["excluded_assets"]),
+            "masked_for_internal": {k: set(v) for k, v in expected["masked_for_internal"].items()},
+        }
+    assert case["module"] == {"code": MATURITY_LADDER, "version": 1}, path
+    assert case["tolerance"] == dict.fromkeys((*AMOUNTS, "contribution_count"), "0"), path
+    return {
+        **common,
+        **expected,
+        "ladder": {
+            currency: {
+                code: (tuple(row[a] for a in AMOUNTS), row["contribution_count"])
+                for code, row in rows.items()
+            }
+            for currency, rows in expected["ladder"].items()
+        },
+    }
+
+
+PACK = [golden_case(path) for path in sorted(GOLDEN_DIR.glob("*.json"))]
+# Each file runs under its own module: the ladder loop (part 4) and the LCR part (5b).
+GOLDEN = [g for g in PACK if g["module"]["code"] == MATURITY_LADDER]
+LCR_GOLDEN_CASES = [g for g in PACK if g["module"]["code"] == LCR_HQLA]
 
 
 def migration(name: str) -> ModuleType:
@@ -379,11 +365,14 @@ def cashflow_csv(rows: Sequence[tuple[Any, ...]], reporting: date) -> bytes:
     return ("\n".join(lines) + "\n").encode()
 
 
+@pytest.mark.ws3
 def test_registry_snapshot_run_and_maturity_ladder(
     api: TestClient, db: str, artifact_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # --- 1. The registry seed (BE-15.1) --------------------------------------------------------
     m18 = migration("0018_calculations")
+    m21 = migration("0021_planned_modules")
+    assert m21.down_revision == "0020"  # re-chained onto Phase 17's 0020_lcr_results
     spec = maturity_ladder.SPEC
     assert (m18.TAG, m18.STATEMENT) == (RULES_SEED_TAG, ILLUSTRATIVE_STATEMENT)
     assert m18.RULE_STATUSES == tuple(s.value for s in RuleVersionStatus)
@@ -439,10 +428,15 @@ def test_registry_snapshot_run_and_maturity_ladder(
     assert m20.MODULE_VERSION["engine_version"] == lspec.engine_version
     assert set(m20.OUTPUT_TABLES) == set(LCR_OUTPUT_TABLES)
     assert m20.LCR_WARNING_CODES == tuple(c.value for c in LcrWarningCode)
+    planned_ids = {m21._id("calculation_module", c) for c in m21.MODULES} | {
+        m21._id("module_version", f"{c}:{m21.VERSION}") for c in m21.MODULES
+    }
+    assert planned_ids.isdisjoint({m20.MODULE_ID, m20.VERSION_ID})  # uuid5 seeds never collide
 
     modules = sql(
         db,
-        "SELECT m.code, v.* FROM module_version v JOIN calculation_module m ON m.id = v.module_id",
+        "SELECT m.code, v.* FROM module_version v JOIN calculation_module m ON m.id = v.module_id"
+        " WHERE v.implementation_status = 'AVAILABLE'",
     )
     assert {(r["code"], r["version"]) for r in modules} == set(REGISTRY)  # code == seed (D-31)
     for registered in (spec, lspec):
@@ -452,7 +446,12 @@ def test_registry_snapshot_run_and_maturity_ladder(
         assert module_row["implementation_status"] == "AVAILABLE", registered.code
     assert module_row["seeded_by"] == LCR_SEED_TAG and lspec.code == LCR_HQLA
     for table in REGISTRY_TABLES:
-        rows = sql(db, f"SELECT seeded_by, provisional, illustrative FROM {table}")
+        rows = sql(
+            db,
+            f"SELECT seeded_by, provisional, illustrative FROM {table}"  # noqa: S608
+            " WHERE seeded_by IS DISTINCT FROM $1",
+            m21.TAG,
+        )
         assert rows, table
         assert all(
             r["seeded_by"] in (RULES_SEED_TAG, LCR_SEED_TAG)
@@ -503,7 +502,9 @@ def test_registry_snapshot_run_and_maturity_ladder(
     steward, approver = dev_token(api, "data_steward"), dev_token(api, "approver")
     analyst = dev_token(api, "risk_analyst")
     catalogue = no_float(api.get(MODULES, headers=dev_token(api, "auditor")).text)
-    listed_modules = {m["code"]: m for m in catalogue["items"]}
+    listed_modules = {
+        m["code"]: m for m in catalogue["items"] if m["implementation_status"] == "AVAILABLE"
+    }
     assert set(listed_modules) == {"maturity_ladder", LCR_HQLA}
     lcr_module = listed_modules[LCR_HQLA]
     assert (lcr_module["version"], lcr_module["implementation_status"]) == (1, "AVAILABLE")
@@ -513,6 +514,14 @@ def test_registry_snapshot_run_and_maturity_ladder(
         lcr_versions
     )
     module = listed_modules["maturity_ladder"]
+    # BE-18.1: the PLANNED extension points are listed, with their declared contracts, and
+    # never runnable (part 4: refused 409 module_not_available, audited DENIED).
+    planned = {m["code"]: m for m in catalogue["items"] if m["implementation_status"] == "PLANNED"}
+    assert set(planned) == set(m21.MODULES) == {"alm_irrbb", "collateral", "capital"}
+    for code, m in planned.items():
+        assert not m["runnable"] and m["provisional"] and m["illustrative"], code
+        assert m["input_contract"] == m21.MODULES[code]["input_contract"], code
+        assert m["output_contract"] == m21.MODULES[code]["output_contract"], code
     assert (module["code"], module["version"], module["implementation_status"]) == (
         "maturity_ladder",
         1,
@@ -791,7 +800,7 @@ def test_registry_snapshot_run_and_maturity_ladder(
         "reporting_date": case["reporting_date"].isoformat(),
     }
     golden_runs = []
-    for golden in GOLDEN:  # the golden loop (BE-18.2 reads it from files)
+    for golden in GOLDEN:  # the golden loop, over the BE-18.2 pack files
         assert golden["status"].startswith("ENGINEERING")
         c = cid()
         r = start_run(
@@ -875,6 +884,10 @@ def test_registry_snapshot_run_and_maturity_ladder(
     before = calc_counts(db)
     for change, status, code in (
         ({"module_version_id": str(uuid.uuid4())}, 409, "module_not_available"),
+        *(
+            ({"module_version_id": m["module_version_id"]}, 409, "module_not_available")
+            for m in planned.values()
+        ),
         ({"dataset_snapshot_id": str(uuid.uuid4())}, 404, "not_found"),
     ):
         c = cid()
@@ -1237,7 +1250,7 @@ def test_registry_snapshot_run_and_maturity_ladder(
     # The golden case (hand-computed, D-35 §4) over its own snapshot of three projected
     # imports: an ineligible asset, the inflow cap binding, a zero denominator, mixed
     # currencies, the horizon edge and a ratio tie that only ROUND_HALF_EVEN rounds down.
-    lcr = LCR_GOLDEN
+    [lcr] = LCR_GOLDEN_CASES  # the lcr_hqla v1 pack file (BE-18.2)
     assert lcr["status"].startswith("ENGINEERING")
     lcr_date = lcr["reporting_date"]
     position_source = csv_source(api, db, steward, "calc_positions", "position", POSITION_COLUMNS)
@@ -1541,7 +1554,7 @@ def test_registry_snapshot_run_and_maturity_ladder(
     # transaction: nothing changes; 0020 alone refuses while LCR results exist (BE-17.1).
     # Without them, head -> 0017 -> head.
     head = str(ScriptDirectory.from_config(Config("alembic.ini")).get_current_head())
-    assert sql(db, "SELECT version_num FROM alembic_version")[0]["version_num"] == head == "0020"
+    assert sql(db, "SELECT version_num FROM alembic_version")[0]["version_num"] == head == "0021"
     before = calc_counts(db)
     try:
         for target in (m20.down_revision, "0017"):

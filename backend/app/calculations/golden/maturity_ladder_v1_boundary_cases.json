@@ -1,0 +1,430 @@
+{
+  "name": "maturity_ladder v1 boundary cases",
+  "status": "ENGINEERING — awaiting domain-expert approval",
+  "module": {
+    "code": "maturity_ladder",
+    "version": 1
+  },
+  "description": "Hand-computed engineering fixture (D-35 section 4) for the illustrative maturity ladder v1 under the seeded D-35 rules: bucket edges, past due, unmapped type, missing instrument, zero amount, open last bucket, two currencies, both origins. Ladder amounts are exact decimal text; masked_for_internal lists the figures a role with clearance internal sees masked under D-33 minimum aggregation (CALC_MIN_AGGREGATE_COUNT 3); only non-zero contributions count, so EUR B03 outflows (only CF-06, 0.00) stay clear.",
+  "tolerance": {
+    "inflows": "0",
+    "outflows": "0",
+    "net_gap": "0",
+    "cumulative_gap": "0",
+    "inflows_contractual": "0",
+    "inflows_behavioural": "0",
+    "outflows_contractual": "0",
+    "outflows_behavioural": "0",
+    "contribution_count": "0"
+  },
+  "inputs": {
+    "reporting_date": "2026-12-31",
+    "instruments": [
+      {
+        "instrument_id": "GL-LOAN",
+        "instrument_type": "LOAN",
+        "currency": "EUR",
+        "notional": "1000.00"
+      },
+      {
+        "instrument_id": "GL-DEP",
+        "instrument_type": "DEPOSIT",
+        "currency": "EUR",
+        "notional": "500.00"
+      },
+      {
+        "instrument_id": "GL-BOND",
+        "instrument_type": "BOND",
+        "currency": "USD",
+        "notional": "2000.00"
+      },
+      {
+        "instrument_id": "GL-DEPU",
+        "instrument_type": "DEPOSIT",
+        "currency": "USD",
+        "notional": "800.00"
+      },
+      {
+        "instrument_id": "GL-SWAP",
+        "instrument_type": "SWAP",
+        "currency": "EUR",
+        "notional": "100.00",
+        "note": "a type the direction rule does not map"
+      }
+    ],
+    "cash_flows": [
+      {
+        "cashflow_id": "CF-01",
+        "instrument_id": "GL-LOAN",
+        "days_after_reporting_date": 1,
+        "amount": "100.00",
+        "currency": "EUR",
+        "cashflow_type": "PRINCIPAL",
+        "origin": "CONTRACTUAL",
+        "note": "day 1: upper edge of B01 (0,1]"
+      },
+      {
+        "cashflow_id": "CF-02",
+        "instrument_id": "GL-DEP",
+        "days_after_reporting_date": 7,
+        "amount": "40.50",
+        "currency": "EUR",
+        "cashflow_type": "PRINCIPAL",
+        "origin": "CONTRACTUAL",
+        "note": "day 7: upper edge of B02 (1,7]"
+      },
+      {
+        "cashflow_id": "CF-03",
+        "instrument_id": "GL-LOAN",
+        "days_after_reporting_date": 8,
+        "amount": "25.25",
+        "currency": "EUR",
+        "cashflow_type": "INTEREST",
+        "origin": "BEHAVIOURAL",
+        "note": "day 8: just past the B02 edge, into B03"
+      },
+      {
+        "cashflow_id": "CF-04",
+        "instrument_id": "GL-DEP",
+        "days_after_reporting_date": 0,
+        "amount": "10.00",
+        "currency": "EUR",
+        "cashflow_type": "PRINCIPAL",
+        "origin": "CONTRACTUAL",
+        "note": "day 0: on the reporting date, outside every bucket"
+      },
+      {
+        "cashflow_id": "CF-05",
+        "instrument_id": "GL-LOAN",
+        "days_after_reporting_date": -3,
+        "amount": "55.00",
+        "currency": "EUR",
+        "cashflow_type": "PRINCIPAL",
+        "origin": "CONTRACTUAL",
+        "note": "day -3: past due"
+      },
+      {
+        "cashflow_id": "CF-06",
+        "instrument_id": "GL-DEP",
+        "days_after_reporting_date": 30,
+        "amount": "0.00",
+        "currency": "EUR",
+        "cashflow_type": "FEE",
+        "origin": "CONTRACTUAL",
+        "note": "day 30: a zero amount on the upper edge of B03 (7,30]"
+      },
+      {
+        "cashflow_id": "CF-07",
+        "instrument_id": "GL-SWAP",
+        "days_after_reporting_date": 10,
+        "amount": "70.00",
+        "currency": "EUR",
+        "cashflow_type": "PRINCIPAL",
+        "origin": "CONTRACTUAL",
+        "note": "instrument type SWAP is not mapped by cashflow_direction"
+      },
+      {
+        "cashflow_id": "CF-08",
+        "instrument_id": "GL-NONE",
+        "days_after_reporting_date": 10,
+        "amount": "80.00",
+        "currency": "EUR",
+        "cashflow_type": "PRINCIPAL",
+        "origin": "CONTRACTUAL",
+        "note": "its instrument is not in the snapshot"
+      },
+      {
+        "cashflow_id": "CF-09",
+        "instrument_id": "GL-BOND",
+        "days_after_reporting_date": 731,
+        "amount": "1000.00",
+        "currency": "USD",
+        "cashflow_type": "PRINCIPAL",
+        "origin": "CONTRACTUAL",
+        "note": "day 731: in the open last bucket B08 (730,inf)"
+      },
+      {
+        "cashflow_id": "CF-10",
+        "instrument_id": "GL-DEPU",
+        "days_after_reporting_date": 730,
+        "amount": "300.00",
+        "currency": "USD",
+        "cashflow_type": "PRINCIPAL",
+        "origin": "CONTRACTUAL",
+        "note": "day 730: upper edge of B07 (365,730]"
+      },
+      {
+        "cashflow_id": "CF-11",
+        "instrument_id": "GL-LOAN",
+        "days_after_reporting_date": 365,
+        "amount": "12.34",
+        "currency": "EUR",
+        "cashflow_type": "INTEREST",
+        "origin": "BEHAVIOURAL",
+        "note": "day 365: upper edge of B06 (180,365]"
+      },
+      {
+        "cashflow_id": "CF-12",
+        "instrument_id": "GL-DEP",
+        "days_after_reporting_date": 2,
+        "amount": "9.99",
+        "currency": "EUR",
+        "cashflow_type": "INTEREST",
+        "origin": "BEHAVIOURAL",
+        "note": "day 2: in B02, behavioural outflow"
+      }
+    ]
+  },
+  "expected": {
+    "run_status": "SUCCEEDED_WITH_WARNINGS",
+    "excluded": {
+      "CF-04": "OUTSIDE_BUCKETS",
+      "CF-05": "PAST_DUE_EXCLUDED",
+      "CF-07": "UNMAPPED_INSTRUMENT_TYPE",
+      "CF-08": "INSTRUMENT_NOT_IN_SNAPSHOT"
+    },
+    "ladder": {
+      "EUR": {
+        "B01": {
+          "inflows": "100.00",
+          "outflows": "0",
+          "net_gap": "100.00",
+          "cumulative_gap": "100.00",
+          "inflows_contractual": "100.00",
+          "inflows_behavioural": "0",
+          "outflows_contractual": "0",
+          "outflows_behavioural": "0",
+          "contribution_count": 1
+        },
+        "B02": {
+          "inflows": "0",
+          "outflows": "50.49",
+          "net_gap": "-50.49",
+          "cumulative_gap": "49.51",
+          "inflows_contractual": "0",
+          "inflows_behavioural": "0",
+          "outflows_contractual": "40.50",
+          "outflows_behavioural": "9.99",
+          "contribution_count": 2
+        },
+        "B03": {
+          "inflows": "25.25",
+          "outflows": "0.00",
+          "net_gap": "25.25",
+          "cumulative_gap": "74.76",
+          "inflows_contractual": "0",
+          "inflows_behavioural": "25.25",
+          "outflows_contractual": "0.00",
+          "outflows_behavioural": "0",
+          "contribution_count": 2
+        },
+        "B04": {
+          "inflows": "0",
+          "outflows": "0",
+          "net_gap": "0",
+          "cumulative_gap": "74.76",
+          "inflows_contractual": "0",
+          "inflows_behavioural": "0",
+          "outflows_contractual": "0",
+          "outflows_behavioural": "0",
+          "contribution_count": 0
+        },
+        "B05": {
+          "inflows": "0",
+          "outflows": "0",
+          "net_gap": "0",
+          "cumulative_gap": "74.76",
+          "inflows_contractual": "0",
+          "inflows_behavioural": "0",
+          "outflows_contractual": "0",
+          "outflows_behavioural": "0",
+          "contribution_count": 0
+        },
+        "B06": {
+          "inflows": "12.34",
+          "outflows": "0",
+          "net_gap": "12.34",
+          "cumulative_gap": "87.10",
+          "inflows_contractual": "0",
+          "inflows_behavioural": "12.34",
+          "outflows_contractual": "0",
+          "outflows_behavioural": "0",
+          "contribution_count": 1
+        },
+        "B07": {
+          "inflows": "0",
+          "outflows": "0",
+          "net_gap": "0",
+          "cumulative_gap": "87.10",
+          "inflows_contractual": "0",
+          "inflows_behavioural": "0",
+          "outflows_contractual": "0",
+          "outflows_behavioural": "0",
+          "contribution_count": 0
+        },
+        "B08": {
+          "inflows": "0",
+          "outflows": "0",
+          "net_gap": "0",
+          "cumulative_gap": "87.10",
+          "inflows_contractual": "0",
+          "inflows_behavioural": "0",
+          "outflows_contractual": "0",
+          "outflows_behavioural": "0",
+          "contribution_count": 0
+        }
+      },
+      "USD": {
+        "B01": {
+          "inflows": "0",
+          "outflows": "0",
+          "net_gap": "0",
+          "cumulative_gap": "0",
+          "inflows_contractual": "0",
+          "inflows_behavioural": "0",
+          "outflows_contractual": "0",
+          "outflows_behavioural": "0",
+          "contribution_count": 0
+        },
+        "B02": {
+          "inflows": "0",
+          "outflows": "0",
+          "net_gap": "0",
+          "cumulative_gap": "0",
+          "inflows_contractual": "0",
+          "inflows_behavioural": "0",
+          "outflows_contractual": "0",
+          "outflows_behavioural": "0",
+          "contribution_count": 0
+        },
+        "B03": {
+          "inflows": "0",
+          "outflows": "0",
+          "net_gap": "0",
+          "cumulative_gap": "0",
+          "inflows_contractual": "0",
+          "inflows_behavioural": "0",
+          "outflows_contractual": "0",
+          "outflows_behavioural": "0",
+          "contribution_count": 0
+        },
+        "B04": {
+          "inflows": "0",
+          "outflows": "0",
+          "net_gap": "0",
+          "cumulative_gap": "0",
+          "inflows_contractual": "0",
+          "inflows_behavioural": "0",
+          "outflows_contractual": "0",
+          "outflows_behavioural": "0",
+          "contribution_count": 0
+        },
+        "B05": {
+          "inflows": "0",
+          "outflows": "0",
+          "net_gap": "0",
+          "cumulative_gap": "0",
+          "inflows_contractual": "0",
+          "inflows_behavioural": "0",
+          "outflows_contractual": "0",
+          "outflows_behavioural": "0",
+          "contribution_count": 0
+        },
+        "B06": {
+          "inflows": "0",
+          "outflows": "0",
+          "net_gap": "0",
+          "cumulative_gap": "0",
+          "inflows_contractual": "0",
+          "inflows_behavioural": "0",
+          "outflows_contractual": "0",
+          "outflows_behavioural": "0",
+          "contribution_count": 0
+        },
+        "B07": {
+          "inflows": "0",
+          "outflows": "300.00",
+          "net_gap": "-300.00",
+          "cumulative_gap": "-300.00",
+          "inflows_contractual": "0",
+          "inflows_behavioural": "0",
+          "outflows_contractual": "300.00",
+          "outflows_behavioural": "0",
+          "contribution_count": 1
+        },
+        "B08": {
+          "inflows": "1000.00",
+          "outflows": "0",
+          "net_gap": "1000.00",
+          "cumulative_gap": "700.00",
+          "inflows_contractual": "1000.00",
+          "inflows_behavioural": "0",
+          "outflows_contractual": "0",
+          "outflows_behavioural": "0",
+          "contribution_count": 1
+        }
+      }
+    },
+    "masked_for_internal": {
+      "EUR": {
+        "B01": [
+          "cumulative_gap",
+          "inflows",
+          "inflows_contractual",
+          "net_gap"
+        ],
+        "B02": [
+          "cumulative_gap",
+          "net_gap",
+          "outflows",
+          "outflows_behavioural",
+          "outflows_contractual"
+        ],
+        "B03": [
+          "cumulative_gap",
+          "inflows",
+          "inflows_behavioural",
+          "net_gap"
+        ],
+        "B04": [
+          "cumulative_gap"
+        ],
+        "B05": [
+          "cumulative_gap"
+        ],
+        "B06": [
+          "cumulative_gap",
+          "inflows",
+          "inflows_behavioural",
+          "net_gap"
+        ],
+        "B07": [
+          "cumulative_gap"
+        ],
+        "B08": [
+          "cumulative_gap"
+        ]
+      },
+      "USD": {
+        "B01": [],
+        "B02": [],
+        "B03": [],
+        "B04": [],
+        "B05": [],
+        "B06": [],
+        "B07": [
+          "cumulative_gap",
+          "net_gap",
+          "outflows",
+          "outflows_contractual"
+        ],
+        "B08": [
+          "cumulative_gap",
+          "inflows",
+          "inflows_contractual",
+          "net_gap"
+        ]
+      }
+    }
+  }
+}

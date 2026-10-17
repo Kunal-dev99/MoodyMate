@@ -286,7 +286,7 @@ def pinned(run: dict[str, Any], code: str) -> dict[str, Any]:
     return dict(member)
 
 
-# BE-18.3: mark ws3 after Phase 18 merges
+@pytest.mark.ws3
 def test_governed_rule_changes_and_pinning(api: TestClient, db: str, artifact_dir: Path) -> None:
     analyst = dev_token(api, "risk_analyst")
     approver = dev_token(api, "approver")

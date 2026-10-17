@@ -107,7 +107,10 @@ test('FE-16.1: the auditor browses the modules (PLANNED never ready) and the ass
   await expect(ladder.getByTestId('illustrative-badge')).toBeVisible()
   const planned = page.locator('[data-testid="registry-module"][data-status="PLANNED"]')
   for (const card of await planned.all()) {
-    await expect(card.getByTestId('module-implementation')).toHaveText('Planned · not runnable')
+    // FE-18.1: the shared PlannedModuleBadge, never the implementation pill.
+    await expect(card.getByTestId('planned-module-badge')).toHaveText('Planned — extension point')
+    await expect(card.getByTestId('module-implementation')).toHaveCount(0)
+    await expect(card.getByTestId('module-contracts')).toBeVisible()
     await expect(card.getByTestId('module-planned-note')).toContainText('not production-ready')
     await expect(card.getByTestId('module-runnable')).toHaveCount(0)
   }

@@ -53,7 +53,8 @@ from app.tests.helpers import (
     validated_sample,
 )
 
-pytestmark = [pytest.mark.db, pytest.mark.ws1]
+# BE-18.3: every test here (matrix, isolation, audit, round trip) is in the WS3 suite too.
+pytestmark = [pytest.mark.db, pytest.mark.ws1, pytest.mark.ws3]
 
 ROLES = [r.value for r in Role]
 MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
@@ -288,7 +289,9 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
     here_instrument = here_projected["instrument_id"]
     # Phase 15: a snapshot and a run on it.
     here_calculated = blocked_run(api, here_projected["import_id"])
-    here_module = sql(db, "SELECT id FROM module_version")[0]["id"]
+    here_module = sql(
+        db, "SELECT id FROM module_version WHERE implementation_status = 'AVAILABLE'"
+    )[0]["id"]
     here_rule = rule_id(db, "past_due_treatment")  # Phase 16
     here_assumption_set = sql(db, "SELECT id FROM assumption_set")[0]["id"]
 
@@ -656,7 +659,7 @@ def test_every_mutating_route_is_listed_and_emits_an_audit_event(api: TestClient
     snapshot = call(
         "POST /api/v1/dataset-snapshots", analyst, body={"import_ids": [cash_flows["id"]]}
     )
-    module = api.get(MODULES, headers=analyst).json()["items"][0]["module_version_id"]
+    module = module_version_id(api, analyst)  # maturity_ladder: PLANNED modules never run
     run = call(
         "POST /api/v1/calculation-runs",
         {**analyst, "Idempotency-Key": cid()},
@@ -667,6 +670,21 @@ def test_every_mutating_route_is_listed_and_emits_an_audit_event(api: TestClient
         },
     )
     assert run["status"] == "BLOCKED", run
+    # Phase 18 (BE-18.1): a PLANNED module version never runs: 409, audited DENIED, no run.
+    correlation = cid()
+    r = api.post(
+        RUNS,
+        json={
+            "dataset_snapshot_id": snapshot["snapshot_id"],
+            "module_version_id": module_version_id(api, analyst, "alm_irrbb"),
+            "reporting_date": "2026-12-31",
+        },
+        headers={**analyst, "Idempotency-Key": cid(), "X-Correlation-ID": correlation},
+    )
+    assert (r.status_code, r.json()["code"]) == (409, "module_not_available"), r.text
+    assert r.json()["details"]["reason"] == "planned"
+    [denied] = events(db, correlation)
+    assert (denied["action"], denied["outcome"]) == ("calculation_run.create", "DENIED")
     # Phase 16: propose, submit and approve a rule version (maker-checker: two people).
     rule = f"{RULES}/{rule_id(db, 'past_due_treatment')}"
     proposed = call(
