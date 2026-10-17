@@ -7,12 +7,12 @@ registered here and AVAILABLE in the registry (409 `module_not_available`). Ther
 to create a module: a new module version is a code release plus a migration.
 """
 
-from app.calculations.modules import maturity_ladder
+from app.calculations.modules import lcr_hqla, maturity_ladder
 from app.calculations.modules.base import RegisteredModule
 
 # (code, version) -> module
 REGISTRY: dict[tuple[str, int], RegisteredModule] = {
-    (m.spec.code, m.spec.version): m for m in (maturity_ladder.MODULE,)
+    (m.spec.code, m.spec.version): m for m in (maturity_ladder.MODULE, lcr_hqla.MODULE)
 }
 
 

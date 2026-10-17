@@ -22,10 +22,15 @@ from datetime import date
 from decimal import Context, Decimal
 from typing import Any
 
-from app.calculations.constants import CalculationWarningCode, WarningSeverity
-from app.core.decimals import DeclaredRounding
+from app.calculations.constants import (
+    CalculationWarningCode,
+    HqlaExclusionReason,
+    LcrWarningCode,
+    WarningSeverity,
+)
+from app.core.decimals import DeclaredRounding, exact_context, quantize
 from app.domain.constants import CashflowOrigin
-from app.rules.constants import CashflowDirection
+from app.rules.constants import CashflowDirection, HqlaLevel
 
 # --- inputs -----------------------------------------------------------------------------------
 
@@ -53,6 +58,18 @@ class InstrumentInput:
 
 
 @dataclass(frozen=True)
+class PositionInput:
+    """One projected position version of the snapshot (typed columns; None when missing)."""
+
+    position_version_id: uuid.UUID
+    position_id: uuid.UUID
+    business_key: str
+    instrument_key: str | None
+    balance: Decimal | None
+    currency: str | None
+
+
+@dataclass(frozen=True)
 class ModuleInputs:
     """Everything a module may read, frozen. The engine sorts every tuple (source row
     order, then id), so a module sees the same inputs in the same order on every run."""
@@ -60,6 +77,7 @@ class ModuleInputs:
     reporting_date: date
     cash_flows: tuple[CashFlowInput, ...] = ()
     instruments: tuple[InstrumentInput, ...] = ()
+    positions: tuple[PositionInput, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -138,6 +156,86 @@ class GapRow:
 
 
 @dataclass(frozen=True)
+class HqlaAsset:
+    """lcr_hqla: one asset position, included at its level (value = balance x (1 - haircut))
+    or excluded with its reason (value 0)."""
+
+    position_version_id: uuid.UUID
+    instrument_version_id: uuid.UUID
+    currency: str
+    instrument_type: str
+    balance: Decimal
+    level: HqlaLevel | None
+    haircut: Decimal | None
+    hqla_value: Decimal
+    exclusion_reason: HqlaExclusionReason | None
+    rule_version_ids: tuple[uuid.UUID, ...]
+
+    @property
+    def included(self) -> bool:
+        return self.level is not None
+
+
+@dataclass(frozen=True)
+class OutflowContribution:
+    """lcr_hqla: one position whose instrument type has a run-off rate."""
+
+    position_version_id: uuid.UUID
+    currency: str
+    balance: Decimal
+    run_off: Decimal
+    outflow: Decimal  # balance x run_off
+
+
+@dataclass(frozen=True)
+class InflowContribution:
+    """lcr_hqla: one cash flow due within the horizon whose instrument type has an inflow
+    rate."""
+
+    cashflow_event_id: uuid.UUID
+    currency: str
+    amount: Decimal
+    rate: Decimal
+    inflow: Decimal  # amount x rate
+
+
+@dataclass(frozen=True)
+class LcrRow:
+    """lcr_hqla: one currency's LCR (D-35 §2)."""
+
+    currency: str
+    hqla_level1: Decimal
+    hqla_level2a: Decimal
+    hqla_level2b: Decimal
+    hqla_total: Decimal
+    level1_count: int
+    level2a_count: int
+    level2b_count: int
+    excluded_asset_count: int
+    outflow_balance: Decimal
+    outflows: Decimal
+    outflow_count: int
+    inflows_gross: Decimal
+    inflows_before_cap: Decimal
+    inflow_cap_rate: Decimal
+    inflow_cap_amount: Decimal
+    inflows_after_cap: Decimal
+    inflow_cap_applied: bool
+    inflow_count: int
+    net_outflows: Decimal
+    ratio: Decimal | None  # None: the denominator is not positive (LCR_DENOMINATOR_ZERO)
+    warnings: tuple[LcrWarningCode, ...]
+    rule_version_ids: tuple[uuid.UUID, ...]
+    # D-33: per level, outflows and inflows, the contributions with a non-zero value (HQLA
+    # value, balance, amount): the minimum aggregation counts only these.
+    level1_nonzero_count: int
+    level2a_nonzero_count: int
+    level2b_nonzero_count: int
+    outflow_nonzero_count: int
+    inflow_nonzero_count: int
+
+
+@dataclass(frozen=True)
 class ModuleResult:
     """A module's outputs. `blocked`: the inputs or pinned parameters do not meet the
     module's contract, so it produced no results (the run is BLOCKED)."""
@@ -148,6 +246,13 @@ class ModuleResult:
     blocked: bool = False
     # Warning codes that exclude their entity from the outputs (the post-checks need them).
     exclusion_codes: frozenset[CalculationWarningCode] = frozenset()
+    # lcr_hqla (Phase 17): per-currency rows, asset rows, outflow and inflow contributions,
+    # and the cash flows that are not inflows by rule (out of scope, no warning).
+    lcr: tuple[LcrRow, ...] = ()
+    hqla_assets: tuple[HqlaAsset, ...] = ()
+    outflows: tuple[OutflowContribution, ...] = ()
+    inflows: tuple[InflowContribution, ...] = ()
+    out_of_scope: tuple[uuid.UUID, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -189,3 +294,26 @@ class RegisteredModule:
 
     def run(self, inputs: ModuleInputs, parameters: PinnedParameters) -> ModuleResult:
         return self.function(inputs, parameters)
+
+
+def divide(numerator: Decimal, denominator: Decimal, declared: DeclaredRounding) -> Decimal:
+    """numerator / denominator rounded ONCE as the module declares (D-31 §2).
+
+    Exact rational arithmetic on the operands' integer ratios: the quotient is computed to
+    one digit past the declared exponent plus a sticky digit for any remainder, which keeps
+    its position against every rounding boundary, then `quantize` applies the declared mode.
+    No intermediate rounding (so no double rounding). A zero denominator raises."""
+    if denominator == 0:
+        raise ZeroDivisionError("the denominator is zero")
+    exponent = declared.exponent.as_tuple().exponent
+    if not isinstance(exponent, int) or exponent > 0:
+        raise ValueError("the declared exponent is a finite decimal of at most 1")
+    places = -exponent
+    n_top, n_bottom = numerator.as_integer_ratio()
+    d_top, d_bottom = denominator.as_integer_ratio()
+    top, bottom = n_top * d_bottom, n_bottom * d_top
+    negative = (top < 0) != (bottom < 0) and top != 0
+    whole, rest = divmod(abs(top) * 10 ** (places + 1), abs(bottom))
+    digits = whole * 10 + (1 if rest else 0)
+    value = Decimal(-digits if negative else digits).scaleb(-(places + 2), context=exact_context())
+    return quantize(value, declared)

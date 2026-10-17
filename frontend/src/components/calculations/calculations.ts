@@ -1,5 +1,6 @@
 import { ApiError, api, call, callWithResponse, type Schemas } from '@/api/client'
 import { toastApiError } from '@/components/common/api-error-toast'
+import { LIQUIDITY_UI_ENABLED } from '@/config/features'
 import { isMasked } from '@/components/common/MaskedValue'
 import { DOMAIN_SCHEMA_CODES, type DomainSchemaCode } from '@/components/domain/domain'
 import { newIdempotencyKey, type ImportSummary } from '@/components/ingestion/imports'
@@ -39,6 +40,13 @@ export type WarningCode = Schemas['CalculationWarningCode']
 export type WarningSeverity = Schemas['WarningSeverity']
 export type PostCheck = Schemas['PostCheck']
 export type CashflowDirection = Schemas['CashflowDirection']
+export type Liquidity = Schemas['LiquidityOut']
+export type LcrCurrency = Schemas['LiquidityCurrency']
+export type HqlaAsset = Schemas['HqlaAssetOut']
+export type HqlaLevelTotal = Schemas['HqlaLevelOut']
+export type HqlaLevel = Schemas['HqlaLevel']
+export type HqlaExclusionReason = Schemas['HqlaExclusionReason']
+export type LcrWarningCode = Schemas['LcrWarningCode']
 
 /** D-35 §3: the label on every seeded module and every result, when the server sends none. */
 export const ILLUSTRATIVE_STATEMENT =
@@ -123,6 +131,8 @@ export const POST_CHECK_TEXT: Record<PostCheck, string> = {
   BUCKET_DEFINED: 'Every contribution lands in a pinned bucket.',
   BUCKET_TOTALS: 'Every bucket total equals the sum of its contributions.',
   CUMULATIVE_GAP: 'The cumulative gap is the running sum of the net gaps.',
+  HQLA_TOTALS: 'Every HQLA level total equals the sum of its included asset rows (lcr_hqla).',
+  LCR_FIGURES: 'Every per-currency LCR figure is recomputed from its contributions (lcr_hqla).',
   RERUN_REPRODUCED: 'A re-run reproduces the original run\'s result hash on the original pins.',
 }
 
@@ -170,6 +180,51 @@ export function ladderMaskHint(row: LadderRow, figure: LadderFigure, minAggregat
     return `masked: an earlier bucket's net gap has fewer than ${minAggregateCount} contributions`
   return `masked: fewer than ${minAggregateCount} contributions`
 }
+
+// --- the liquidity view (lcr_hqla, FE-17.1) -------------------------------------------------
+
+/** The module whose runs the run detail shows as the liquidity view. */
+export const LCR_MODULE = 'lcr_hqla'
+
+/**
+ * Whether the run detail shows this run as the liquidity view (in the ladder's place): an
+ * `lcr_hqla` run, unless NEXT_PUBLIC_LIQUIDITY_UI=off, which restores the Phase 15 layout (D-02).
+ */
+export const showsLiquidity = (run: Pick<RunSummary, 'module'>, enabled: boolean = LIQUIDITY_UI_ENABLED): boolean =>
+  enabled && run.module.code === LCR_MODULE
+
+/** `lcr_result.warning_codes` (BE-17.2): value-free warnings about one currency's LCR. */
+export const LCR_WARNING_TEXT: Record<LcrWarningCode, string> = {
+  LCR_DENOMINATOR_ZERO: 'Outflows minus capped inflows is zero or negative, so the ratio is not computable (NULL).',
+  LCR_LEVEL_CAPS_NOT_APPLIED: 'Level 2A/2B assets are included without the L2 caps: a documented v1 limitation.',
+}
+
+/** `hqla_asset_result.exclusion_reason` (BE-17.1): why an asset row adds nothing to HQLA. */
+export const EXCLUSION_TEXT: Record<HqlaExclusionReason, string> = {
+  NOT_HQLA_ELIGIBLE: 'Its instrument type has no HQLA level in the pinned hqla_level rule.',
+}
+
+/** The HQLA levels, in the order the server lists them (L1, L2A, L2B). */
+export const HQLA_LEVEL_TEXT: Record<HqlaLevel, string> = {
+  L1: 'Level 1',
+  L2A: 'Level 2A',
+  L2B: 'Level 2B',
+}
+
+/**
+ * Why the server masked an LCR figure (D-33 minimum aggregation): a figure built from fewer
+ * than `min` contributions takes their classification, and so does every figure derived from
+ * one. `count` is the figure's own contribution count, or null for a derived figure. Null when
+ * the figure is shown. The figure itself is always the server's; this only explains it.
+ */
+export function lcrMaskHint(value: unknown, count: number | null, min: number): string | null {
+  if (!isMasked(value)) return null
+  if (count !== null && count < min) return `masked: fewer than ${min} contributions`
+  return `masked: derived from a figure with fewer than ${min} contributions`
+}
+
+/** How many included asset rows the HQLA total is built from (the levels' own counts). */
+export const hqlaAssetCount = (row: Pick<LcrCurrency, 'hqla_levels'>): number => row.hqla_levels.reduce((n, l) => n + l.asset_count, 0)
 
 // --- the run list ----------------------------------------------------------------------------
 

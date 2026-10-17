@@ -35,8 +35,18 @@ maturity ladder end to end, in one essential test (D-26), in six parts:
    rule (DB); snapshots and rule sets are append-only; a finished run refuses any change and
    any new output row; the downgrade refuses while a run or a non-seed registry row exists,
    and without them 0018 -> 0017 -> head removes and restores the tagged seed.
+
+Phase 17 (BE-17.1 – BE-17.3), folded in (+0): part 1 checks the 0020 frozen seed and the
+second module (`lcr_hqla` v1); part 2 runs it purely (levels, haircuts, uncapped L2 flagged,
+a zero denominator with outflows, a JSON-number parameter refused); part 5b runs the
+hand-computed LCR golden case (the lcr_hqla pack file, BE-18.2) and reads GET …/liquidity
+(HQLA total = its included asset rows, D-33 masking, a rerun's hashes, 404 for a run of
+another module); part 6
+loops the output guards over hqla_asset_result and lcr_result, and 0020 refuses its downgrade
+while LCR results exist.
 """
 
+import dataclasses
 import hashlib
 import importlib.util
 import json
@@ -63,25 +73,40 @@ from app.calculations.constants import (
     CalculationWarningCode,
     InputRefType,
     IntermediateCode,
+    LcrWarningCode,
     PostCheck,
     WarningSeverity,
 )
-from app.calculations.modules import REGISTRY, maturity_ladder
+from app.calculations.models import LcrResult
+from app.calculations.modules import REGISTRY, lcr_hqla, maturity_ladder
 from app.calculations.modules.base import (
     CashFlowInput,
     InstrumentInput,
     ModuleInputs,
     PinnedRule,
+    PositionInput,
     RegisteredModule,
 )
-from app.calculations.service import ladder_classes, reproduce, result_document
+from app.calculations.service import (
+    ladder_classes,
+    liquidity_classes,
+    reproduce,
+    result_document,
+)
 from app.core.config import Settings
 from app.core.decimals import exact_context
 from app.domain.constants import CashflowOrigin, DomainSchemaCode
 from app.main import create_app
 from app.rules.constants import (
     BASELINE_ASSUMPTION_SET,
+    HQLA_HAIRCUT,
+    HQLA_LEVEL,
     ILLUSTRATIVE_STATEMENT,
+    LCR_HQLA,
+    LCR_INFLOW_CAP,
+    LCR_INFLOW_RATE,
+    LCR_SEED_TAG,
+    LCR_SEEDED_RULES,
     MATURITY_BUCKETS,
     MATURITY_LADDER,
     PAST_DUE_TREATMENT,
@@ -97,7 +122,7 @@ from app.rules.constants import (
     RuleCategory,
     RuleVersionStatus,
 )
-from app.rules.service import canonical_sha256, check_parameters, exact_json
+from app.rules.service import canonical_sha256, check_parameters, check_schema, exact_json
 from app.tests.conftest import alembic_config, clean, dev_token, sql
 from app.tests.helpers import (
     IMPORTS,
@@ -122,6 +147,11 @@ from app.tests.helpers import (
     upload,
     validate_import,
 )
+from app.tests.lcr_kit import (
+    LCR_OUTPUT_TABLES,
+    POSITION_COLUMNS,
+    position_csv,
+)
 
 pytestmark = pytest.mark.db
 
@@ -145,7 +175,23 @@ OUTPUT_TABLES = (
     "intermediate_value",
     "calculation_warning",
 )
-CALC_TABLES = (*SNAPSHOT_TABLES, "calculation_run", *OUTPUT_TABLES)
+CALC_TABLES = (*SNAPSHOT_TABLES, "calculation_run", *OUTPUT_TABLES, *LCR_OUTPUT_TABLES)
+ALL_RULES = {**SEEDED_RULES, **LCR_SEEDED_RULES}
+SEED_TAGS = {
+    **dict.fromkeys(SEEDED_RULES, RULES_SEED_TAG),
+    **dict.fromkeys(LCR_SEEDED_RULES, LCR_SEED_TAG),
+}
+# GET /calculation-runs/{id}/liquidity: the decimal figures of a currency (BE-17.3).
+LCR_FIGURES = (
+    "hqla_total",
+    "outflow_balance",
+    "outflows",
+    "inflows_gross",
+    "inflows_before_cap",
+    "inflow_cap_amount",
+    "inflows_after_cap",
+    "net_outflows",
+)
 
 INSTRUMENT_COLUMNS = ["instrument_id", "instrument_type", "currency", "notional"]
 CASHFLOW_COLUMNS = [
@@ -189,26 +235,52 @@ CASHFLOW_FIELDS = (
     "cashflow_type",
     "origin",
 )
+GOLDEN_POSITION_FIELDS = ("position_id", "instrument_id", "balance", "currency")
 
 
 def no_fraction(text: str) -> Any:
     raise AssertionError(f"a JSON fraction in the golden pack: {text}")  # amounts are text
 
 
+LCR_TOLERANCE = (
+    *LCR_FIGURES,
+    "ratio",
+    "levels",
+    "excluded_asset_count",
+    "outflow_count",
+    "inflow_count",
+)
+
+
 def golden_case(path: Path) -> dict[str, Any]:
-    """A pack file in the loop's shape: input rows as CSV tuples, ladder rows as (the AMOUNTS,
-    the number of contributions)."""
+    """A pack file in its module's loop shape. maturity_ladder v1: input rows as CSV tuples,
+    ladder rows as (the AMOUNTS, the number of contributions). lcr_hqla v1: input rows as CSV
+    tuples, the per-currency figures under "lcr", asset keys as sets."""
     case = json.loads(path.read_text(encoding="utf-8"), parse_float=no_fraction)
     assert case["status"] == GOLDEN_STATUS, path
-    assert case["module"] == {"code": MATURITY_LADDER, "version": 1}, path
-    assert case["tolerance"] == dict.fromkeys((*AMOUNTS, "contribution_count"), "0"), path
     inputs, expected = case["inputs"], case["expected"]
-    return {
+    common = {
         **case,
-        **expected,
         "reporting_date": date.fromisoformat(inputs["reporting_date"]),
         "instruments": [tuple(i[c] for c in INSTRUMENT_COLUMNS) for i in inputs["instruments"]],
         "cash_flows": [tuple(f[c] for c in CASHFLOW_FIELDS) for f in inputs["cash_flows"]],
+    }
+    if case["module"] == {"code": LCR_HQLA, "version": 1}:
+        assert case["tolerance"] == dict.fromkeys(LCR_TOLERANCE, "0"), path
+        return {
+            **common,
+            "positions": [tuple(p[c] for c in GOLDEN_POSITION_FIELDS) for p in inputs["positions"]],
+            "lcr": expected["currencies"],
+            "outcome": expected["outcome"],
+            "included_assets": {k: set(v) for k, v in expected["included_assets"].items()},
+            "excluded_assets": set(expected["excluded_assets"]),
+            "masked_for_internal": {k: set(v) for k, v in expected["masked_for_internal"].items()},
+        }
+    assert case["module"] == {"code": MATURITY_LADDER, "version": 1}, path
+    assert case["tolerance"] == dict.fromkeys((*AMOUNTS, "contribution_count"), "0"), path
+    return {
+        **common,
+        **expected,
         "ladder": {
             currency: {
                 code: (tuple(row[a] for a in AMOUNTS), row["contribution_count"])
@@ -219,7 +291,10 @@ def golden_case(path: Path) -> dict[str, Any]:
     }
 
 
-GOLDEN = [golden_case(path) for path in sorted(GOLDEN_DIR.glob("*.json"))]
+PACK = [golden_case(path) for path in sorted(GOLDEN_DIR.glob("*.json"))]
+# Each file runs under its own module: the ladder loop (part 4) and the LCR part (5b).
+GOLDEN = [g for g in PACK if g["module"]["code"] == MATURITY_LADDER]
+LCR_GOLDEN_CASES = [g for g in PACK if g["module"]["code"] == LCR_HQLA]
 
 
 def migration(name: str) -> ModuleType:
@@ -258,7 +333,9 @@ def csv_source(
 ) -> dict[str, Any]:
     """A CSV source whose contract is these columns. The instrument key is (instrument_id,
     currency), so one instrument_id may come twice in one file (the ambiguous fixture)."""
-    key = ["instrument_id", "currency"] if schema == "instrument" else ["cashflow_id"]
+    key = {"instrument": ["instrument_id", "currency"], "position": ["position_id"]}.get(
+        schema, ["cashflow_id"]
+    )
     body = source_body(
         db,
         code=code,
@@ -295,6 +372,7 @@ def test_registry_snapshot_run_and_maturity_ladder(
     # --- 1. The registry seed (BE-15.1) --------------------------------------------------------
     m18 = migration("0018_calculations")
     m21 = migration("0021_planned_modules")
+    assert m21.down_revision == "0020"  # re-chained onto Phase 17's 0020_lcr_results
     spec = maturity_ladder.SPEC
     assert (m18.TAG, m18.STATEMENT) == (RULES_SEED_TAG, ILLUSTRATIVE_STATEMENT)
     assert m18.RULE_STATUSES == tuple(s.value for s in RuleVersionStatus)
@@ -335,6 +413,25 @@ def test_registry_snapshot_run_and_maturity_ladder(
     assert spec.engine_version == ENGINE_VERSION
     probe = {"b": [1, None, "é"], "a": {"z": "0.10"}}
     assert m18.canonical_sha256(probe) == canonical_sha256(probe)
+    m20 = migration("0020_lcr_results")  # BE-17.1: its frozen seed equals the code
+    lspec = lcr_hqla.SPEC
+    assert (m20.TAG, m20.STATEMENT, m20.down_revision) == (
+        LCR_SEED_TAG,
+        ILLUSTRATIVE_STATEMENT,
+        "0018",
+    )
+    assert m20.RULES == {
+        code: (name, category.value, schema, params, description)
+        for code, (name, category, schema, params, description) in LCR_SEEDED_RULES.items()
+    }
+    assert m20.MODULE["code"] == lspec.code and m20.MODULE_VERSION["version"] == lspec.version
+    assert m20.MODULE_VERSION["engine_version"] == lspec.engine_version
+    assert set(m20.OUTPUT_TABLES) == set(LCR_OUTPUT_TABLES)
+    assert m20.LCR_WARNING_CODES == tuple(c.value for c in LcrWarningCode)
+    planned_ids = {m21._id("calculation_module", c) for c in m21.MODULES} | {
+        m21._id("module_version", f"{c}:{m21.VERSION}") for c in m21.MODULES
+    }
+    assert planned_ids.isdisjoint({m20.MODULE_ID, m20.VERSION_ID})  # uuid5 seeds never collide
 
     modules = sql(
         db,
@@ -342,9 +439,12 @@ def test_registry_snapshot_run_and_maturity_ladder(
         " WHERE v.implementation_status = 'AVAILABLE'",
     )
     assert {(r["code"], r["version"]) for r in modules} == set(REGISTRY)  # code == seed (D-31)
-    [module_row] = modules
-    assert json.loads(module_row["input_contract"]) == spec.input_contract
-    assert json.loads(module_row["output_contract"]) == spec.output_contract
+    for registered in (spec, lspec):
+        [module_row] = [r for r in modules if r["code"] == registered.code]
+        assert json.loads(module_row["input_contract"]) == registered.input_contract
+        assert json.loads(module_row["output_contract"]) == registered.output_contract
+        assert module_row["implementation_status"] == "AVAILABLE", registered.code
+    assert module_row["seeded_by"] == LCR_SEED_TAG and lspec.code == LCR_HQLA
     for table in REGISTRY_TABLES:
         rows = sql(
             db,
@@ -354,7 +454,9 @@ def test_registry_snapshot_run_and_maturity_ladder(
         )
         assert rows, table
         assert all(
-            (r["seeded_by"], r["provisional"], r["illustrative"]) == (RULES_SEED_TAG, True, True)
+            r["seeded_by"] in (RULES_SEED_TAG, LCR_SEED_TAG)
+            and r["provisional"]
+            and r["illustrative"]
             for r in rows
         ), table
     versions = sql(
@@ -362,15 +464,19 @@ def test_registry_snapshot_run_and_maturity_ladder(
         "SELECT d.code, d.description AS rule_description, v.* FROM rule_version v"
         " JOIN rule_definition d ON d.id = v.rule_definition_id",
     )
-    assert {v["code"] for v in versions} == set(SEEDED_RULES) == set(spec.rules)
+    assert {v["code"] for v in versions} == set(ALL_RULES)
+    assert (set(spec.rules), set(lspec.rules)) == (set(SEEDED_RULES), set(LCR_SEEDED_RULES))
     for v in versions:
         parameters = json.loads(v["parameters"])
-        assert parameters == SEEDED_RULES[v["code"]][3]
+        assert parameters == ALL_RULES[v["code"]][3]
         assert v["parameters_sha256"] == canonical_sha256(parameters)
         assert (v["status"], v["version"]) == ("ACTIVE", 1)
-        assert v["authored_by"] == v["approved_by"] == RULES_SEED_TAG and v["approved_at"]
+        tag = SEED_TAGS[v["code"]]
+        assert v["authored_by"] == v["approved_by"] == v["seeded_by"] == tag and v["approved_at"]
         assert v["rule_description"].endswith(ILLUSTRATIVE_STATEMENT)
-    seeded_versions = {v["code"]: str(v["id"]) for v in versions}
+    all_versions = {v["code"]: str(v["id"]) for v in versions}
+    seeded_versions = {code: all_versions[code] for code in spec.rules}
+    lcr_versions = {code: all_versions[code] for code in lspec.rules}
     buckets = sql(
         db,
         "SELECT sequence, code, label, lower_exclusive_days AS lower,"
@@ -396,7 +502,18 @@ def test_registry_snapshot_run_and_maturity_ladder(
     steward, approver = dev_token(api, "data_steward"), dev_token(api, "approver")
     analyst = dev_token(api, "risk_analyst")
     catalogue = no_float(api.get(MODULES, headers=dev_token(api, "auditor")).text)
-    [module] = [m for m in catalogue["items"] if m["implementation_status"] == "AVAILABLE"]
+    listed_modules = {
+        m["code"]: m for m in catalogue["items"] if m["implementation_status"] == "AVAILABLE"
+    }
+    assert set(listed_modules) == {"maturity_ladder", LCR_HQLA}
+    lcr_module = listed_modules[LCR_HQLA]
+    assert (lcr_module["version"], lcr_module["implementation_status"]) == (1, "AVAILABLE")
+    assert lcr_module["runnable"] and lcr_module["illustrative"]
+    assert lcr_module["statement"] == ILLUSTRATIVE_STATEMENT
+    assert {r["code"]: r["active_version"]["rule_version_id"] for r in lcr_module["rules"]} == (
+        lcr_versions
+    )
+    module = listed_modules["maturity_ladder"]
     # BE-18.1: the PLANNED extension points are listed, with their declared contracts, and
     # never runnable (part 4: refused 409 module_not_available, audited DENIED).
     planned = {m["code"]: m for m in catalogue["items"] if m["implementation_status"] == "PLANNED"}
@@ -422,7 +539,7 @@ def test_registry_snapshot_run_and_maturity_ladder(
 
     # --- 2. Module purity (BE-15.4, D-31 §1-2, §8) ---------------------------------------------
     sources = [*sorted((APP / "calculations").rglob("*.py")), APP / "core" / "decimals.py"]
-    assert len(sources) > 8
+    assert len(sources) > 8 and APP / "calculations" / "modules" / "lcr_hqla.py" in sources
     for path in sources:
         text = path.read_text()
         assert "float" not in text, path  # as BE-11.2: Decimal only
@@ -455,6 +572,97 @@ def test_registry_snapshot_run_and_maturity_ladder(
     pins[MATURITY_BUCKETS] = PinnedRule(uuid.uuid4(), {"buckets": [open_last]})
     blocked = maturity_ladder.MODULE.run(pure_inputs, pins)
     assert blocked.blocked and [w.code for w in blocked.warnings] == ["PARAMETERS_INVALID"]
+    # lcr_hqla v1 (BE-17.2), pure, under pins that are not the seed: three levels with their
+    # haircuts (L2A/L2B included uncapped, flagged), a cap of 1 that makes the denominator 0
+    # with outflows present, a flow due on the reporting date (out of the (0, 30] horizon).
+    kinds = {"B": "BOND", "C": "COVERED", "Q": "EQUITY", "D": "DEPOSIT", "L": "LOAN"}
+    held = {k: InstrumentInput(uuid.uuid4(), uuid.uuid4(), k, t) for k, t in kinds.items()}
+    held_rows = [("B", "100.00"), ("C", "200.00"), ("Q", "50.00"), ("D", "1000.00")]
+    lcr_inputs = ModuleInputs(
+        reporting,
+        tuple(
+            CashFlowInput(
+                uuid.uuid4(), "L", reporting + timedelta(days=d), Decimal(a), "EUR", "CONTRACTUAL"
+            )
+            for d, a in ((0, "999.00"), (10, "400.00"))
+        ),
+        tuple(held.values()),
+        tuple(
+            PositionInput(uuid.uuid4(), uuid.uuid4(), f"P-{k}", k, Decimal(b), "EUR")
+            for k, b in held_rows
+        ),
+    )
+    lcr_pins = {code: PinnedRule(uuid.uuid4(), seed[3]) for code, seed in LCR_SEEDED_RULES.items()}
+    lcr_pins[HQLA_LEVEL] = PinnedRule(
+        uuid.uuid4(), {"map": {"BOND": "L1", "COVERED": "L2A", "EQUITY": "L2B"}}
+    )
+    lcr_pins[HQLA_HAIRCUT] = PinnedRule(
+        uuid.uuid4(), {"map": {"BOND": "0", "COVERED": "0.15", "EQUITY": "0.50"}}
+    )
+    lcr_pins[LCR_INFLOW_CAP] = PinnedRule(uuid.uuid4(), {"value": "1"})
+    with localcontext(exact_context()):
+        priced = lcr_hqla.MODULE.run(lcr_inputs, lcr_pins)
+    [lcr_row] = priced.lcr
+    assert (
+        lcr_row.hqla_level1,
+        lcr_row.hqla_level2a,
+        lcr_row.hqla_level2b,
+        lcr_row.hqla_total,
+    ) == (Decimal("100.00"), Decimal("170.00"), Decimal("25.00"), Decimal("295.00"))
+    assert [(a.level, a.haircut, a.hqla_value) for a in priced.hqla_assets] == [
+        ("L1", Decimal("0"), Decimal("100.00")),
+        ("L2A", Decimal("0.15"), Decimal("170.00")),
+        ("L2B", Decimal("0.50"), Decimal("25.00")),
+    ]
+    assert (lcr_row.outflows, lcr_row.inflows_before_cap, lcr_row.inflows_after_cap) == (
+        Decimal("100.00"),
+        Decimal("200.00"),
+        Decimal("100.00"),
+    )
+    assert lcr_row.inflow_cap_applied and lcr_row.net_outflows == 0 and lcr_row.ratio is None
+    assert list(lcr_row.warnings) == ["LCR_DENOMINATOR_ZERO", "LCR_LEVEL_CAPS_NOT_APPLIED"]
+    assert len(priced.out_of_scope) == 1 and not priced.warnings and not priced.blocked
+    lcr_pins[LCR_INFLOW_CAP] = PinnedRule(uuid.uuid4(), {"value": 1})  # a JSON number
+    refused_pins = lcr_hqla.MODULE.run(lcr_inputs, lcr_pins)
+    assert refused_pins.blocked and [w.code for w in refused_pins.warnings] == [
+        "PARAMETERS_INVALID"
+    ]
+    # One role per instrument type: HQLA and an inflow, or a run-off liability and an inflow,
+    # would count one balance or cash flow twice (PARAMETERS_INVALID, BLOCKED).
+    lcr_pins[LCR_INFLOW_CAP] = PinnedRule(uuid.uuid4(), {"value": "1"})
+    for overlap in ({"LOAN": "0.5000", "BOND": "0.5000"}, {"LOAN": "0.5000", "DEPOSIT": "1"}):
+        lcr_pins[LCR_INFLOW_RATE] = PinnedRule(uuid.uuid4(), {"map": overlap})
+        refused_pins = lcr_hqla.MODULE.run(lcr_inputs, lcr_pins)
+        assert refused_pins.blocked and [w.code for w in refused_pins.warnings] == [
+            "PARAMETERS_INVALID"
+        ], overlap
+    # D-33: zero contributions do not count toward the minimum aggregation. One real deposit
+    # and two dormant zero-balance ones: the outflows rest on one balance, so they are masked.
+    lcr_pins[LCR_INFLOW_RATE] = PinnedRule(uuid.uuid4(), LCR_SEEDED_RULES[LCR_INFLOW_RATE][3])
+    dormant = ModuleInputs(
+        reporting,
+        instruments=tuple(held.values()),
+        positions=tuple(
+            PositionInput(uuid.uuid4(), uuid.uuid4(), f"P-D{i}", "D", Decimal(b), "EUR")
+            for i, b in enumerate(("1000.00", "0.00", "0"))
+        ),
+    )
+    with localcontext(exact_context()):
+        [dormant_row] = lcr_hqla.MODULE.run(dormant, lcr_pins).lcr
+    assert (dormant_row.outflow_count, dormant_row.outflow_nonzero_count) == (3, 1)
+    dormant_classes = liquidity_classes(
+        LcrResult(
+            **{
+                f.name: getattr(dormant_row, f.name)
+                for f in dataclasses.fields(dormant_row)
+                if f.name not in ("warnings", "rule_version_ids")
+            },
+            classification="internal",
+            contribution_classification="confidential",
+        ),
+        3,
+    )
+    assert dormant_classes["outflows"] == dormant_classes["outflow_balance"] == "confidential"
 
     # --- 3. Snapshots (BE-15.3) ----------------------------------------------------------------
     instrument_source = csv_source(
@@ -472,10 +680,15 @@ def test_registry_snapshot_run_and_maturity_ladder(
         assert r.status_code == 201, r.text
         imported = r.json()
         if source["id"] not in mapped:
+            schema, columns = (
+                ("position", POSITION_COLUMNS)
+                if source["code"] == "calc_positions"
+                else ("cashflow_event", CASHFLOW_COLUMNS)
+            )
             rules = (
                 INSTRUMENT_RULES
                 if source is instrument_source
-                else sample_rules(api, db, steward, "cashflow_event", CASHFLOW_COLUMNS)
+                else sample_rules(api, db, steward, schema, columns)
             )
             body = {
                 "code": f"{source['code']}_map",
@@ -1033,6 +1246,179 @@ def test_registry_snapshot_run_and_maturity_ladder(
     for stored in sql(db, "SELECT parameters::text AS p FROM rule_version"):
         assert exact_json(no_float(stored["p"]))
 
+    # --- 5b. LCR/HQLA prototype (BE-17.1 – BE-17.3) -------------------------------------------
+    # The golden case (hand-computed, D-35 §4) over its own snapshot of three projected
+    # imports: an ineligible asset, the inflow cap binding, a zero denominator, mixed
+    # currencies, the horizon edge and a ratio tie that only ROUND_HALF_EVEN rounds down.
+    [lcr] = LCR_GOLDEN_CASES  # the lcr_hqla v1 pack file (BE-18.2)
+    assert lcr["status"].startswith("ENGINEERING")
+    lcr_date = lcr["reporting_date"]
+    position_source = csv_source(api, db, steward, "calc_positions", "position", POSITION_COLUMNS)
+    lcr_imports = [
+        load(instrument_source, instrument_csv(lcr["instruments"])),
+        load(position_source, position_csv(lcr["positions"], lcr_date)),
+        load(cash_source, cashflow_csv(lcr["cash_flows"], lcr_date)),
+    ]
+    for imported in lcr_imports:
+        assert project(api, steward, imported["id"]).status_code == 201
+    r = make_snapshot(api, analyst, [i["id"] for i in lcr_imports])
+    assert r.status_code == 201, r.text
+    lcr_body = {
+        "dataset_snapshot_id": r.json()["snapshot_id"],
+        "module_version_id": module_version_id(api, analyst, LCR_HQLA),
+        "reporting_date": lcr_date.isoformat(),
+    }
+    c = cid()
+    r = start_run(api, analyst, lcr_body, **{"X-Correlation-ID": c})
+    assert r.status_code == 201, r.text
+    lcr_run = no_float(r.text)
+    lcr_id = lcr_run["run_id"]
+    assert lcr_run["status"] == "SUCCEEDED_WITH_WARNINGS", lcr_run  # USD: LCR_DENOMINATOR_ZERO
+    assert [(e["action"], e["outcome"]) for e in events(db, c)] == [
+        ("calculation_run.create", "SUCCESS"),
+        ("calculation_run.finish", "SUCCESS"),
+    ]
+    assert lcr_run["warnings"] == []  # nothing excluded; the LCR warnings are per currency
+    outcome = lcr_run["outcome"]
+    assert {k: outcome[k] for k in lcr["outcome"]} == lcr["outcome"], outcome
+    assert outcome["post_checks"] and all(p["passed"] for p in outcome["post_checks"])
+    lcr_detail = no_float(api.get(f"{RUNS}/{lcr_id}", headers=analyst).text)
+    lcr_members = lcr_detail["manifest"]["rule_set"]["members"]
+    assert {m["rule_code"]: m["rule_version_id"] for m in lcr_members} == lcr_versions
+    liquidity = no_float(api.get(f"{RUNS}/{lcr_id}/liquidity", headers=approver).text)
+    assert (liquidity["run_id"], liquidity["status"]) == (lcr_id, lcr_run["status"])
+    assert liquidity["prototype"] and liquidity["illustrative"] and liquidity["limitations"]
+    assert liquidity["statement"] == ILLUSTRATIVE_STATEMENT
+    assert liquidity["inflow_horizon_days"] == 30
+    assert [cur["currency"] for cur in liquidity["currencies"]] == sorted(lcr["lcr"])
+    position_import = lcr_imports[1]["id"]
+    for cur in liquidity["currencies"]:
+        want = lcr["lcr"][cur["currency"]]
+        for figure in LCR_FIGURES:
+            assert DECIMAL_TEXT.match(cur[figure]), (cur["currency"], figure)
+            assert Decimal(cur[figure]) == Decimal(want[figure]), (cur["currency"], figure)
+        assert cur["ratio"] == want["ratio"], cur  # exact text, 4 dp ROUND_HALF_EVEN, or None
+        assert cur["inflow_cap_applied"] is want["inflow_cap_applied"]
+        assert cur["inflow_cap_rate"] == want["inflow_cap_rate"]
+        assert {k: cur[k] for k in want["counts"]} == want["counts"]
+        assert cur["warnings"] == want["warnings"] and cur["classification"] == "internal"
+        assert [lv["level"] for lv in cur["hqla_levels"]] == ["L1", "L2A", "L2B"]
+        # BE-17.3: the HQLA total, and each level's, is the sum of its included asset rows.
+        included = [a for a in cur["assets"] if a["included"]]
+        hqla_sum = sum((Decimal(a["hqla_value"]) for a in included), Decimal(0))
+        assert hqla_sum == Decimal(cur["hqla_total"]), cur["currency"]
+        for lv in cur["hqla_levels"]:
+            mine = [Decimal(a["hqla_value"]) for a in included if a["level"] == lv["level"]]
+            assert (
+                sum(mine, Decimal(0))
+                == Decimal(lv["total"])
+                == Decimal(want["levels"][lv["level"]])
+            )
+            assert lv["asset_count"] == len(mine)
+        assert {a["lineage"]["position_business_key"] for a in included} == (
+            lcr["included_assets"][cur["currency"]]
+        )
+        for a in cur["assets"]:
+            assert a["lineage"]["import_id"] == position_import, a
+            assert a["classification"] == "confidential", a
+            if a["included"]:
+                assert (a["level"], a["haircut"], a["exclusion_reason"]) == ("L1", "0.0000", None)
+                assert Decimal(a["hqla_value"]) == Decimal(a["balance"])
+            else:
+                assert (a["level"], a["haircut"], Decimal(a["hqla_value"])) == (
+                    None,
+                    None,
+                    Decimal(0),
+                )
+    excluded_assets = {
+        a["lineage"]["position_business_key"]: a["exclusion_reason"]
+        for cur in liquidity["currencies"]
+        for a in cur["assets"]
+        if not a["included"]
+    }
+    assert excluded_assets == dict.fromkeys(lcr["excluded_assets"], "NOT_HQLA_ELIGIBLE")
+    # D-33: risk_analyst (internal) sees asset amounts masked, and an aggregate masked when it
+    # rests on fewer than 3 contributions (with what derives from it); zeros and NULL clear.
+    seen = no_float(api.get(f"{RUNS}/{lcr_id}/liquidity", headers=analyst).text)
+    assert seen["min_aggregate_count"] == 3
+    for mine, theirs in zip(seen["currencies"], liquidity["currencies"], strict=True):
+        masked = lcr["masked_for_internal"][mine["currency"]]
+        for figure in (*LCR_FIGURES, "ratio", "inflow_cap_applied"):
+            expect = MASKED if figure in masked else theirs[figure]
+            assert mine[figure] == expect, (mine["currency"], figure)
+        for lv, clear in zip(mine["hqla_levels"], theirs["hqla_levels"], strict=True):
+            assert lv["total"] == (MASKED if lv["level"] in masked else clear["total"]), lv
+        for row, clear in zip(mine["assets"], theirs["assets"], strict=True):
+            assert row["balance"] == MASKED, row  # an excluded row's 0 is by rule: clear
+            assert row["hqla_value"] == (MASKED if row["included"] else clear["hqla_value"]), row
+            for key in ("included", "level", "haircut", "exclusion_reason", "sequence"):
+                assert row[key] == clear[key], key
+    # A re-run on the same pins reproduces both hashes.
+    lcr_again = no_float(start_run(api, analyst, lcr_body).text)
+    assert lcr_again["run_id"] != lcr_id
+    for key in ("manifest_sha256", "result_sha256", "rule_set_id", "status"):
+        assert lcr_again[key] == lcr_run[key], key
+    assert listed(module_code=LCR_HQLA) == {lcr_id, lcr_again["run_id"]}
+    # Each read answers 404 for a run of the other module, and for no run at all.
+    for url, refusal in (
+        (f"{RUNS}/{run_id}/liquidity", "liquidity_not_found"),
+        (f"{RUNS}/{uuid.uuid4()}/liquidity", "not_found"),
+        (f"{RUNS}/{lcr_id}/maturity-ladder", "maturity_ladder_not_found"),
+    ):
+        r = api.get(url, headers=approver)
+        assert (r.status_code, r.json()["code"]) == (404, refusal), (url, r.text)
+    # Phase 16 x 17: every seeded rule is in the validator's stored shape (its kind's exact
+    # schema keys; decimals padded to the scale), so re-sending the seeded cap as "0.75" is
+    # no change; and an LCR rule goes through propose, submit and approve, after which a
+    # run pins the new version and still reproduces the golden figures.
+    for code, (_, _, schema, params, _) in ALL_RULES.items():
+        assert check_schema(schema) == [], code
+        assert check_parameters(schema, params, frozenset({"BOND", "DEPOSIT", "LOAN"})) == (
+            params,
+            [],
+        ), code
+    cap_rule = f"{RULES}/{rule_id(db, LCR_INFLOW_CAP)}"
+    r = api.post(
+        f"{cap_rule}/versions",
+        json={"parameters_patch": {"value": "0.75"}, "change_summary": "Same cap."},
+        headers=analyst,
+    )
+    assert (r.status_code, r.json()["code"]) == (422, "no_change"), r.text
+    # A haircut for LOAN, which is not HQLA: governed, pinned, and no figure changes.
+    haircut_rule = f"{RULES}/{rule_id(db, HQLA_HAIRCUT)}"
+    r = api.post(
+        f"{haircut_rule}/versions",
+        json={"parameters_patch": {"map": {"LOAN": "0.25"}}, "change_summary": "LOAN haircut."},
+        headers=analyst,
+    )
+    assert r.status_code == 201, r.text
+    lcr_change = r.json()
+    assert lcr_change["parameters"] == {"map": {"BOND": "0.0000", "LOAN": "0.2500"}}
+    lcr_rule_version = f"{haircut_rule}/versions/{lcr_change['version']}"
+    r = api.post(f"{lcr_rule_version}/submit", json={}, headers=analyst)
+    assert r.status_code == 200 and r.json()["status"] == "IN_REVIEW", r.text
+    r = api.post(
+        f"{lcr_rule_version}/approval",
+        json={"decision": "APPROVE", "comment": "LOAN is not HQLA: no figure changes."},
+        headers=approver,
+    )
+    assert r.status_code == 200 and r.json()["status"] == "ACTIVE", r.text
+    lcr_changed = no_float(start_run(api, analyst, lcr_body).text)
+    assert lcr_changed["status"] == lcr_run["status"]
+    assert lcr_changed["rule_set_id"] != lcr_run["rule_set_id"]
+    assert lcr_change["rule_version_id"] in {
+        m["rule_version_id"] for m in lcr_changed["manifest"]["rule_set"]["members"]
+    }
+    changed_liquidity = no_float(
+        api.get(f"{RUNS}/{lcr_changed['run_id']}/liquidity", headers=approver).text
+    )
+    for cur in changed_liquidity["currencies"]:
+        want = lcr["lcr"][cur["currency"]]
+        assert {f: Decimal(cur[f]) for f in LCR_FIGURES} == {
+            f: Decimal(want[f]) for f in LCR_FIGURES
+        }, cur["currency"]
+        assert (cur["ratio"], cur["warnings"]) == (want["ratio"], want["warnings"])
+
     # --- 6. Guards (BE-15.1, BE-15.2) ----------------------------------------------------------
     bucket_version = uuid.UUID(seeded_versions[MATURITY_BUCKETS])
     for statement, match in (
@@ -1122,7 +1508,7 @@ def test_registry_snapshot_run_and_maturity_ladder(
         "SELECT count(*) AS n FROM rule_version WHERE status = 'ACTIVE'"
         " GROUP BY rule_definition_id",
     )
-    assert [a["n"] for a in actives] == [1, 1, 1]
+    assert [a["n"] for a in actives] == [1] * len(ALL_RULES)
     # One ACTIVE bucket version: the approved one; the seeded one is SUPERSEDED, never deleted.
     assert (
         sql(db, "SELECT status FROM rule_version WHERE id = $1", bucket_version)[0]["status"]
@@ -1146,10 +1532,14 @@ def test_registry_snapshot_run_and_maturity_ladder(
     with pytest.raises(IMMUTABLE, match="written RUNNING"):
         sql(db, copy("calculation_run", "'idempotency_key', 'copy'", "id = $1"), run_uuid)
     assert sql(db, "SELECT * FROM calculation_run WHERE id = $1", run_uuid) == before_run
-    for table in OUTPUT_TABLES:
+    lcr_uuid = uuid.UUID(lcr_id)
+    for table, owner in (
+        *((t, run_uuid) for t in OUTPUT_TABLES),
+        *((t, lcr_uuid) for t in LCR_OUTPUT_TABLES),  # BE-17.1: the LCR outputs, alike
+    ):
         with pytest.raises(IMMUTABLE, match="only while their run is RUNNING"):
-            sql(db, copy(table, "'sequence', 9999", "calculation_run_id = $1"), run_uuid)
-        [row] = sql(db, f"SELECT * FROM {table} WHERE calculation_run_id = $1 LIMIT 1", run_uuid)
+            sql(db, copy(table, "'sequence', 9999", "calculation_run_id = $1"), owner)
+        [row] = sql(db, f"SELECT * FROM {table} WHERE calculation_run_id = $1 LIMIT 1", owner)
         for statement in (
             f"UPDATE {table} SET created_by = 'tampered' WHERE id = $1",
             f"DELETE FROM {table} WHERE id = $1",
@@ -1158,17 +1548,20 @@ def test_registry_snapshot_run_and_maturity_ladder(
                 sql(db, statement, row["id"])
         with pytest.raises(IMMUTABLE, match="TRUNCATE"):
             sql(db, f"TRUNCATE {table} CASCADE")
+        assert sql(db, f"SELECT * FROM {table} WHERE id = $1", row["id"]) == [row], table
 
     # The downgrade refuses while a run (or a non-seed registry row) exists, in one
-    # transaction: nothing changes. Without them, 0018 -> 0017 -> head.
+    # transaction: nothing changes; 0020 alone refuses while LCR results exist (BE-17.1).
+    # Without them, head -> 0017 -> head.
     head = str(ScriptDirectory.from_config(Config("alembic.ini")).get_current_head())
-    assert sql(db, "SELECT version_num FROM alembic_version")[0]["version_num"] == head
+    assert sql(db, "SELECT version_num FROM alembic_version")[0]["version_num"] == head == "0021"
     before = calc_counts(db)
     try:
-        with pytest.raises(Exception, match="this downgrade is refused"):
-            command.downgrade(alembic_config(db), "0017")
-        assert sql(db, "SELECT version_num FROM alembic_version")[0]["version_num"] == head
-        assert calc_counts(db) == before
+        for target in (m20.down_revision, "0017"):
+            with pytest.raises(Exception, match="LCR results.*this downgrade is refused"):
+                command.downgrade(alembic_config(db), target)
+            assert sql(db, "SELECT version_num FROM alembic_version")[0]["version_num"] == head
+            assert calc_counts(db) == before
         clean(db)
         sql(
             db,
@@ -1198,6 +1591,14 @@ def test_registry_snapshot_run_and_maturity_ladder(
         RULES_SEED_TAG,
     )[0]
     assert (seeded["v"], seeded["b"], seeded["m"], seeded["a"]) == (3, 8, 1, 1)
+    lcr_seeded = sql(
+        db,
+        "SELECT (SELECT count(*) FROM rule_version WHERE status = 'ACTIVE'"
+        " AND seeded_by = $1) AS v,"
+        " (SELECT count(*) FROM module_version WHERE seeded_by = $1) AS m",
+        LCR_SEED_TAG,
+    )[0]
+    assert (lcr_seeded["v"], lcr_seeded["m"]) == (len(LCR_SEEDED_RULES), 1)
     assert {str(r["id"]) for r in sql(db, "SELECT id FROM rule_version")} == set(
-        seeded_versions.values()
-    )  # the seed's ids are stable across a round trip
+        all_versions.values()
+    )  # the seeds' ids are stable across a round trip

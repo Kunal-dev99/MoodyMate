@@ -6,7 +6,8 @@ separate step and the route x role matrix is printed in the test report.
    token.
 2. Cross-tenant isolation: a user of another tenant sees and changes nothing here, and
    another tenant's resource is the same 404 as a random id (WS3 instruments and the
-   projection included, Phase 14; dataset snapshots, runs and their results, Phase 15).
+   projection included, Phase 14; dataset snapshots, runs and their results, Phase 15; the
+   liquidity read, Phase 17).
 3. Audit completeness: every mutating route is listed and emits its audit event.
 4. Migrations: base -> head round trip with the seed; the downgrade refuses while user data
    or audit rows exist.
@@ -46,6 +47,7 @@ from app.tests.helpers import (
     schema_id,
     seeded_source_id,
     source_body,
+    start_run,
     token_for,
     upload,
     validated_sample,
@@ -143,6 +145,19 @@ def test_route_by_role_authorization_matrix(api: TestClient, db: str) -> None:
     # Phase 15: a snapshot of that import and a run on it (BLOCKED: no cash flows), so the
     # calculation reads answer 2xx.
     calculated = blocked_run(api, projected["import_id"])
+    # Phase 17: an lcr_hqla run on the same snapshot (BLOCKED: no positions or cash flows),
+    # so GET /calculation-runs/{run_id}/liquidity answers 2xx.
+    analyst = dev_token(api, "risk_analyst")
+    lcr_run = start_run(
+        api,
+        analyst,
+        {
+            "dataset_snapshot_id": calculated["snapshot_id"],
+            "module_version_id": module_version_id(api, analyst, "lcr_hqla"),
+            "reporting_date": "2026-12-31",
+        },
+    )
+    assert lcr_run.status_code == 201 and lcr_run.json()["status"] == "BLOCKED", lcr_run.text
     ids = {
         "schema_id": str(schema_id(db, "instrument")),
         "proposal_id": proposal["id"],
@@ -163,13 +178,14 @@ def test_route_by_role_authorization_matrix(api: TestClient, db: str) -> None:
     tokens = {role: dev_token(api, role) for role in ROLES}
     failures = []
     successes = dict.fromkeys(ROLES, 0)
+    lcr_ids = {**ids, "run_id": lcr_run.json()["run_id"]}
     for method, path, permission in routes:
         row: dict[str, Any] = {"route": f"{method} {path}", "permission": permission}
         for role in ROLES:
             allowed = permission == AUTHENTICATED or permission in ROLE_PERMISSIONS[Role(role)]
             r = api.request(
                 method,
-                fill(path, ids),
+                fill(path, lcr_ids if path.endswith("/liquidity") else ids),
                 headers=tokens[role],
                 json={} if method in MUTATING else None,
             )
@@ -225,6 +241,7 @@ def test_route_by_role_authorization_matrix(api: TestClient, db: str) -> None:
         ("GET /api/v1/calculation-runs/{run_id}", "calc:read"),
         ("GET /api/v1/calculation-runs/{run_id}/results", "calc:read"),
         ("GET /api/v1/calculation-runs/{run_id}/maturity-ladder", "calc:read"),
+        ("GET /api/v1/calculation-runs/{run_id}/liquidity", "calc:read"),  # BE-17.3
         ("GET /api/v1/assumption-sets", "rule:read"),  # BE-16.4
         ("GET /api/v1/assumption-sets/{assumption_set_id}", "rule:read"),
     ):
@@ -348,6 +365,8 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
             f"{RUNS}/{here_calculated['run_id']}/maturity-ladder",
             f"{RUNS}/{uuid.uuid4()}/maturity-ladder",
         ),
+        # Phase 17: the liquidity read is scoped through the run.
+        (f"{RUNS}/{here_calculated['run_id']}/liquidity", f"{RUNS}/{uuid.uuid4()}/liquidity"),
         # BE-16.4: this tenant's seeded assumption set.
         (
             f"/api/v1/assumption-sets/{here_assumption_set}",

@@ -52,6 +52,20 @@ One JSON object per case, UTF-8. All amounts are decimal strings, never JSON fra
 
 | File | Module | Covers |
 | --- | --- | --- |
-| `maturity_ladder_v1_boundary_cases.json` | `maturity_ladder` v1 | Bucket edges, on the date, past due, unmapped type, missing instrument, zero amount, open last bucket, two currencies, both origins, D-33 minimum-aggregation masking. |
+| `maturity_ladder_v1_boundary_cases.json` | `maturity_ladder` v1 | Bucket edges, on the date, past due, unmapped type, missing instrument, zero amount, open last bucket, two currencies, both origins, D-33 minimum-aggregation masking (non-zero contributions only). |
+| `lcr_hqla_v1_engineering_cases.json` | `lcr_hqla` v1 | An ineligible asset, the inflow cap binding, a zero denominator, mixed currencies, the horizon edge, a ratio tie only ROUND_HALF_EVEN rounds down, D-33 masking. |
 
-The `lcr_hqla` v1 case is added here by BE-17.2 when that module exists.
+### Expected-output shape per module
+
+- `maturity_ladder` v1: `expected` has `run_status`, `excluded` (input key to warning code),
+  `ladder` (currency, bucket code, then the eight amounts and `contribution_count`) and
+  `masked_for_internal` (currency, bucket code, masked figures). `inputs` has
+  `instruments` and `cash_flows`.
+- `lcr_hqla` v1: `expected` has `currencies` (per currency: the `GET …/liquidity` figures,
+  `levels`, `ratio` as exact text or null, `inflow_cap_applied`, `counts` and the
+  `lcr_result` `warnings`), `outcome` (input counts), `included_assets` and
+  `excluded_assets` (position keys) and `masked_for_internal` (currency, masked figures).
+  `inputs` has `instruments`, `positions` and `cash_flows`.
+
+The test runs each file under its own module: ladder files in the ladder loop, `lcr_hqla`
+files in the LCR part, each over its own snapshot.

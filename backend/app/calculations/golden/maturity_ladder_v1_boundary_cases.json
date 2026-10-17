@@ -5,7 +5,7 @@
     "code": "maturity_ladder",
     "version": 1
   },
-  "description": "Hand-computed engineering fixture (D-35 section 4) for the illustrative maturity ladder v1 under the seeded D-35 rules: bucket edges, past due, unmapped type, missing instrument, zero amount, open last bucket, two currencies, both origins. Ladder amounts are exact decimal text; masked_for_internal lists the figures a role with clearance internal sees masked under D-33 minimum aggregation (CALC_MIN_AGGREGATE_COUNT 3).",
+  "description": "Hand-computed engineering fixture (D-35 section 4) for the illustrative maturity ladder v1 under the seeded D-35 rules: bucket edges, past due, unmapped type, missing instrument, zero amount, open last bucket, two currencies, both origins. Ladder amounts are exact decimal text; masked_for_internal lists the figures a role with clearance internal sees masked under D-33 minimum aggregation (CALC_MIN_AGGREGATE_COUNT 3); only non-zero contributions count, so EUR B03 outflows (only CF-06, 0.00) stay clear.",
   "tolerance": {
     "inflows": "0",
     "outflows": "0",
@@ -384,9 +384,7 @@
           "cumulative_gap",
           "inflows",
           "inflows_behavioural",
-          "net_gap",
-          "outflows",
-          "outflows_contractual"
+          "net_gap"
         ],
         "B04": [
           "cumulative_gap"

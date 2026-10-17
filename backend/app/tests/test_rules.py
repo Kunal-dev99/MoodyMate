@@ -41,6 +41,7 @@ from app.main import create_app
 from app.rules.constants import (
     CASHFLOW_DIRECTION,
     ILLUSTRATIVE_STATEMENT,
+    LCR_SEEDED_RULES,
     MATURITY_BUCKETS,
     MATURITY_LADDER,
     PAST_DUE_TREATMENT,
@@ -300,8 +301,10 @@ def test_governed_rule_changes_and_pinning(api: TestClient, db: str, artifact_di
         r = api.get(RULES, headers=headers)
         assert r.status_code == 200, (role, r.text)
         page = no_float(r.text)
-        assert page["total"] == len(SEEDED_RULES) == len(page["items"])
-        assert [i["code"] for i in page["items"]] == sorted(SEEDED_RULES)
+        # The maturity_ladder seed (0018) and the lcr_hqla seed (0020, Phase 17).
+        seeded = {**SEEDED_RULES, **LCR_SEEDED_RULES}
+        assert page["total"] == len(seeded) == len(page["items"])
+        assert [i["code"] for i in page["items"]] == sorted(seeded)
         assert all(
             (i["active_version"], i["version_count"], i["illustrative"], i["provisional"])
             == (1, 1, True, True)

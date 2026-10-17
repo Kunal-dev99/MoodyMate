@@ -1,0 +1,354 @@
+{
+  "name": "lcr_hqla v1 engineering cases",
+  "status": "ENGINEERING — awaiting domain-expert approval",
+  "module": {
+    "code": "lcr_hqla",
+    "version": 1
+  },
+  "description": "Hand-computed engineering fixture (D-35 section 4) for the illustrative lcr_hqla v1 under the seeded D-35 rules (0020_lcr_hqla): BOND is Level 1 with a 0 haircut, any other type is not HQLA; DEPOSIT run-off 0.10; LOAN cash flows due within 30 days after the reporting date flow in at 0.50, capped at 0.75 x outflows; ratio = HQLA / (outflows - inflows after the cap), 4 dp ROUND_HALF_EVEN. Covers an ineligible asset, the inflow cap binding, a zero denominator, mixed currencies, the horizon edge and a ratio tie. EUR: HQLA 246.81; outflows 800; inflows 750 before the cap, 600 after it; ratio 246.81 / 200 = 1.23405 -> 1.2340 (HALF_EVEN; HALF_UP would give 1.2341). USD: HQLA 300.00; no outflows, so the cap is 0 and the denominator 0: NULL ratio and LCR_DENOMINATOR_ZERO. GBP: HQLA 700.00; outflows 100; inflows 30 (cap 75 does not bind); ratio 10.0000. masked_for_internal lists the figures a role with clearance internal sees masked under D-33 minimum aggregation (CALC_MIN_AGGREGATE_COUNT 3): only non-zero contributions count; zeros and a NULL ratio stay clear; asset rows are masked whatever the count.",
+  "tolerance": {
+    "hqla_total": "0",
+    "outflow_balance": "0",
+    "outflows": "0",
+    "inflows_gross": "0",
+    "inflows_before_cap": "0",
+    "inflow_cap_amount": "0",
+    "inflows_after_cap": "0",
+    "net_outflows": "0",
+    "ratio": "0",
+    "levels": "0",
+    "excluded_asset_count": "0",
+    "outflow_count": "0",
+    "inflow_count": "0"
+  },
+  "inputs": {
+    "reporting_date": "2026-12-31",
+    "instruments": [
+      {
+        "instrument_id": "LQ-BOND-E1",
+        "instrument_type": "BOND",
+        "currency": "EUR",
+        "notional": "1.00"
+      },
+      {
+        "instrument_id": "LQ-BOND-E2",
+        "instrument_type": "BOND",
+        "currency": "EUR",
+        "notional": "1.00"
+      },
+      {
+        "instrument_id": "LQ-BOND-E3",
+        "instrument_type": "BOND",
+        "currency": "EUR",
+        "notional": "1.00"
+      },
+      {
+        "instrument_id": "LQ-LOAN-E",
+        "instrument_type": "LOAN",
+        "currency": "EUR",
+        "notional": "1.00"
+      },
+      {
+        "instrument_id": "LQ-DEP-E1",
+        "instrument_type": "DEPOSIT",
+        "currency": "EUR",
+        "notional": "1.00"
+      },
+      {
+        "instrument_id": "LQ-DEP-E2",
+        "instrument_type": "DEPOSIT",
+        "currency": "EUR",
+        "notional": "1.00"
+      },
+      {
+        "instrument_id": "LQ-DEP-E3",
+        "instrument_type": "DEPOSIT",
+        "currency": "EUR",
+        "notional": "1.00"
+      },
+      {
+        "instrument_id": "LQ-BOND-U",
+        "instrument_type": "BOND",
+        "currency": "USD",
+        "notional": "1.00"
+      },
+      {
+        "instrument_id": "LQ-LOAN-U",
+        "instrument_type": "LOAN",
+        "currency": "USD",
+        "notional": "1.00"
+      },
+      {
+        "instrument_id": "LQ-BOND-G",
+        "instrument_type": "BOND",
+        "currency": "GBP",
+        "notional": "1.00"
+      },
+      {
+        "instrument_id": "LQ-LOAN-G",
+        "instrument_type": "LOAN",
+        "currency": "GBP",
+        "notional": "1.00"
+      },
+      {
+        "instrument_id": "LQ-DEP-G",
+        "instrument_type": "DEPOSIT",
+        "currency": "GBP",
+        "notional": "1.00"
+      }
+    ],
+    "positions": [
+      {
+        "position_id": "LP-E1",
+        "instrument_id": "LQ-BOND-E1",
+        "balance": "200.00",
+        "currency": "EUR",
+        "note": "EUR Level 1 (BOND, haircut 0)"
+      },
+      {
+        "position_id": "LP-E2",
+        "instrument_id": "LQ-BOND-E2",
+        "balance": "40.00",
+        "currency": "EUR",
+        "note": "EUR Level 1"
+      },
+      {
+        "position_id": "LP-E3",
+        "instrument_id": "LQ-BOND-E3",
+        "balance": "6.81",
+        "currency": "EUR",
+        "note": "EUR Level 1"
+      },
+      {
+        "position_id": "LP-E4",
+        "instrument_id": "LQ-LOAN-E",
+        "balance": "5000.00",
+        "currency": "EUR",
+        "note": "an ineligible asset: LOAN is not HQLA (NOT_HQLA_ELIGIBLE)"
+      },
+      {
+        "position_id": "LP-E5",
+        "instrument_id": "LQ-DEP-E1",
+        "balance": "5000.00",
+        "currency": "EUR",
+        "note": "EUR DEPOSIT, run-off 0.10: 500.0000"
+      },
+      {
+        "position_id": "LP-E6",
+        "instrument_id": "LQ-DEP-E2",
+        "balance": "2000.00",
+        "currency": "EUR",
+        "note": "EUR DEPOSIT, run-off 200.0000"
+      },
+      {
+        "position_id": "LP-E7",
+        "instrument_id": "LQ-DEP-E3",
+        "balance": "1000.00",
+        "currency": "EUR",
+        "note": "EUR DEPOSIT, run-off 100.0000"
+      },
+      {
+        "position_id": "LP-U1",
+        "instrument_id": "LQ-BOND-U",
+        "balance": "300.00",
+        "currency": "USD",
+        "note": "USD Level 1; USD has no outflows"
+      },
+      {
+        "position_id": "LP-G1",
+        "instrument_id": "LQ-BOND-G",
+        "balance": "700.00",
+        "currency": "GBP",
+        "note": "GBP Level 1"
+      },
+      {
+        "position_id": "LP-G2",
+        "instrument_id": "LQ-DEP-G",
+        "balance": "1000.00",
+        "currency": "GBP",
+        "note": "GBP DEPOSIT, run-off 100.0000"
+      }
+    ],
+    "cash_flows": [
+      {
+        "cashflow_id": "LCF-E1",
+        "instrument_id": "LQ-LOAN-E",
+        "days_after_reporting_date": 1,
+        "amount": "1000.00",
+        "currency": "EUR",
+        "cashflow_type": "PRINCIPAL",
+        "origin": "CONTRACTUAL"
+      },
+      {
+        "cashflow_id": "LCF-E2",
+        "instrument_id": "LQ-LOAN-E",
+        "days_after_reporting_date": 15,
+        "amount": "300.00",
+        "currency": "EUR",
+        "cashflow_type": "PRINCIPAL",
+        "origin": "CONTRACTUAL"
+      },
+      {
+        "cashflow_id": "LCF-E3",
+        "instrument_id": "LQ-LOAN-E",
+        "days_after_reporting_date": 30,
+        "amount": "200.00",
+        "currency": "EUR",
+        "cashflow_type": "INTEREST",
+        "origin": "CONTRACTUAL",
+        "note": "day 30: on the inflow horizon edge, in scope"
+      },
+      {
+        "cashflow_id": "LCF-E4",
+        "instrument_id": "LQ-LOAN-E",
+        "days_after_reporting_date": 31,
+        "amount": "999.00",
+        "currency": "EUR",
+        "cashflow_type": "PRINCIPAL",
+        "origin": "CONTRACTUAL",
+        "note": "day 31: past the 30-day horizon, out of scope"
+      },
+      {
+        "cashflow_id": "LCF-U1",
+        "instrument_id": "LQ-LOAN-U",
+        "days_after_reporting_date": 5,
+        "amount": "400.00",
+        "currency": "USD",
+        "cashflow_type": "PRINCIPAL",
+        "origin": "CONTRACTUAL"
+      },
+      {
+        "cashflow_id": "LCF-G1",
+        "instrument_id": "LQ-LOAN-G",
+        "days_after_reporting_date": 10,
+        "amount": "60.00",
+        "currency": "GBP",
+        "cashflow_type": "PRINCIPAL",
+        "origin": "CONTRACTUAL"
+      }
+    ]
+  },
+  "expected": {
+    "currencies": {
+      "EUR": {
+        "hqla_total": "246.81",
+        "levels": {
+          "L1": "246.81",
+          "L2A": "0",
+          "L2B": "0"
+        },
+        "outflow_balance": "8000.00",
+        "outflows": "800",
+        "inflows_gross": "1500.00",
+        "inflows_before_cap": "750",
+        "inflow_cap_rate": "0.7500",
+        "inflow_cap_amount": "600",
+        "inflows_after_cap": "600",
+        "inflow_cap_applied": true,
+        "net_outflows": "200",
+        "ratio": "1.2340",
+        "counts": {
+          "excluded_asset_count": 1,
+          "outflow_count": 3,
+          "inflow_count": 3
+        },
+        "warnings": []
+      },
+      "GBP": {
+        "hqla_total": "700.00",
+        "levels": {
+          "L1": "700.00",
+          "L2A": "0",
+          "L2B": "0"
+        },
+        "outflow_balance": "1000.00",
+        "outflows": "100",
+        "inflows_gross": "60.00",
+        "inflows_before_cap": "30",
+        "inflow_cap_rate": "0.7500",
+        "inflow_cap_amount": "75",
+        "inflows_after_cap": "30",
+        "inflow_cap_applied": false,
+        "net_outflows": "70",
+        "ratio": "10.0000",
+        "counts": {
+          "excluded_asset_count": 0,
+          "outflow_count": 1,
+          "inflow_count": 1
+        },
+        "warnings": []
+      },
+      "USD": {
+        "hqla_total": "300.00",
+        "levels": {
+          "L1": "300.00",
+          "L2A": "0",
+          "L2B": "0"
+        },
+        "outflow_balance": "0",
+        "outflows": "0",
+        "inflows_gross": "400.00",
+        "inflows_before_cap": "200",
+        "inflow_cap_rate": "0.7500",
+        "inflow_cap_amount": "0",
+        "inflows_after_cap": "0",
+        "inflow_cap_applied": true,
+        "net_outflows": "0",
+        "ratio": null,
+        "counts": {
+          "excluded_asset_count": 0,
+          "outflow_count": 0,
+          "inflow_count": 1
+        },
+        "warnings": [
+          "LCR_DENOMINATOR_ZERO"
+        ]
+      }
+    },
+    "outcome": {
+      "in_scope": 16,
+      "bucketed": 15,
+      "excluded": 0,
+      "out_of_scope": 1
+    },
+    "included_assets": {
+      "EUR": [
+        "LP-E1",
+        "LP-E2",
+        "LP-E3"
+      ],
+      "USD": [
+        "LP-U1"
+      ],
+      "GBP": [
+        "LP-G1"
+      ]
+    },
+    "excluded_assets": [
+      "LP-E4"
+    ],
+    "masked_for_internal": {
+      "EUR": [],
+      "USD": [
+        "L1",
+        "hqla_total",
+        "inflow_cap_applied",
+        "inflows_before_cap",
+        "inflows_gross"
+      ],
+      "GBP": [
+        "L1",
+        "hqla_total",
+        "inflow_cap_amount",
+        "inflow_cap_applied",
+        "inflows_after_cap",
+        "inflows_before_cap",
+        "inflows_gross",
+        "net_outflows",
+        "outflow_balance",
+        "outflows",
+        "ratio"
+      ]
+    }
+  }
+}

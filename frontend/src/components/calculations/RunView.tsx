@@ -15,11 +15,12 @@ import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
 import { IllustrativeBanner } from './IllustrativeBanner'
+import { LiquidityView } from './LiquidityView'
 import { ManifestPanel } from './ManifestPanel'
 import { MaturityLadderView } from './MaturityLadderView'
 import { RunIdentity } from './RunIdentity'
 import { RunStatusPill } from './RunStatusPill'
-import { POST_CHECK_TEXT, RUN_STATUS_STYLE, SEVERITY_VARIANT, WARNING_TEXT, hasResults, type RunDetail, type RunWarning } from './calculations'
+import { POST_CHECK_TEXT, RUN_STATUS_STYLE, SEVERITY_VARIANT, WARNING_TEXT, hasResults, showsLiquidity, type RunDetail, type RunWarning } from './calculations'
 
 const CRUMBS = [{ label: 'Calculations', href: '/calculations' }]
 
@@ -53,8 +54,16 @@ function StatusNotice({ run }: { run: RunDetail }) {
   )
 }
 
+/** The outcome counts' labels: the ladder's (FE-15.2), or the LCR's inputs (FE-17.1). */
+const OUTCOME_LABELS = {
+  ladder: { in_scope: 'Cash flows in scope', bucketed: 'Bucketed', excluded: 'Excluded with a warning' },
+  lcr: { in_scope: 'Positions and cash flows in scope', bucketed: 'Used (assets, outflows, inflows)', excluded: 'Excluded with a warning' },
+} as const
+
 function Outcome({ run }: { run: RunDetail }) {
   const o = run.outcome
+  const lcr = showsLiquidity(run)
+  const labels = OUTCOME_LABELS[lcr ? 'lcr' : 'ladder']
   return (
     <PageSection icon={ClipboardList} title="Outcome" description="Value-free counts and the engine's post-checks (D-31 §3), as the server recorded them when the run ended.">
       {!o ? (
@@ -64,15 +73,20 @@ function Outcome({ run }: { run: RunDetail }) {
       ) : (
         <div className="grid gap-6 lg:grid-cols-2" data-testid="run-outcome">
           <dl className="grid grid-cols-[200px_1fr] gap-y-1 text-sm">
-            <Field label="Cash flows in scope" testId="outcome-in-scope">
+            <Field label={labels.in_scope} testId="outcome-in-scope">
               <span className="font-mono">{o.in_scope}</span>
             </Field>
-            <Field label="Bucketed" testId="outcome-bucketed">
+            <Field label={labels.bucketed} testId="outcome-bucketed">
               <span className="font-mono">{o.bucketed}</span>
             </Field>
-            <Field label="Excluded with a warning" testId="outcome-excluded">
+            <Field label={labels.excluded} testId="outcome-excluded">
               <span className="font-mono">{o.excluded}</span>
             </Field>
+            {lcr && (
+              <Field label="Cash flows not inflows by rule" testId="outcome-out-of-scope">
+                <span className="font-mono">{o.out_of_scope ?? '—'}</span>
+              </Field>
+            )}
             <Field label="Rows read">
               <span className="font-mono text-xs">
                 {Object.entries(o.inputs)
@@ -173,6 +187,8 @@ function Warnings({ warnings }: { warnings: RunWarning[] }) {
  * FE-15.2: one run. Its identity and status (the server's), the illustrative label, the
  * outcome and post-checks, the manifest with every pin, the warnings, and the maturity ladder
  * with the contributions drill-down to the instrument, the import and the source row.
+ * FE-17.1: an `lcr_hqla` run shows the liquidity view in the ladder's place (unless
+ * NEXT_PUBLIC_LIQUIDITY_UI=off, which restores the Phase 15 layout exactly).
  */
 export function RunView({ runId }: { runId: string }) {
   const [state, setState] = useState<Loaded<RunDetail>>({ kind: 'loading' })
@@ -248,7 +264,7 @@ export function RunView({ runId }: { runId: string }) {
           </dl>
         </PageSection>
         <Outcome run={run} />
-        <MaturityLadderView run={run} />
+        {showsLiquidity(run) ? <LiquidityView run={run} /> : <MaturityLadderView run={run} />}
         <Warnings warnings={run.warnings} />
         <ManifestPanel run={run} />
       </div>

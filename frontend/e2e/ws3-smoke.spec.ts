@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 import type { components } from '../src/api/schema'
+import { sameDecimal, sumDecimals } from './calc-support'
 import { API, SAMPLES, bearer, ensureActiveMapping, signIn, uploadSample } from './support'
 
 /**
@@ -19,9 +20,8 @@ import { API, SAMPLES, bearer, ensureActiveMapping, signIn, uploadSample } from 
  *   8. (Phase 16 FE-16.1, FE-18.1) the module registry lists the PLANNED modules with the
  *      PlannedModuleBadge and their contracts, never as ready.
  *
- * Step 4b needs the Phase 17 liquidity view. Until that is merged into this branch it skips
- * itself on a feature check (no AVAILABLE lcr_hqla module), with a TODO naming its phase: it is
- * never silently green.
+ * Step 4b runs Phase 17's lcr_hqla on the same snapshot (its position import is the projected
+ * XLSX) at LCR_REPORTING_DATE, so a synthetic inflow falls inside the 30-day horizon.
  *
  * Every payload type is the generated one (src/api/schema.d.ts); none is written here.
  *
@@ -39,6 +39,8 @@ type AuthHeaders = Record<string, string>
 test.describe.configure({ mode: 'serial' })
 
 const REPORTING_DATE = '2026-12-31'
+/** As liquidity.spec: a LOAN cash flow of the synthetic sample (2026-12-28) is within the 30-day inflow horizon. */
+const LCR_REPORTING_DATE = '2026-12-20'
 const LADDER = 'maturity_ladder'
 /** BE-18.1: the declared extension points, seeded PLANNED. */
 const PLANNED_CODES = ['alm_irrbb', 'collateral', 'capital'] as const
@@ -202,9 +204,9 @@ async function buildSnapshotInBrowser(page: Page, picks: [string, string][]) {
 }
 
 /** Pick an AVAILABLE module and the date, submit, and open the run the server wrote. */
-async function submitRunInBrowser(page: Page, moduleVersionId: string): Promise<Schemas['RunDetail']> {
+async function submitRunInBrowser(page: Page, moduleVersionId: string, reportingDate: string = REPORTING_DATE): Promise<Schemas['RunDetail']> {
   await page.locator(`[data-testid="module-option"][data-module-version-id="${moduleVersionId}"]`).getByTestId('module-radio').check()
-  await page.getByTestId('reporting-date').fill(REPORTING_DATE)
+  await page.getByTestId('reporting-date').fill(reportingDate)
   await expect(page.getByTestId('pins-preview').locator('[data-testid="pin-row"][data-missing="true"]')).toHaveCount(0)
   const submitted = isPost(page, `${API}/api/v1/calculation-runs`)
   await page.getByTestId('run-submit').click()
@@ -215,7 +217,7 @@ async function submitRunInBrowser(page: Page, moduleVersionId: string): Promise<
   await page.waitForURL(`**/calculations/runs/${run.run_id}`)
   await expect(page.getByTestId('run-detail-status')).toHaveAttribute('data-status', run.status)
   await expect(page.getByTestId('run-id')).toHaveText(run.run_id)
-  await expect(page.getByTestId('run-reporting-date')).toHaveText(REPORTING_DATE)
+  await expect(page.getByTestId('run-reporting-date')).toHaveText(reportingDate)
   await expect(page.getByTestId('illustrative-banner')).toContainText(run.statement)
   return run
 }
@@ -369,22 +371,45 @@ test('FE-18.2: WS3 smoke: project → catalogue → snapshot (PLANNED not select
     await expect(analyst.getByTestId('manifest-rule')).toHaveCount(run.manifest.rule_set.members.length)
   })
 
-  await test.step('4b. the analyst runs LCR and sees the liquidity view (Phase 17)', async (step) => {
+  await test.step('4b. the analyst runs LCR and sees the liquidity view (Phase 17)', async () => {
     const lcr = modules.items.find((m) => m.code === LCR && m.implementation_status === 'AVAILABLE')
-    // TODO(Phase 17, FE-17.1): enable after the merge; confirm the liquidity view's test IDs.
-    step.skip(!lcr, `Phase 17 is not on this branch: no AVAILABLE ${LCR} module`)
+    expect(lcr?.runnable, `${LCR} v1 is seeded AVAILABLE with every rule ACTIVE (BE-17.1)`).toBe(true)
     await analyst.goto('/calculations/new')
     // The same members: the content-addressed snapshot is reused, nothing new is written.
     const again = await buildSnapshotInBrowser(analyst, picks)
     expect(again.status).toBe(200)
     expect(again.snapshot.snapshot_id).toBe(snapshot!.snapshot_id)
-    const lcrRun = await submitRunInBrowser(analyst, lcr!.module_version_id)
+    const lcrRun = await submitRunInBrowser(analyst, lcr!.module_version_id, LCR_REPORTING_DATE)
+    expect(lcrRun.module.code).toBe(LCR)
     expect(['SUCCEEDED', 'SUCCEEDED_WITH_WARNINGS']).toContain(lcrRun.status)
-    const view = analyst.getByTestId('liquidity-view')
+    // The liquidity view takes the ladder's place, with the run's identity and the prototype label.
+    const view = analyst.getByTestId('liquidity')
     await expect(view).toBeVisible()
+    await expect(analyst.getByTestId('maturity-ladder')).toHaveCount(0)
     await expect(view.getByTestId('identity-run-id')).toHaveText(lcrRun.run_id)
-    await expect(view.getByTestId('identity-reporting-date')).toHaveText(REPORTING_DATE)
-    await expect(analyst.getByTestId('illustrative-banner')).toBeVisible()
+    await expect(view.getByTestId('identity-reporting-date')).toHaveText(LCR_REPORTING_DATE)
+    await expect(view.getByTestId('lcr-prototype-banner')).toContainText('not a regulatory LCR')
+    await expect(analyst.getByTestId('illustrative-banner')).toContainText('Illustrative prototype — not regulatory')
+
+    // The approver is cleared for the asset rows (D-33): the HQLA total equals the sum of its rows.
+    const liquidityRead = isGet(approver, `${API}/api/v1/calculation-runs/${lcrRun.run_id}/liquidity`)
+    await approver.goto(`/calculations/runs/${lcrRun.run_id}`)
+    const liquidity: Schemas['LiquidityOut'] = await (await liquidityRead).json()
+    expect(liquidity.currencies.length).toBeGreaterThan(0)
+    const approverView = approver.getByTestId('liquidity')
+    await expect(approverView.getByTestId('identity-run-id')).toHaveText(lcrRun.run_id)
+    await expect(approver.getByTestId('illustrative-banner')).toBeVisible()
+    await expect(approverView.getByTestId('lcr-currency')).toHaveCount(liquidity.currencies.length)
+    for (const c of liquidity.currencies) {
+      const block = approverView.locator(`[data-testid="lcr-currency"][data-currency="${c.currency}"]`)
+      await expect(block.locator('[data-masked="true"]')).toHaveCount(0)
+      await expect(block.getByTestId('hqla-asset')).toHaveCount(c.assets.length)
+      const values = (await block.locator('[data-testid="hqla-asset"][data-included="true"]').getByTestId('hqla-asset-hqla').allTextContents()).map((t) => t.trim())
+      const total = (await block.getByTestId('lcr-hqla').textContent())!.trim()
+      expect(total).toBe(c.hqla_total)
+      expect(sameDecimal(sumDecimals(values), total), `${c.currency}: HQLA ${values.join(' + ')} = ${total}`).toBe(true)
+    }
+    if (process.env.WS3_SMOKE_SCREENSHOT) await approver.screenshot({ path: `${process.env.WS3_SMOKE_SCREENSHOT}/liquidity.png`, fullPage: true })
   })
 
   await test.step('5. the ladder, and a drill-down from a bucket to a contribution’s source row', async () => {

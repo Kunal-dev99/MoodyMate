@@ -23,13 +23,13 @@ written by a tagged migration (D-11). There is no API to create a module (D-31 �
 | Module code | Version | `implementation_status` | Seeded by | Runnable |
 |---|---|---|---|---|
 | `maturity_ladder` | 1 | AVAILABLE | `0018_calculations` | yes |
-| `lcr_hqla` | 1 | AVAILABLE | Phase 17 (BE-17.1) | yes, once Phase 17 is merged |
+| `lcr_hqla` | 1 | AVAILABLE | `0020_lcr_hqla` (migration `0020_lcr_results`) | yes |
 | `alm_irrbb` | 1 | PLANNED | `0021_planned_modules` | never |
 | `collateral` | 1 | PLANNED | `0021_planned_modules` | never |
 | `capital` | 1 | PLANNED | `0021_planned_modules` | never |
 
-`lcr_hqla` is built in parallel in Phase 17. Its section below repeats the plan (BE-17.2,
-D-35 §2). Check it against the Phase 17 seed at merge time.
+`lcr_hqla` was built in Phase 17. Its section below matches the Phase 17 seed
+(`0020_lcr_results.py`) and module (`modules/lcr_hqla.py`).
 
 A version can run only when **all** of these hold. Otherwise `POST /calculation-runs`
 answers 409 `module_not_available`, writes no run, and audits a DENIED
@@ -148,27 +148,74 @@ This is a per-currency maturity ladder (FC-04, D-35 §1).
 
 ### `lcr_hqla` v1 (AVAILABLE, Phase 17)
 
-This is an illustrative LCR/HQLA module (FC-03, D-35 §2). It is built in parallel, so this
-section repeats the plan, and Phase 17 owns the final contract.
+This is an illustrative LCR/HQLA module (FC-03, D-35 §2). It is not a regulatory
+calculation, and it claims no parity with any vendor system. Migration `0020_lcr_results`
+seeds it for the default tenant, tagged `seeded_by = '0020_lcr_hqla'` (D-11), PROVISIONAL and
+ILLUSTRATIVE.
 
 **Contracts.**
-- **Inputs:** position versions (`balance` as the value, PROVISIONAL), instrument versions
-  (type) and cash flows within the horizon.
-- **Outputs:** `hqla_asset_result` and `lcr_result`.
+- **Inputs:**
+  - `position` (`position_id`, `instrument_id`, `balance`, `currency`): the value is the
+    `balance`, PROVISIONAL, because the schema has no market value;
+  - `instrument` (`instrument_id`, `instrument_type`);
+  - `cashflow_event` (`cashflow_id`, `instrument_id`, `due_date`, `amount`, `currency`).
+- **Rules:** the six below. No assumption keys. **Parameters:** `reporting_date`.
+- **Outputs:** `lcr_result` (one row per run and currency) and `hqla_asset_result` (one row
+  per asset position, included at its level or excluded `NOT_HQLA_ELIGIBLE` with value 0, with
+  its position version's lineage). No intermediates.
+- **Warning codes:** `AMBIGUOUS_INSTRUMENT_KEY`, `INSTRUMENT_NOT_IN_SNAPSHOT`,
+  `MISSING_VALUE`, `NEGATIVE_AMOUNT`, `PARAMETERS_INVALID` and `UNMAPPED_INSTRUMENT_TYPE` are
+  written to `calculation_warning`. The LCR's own codes, `LCR_DENOMINATOR_ZERO` and
+  `LCR_LEVEL_CAPS_NOT_APPLIED`, live on the currency's `lcr_result` row
+  (`lcr_result.warning_codes`), because 0018's closed CHECK on `calculation_warning.code`
+  may not be widened by a forward migration (D-01).
 
-**Formulas.**
-- HQLA = Σ eligible balance × (1 − haircut).
+**Seeded rules** (each an ACTIVE ILLUSTRATIVE v1). Decimal parameters are stored as JSON
+strings of exact decimal text, padded to the schema's scale (4 dp); a JSON number is refused.
+
+| Rule | Kind | Seeded parameters |
+|---|---|---|
+| `hqla_level` | ENUM_MAP (instrument type to `L1`, `L2A`, `L2B`) | `{"map": {"BOND": "L1"}}` |
+| `hqla_haircut` | DECIMAL_MAP, 0 to 1, scale 4 | `{"map": {"BOND": "0.0000"}}` |
+| `lcr_outflow_run_off` | DECIMAL_MAP, 0 to 1, scale 4 | `{"map": {"DEPOSIT": "0.1000"}}` |
+| `lcr_inflow_rate` | DECIMAL_MAP, 0 to 1, scale 4 | `{"map": {"LOAN": "0.5000"}}` |
+| `lcr_inflow_horizon_days` | INTEGER, 1 to 366, calendar days | `{"value": 30}` |
+| `lcr_inflow_cap` | DECIMAL, 0 to 1, scale 4 | `{"value": "0.7500"}` |
+
+These rules change only through Phase 16's governed rule versions (propose, submit, approve
+with maker-checker); a run pins the ACTIVE versions in its manifest.
+
+**Overlap refusals.** An instrument type has one role at most: HQLA, a run-off liability or
+an inflow. If the pinned rules give a type two roles (HQLA and run-off, HQLA and inflow, or
+run-off and inflow), or a levelled type has no haircut, the run is BLOCKED with
+`PARAMETERS_INVALID` and writes no results. This stops a balance or cash flow being counted
+twice.
+
+**Formulas** (per currency, no FX).
+- Each position with a valid balance, currency and typed instrument is an outflow when its
+  type has a run-off rate, otherwise an asset row.
+- HQLA = Σ eligible balance × (1 − haircut), by level and in total.
 - Outflows = Σ balance × run-off.
-- Inflows = min(Σ inflow × rate, cap × outflows).
-- Ratio = HQLA / (outflows − inflows).
+- Inflows = min(Σ amount × rate, cap × outflows), for cash flows of a type with an inflow
+  rate, due in (0, horizon] calendar days after the reporting date.
+- Ratio = HQLA / (outflows − inflows after the cap).
 
-**Rounding.** The ratio is quantized to 4 dp with ROUND_HALF_EVEN (PROVISIONAL).
+**Rounding.** The ratio is the module's one declared rounding: quantized once to 4 dp with
+ROUND_HALF_EVEN (PROVISIONAL). Everything else is exact.
+
+**Masking (D-33).** An `lcr_result` row is `internal`. An HQLA level, the outflows or the
+inflows resting on fewer than `CALC_MIN_AGGREGATE_COUNT` (default 3) contributions, and
+every figure derived from them, take the contributions' classification. Only **non-zero**
+contributions count toward the minimum (the `*_nonzero_count` columns), so zero rows cannot
+unmask a single balance; this applies to the maturity ladder too. Zeros and a NULL ratio stay
+clear. Asset rows are masked by their own classification, whatever the count.
 
 **Limitations.**
 - It works per currency, with no FX.
 - The value is the position balance, because the schema has no market value.
-- BOND is the only HQLA type (Level 1, 0 haircut).
-- There are no L2A or L2B caps. This is a documented limitation and raises a warning.
+- BOND is the only seeded HQLA type (Level 1, 0 haircut).
+- There are no L2A or L2B caps. This is a documented limitation: a currency with an
+  included Level 2 asset carries `LCR_LEVEL_CAPS_NOT_APPLIED`.
 - A zero or negative denominator gives a NULL ratio and `LCR_DENOMINATOR_ZERO`.
 
 ### Planned contracts (FC-05, FC-06): `alm_irrbb`, `collateral`, `capital`

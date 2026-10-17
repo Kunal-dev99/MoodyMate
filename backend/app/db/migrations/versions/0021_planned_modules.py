@@ -15,7 +15,7 @@ references them (D-02: calculation evidence is kept). Both tables are append-onl
 downgrade lifts their append-only triggers for its own transaction only.
 
 Revision ID: 0021
-Revises: 0018 (re-chained at merge time after Phases 16 and 17)
+Revises: 0020 (Phase 17's lcr_results; re-chained at the Phase 17 merge)
 Create Date: 2026-10-17
 
 D-01: additive only (inserts, no DDL). D-02: downgrade restores the prior state.
@@ -30,7 +30,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "0021"
-down_revision: str | None = "0018"
+down_revision: str | None = "0020"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

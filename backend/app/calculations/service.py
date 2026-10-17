@@ -60,6 +60,7 @@ from app.calculations.constants import (
     CalculationWarningCode,
     InputRefType,
     IntermediateCode,
+    LcrWarningCode,
     PostCheck,
     RunRefusal,
     SnapshotRefusal,
@@ -71,7 +72,9 @@ from app.calculations.models import (
     CalculationWarning,
     DatasetSnapshot,
     DatasetSnapshotMember,
+    HqlaAssetResult,
     IntermediateValue,
+    LcrResult,
     LiquidityGapResult,
 )
 from app.calculations.modules import registered
@@ -79,19 +82,23 @@ from app.calculations.modules.base import (
     CashFlowInput,
     Contribution,
     GapRow,
+    HqlaAsset,
     InstrumentInput,
+    LcrRow,
     ModuleInputs,
     ModuleResult,
     ModuleWarning,
     PinnedRule,
+    PositionInput,
     RegisteredModule,
+    divide,
 )
 from app.calculations.repository import CalculationRepository, SnapshotRepository
 from app.core.correlation import get_correlation_id
-from app.core.decimals import decimal_text, exact_context
+from app.core.decimals import DeclaredRounding, decimal_text, exact_context
 from app.core.errors import ApiError
 from app.core.principal import Principal
-from app.domain.models import CashflowEvent, DomainProjection
+from app.domain.models import CashflowEvent, DomainProjection, InstrumentVersion, PositionVersion
 from app.domain.service import DomainService, SchemaPins
 from app.governance.constants import AuditOutcome, ClassificationCode
 from app.governance.service import audit_by, record_denial
@@ -102,8 +109,11 @@ from app.reconciliation.models import ReconciliationRun
 from app.reconciliation.service import ReconciliationService
 from app.rules.constants import (
     ILLUSTRATIVE_STATEMENT,
+    LCR_HQLA,
+    LCR_INFLOW_HORIZON_DAYS,
     MATURITY_BUCKETS,
     MATURITY_LADDER,
+    HqlaLevel,
     ImplementationStatus,
 )
 from app.rules.models import AssumptionSet, MaturityBucketDefinition, RuleDefinition, RuleVersion
@@ -210,6 +220,158 @@ def post_checks(
     }
 
 
+def lcr_post_checks(
+    inputs: ModuleInputs, result: ModuleResult, rounding: DeclaredRounding | None
+) -> dict[PostCheck, bool]:
+    """lcr_hqla's checks (D-31 §3), recomputed from the contributions and never taken from
+    the module's own sums: every position and cash flow is used once, out of scope by rule,
+    or excluded with a warning code; every asset row's value follows from its balance and
+    haircut and every HQLA level total is the sum of its included rows; every currency's
+    outflows, capped inflows, denominator, ratio and warnings follow from the contributions.
+    Run under the exact context."""
+    zero = Decimal(0)
+    ids = [p.position_version_id for p in inputs.positions]
+    ids += [f.cashflow_event_id for f in inputs.cash_flows]
+    used = [a.position_version_id for a in result.hqla_assets]
+    used += [o.position_version_id for o in result.outflows]
+    used += [i.cashflow_event_id for i in result.inflows]
+    used += list(result.out_of_scope)
+    excluded = [
+        w.entity_id
+        for w in result.warnings
+        if w.code in result.exclusion_codes and w.entity_id is not None
+    ]
+    coverage = (
+        len(set(ids)) == len(ids)
+        and len(set(used)) == len(used)
+        and len(set(excluded)) == len(excluded)
+        and not set(used) & set(excluded)
+        and set(used) | set(excluded) == set(ids)
+    )
+    rows = {r.currency: r for r in result.lcr}
+    currencies = (
+        {a.currency for a in result.hqla_assets}
+        | {o.currency for o in result.outflows}
+        | {i.currency for i in result.inflows}
+    )
+    caps = {r.inflow_cap_rate for r in result.lcr}
+    hqla_ok = len(rows) == len(result.lcr) and set(rows) == currencies and len(caps) <= 1
+    # A module that divides declares its rounding (D-31 §2): without one, nothing passes.
+    figures_ok = hqla_ok and rounding is not None
+    for a in result.hqla_assets:
+        if a.level is None:
+            hqla_ok = hqla_ok and a.haircut is None and a.hqla_value == zero
+            hqla_ok = hqla_ok and a.exclusion_reason is not None
+        else:
+            hqla_ok = hqla_ok and a.haircut is not None and a.exclusion_reason is None
+            haircut = a.haircut if a.haircut is not None else zero
+            hqla_ok = hqla_ok and a.hqla_value == a.balance * (1 - haircut)
+    for currency, r in rows.items():
+        mine = [a for a in result.hqla_assets if a.currency == currency]
+        by_level = {level: [a.hqla_value for a in mine if a.level == level] for level in HqlaLevel}
+        hqla_ok = hqla_ok and (
+            (r.hqla_level1, r.hqla_level2a, r.hqla_level2b)
+            == tuple(sum(by_level[level], zero) for level in HqlaLevel)
+            and (r.level1_count, r.level2a_count, r.level2b_count)
+            == tuple(len(by_level[level]) for level in HqlaLevel)
+            and r.hqla_total == r.hqla_level1 + r.hqla_level2a + r.hqla_level2b
+            and r.excluded_asset_count == sum(1 for a in mine if a.level is None)
+            and (r.level1_nonzero_count, r.level2a_nonzero_count, r.level2b_nonzero_count)
+            == tuple(sum(1 for v in by_level[level] if v != zero) for level in HqlaLevel)
+        )
+        out = [o for o in result.outflows if o.currency == currency]
+        into = [i for i in result.inflows if i.currency == currency]
+        outflows = sum((o.balance * o.run_off for o in out), zero)
+        before = sum((i.amount * i.rate for i in into), zero)
+        cap_amount = r.inflow_cap_rate * outflows
+        after = min(before, cap_amount)
+        net = outflows - after
+        ratio = None
+        if net > zero and rounding is not None:
+            ratio = divide(r.hqla_total, net, rounding)
+        expected = [LcrWarningCode.LCR_DENOMINATOR_ZERO] if net <= zero else []
+        if r.level2a_count or r.level2b_count:
+            expected.append(LcrWarningCode.LCR_LEVEL_CAPS_NOT_APPLIED)
+        figures_ok = figures_ok and (
+            all(o.outflow == o.balance * o.run_off for o in out)
+            and all(i.inflow == i.amount * i.rate for i in into)
+            and r.outflow_balance == sum((o.balance for o in out), zero)
+            and (r.outflows, r.outflow_count) == (outflows, len(out))
+            and r.inflows_gross == sum((i.amount for i in into), zero)
+            and (r.inflows_before_cap, r.inflow_count) == (before, len(into))
+            and r.outflow_nonzero_count == sum(1 for o in out if o.balance != zero)
+            and r.inflow_nonzero_count == sum(1 for i in into if i.amount != zero)
+            and (r.inflow_cap_amount, r.inflows_after_cap) == (cap_amount, after)
+            and r.inflow_cap_applied == (before > cap_amount)
+            and r.net_outflows == net
+            and r.ratio == ratio
+            and list(r.warnings) == expected
+        )
+    return {
+        PostCheck.COVERAGE: coverage,
+        PostCheck.HQLA_TOTALS: hqla_ok,
+        PostCheck.LCR_FIGURES: figures_ok,
+    }
+
+
+def _lcr_document(r: LcrRow) -> dict[str, Any]:
+    figures = {
+        name: decimal_text(getattr(r, name))
+        for name in (
+            "hqla_level1",
+            "hqla_level2a",
+            "hqla_level2b",
+            "hqla_total",
+            "outflow_balance",
+            "outflows",
+            "inflows_gross",
+            "inflows_before_cap",
+            "inflow_cap_rate",
+            "inflow_cap_amount",
+            "inflows_after_cap",
+            "net_outflows",
+        )
+    }
+    return {
+        "currency": r.currency,
+        **figures,
+        "ratio": decimal_text(r.ratio) if r.ratio is not None else None,
+        "inflow_cap_applied": r.inflow_cap_applied,
+        "counts": [
+            r.level1_count,
+            r.level2a_count,
+            r.level2b_count,
+            r.excluded_asset_count,
+            r.outflow_count,
+            r.inflow_count,
+        ],
+        "nonzero_counts": [
+            r.level1_nonzero_count,
+            r.level2a_nonzero_count,
+            r.level2b_nonzero_count,
+            r.outflow_nonzero_count,
+            r.inflow_nonzero_count,
+        ],
+        "warnings": [w.value for w in r.warnings],
+        "rule_version_ids": [str(i) for i in r.rule_version_ids],
+    }
+
+
+def _asset_document(a: HqlaAsset) -> dict[str, Any]:
+    return {
+        "position_version_id": str(a.position_version_id),
+        "instrument_version_id": str(a.instrument_version_id),
+        "currency": a.currency,
+        "instrument_type": a.instrument_type,
+        "balance": decimal_text(a.balance),
+        "level": a.level.value if a.level else None,
+        "haircut": decimal_text(a.haircut) if a.haircut is not None else None,
+        "hqla_value": decimal_text(a.hqla_value),
+        "exclusion_reason": a.exclusion_reason.value if a.exclusion_reason else None,
+        "rule_version_ids": [str(i) for i in a.rule_version_ids],
+    }
+
+
 def _gap_document(g: GapRow) -> dict[str, Any]:
     return {
         "currency": g.currency,
@@ -251,6 +413,15 @@ def _warning_document(w: ModuleWarning) -> dict[str, Any]:
     }
 
 
+def kept_lcr(
+    status: CalculationRunStatus, lcr: Sequence[LcrRow], assets: Sequence[HqlaAsset]
+) -> tuple[list[LcrRow], list[HqlaAsset]]:
+    """The lcr_hqla outputs a finishing run stores (and hashes): only when it SUCCEEDED."""
+    if status not in SUCCEEDED:
+        return [], []
+    return sorted(lcr, key=lambda r: r.currency), list(assets)
+
+
 def reproduce(
     expected: str | None,
     status: CalculationRunStatus,
@@ -258,6 +429,9 @@ def reproduce(
     contributions: Sequence[Contribution],
     warnings: Sequence[ModuleWarning],
     checks: Mapping[PostCheck, bool],
+    *,
+    lcr: Sequence[LcrRow] = (),
+    assets: Sequence[HqlaAsset] = (),
 ) -> tuple[
     CalculationRunStatus,
     list[GapRow],
@@ -269,12 +443,15 @@ def reproduce(
     """The stored outputs and `result_sha256` of a finishing run (results only when it
     SUCCEEDED). A re-run (`expected`: its original's result_sha256, D-31 §5) that does not
     reproduce it ends FAILED with a POST_CHECK_FAILED warning and no result: never a
-    silent, different success."""
+    silent, different success. The lcr_hqla outputs (`lcr`, `assets`) are hashed too; the
+    caller stores `kept_lcr(status, ...)` of the returned status."""
     keep = status in SUCCEEDED
     kept_gap = sorted(gap, key=lambda g: (g.currency, g.bucket.sequence)) if keep else []
     kept = list(contributions) if keep else []
     found = list(warnings)
-    sha = canonical_sha256(result_document(status, kept_gap, kept, found))
+    sha = canonical_sha256(
+        result_document(status, kept_gap, kept, found, *kept_lcr(status, lcr, assets))
+    )
     if expected is None:
         return status, kept_gap, kept, found, dict(checks), sha
     if sha == expected:
@@ -298,16 +475,23 @@ def result_document(
     gap: Sequence[GapRow],
     contributions: Sequence[Contribution],
     warnings: Sequence[ModuleWarning],
+    lcr: Sequence[LcrRow] = (),
+    assets: Sequence[HqlaAsset] = (),
 ) -> dict[str, Any]:
     """The canonical serialisation of every stored output (D-31 §4): what `result_sha256`
     hashes. Ids are domain and rule ids (stable across runs), never row ids or times;
-    warning messages are presentation and are left out."""
-    return {
+    warning messages are presentation and are left out. The lcr_hqla outputs are added
+    only when there are some, so a maturity-ladder result hashes as it always did."""
+    document: dict[str, Any] = {
         "status": status.value,
         "liquidity_gap": [_gap_document(g) for g in gap],
         "contributions": [_contribution_document(c) for c in contributions],
         "warnings": [_warning_document(w) for w in warnings],
     }
+    if lcr or assets:
+        document["lcr"] = [_lcr_document(r) for r in lcr]
+        document["hqla_assets"] = [_asset_document(a) for a in assets]
+    return document
 
 
 # A ladder row's direction/origin parts, and the figures derived from them.
@@ -330,8 +514,9 @@ def ladder_classes(
     Aggregates are `internal` (D-33 option A), but a figure built from 1 to `minimum` - 1
     contributions would show a single cash flow's (confidential) amount, e.g. with a
     reporting date one day before a due date. So:
-    - a direction/origin part with 0 < count < minimum takes its contributions'
-      classification; a part with no contribution stays as it is (it is 0);
+    - a direction/origin part with 0 < count < minimum non-zero contributions takes its
+      contributions' classification; a part with no non-zero contribution stays as it is
+      (it is 0). Zero contributions do not count: two of them must not unmask a third;
     - inflows, outflows and the net gap take the most sensitive classification of what they
       are derived from;
     - the cumulative gap carries the most sensitive classification so far in its currency,
@@ -361,6 +546,50 @@ def ladder_classes(
         mine["cumulative_gap"] = carried[row.currency]
         classes[row.id] = mine
     return classes
+
+
+def _clear_if_zero(value: Decimal | None, code: str, aggregate: str) -> str:
+    """D-33 amendment: zero figures (and a NULL ratio) stay clear."""
+    return aggregate if value is None or value == 0 else code
+
+
+def liquidity_classes(row: LcrResult, minimum: int) -> dict[str, str]:
+    """D-33 minimum aggregation (CALC_MIN_AGGREGATE_COUNT, PROVISIONAL) for one currency's
+    LCR, for masking on read. The row is `internal` (an aggregate), but:
+    - an HQLA level, the outflows or the inflows built from 1 to `minimum` - 1 non-zero
+      contributions take the contributions' classification (a zero contribution does not
+      count: two zero rows must not unmask a single balance);
+    - derived figures take the most sensitive part they are built from: the HQLA total
+      (its levels), the cap amount (outflows), the inflows after the cap and whether the
+      cap binds (inflows before the cap and outflows), the denominator (outflows and
+      inflows after the cap) and the ratio (HQLA total and denominator);
+    - zero figures and a NULL ratio stay clear.
+    """
+    agg, contributed = row.classification, row.contribution_classification
+
+    def part(count: int, value: Decimal) -> str:
+        return _clear_if_zero(value, contributed if 0 < count < minimum else agg, agg)
+
+    c = {
+        "hqla_level1": part(row.level1_nonzero_count, row.hqla_level1),
+        "hqla_level2a": part(row.level2a_nonzero_count, row.hqla_level2a),
+        "hqla_level2b": part(row.level2b_nonzero_count, row.hqla_level2b),
+        "outflow_balance": part(row.outflow_nonzero_count, row.outflow_balance),
+        "outflows": part(row.outflow_nonzero_count, row.outflows),
+        "inflows_gross": part(row.inflow_nonzero_count, row.inflows_gross),
+        "inflows_before_cap": part(row.inflow_nonzero_count, row.inflows_before_cap),
+    }
+    levels = most_sensitive([c["hqla_level1"], c["hqla_level2a"], c["hqla_level2b"]])
+    c["hqla_total"] = _clear_if_zero(row.hqla_total, levels, agg)
+    c["inflow_cap_amount"] = _clear_if_zero(row.inflow_cap_amount, c["outflows"], agg)
+    capped = most_sensitive([c["inflows_before_cap"], c["outflows"]])
+    c["inflow_cap_applied"] = capped
+    c["inflows_after_cap"] = _clear_if_zero(row.inflows_after_cap, capped, agg)
+    net = most_sensitive([c["outflows"], c["inflows_after_cap"]])
+    c["net_outflows"] = _clear_if_zero(row.net_outflows, net, agg)
+    ratio = most_sensitive([c["hqla_total"], c["net_outflows"]])
+    c["ratio"] = _clear_if_zero(row.ratio, ratio, agg)
+    return c
 
 
 def definitions_match(
@@ -461,6 +690,27 @@ class ResultsView:
 
 
 @dataclass(frozen=True)
+class AssetRow:
+    value: HqlaAssetResult
+    position: PositionVersion
+    position_key: str
+    instrument: InstrumentVersion | None
+    instrument_key: str | None
+    position_classes: Mapping[str, str]  # position schema field -> classification (pinned)
+    instrument_classes: Mapping[str, str]
+
+
+@dataclass(frozen=True)
+class LiquidityView:
+    row: RunRow
+    horizon_days: int | None
+    rows: list[LcrResult]
+    assets: list[AssetRow]
+    classes: Mapping[uuid.UUID, Mapping[str, str]]  # LCR row id -> figure -> class (D-33)
+    min_aggregate_count: int
+
+
+@dataclass(frozen=True)
 class LadderView:
     row: RunRow
     bucket_rule_version_id: uuid.UUID
@@ -501,6 +751,7 @@ class _Run:
     expected_result_sha256: str | None = None
     counts: dict[str, int] = field(default_factory=dict)
     events: dict[uuid.UUID, CashflowEvent] = field(default_factory=dict)
+    positions: dict[uuid.UUID, PositionVersion] = field(default_factory=dict)
 
 
 # --- dataset snapshots (BE-15.3) ------------------------------------------------------------
@@ -1161,7 +1412,19 @@ class CalculationService:
                 for v, key in await self.domain.import_instruments(held.import_job_id)
             ]
         state.counts = {"cashflow_event": len(flows), "instrument": len(instruments)}
-        return ModuleInputs(state.reporting_date, tuple(flows), tuple(instruments))
+        positions: list[PositionInput] = []
+        held_positions = state.members.get("position")
+        if held_positions is not None and "position" in state.implementation.spec.fields_read():
+            rows = await self.domain.import_positions(held_positions.import_job_id)
+            state.positions = {v.id: v for v, _ in rows}
+            positions = [
+                PositionInput(v.id, v.position_id, key, v.instrument_key, v.balance, v.currency)
+                for v, key in rows
+            ]
+            state.counts["position"] = len(positions)
+        return ModuleInputs(
+            state.reporting_date, tuple(flows), tuple(instruments), tuple(positions)
+        )
 
     async def _execute(self, state: _Run) -> None:
         """Run the module on the pinned inputs, post-check it and end the run (one
@@ -1214,7 +1477,10 @@ class CalculationService:
                 await self._end(state, CalculationRunStatus.BLOCKED, result, [warning], {})
                 return
         with localcontext(exact_context()):
-            checks = post_checks(inputs, result, buckets)
+            if "lcr_result" in spec.output_contract["results"]:
+                checks = lcr_post_checks(inputs, result, state.implementation.rounding)
+            else:
+                checks = post_checks(inputs, result, buckets)
         warnings = list(result.warnings)
         if not all(checks.values()):
             warnings += [
@@ -1228,7 +1494,9 @@ class CalculationService:
                 if not passed
             ]
             status = CalculationRunStatus.FAILED
-        elif any(w.severity != WarningSeverity.INFO for w in warnings):
+        elif any(w.severity != WarningSeverity.INFO for w in warnings) or any(
+            r.warnings for r in result.lcr
+        ):
             status = CalculationRunStatus.SUCCEEDED_WITH_WARNINGS
         else:
             status = CalculationRunStatus.SUCCEEDED
@@ -1279,8 +1547,11 @@ class CalculationService:
             result.contributions,
             warnings,
             checks,
+            lcr=result.lcr,
+            assets=result.hqla_assets,
         )
         keep = status in SUCCEEDED
+        lcr, assets = kept_lcr(status, result.lcr, result.hqla_assets)
         tenant, actor = self.principal.tenant_id, self.principal.actor
         bucket_ids = {b.code: b.id for b in buckets}
         gap_ids: dict[tuple[str, str], uuid.UUID] = {}
@@ -1313,10 +1584,12 @@ class CalculationService:
         await self.repo.insert_rows(LiquidityGapResult, gap_rows)
         # Read only when there is something to classify: after an engine failure the session
         # was rolled back and the pinned rows must not be reloaded.
-        if contributions and state is None:
+        if (contributions or assets or lcr) and state is None:
             raise RuntimeError("results are stored only with the run's pinned state")
         classification = (
-            self._contribution_classification(state) if state is not None and contributions else ""
+            self._contribution_classification(state)
+            if state is not None and (contributions or assets or lcr)
+            else ""
         )
         intermediates = []
         for position, c in enumerate(contributions, start=1):
@@ -1348,6 +1621,7 @@ class CalculationService:
                 }
             )
         await self.repo.insert_rows(IntermediateValue, intermediates)
+        await self._store_lcr(run_id, lcr, assets, classification, state)
         await self.repo.insert_rows(
             CalculationWarning,
             [
@@ -1370,13 +1644,23 @@ class CalculationService:
         excluded = sum(
             1 for w in warnings if w.code in result.exclusion_codes and w.entity_id is not None
         )
+        in_scope, used, out_of_scope = counts.get("cashflow_event", 0), len(contributions), 0
+        if "position" in counts:  # lcr_hqla: positions and cash flows
+            in_scope += counts["position"]
+            if keep:
+                used = len(assets) + len(result.outflows) + len(result.inflows)
+                out_of_scope = len(result.out_of_scope)
+        lcr_warnings = Counter(w.value for r in lcr for w in r.warnings)
         outcome: dict[str, Any] = {
             "inputs": dict(sorted(counts.items())),
-            "in_scope": counts.get("cashflow_event", 0),
-            "bucketed": len(contributions),
+            "in_scope": in_scope,
+            "bucketed": used,
             "excluded": excluded,
-            "warnings_by_code": dict(sorted(Counter(w.code.value for w in warnings).items())),
-            "currencies": sorted({g.currency for g in gap}),
+            "out_of_scope": out_of_scope,
+            "warnings_by_code": dict(
+                sorted((Counter(w.code.value for w in warnings) + lcr_warnings).items())
+            ),
+            "currencies": sorted({g.currency for g in gap} | {r.currency for r in lcr}),
             "post_checks": [{"check": c.value, "passed": p} for c, p in checks.items()],
         }
         await self.repo.finish(run_id, status, result_sha256, outcome, len(warnings))
@@ -1397,6 +1681,96 @@ class CalculationService:
             details_classification=_public(details),
         )
         await self.session.commit()
+
+    async def _store_lcr(
+        self,
+        run_id: uuid.UUID,
+        lcr: Sequence[LcrRow],
+        assets: Sequence[HqlaAsset],
+        classification: str,
+        state: _Run | None,
+    ) -> dict[str, uuid.UUID]:
+        """lcr_hqla: one lcr_result row per currency, then one hqla_asset_result row per
+        asset position, under its currency's row and with its position's lineage."""
+        if not lcr:
+            return {}
+        assert state is not None
+        tenant, actor = self.principal.tenant_id, self.principal.actor
+        ids = {r.currency: uuid.uuid4() for r in lcr}
+        await self.repo.insert_rows(
+            LcrResult,
+            [
+                {
+                    "id": ids[r.currency],
+                    "tenant_id": tenant,
+                    "calculation_run_id": run_id,
+                    "sequence": position,
+                    "currency": r.currency,
+                    "hqla_level1": r.hqla_level1,
+                    "hqla_level2a": r.hqla_level2a,
+                    "hqla_level2b": r.hqla_level2b,
+                    "hqla_total": r.hqla_total,
+                    "level1_count": r.level1_count,
+                    "level2a_count": r.level2a_count,
+                    "level2b_count": r.level2b_count,
+                    "excluded_asset_count": r.excluded_asset_count,
+                    "outflow_balance": r.outflow_balance,
+                    "outflows": r.outflows,
+                    "outflow_count": r.outflow_count,
+                    "inflows_gross": r.inflows_gross,
+                    "inflows_before_cap": r.inflows_before_cap,
+                    "inflow_cap_rate": r.inflow_cap_rate,
+                    "inflow_cap_amount": r.inflow_cap_amount,
+                    "inflows_after_cap": r.inflows_after_cap,
+                    "inflow_cap_applied": r.inflow_cap_applied,
+                    "inflow_count": r.inflow_count,
+                    "level1_nonzero_count": r.level1_nonzero_count,
+                    "level2a_nonzero_count": r.level2a_nonzero_count,
+                    "level2b_nonzero_count": r.level2b_nonzero_count,
+                    "outflow_nonzero_count": r.outflow_nonzero_count,
+                    "inflow_nonzero_count": r.inflow_nonzero_count,
+                    "net_outflows": r.net_outflows,
+                    "ratio": r.ratio,
+                    "warning_codes": [w.value for w in r.warnings],
+                    "rule_version_ids": [str(i) for i in r.rule_version_ids],
+                    "classification": AGGREGATE_CLASSIFICATION,
+                    "contribution_classification": classification,
+                    "created_by": actor,
+                }
+                for position, r in enumerate(lcr, start=1)
+            ],
+        )
+        rows = []
+        for position, a in enumerate(assets, start=1):
+            held = state.positions[a.position_version_id]
+            rows.append(
+                {
+                    "id": uuid.uuid4(),
+                    "tenant_id": tenant,
+                    "calculation_run_id": run_id,
+                    "sequence": position,
+                    "lcr_result_id": ids[a.currency],
+                    "currency": a.currency,
+                    "included": a.included,
+                    "level": a.level.value if a.level else None,
+                    "exclusion_reason": a.exclusion_reason.value if a.exclusion_reason else None,
+                    "instrument_type": a.instrument_type,
+                    "balance": a.balance,
+                    "haircut": a.haircut,
+                    "hqla_value": a.hqla_value,
+                    "rule_version_ids": [str(i) for i in a.rule_version_ids],
+                    "classification": classification,
+                    "position_version_id": a.position_version_id,
+                    "instrument_version_id": a.instrument_version_id,
+                    "canonical_record_id": held.canonical_record_id,
+                    "import_job_id": held.import_job_id,
+                    "source_record_id": held.source_record_id,
+                    "source_ordinal": held.source_ordinal,
+                    "created_by": actor,
+                }
+            )
+        await self.repo.insert_rows(HqlaAssetResult, rows)
+        return ids
 
     def _contribution_classification(self, state: _Run) -> str:
         """D-33: a contribution carries the most sensitive classification among the fields
@@ -1520,6 +1894,55 @@ class CalculationService:
             await self.rules.bucket_definitions(version_id),
             rows,
             ladder_classes(rows, parts, min_aggregate_count),
+            min_aggregate_count,
+        )
+
+    async def liquidity(self, run_id: uuid.UUID, min_aggregate_count: int = 3) -> LiquidityView:
+        """An lcr_hqla run's LCR per currency with its asset rows (BE-17.3): 404 alike for an
+        absent and a foreign run (D-04), 404 `liquidity_not_found` for another module's."""
+        run = await self._run(run_id)
+        row = RunRow(run, self._module_of(run, await self._modules()))
+        if row.module.code != LCR_HQLA:
+            raise ApiError(404, "liquidity_not_found", "This run is not an LCR/HQLA run.")
+        horizon = None
+        for member in run.manifest["rule_set"]["members"]:
+            if member["rule_code"] == LCR_INFLOW_HORIZON_DAYS:
+                value = member["parameters"].get("value")
+                horizon = value if isinstance(value, int) else None
+        rows = await self.repo.lcr_rows(run.id)
+        values = await self.repo.hqla_assets(run.id)
+        positions = {
+            v.id: (v, key)
+            for v, key in await self.domain.positions_by_id([a.position_version_id for a in values])
+        }
+        instruments = {
+            v.id: (v, key)
+            for v, key in await self.domain.instrument_versions_by_id(
+                [a.instrument_version_id for a in values]
+            )
+        }
+        pins = await self.domain.schema_pins()
+        assets = []
+        for a in values:
+            position, position_key = positions[a.position_version_id]
+            instrument = instruments.get(a.instrument_version_id)
+            assets.append(
+                AssetRow(
+                    a,
+                    position,
+                    position_key,
+                    instrument[0] if instrument else None,
+                    instrument[1] if instrument else None,
+                    pins.classes(position.schema_version_id),
+                    pins.classes(instrument[0].schema_version_id) if instrument else {},
+                )
+            )
+        return LiquidityView(
+            row,
+            horizon,
+            rows,
+            assets,
+            {r.id: liquidity_classes(r, min_aggregate_count) for r in rows},
             min_aggregate_count,
         )
 
