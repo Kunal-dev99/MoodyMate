@@ -121,8 +121,32 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Import */
+        /**
+         * Get Import
+         * @description The import, with its manifest once validated (BE-11.5).
+         */
         get: operations["getImport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/imports/{import_id}/issues": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Import Issues
+         * @description The import's validation issues, file-level first then by row, filtered by severity,
+         *     code and field. Issues carry no values.
+         */
+        get: operations["listImportIssues"];
         put?: never;
         post?: never;
         delete?: never;
@@ -167,6 +191,30 @@ export interface paths {
         get: operations["getImportProfile"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/imports/{import_id}/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Validate Import
+         * @description Validate the import with its usable ACTIVE mapping version, once (D-21): it is pinned,
+         *     every row is accepted (a canonical record), quarantined or rejected, and the import ends
+         *     COMPLETED, COMPLETED_WITH_WARNINGS, QUARANTINED or FAILED (a file-level BLOCKER: no row
+         *     accepted). 409 `mapping_required` without a usable mapping version, 409
+         *     `already_validated` on a second call: a re-run is a new import.
+         */
+        post: operations["validateImport"];
         delete?: never;
         options?: never;
         head?: never;
@@ -309,6 +357,48 @@ export interface paths {
         get: operations["getMyPermissions"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/quarantine/{batch_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Quarantine
+         * @description A batch's quarantined and rejected rows (D-20), by row, with their values masked by
+         *     classification. Nothing here is ever deleted.
+         */
+        get: operations["getQuarantine"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/quarantine/{batch_id}/items/{quarantine_id}/disposition": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Disposition Quarantine Item
+         * @description Move an item along the D-20 table (audited). No row is deleted or edited; a
+         *     correction is a new import with retry_of_import_id.
+         */
+        post: operations["dispositionQuarantineItem"];
         delete?: never;
         options?: never;
         head?: never;
@@ -659,6 +749,12 @@ export interface components {
             batch_number: number;
             /** Column Count */
             column_count: number;
+            /**
+             * Id
+             * Format: uuid
+             * @description The batch id (GET /quarantine/{batch_id}).
+             */
+            id: string;
             /** Row Count */
             row_count: number;
             /** Sheet Name */
@@ -959,6 +1055,13 @@ export interface components {
              */
             token_type: "Bearer";
         };
+        /** DispositionIn */
+        DispositionIn: {
+            /** Comment */
+            comment?: string | null;
+            /** @description OPEN->UNDER_REVIEW; UNDER_REVIEW->REJECTED | RETRY_READY | OPEN. Other moves are 409 invalid_transition (CORRECTED and RESOLVED come from a retry import). */
+            status: components["schemas"]["QuarantineStatus"];
+        };
         /**
          * EnvironmentInfo
          * @description Shown on every page outside production (FE-6.1).
@@ -1098,6 +1201,8 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /** @description Present once the import is validated (BE-11.5). */
+            manifest?: components["schemas"]["ImportManifest"] | null;
             /**
              * Mapping Version Id
              * @description The mapping version the import is validated with (D-18 §5); empty until validation (Phase 11).
@@ -1145,6 +1250,102 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /**
+         * ImportManifest
+         * @description What validation pinned and produced (BE-11.5, Data Model §10). Written once with the
+         *     outcome and never changed: this is what a calculation run pins (D-22).
+         */
+        ImportManifest: {
+            artifact: components["schemas"]["ManifestArtifact"];
+            /**
+             * Canonical Sha256
+             * @description SHA-256 over the accepted records' payload hashes in file order.
+             */
+            canonical_sha256: string;
+            /**
+             * Import Id
+             * Format: uuid
+             */
+            import_id: string;
+            /**
+             * Manifest Id
+             * Format: uuid
+             */
+            manifest_id: string;
+            /**
+             * Manifest Sha256
+             * @description SHA-256 of the manifest content.
+             */
+            manifest_sha256: string;
+            /** Manifest Version */
+            manifest_version: number;
+            /** Mapping Code */
+            mapping_code: string;
+            /**
+             * Mapping Id
+             * Format: uuid
+             */
+            mapping_id: string;
+            /** Mapping Sha256 */
+            mapping_sha256: string;
+            /** Mapping Version */
+            mapping_version: number;
+            /**
+             * Mapping Version Id
+             * Format: uuid
+             */
+            mapping_version_id: string;
+            quality: components["schemas"]["ManifestQuality"];
+            /** Schema Code */
+            schema_code: string;
+            /**
+             * Schema Id
+             * Format: uuid
+             */
+            schema_id: string;
+            /** Schema Sha256 */
+            schema_sha256: string;
+            /** Schema Version */
+            schema_version: number;
+            /**
+             * Schema Version Id
+             * Format: uuid
+             */
+            schema_version_id: string;
+            /** Source Code */
+            source_code: string;
+            /**
+             * Source Contract Id
+             * Format: uuid
+             */
+            source_contract_id: string;
+            /** Source Contract Sha256 */
+            source_contract_sha256: string;
+            /** Source Contract Version */
+            source_contract_version: number;
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+            /**
+             * Source Profile Id
+             * Format: uuid
+             */
+            source_profile_id: string;
+            /** @description The import's outcome status. */
+            status: components["schemas"]["ImportStatus"];
+            /**
+             * Validated At
+             * Format: date-time
+             */
+            validated_at: string;
+            /** Validated By */
+            validated_by: string;
+            validation_profile: components["schemas"]["ManifestProfile"];
+            /** Validator Version */
+            validator_version: number;
         };
         /** ImportPage */
         ImportPage: {
@@ -1309,6 +1510,87 @@ export interface components {
          */
         IssueCode: "required_field_unmapped" | "unknown_target_field" | "source_column_missing" | "transform_target_incompatible" | "profile_type_mismatch" | "transform_failed" | "column_without_policy" | "duplicate_business_key" | "missing_business_key";
         /**
+         * IssueDisposition
+         * @description D-23 `validation_issue.disposition`: what the issue does to its row (or file).
+         * @enum {string}
+         */
+        IssueDisposition: "ACCEPTED_WITH_WARNING" | "QUARANTINED" | "REJECTED" | "FILE_BLOCKED";
+        /**
+         * IssueOut
+         * @description A validation finding. It names a row, field, column and rule; never a value.
+         */
+        IssueOut: {
+            code: components["schemas"]["ValidationCode"];
+            disposition: components["schemas"]["IssueDisposition"];
+            /**
+             * Field
+             * @description The schema field concerned, if any.
+             */
+            field: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Message
+             * @description Actionable text; never contains a value.
+             */
+            message: string;
+            /**
+             * Row
+             * @description 1-based data row (source record ordinal); null for a file-level issue.
+             */
+            row: number | null;
+            /**
+             * Rule Position
+             * @description The mapping rule's position, if any.
+             */
+            rule_position: number | null;
+            /**
+             * Sequence
+             * @description Order in which validation raised it.
+             */
+            sequence: number;
+            severity: components["schemas"]["ValidationSeverity"];
+            /**
+             * Source Column
+             * @description The source column concerned, if any.
+             */
+            source_column: string | null;
+            /** Source Record Id */
+            source_record_id: string | null;
+            /**
+             * Validation Profile Id
+             * Format: uuid
+             */
+            validation_profile_id: string;
+        };
+        /** IssuePage */
+        IssuePage: {
+            /**
+             * Import Id
+             * Format: uuid
+             */
+            import_id: string;
+            import_status: components["schemas"]["ImportStatus"];
+            /** Items */
+            items: components["schemas"]["IssueOut"][];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /**
+             * Severity Counts
+             * @description Severity -> issues of this import (unfiltered).
+             */
+            severity_counts: {
+                [key: string]: number;
+            };
+            /** Total */
+            total: number;
+        };
+        /**
          * IssueSeverity
          * @enum {string}
          */
@@ -1321,6 +1603,53 @@ export interface components {
              */
             code: "LOWER";
             params?: components["schemas"]["NoParams"];
+        };
+        /** ManifestArtifact */
+        ManifestArtifact: {
+            /** Classification */
+            classification: string;
+            /**
+             * Sha256
+             * @description SHA-256 of the raw artifact (hex).
+             */
+            sha256: string;
+            /** Size Bytes */
+            size_bytes: number;
+        };
+        /** ManifestProfile */
+        ManifestProfile: {
+            /** Code */
+            code: string;
+            /** Content Sha256 */
+            content_sha256: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Provisional */
+            provisional: boolean;
+            /** Version */
+            version: number;
+        };
+        /**
+         * ManifestQuality
+         * @description accepted + quarantined + rejected = row_count, always (D-20 §1, DB CHECK).
+         */
+        ManifestQuality: {
+            /** Accepted Records */
+            accepted_records: number;
+            /** Quarantined Records */
+            quarantined_records: number;
+            /** Rejected Records */
+            rejected_records: number;
+            /** Row Count */
+            row_count: number;
+            /**
+             * Warnings
+             * @description WARNING-severity issues (file- and row-level).
+             */
+            warnings: number;
         };
         /** MapValuesParams */
         MapValuesParams: {
@@ -1914,6 +2243,129 @@ export interface components {
              */
             regression_evidence_ref?: string | null;
         };
+        /** QuarantineBatch */
+        QuarantineBatch: {
+            /**
+             * Batch Id
+             * Format: uuid
+             */
+            batch_id: string;
+            /** Batch Number */
+            batch_number: number;
+            /** Column Classifications */
+            column_classifications: {
+                [key: string]: string;
+            };
+            /**
+             * Columns
+             * @description The batch's header, in file order.
+             */
+            columns: string[];
+            /**
+             * Import Id
+             * Format: uuid
+             */
+            import_id: string;
+            import_status: components["schemas"]["ImportStatus"];
+            /** Items */
+            items: components["schemas"]["QuarantineItemOut"][];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+            /**
+             * Status Counts
+             * @description Status -> items of this batch.
+             */
+            status_counts: {
+                [key: string]: number;
+            };
+            /** Total */
+            total: number;
+        };
+        /** QuarantineItemOut */
+        QuarantineItemOut: {
+            /**
+             * Allowed Dispositions
+             * @description The statuses a reviewer may move this item to now.
+             */
+            allowed_dispositions: components["schemas"]["QuarantineStatus"][];
+            /**
+             * Batch Id
+             * Format: uuid
+             */
+            batch_id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Extra Values
+             * @description Cells beyond the header, masked by the source's default classification.
+             */
+            extra_values: (string | components["schemas"]["MaskedValue"])[];
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Import Id
+             * Format: uuid
+             */
+            import_id: string;
+            /**
+             * Locator
+             * @description Where the row is in the file.
+             */
+            locator: {
+                [key: string]: string | number;
+            };
+            /** Owner */
+            owner: string;
+            /**
+             * Reason Codes
+             * @description Why the row is held.
+             */
+            reason_codes: components["schemas"]["ValidationCode"][];
+            /** Resolved By Import Id */
+            resolved_by_import_id: string | null;
+            /**
+             * Row
+             * @description 1-based data row (source record ordinal).
+             */
+            row: number;
+            /**
+             * Source Record Id
+             * Format: uuid
+             */
+            source_record_id: string;
+            status: components["schemas"]["QuarantineStatus"];
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /**
+             * Values
+             * @description The row as read (never edited), masked by each column's classification.
+             */
+            values: {
+                [key: string]: string | components["schemas"]["MaskedValue"];
+            };
+        };
+        /**
+         * QuarantineStatus
+         * @description Data Model §9 `quarantine_item.status`.
+         * @enum {string}
+         */
+        QuarantineStatus: "OPEN" | "UNDER_REVIEW" | "REJECTED" | "CORRECTED" | "RETRY_READY" | "RESOLVED";
         /**
          * RetentionState
          * @description `import_artifact.retention_state`. D-20 §4 (PROVISIONAL): artifacts are kept
@@ -2420,6 +2872,13 @@ export interface components {
             mapping_version_id: string;
         };
         /**
+         * ValidationCode
+         * @description Validation issue codes (BE-11.2). An issue names a row, a field or a column and a
+         *     rule, never a value. File-level codes have no row.
+         * @enum {string}
+         */
+        ValidationCode: "REQUIRED_FIELD_UNMAPPED" | "REQUIRED_COLUMN_MISSING" | "BUSINESS_KEY_COLUMN_MISSING" | "MAPPING_RULE_INVALID" | "SOURCE_COLUMN_MISSING" | "UNMAPPED_COLUMN" | "BLANK_ROW" | "EXTRA_CELLS" | "MISSING_CELLS" | "CELL_ERROR" | "FORMULA_WITHOUT_CACHED_VALUE" | "FORMULA_CACHED_VALUE" | "PRECISION_BEYOND_15_DIGITS" | "REQUIRED_VALUE_MISSING" | "INVALID_TYPE" | "INVALID_DATE" | "SCALE_EXCEEDED" | "PRECISION_EXCEEDED" | "INVALID_CURRENCY_CODE" | "UNMAPPED_VALUE" | "MISSING_BUSINESS_KEY" | "DUPLICATE_BUSINESS_KEY";
+        /**
          * ValidationIssue
          * @description What is wrong, where (rule, field, column) and how often. Never a source value.
          */
@@ -2477,6 +2936,12 @@ export interface components {
             ok: boolean;
             outcome: components["schemas"]["ValidationOutcome"];
         };
+        /**
+         * ValidationSeverity
+         * @description Data Model §9 `validation_issue.severity`.
+         * @enum {string}
+         */
+        ValidationSeverity: "INFO" | "WARNING" | "ERROR" | "BLOCKER";
         /**
          * ValueParams
          * @description DEFAULT(value) and CONSTANT(value).
@@ -2764,6 +3229,11 @@ export interface operations {
                      * @description The file, in the source profile's format (CSV, XLSX or JSON; detected from content). At most IMPORT_MAX_BYTES (10 MiB). Its name is kept, at most 255 characters.
                      */
                     file: string;
+                    /**
+                     * Format: uuid
+                     * @description A corrected file for this earlier QUARANTINED or FAILED import of the same source (D-20 §3). When the retry is validated, its RETRY_READY items whose business key it contains move to CORRECTED, then RESOLVED if accepted.
+                     */
+                    retry_of_import_id?: string;
                     /** Format: uuid */
                     source_id: string;
                     /**
@@ -2853,6 +3323,53 @@ export interface operations {
             };
         };
     };
+    listImportIssues: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                severity?: components["schemas"]["ValidationSeverity"] | null;
+                code?: components["schemas"]["ValidationCode"] | null;
+                /** @description A schema field or source column name (exact). */
+                field?: string | null;
+            };
+            header?: never;
+            path: {
+                import_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IssuePage"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     validateImportMapping: {
         parameters: {
             query?: never;
@@ -2915,6 +3432,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ImportProfile"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    validateImport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                import_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportDetail"];
                 };
             };
             /** @description Client error (standard envelope) */
@@ -3250,6 +3807,95 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MyPermissions"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    getQuarantine: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                status?: components["schemas"]["QuarantineStatus"] | null;
+            };
+            header?: never;
+            path: {
+                batch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuarantineBatch"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    dispositionQuarantineItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batch_id: string;
+                quarantine_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DispositionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuarantineItemOut"];
                 };
             };
             /** @description Client error (standard envelope) */

@@ -468,6 +468,13 @@ class MappingService:
         """D-21: the contract's ACTIVE mapping version, if it pins this schema version."""
         return await self.repo.active_for(contract_id, schema_version_id)
 
+    async def usable_mapping(
+        self, contract_id: uuid.UUID, schema_version_id: uuid.UUID
+    ) -> tuple[FieldMapping, MappingVersion] | None:
+        """The usable ACTIVE version with its mapping and rules, for validation (BE-11.3)."""
+        version = await self.repo.active_for(contract_id, schema_version_id)
+        return await self.repo.scoped_version(version.id) if version is not None else None
+
     async def column_classifications(
         self,
         contract_id: uuid.UUID,

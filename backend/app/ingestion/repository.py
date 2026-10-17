@@ -9,18 +9,29 @@ import uuid
 from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
-from sqlalchemy import Row, Select, exists, func, insert, select
+from sqlalchemy import Row, Select, exists, func, insert, or_, select, tuple_
 
+from app.db.base import Base
 from app.db.repository import ScopedRepository
 from app.ingestion.models import (
     DataProfileSnapshot,
     ImportBatch,
     ImportJob,
+    ImportManifest,
+    QuarantineItem,
     SourceContract,
     SourceProfile,
     SourceRecord,
     SourceSystem,
+    ValidationIssue,
+    ValidationProfile,
 )
+
+# One page of an import's records for validation: (id, batch id, batch number, ordinal,
+# values, extras, flags).
+RecordRow = Row[
+    tuple[uuid.UUID, uuid.UUID, int, int, dict[str, str], list[str], list[dict[str, Any]]]
+]
 
 
 class SourceRepository(ScopedRepository[SourceSystem]):
@@ -229,3 +240,185 @@ class ImportRepository(ScopedRepository[ImportJob]):
             )
         )
         return result.scalar_one_or_none()
+
+    # --- Phase 11: validation, issues, quarantine and manifests (BE-11.1 – BE-11.5) ---------
+
+    async def record_page(
+        self, import_id: uuid.UUID, after: tuple[int, int] | None, size: int
+    ) -> Sequence[RecordRow]:
+        """The next `size` records of an import after (batch number, ordinal), in file order.
+        Keyset pages (no open cursor), so writes may run between pages. Scoped."""
+        query = (
+            select(
+                SourceRecord.id,
+                SourceRecord.batch_id,
+                ImportBatch.batch_number,
+                SourceRecord.ordinal,
+                SourceRecord.raw_values,
+                SourceRecord.extra_values,
+                SourceRecord.flags,
+            )
+            .join(ImportBatch, ImportBatch.id == SourceRecord.batch_id)
+            .join(ImportJob, ImportJob.id == ImportBatch.import_job_id)
+            .where(ImportJob.id == import_id, ImportJob.tenant_id == self.scope.tenant_id)
+        )
+        if after is not None:
+            query = query.where(tuple_(ImportBatch.batch_number, SourceRecord.ordinal) > after)
+        result = await self.session.execute(
+            query.order_by(ImportBatch.batch_number, SourceRecord.ordinal).limit(size)
+        )
+        return list(result.all())
+
+    async def insert_rows(self, model: type[Base], rows: list[dict[str, Any]]) -> None:
+        """One multi-row INSERT (rows built by the service for an import it holds locked)."""
+        if rows:
+            await self.session.execute(insert(model), rows)
+
+    async def default_profile(self, code: str) -> ValidationProfile | None:
+        """The newest version of the tenant's validation profile `code`."""
+        result = await self.session.execute(
+            select(ValidationProfile)
+            .where(
+                ValidationProfile.tenant_id == self.scope.tenant_id,
+                ValidationProfile.code == code,
+            )
+            .order_by(ValidationProfile.version.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def manifest(self, import_id: uuid.UUID) -> ImportManifest | None:
+        result = await self.session.execute(
+            select(ImportManifest)
+            .join(ImportJob, ImportJob.id == ImportManifest.import_job_id)
+            .where(
+                ImportManifest.import_job_id == import_id,
+                ImportJob.tenant_id == self.scope.tenant_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    def _issues(
+        self, import_id: uuid.UUID, severity: str | None, code: str | None, field: str | None
+    ) -> Select[tuple[ValidationIssue]]:
+        query = (
+            select(ValidationIssue)
+            .join(ImportJob, ImportJob.id == ValidationIssue.import_job_id)
+            .where(
+                ValidationIssue.import_job_id == import_id,
+                ImportJob.tenant_id == self.scope.tenant_id,
+            )
+        )
+        if severity is not None:
+            query = query.where(ValidationIssue.severity == severity)
+        if code is not None:
+            query = query.where(ValidationIssue.code == code)
+        if field is not None:
+            query = query.where(
+                or_(ValidationIssue.field == field, ValidationIssue.source_column == field)
+            )
+        return query
+
+    async def issue_page(
+        self,
+        import_id: uuid.UUID,
+        severity: str | None,
+        code: str | None,
+        field: str | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[ValidationIssue], int]:
+        query = self._issues(import_id, severity, code, field)
+        total = await self.session.scalar(select(func.count()).select_from(query.subquery()))
+        result = await self.session.execute(
+            query.order_by(ValidationIssue.sequence).limit(limit).offset(offset)
+        )
+        return list(result.scalars()), int(total or 0)
+
+    async def severity_counts(self, import_id: uuid.UUID) -> dict[str, int]:
+        query = self._issues(import_id, None, None, None).subquery()
+        result = await self.session.execute(
+            select(query.c.severity, func.count()).group_by(query.c.severity)
+        )
+        return {row[0]: int(row[1]) for row in result}
+
+    async def batch(self, batch_id: uuid.UUID) -> tuple[ImportBatch, ImportJob] | None:
+        """A batch of an import of the caller's tenant, with its import."""
+        result = await self.session.execute(
+            select(ImportBatch, ImportJob)
+            .join(ImportJob, ImportJob.id == ImportBatch.import_job_id)
+            .where(ImportBatch.id == batch_id, ImportJob.tenant_id == self.scope.tenant_id)
+            .execution_options(populate_existing=True)
+        )
+        row = result.one_or_none()
+        return (row[0], row[1]) if row is not None else None
+
+    def _items(self, batch_id: uuid.UUID, status: str | None) -> Select[tuple[QuarantineItem]]:
+        query = (
+            select(QuarantineItem)
+            .join(ImportJob, ImportJob.id == QuarantineItem.import_job_id)
+            .where(QuarantineItem.batch_id == batch_id, ImportJob.tenant_id == self.scope.tenant_id)
+        )
+        return query if status is None else query.where(QuarantineItem.status == status)
+
+    async def quarantine_page(
+        self, batch_id: uuid.UUID, status: str | None, limit: int, offset: int
+    ) -> tuple[list[tuple[QuarantineItem, SourceRecord]], int]:
+        """A batch's quarantine items with their (unedited) source records, by row."""
+        query = self._items(batch_id, status)
+        total = await self.session.scalar(select(func.count()).select_from(query.subquery()))
+        result = await self.session.execute(
+            query.add_columns(SourceRecord)
+            .join(SourceRecord, SourceRecord.id == QuarantineItem.source_record_id)
+            .order_by(QuarantineItem.ordinal)
+            .limit(limit)
+            .offset(offset)
+            .execution_options(populate_existing=True)
+        )
+        return [(row[0], row[1]) for row in result.all()], int(total or 0)
+
+    async def status_counts(self, batch_id: uuid.UUID) -> dict[str, int]:
+        query = self._items(batch_id, None).subquery()
+        result = await self.session.execute(
+            select(query.c.status, func.count()).group_by(query.c.status)
+        )
+        return {row[0]: int(row[1]) for row in result}
+
+    async def lock_item(self, batch_id: uuid.UUID, item_id: uuid.UUID) -> QuarantineItem | None:
+        """A quarantine item of this batch in the caller's tenant, locked."""
+        result = await self.session.execute(
+            self._items(batch_id, None)
+            .where(QuarantineItem.id == item_id)
+            .with_for_update(of=QuarantineItem)
+            .execution_options(populate_existing=True)
+        )
+        return result.scalar_one_or_none()
+
+    async def retry_ready_items(self, import_id: uuid.UUID) -> list[QuarantineItem]:
+        """An import's RETRY_READY items, locked, by row (D-20 §2)."""
+        result = await self.session.execute(
+            select(QuarantineItem)
+            .join(ImportJob, ImportJob.id == QuarantineItem.import_job_id)
+            .where(
+                QuarantineItem.import_job_id == import_id,
+                ImportJob.tenant_id == self.scope.tenant_id,
+                QuarantineItem.status == "RETRY_READY",
+            )
+            .order_by(QuarantineItem.ordinal)
+            .with_for_update(of=QuarantineItem)
+            .execution_options(populate_existing=True)
+        )
+        return list(result.scalars())
+
+    async def batch_item(
+        self, batch_id: uuid.UUID, item_id: uuid.UUID
+    ) -> tuple[QuarantineItem, SourceRecord] | None:
+        result = await self.session.execute(
+            self._items(batch_id, None)
+            .where(QuarantineItem.id == item_id)
+            .add_columns(SourceRecord)
+            .join(SourceRecord, SourceRecord.id == QuarantineItem.source_record_id)
+            .execution_options(populate_existing=True)
+        )
+        row = result.one_or_none()
+        return (row[0], row[1]) if row is not None else None

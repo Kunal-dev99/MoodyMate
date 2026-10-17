@@ -47,27 +47,48 @@ from app.ingestion.adapters import (
 )
 from app.ingestion.constants import (
     CONTRACT_TRANSITIONS,
+    DEFAULT_VALIDATION_PROFILE_CODE,
+    FILE_LEVEL_CODES,
     IMPORT_TRANSITIONS,
+    ISO_4217_CODES,
+    MANUAL_QUARANTINE_MOVES,
+    QUARANTINE_TRANSITIONS,
+    RETRYABLE_IMPORT_STATUSES,
+    SEVERITY_DISPOSITIONS,
     USABLE_SOURCE_KINDS,
+    VALIDATOR_VERSION,
     ContractStatus,
     CsvDelimiter,
     ImportStatus,
+    IssueDisposition,
+    QuarantineStatus,
     RetentionState,
     RowFlagCode,
+    RowOutcome,
     SourceFormat,
     SourceKind,
     UploadRefusal,
+    ValidationCode,
+    ValidationSeverity,
+    is_iso4217_unit,
 )
 from app.ingestion.models import (
+    CanonicalRecord,
     DataProfileSnapshot,
     ImportArtifact,
     ImportBatch,
     ImportJob,
+    ImportManifest,
+    QuarantineItem,
+    RecordLineage,
     SourceContract,
     SourceProfile,
+    SourceRecord,
     SourceSystem,
+    ValidationIssue,
 )
 from app.ingestion.repository import ImportRepository, SourceRepository
+from app.mapping.transforms import TargetField, Transform, TransformError, apply, compile_transform
 
 
 @dataclass(frozen=True)
@@ -444,6 +465,8 @@ class UploadSpec:
     synthetic_attested: bool
     expected_row_count: int | None = None
     control_totals: dict[str, str] | None = None  # column -> decimal text
+    # D-20 §3: a corrected file for an earlier import of the same source.
+    retry_of_import_id: uuid.UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -467,6 +490,8 @@ def request_sha256(spec: UploadSpec, file_sha256: str) -> str:
         "expected_row_count": spec.expected_row_count,
         "control_totals": spec.control_totals or {},
     }
+    if spec.retry_of_import_id is not None:  # only when set: earlier fingerprints still hold
+        payload["retry_of_import_id"] = str(spec.retry_of_import_id)
     text = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(text.encode()).hexdigest()
 
@@ -601,6 +626,8 @@ class ImportService:
                     {"schema_id": str(schema.id)},
                 )
             )
+        if spec.retry_of_import_id is not None:
+            await self._check_retry(spec.retry_of_import_id, source.id)
         unknown = sorted(set(spec.control_totals or {}) - set(contract.control_total_columns))
         if unknown:
             await self.refuse(
@@ -642,6 +669,7 @@ class ImportService:
             expected_row_count=spec.expected_row_count,
             control_totals=spec.control_totals,
             row_count=len(parsed.rows),
+            retry_of_import_id=spec.retry_of_import_id,
             created_by=actor,
         )
         self.repo.add(job)
@@ -710,6 +738,7 @@ class ImportService:
             "schema_version_id": str(version.id),
             "expected_row_count": spec.expected_row_count,
             "control_total_columns": sorted(spec.control_totals or {}),
+            "retry_of_import_id": str(spec.retry_of_import_id) if spec.retry_of_import_id else None,
         }
         audit_by(
             self.session,
@@ -855,6 +884,236 @@ class ImportService:
             default_classification=profile.default_classification,
         )
 
+    # --- validation (BE-11.3, BE-11.5, D-20, D-21, D-22) ----------------------------------------
+
+    async def manifest(self, job: ImportJob) -> ImportManifest | None:
+        """The stored manifest of an import already reached through this scope."""
+        return await self.repo.manifest(job.id)
+
+    async def issues(
+        self,
+        import_id: uuid.UUID,
+        severity: ValidationSeverity | None,
+        code: ValidationCode | None,
+        field: str | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[ImportJob, list[ValidationIssue], int, dict[str, int]]:
+        """An import's issues in the order validation raised them (file-level first), with
+        the per-severity counts of all of them. 404 alike for absent and foreign (D-04)."""
+        job = await self.get(import_id)
+        items, total = await self.repo.issue_page(job.id, severity, code, field, limit, offset)
+        return job, items, total, await self.repo.severity_counts(job.id)
+
+    async def validate(self, import_id: uuid.UUID) -> ImportJob:
+        """Validate an import once (D-21), in one transaction, audited `import.validate`:
+        pin the usable ACTIVE mapping version (D-18 §5), move it VALIDATING, give every row
+        exactly one outcome (canonical record, OPEN or REJECTED quarantine item, D-20 §1),
+        store the issues and the manifest, move it to its outcome status, and resolve the
+        quarantine items of the import it retries (D-20 §2). Refusals are audited DENIED."""
+        job = await self.repo.lock(import_id)
+        if job is None:
+            await self.refuse(
+                ApiError(404, "not_found", "Import not found."), import_id, VALIDATE_IMPORT
+            )
+        status = ImportStatus(job.status)
+        if status in VALIDATED_STATUSES or await self.repo.manifest(job.id) is not None:
+            await self.refuse(
+                ApiError(
+                    409,
+                    "already_validated",
+                    "This import was validated already; a re-run is a new import (D-21).",
+                    {"status": status.value},
+                ),
+                job.id,
+                VALIDATE_IMPORT,
+            )
+        if status not in (ImportStatus.RECEIVED, ImportStatus.MAPPING_REQUIRED):
+            await self.refuse(
+                ApiError(
+                    409,
+                    "invalid_status",
+                    f"Only a RECEIVED or MAPPING_REQUIRED import can be validated; this one is "
+                    f"{status}.",
+                    {"status": status.value},
+                ),
+                job.id,
+                VALIDATE_IMPORT,
+            )
+        from app.mapping.service import MappingService  # mapping depends on ingestion
+
+        usable = await MappingService(self.session, self.principal).usable_mapping(
+            job.source_contract_id, job.schema_version_id
+        )
+        if usable is None:
+            await self.refuse(
+                ApiError(
+                    409,
+                    "mapping_required",
+                    "No ACTIVE mapping version maps this import's contract and schema version; "
+                    "one must be approved first (D-18 §4).",
+                    {"status": status.value},
+                ),
+                job.id,
+                VALIDATE_IMPORT,
+            )
+        profile = await self.repo.default_profile(DEFAULT_VALIDATION_PROFILE_CODE)
+        if profile is None:
+            await self.refuse(
+                ApiError(409, "validation_profile_missing", "No validation profile exists."),
+                job.id,
+                VALIDATE_IMPORT,
+            )
+        mapping, mapping_version = usable
+        source = await self.sources.get(job.source_system_id)
+        contract = next(c for c in profile_of(source).contracts if c.id == job.source_contract_id)
+        schema = await self.schemas.get_schema(contract.schema_id)
+        schema_version = next(v for v in schema.versions if v.id == job.schema_version_id)
+        fields, units = target_fields_of(schema_version)
+        validator = Validator(
+            [MappedRule.of(r) for r in mapping_version.rules],
+            fields,
+            units,
+            list(dict.fromkeys(c for batch in job.batches for c in batch.columns)),
+            contract.business_key_columns,
+            profile_entries(profile.rules),
+        )
+
+        move(job, ImportStatus.VALIDATING)
+        job.mapping_version_id = mapping_version.id  # written once (DB trigger, D-18 §5)
+        await self.repo.flush()
+        writer = _ResultWriter(job, mapping_version.id, profile.id, self.principal.actor)
+        writer.owner = profile_of(source).owner  # the source's data owner holds its items
+        await self.repo.insert_rows(ValidationIssue, [writer.issue(f) for f in validator.findings])
+        after: tuple[int, int] | None = None
+        while page := await self.repo.record_page(job.id, after, VALIDATE_PAGE_ROWS):
+            after = (page[-1][2], page[-1][3])
+            results = await run_in_threadpool(
+                validator.add_all, [(r[3], r[4], r[5], r[6]) for r in page]
+            )
+            rows = writer.add(page, results)
+            for model, values in rows:
+                await self.repo.insert_rows(model, values)
+        final = validator.status()
+        move(job, final)
+        await self.repo.flush()
+
+        artifact = job.artifact
+        manifest: dict[str, Any] = {
+            "manifest_version": 1,
+            "import_id": str(job.id),
+            "status": final.value,
+            "source_id": str(source.id),
+            "source_code": source.code,
+            "source_profile_id": str(profile_of(source).id),
+            "source_contract_id": str(contract.id),
+            "source_contract_version": contract.version,
+            "source_contract_sha256": contract.content_sha256,
+            "schema_id": str(schema.id),
+            "schema_code": schema.code,
+            "schema_version_id": str(schema_version.id),
+            "schema_version": schema_version.version,
+            "schema_sha256": schema_version.content_sha256,
+            "mapping_id": str(mapping.id),
+            "mapping_code": mapping.code,
+            "mapping_version_id": str(mapping_version.id),
+            "mapping_version": mapping_version.version,
+            "mapping_sha256": mapping_version.content_sha256,
+            "validation_profile": {
+                "id": str(profile.id),
+                "code": profile.code,
+                "version": profile.version,
+                "content_sha256": profile.content_sha256,
+                "provisional": profile.provisional,
+            },
+            "validator_version": VALIDATOR_VERSION,
+            "artifact": {
+                "sha256": artifact.sha256,
+                "size_bytes": artifact.size_bytes,
+                "classification": artifact.classification,
+            },
+            "quality": {
+                "row_count": job.row_count,
+                "accepted_records": validator.accepted,
+                "quarantined_records": validator.quarantined,
+                "rejected_records": validator.rejected,
+                "warnings": validator.warnings,
+            },
+            "canonical_sha256": writer.canonical_sha256(),
+        }
+        manifest_sha = hashlib.sha256(
+            json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        self.repo.add(
+            ImportManifest(
+                import_job_id=job.id,
+                validation_profile_id=profile.id,
+                mapping_version_id=mapping_version.id,
+                schema_version_id=schema_version.id,
+                row_count=job.row_count,
+                accepted_count=validator.accepted,
+                quarantined_count=validator.quarantined,
+                rejected_count=validator.rejected,
+                warning_count=validator.warnings,
+                manifest=manifest,
+                manifest_sha256=manifest_sha,
+                created_by=self.principal.actor,
+            )
+        )
+        await self.repo.flush()
+        details: dict[str, Any] = {
+            "status": final.value,
+            "mapping_version_id": str(mapping_version.id),
+            "validation_profile_id": str(profile.id),
+            "row_count": job.row_count,
+            "accepted": validator.accepted,
+            "quarantined": validator.quarantined,
+            "rejected": validator.rejected,
+            "warnings": validator.warnings,
+            "manifest_sha256": manifest_sha,
+            "retry_of_import_id": str(job.retry_of_import_id) if job.retry_of_import_id else None,
+        }
+        audit_by(
+            self.session,
+            self.principal,
+            VALIDATE_IMPORT,
+            "import_job",
+            resource_id=str(job.id),
+            details=details,
+            details_classification=_public(*details),
+        )
+        if job.retry_of_import_id is not None:
+            await QuarantineService(self.session, self.principal).resolve_retry(
+                job.id, job.retry_of_import_id, writer.present_keys, writer.accepted_keys
+            )
+        await self.session.commit()
+        return await self.get(job.id)
+
+    async def _check_retry(self, original_id: uuid.UUID, source_id: uuid.UUID) -> None:
+        """D-20 §3: a retry corrects an earlier validated import of the same source that held
+        rows (QUARANTINED or FAILED). Absent and foreign imports look alike (D-04)."""
+        original = await self.repo.fresh(original_id)
+        if original is None:
+            await self.refuse(ApiError(404, "not_found", "The import to retry was not found."))
+        if original.source_system_id != source_id:
+            await self.refuse(
+                ApiError(
+                    409,
+                    UploadRefusal.RETRY_SOURCE_MISMATCH,
+                    "A retry must be uploaded for the same source as the import it corrects.",
+                    {"retry_of_import_id": str(original.id)},
+                )
+            )
+        if original.status not in RETRYABLE_IMPORT_STATUSES:
+            await self.refuse(
+                ApiError(
+                    409,
+                    UploadRefusal.RETRY_NOT_APPLICABLE,
+                    "Only a QUARANTINED or FAILED import can be retried.",
+                    {"retry_of_import_id": str(original.id), "status": original.status},
+                )
+            )
+
     async def _replay(self, key: str, fingerprint: str) -> ImportJob | None:
         """D-21: the same key with the same request is the original import; with anything
         else it is a 409 idempotency_conflict (audited)."""
@@ -872,6 +1131,132 @@ class ImportService:
                 existing.id,
             )
         return existing
+
+
+# Audit action of validation (BE-11.3); a refusal is recorded under the same action, DENIED.
+VALIDATE_IMPORT = "import.validate"
+VALIDATE_PAGE_ROWS = 1_000  # records per keyset page of a validation
+# Statuses only validation reaches (D-21): an import in one was validated already.
+VALIDATED_STATUSES = frozenset(
+    {
+        ImportStatus.COMPLETED,
+        ImportStatus.COMPLETED_WITH_WARNINGS,
+        ImportStatus.QUARANTINED,
+        ImportStatus.FAILED,
+    }
+)
+
+
+class _ResultWriter:
+    """Turns the engine's row results into the rows validation inserts, and keeps what the
+    manifest and a retry need (payload hashes in file order, business key hashes)."""
+
+    def __init__(
+        self,
+        job: ImportJob,
+        mapping_version_id: uuid.UUID,
+        profile_id: uuid.UUID,
+        actor: str,
+    ) -> None:
+        self.job_id = job.id
+        self.schema_version_id = job.schema_version_id
+        self.mapping_version_id = mapping_version_id
+        self.profile_id = profile_id
+        self.actor = actor
+        self.owner = ""
+        self.hashes: list[str] = []
+        self.present_keys: set[str] = set()
+        self.accepted_keys: set[str] = set()
+
+    def issue(self, f: "Finding", record_id: uuid.UUID | None = None) -> dict[str, Any]:
+        return {
+            "id": uuid.uuid4(),
+            "import_job_id": self.job_id,
+            "sequence": f.sequence,
+            "source_record_id": record_id,
+            "ordinal": f.ordinal if record_id is not None else None,
+            "code": f.code.value,
+            "severity": f.severity.value,
+            "disposition": f.disposition.value,
+            "field": f.field,
+            "source_column": f.source_column,
+            "rule_position": f.rule_position,
+            "validation_profile_id": self.profile_id,
+            "message": f.message,
+            "created_by": self.actor,
+        }
+
+    def add(
+        self, page: Sequence[Any], results: Sequence["RowResult"]
+    ) -> list[tuple[type[Any], list[dict[str, Any]]]]:
+        canonical: list[dict[str, Any]] = []
+        lineage: list[dict[str, Any]] = []
+        issues: list[dict[str, Any]] = []
+        items: list[dict[str, Any]] = []
+        for record, result in zip(page, results, strict=True):
+            record_id, batch_id = record[0], record[1]
+            issues.extend(self.issue(f, record_id) for f in result.findings)
+            if result.key_sha256 is not None:
+                self.present_keys.add(result.key_sha256)
+            if result.outcome == RowOutcome.ACCEPTED:
+                assert result.payload is not None
+                canonical_id = uuid.uuid4()
+                digest = payload_sha256(result.payload)
+                self.hashes.append(digest)
+                if result.key_sha256 is not None:
+                    self.accepted_keys.add(result.key_sha256)
+                canonical.append(
+                    {
+                        "id": canonical_id,
+                        "import_job_id": self.job_id,
+                        "schema_version_id": self.schema_version_id,
+                        "mapping_version_id": self.mapping_version_id,
+                        "source_record_id": record_id,
+                        "ordinal": result.ordinal,
+                        "payload": result.payload,
+                        "payload_sha256": digest,
+                        "created_by": self.actor,
+                    }
+                )
+                lineage.append(
+                    {
+                        "id": uuid.uuid4(),
+                        "canonical_record_id": canonical_id,
+                        "source_record_id": record_id,
+                        "mapping_version_id": self.mapping_version_id,
+                        "transform_trace": result.trace,
+                        "created_by": self.actor,
+                    }
+                )
+                continue
+            items.append(
+                {
+                    "id": uuid.uuid4(),
+                    "import_job_id": self.job_id,
+                    "batch_id": batch_id,
+                    "source_record_id": record_id,
+                    "ordinal": result.ordinal,
+                    "reason_codes": result.reason_codes,
+                    "business_key_sha256": result.key_sha256,
+                    "owner": self.owner,
+                    "status": (
+                        QuarantineStatus.OPEN
+                        if result.outcome == RowOutcome.QUARANTINED
+                        else QuarantineStatus.REJECTED
+                    ).value,
+                    "created_by": self.actor,
+                }
+            )
+        return [
+            (CanonicalRecord, canonical),
+            (RecordLineage, lineage),
+            (ValidationIssue, issues),
+            (QuarantineItem, items),
+        ]
+
+    def canonical_sha256(self) -> str:
+        """The accepted payloads' hashes in file order, hashed: the dataset's identity."""
+        return hashlib.sha256("\n".join(self.hashes).encode()).hexdigest()
 
 
 # --- Phase 9: field profiling (BE-9.2, BE-9.3) --------------------------------------------------
@@ -1250,3 +1635,658 @@ class ProfileView:
 
     def suggested_target(self, column: str) -> str | None:
         return suggested_target(column, self.field_names)
+
+
+# --- Phase 11: the validation engine (BE-11.2) ---------------------------------------------------
+#
+# A pure, deterministic function of the import's records in file order, the pinned mapping
+# version's rules, the pinned schema version's fields, the contract's business key and a
+# validation profile. Every row ends in exactly one outcome (D-20 §1); nothing is dropped,
+# nothing is rounded (Decimal only, through the D-19 transform engine), and a finding names
+# rows, fields, columns and rules, never a value.
+
+
+@dataclass(frozen=True)
+class MappedRule:
+    """One rule of the pinned mapping version, as validation applies it."""
+
+    position: int
+    source_column: str | None
+    target_field: str | None
+    column_policy: str  # MAP | PRESERVE (D-23)
+    transform_code: str
+    transform_params: dict[str, Any]
+    null_policy: str
+    default_value: str | None
+
+    @classmethod
+    def of(cls, rule: Any) -> "MappedRule":
+        return cls(
+            rule.position,
+            rule.source_column,
+            rule.target_field,
+            rule.column_policy,
+            rule.transform_code,
+            dict(rule.transform_params),
+            rule.null_policy,
+            rule.default_value,
+        )
+
+
+@dataclass(frozen=True)
+class Finding:
+    """One validation issue (a `validation_issue` row before it has ids)."""
+
+    sequence: int
+    ordinal: int | None
+    code: ValidationCode
+    severity: ValidationSeverity
+    disposition: IssueDisposition
+    field: str | None
+    source_column: str | None
+    rule_position: int | None
+    message: str
+
+
+@dataclass(frozen=True)
+class RowResult:
+    ordinal: int
+    outcome: RowOutcome
+    findings: list[Finding]
+    payload: dict[str, str | None] | None  # ACCEPTED rows only
+    trace: list[dict[str, Any]]
+    key_sha256: str | None  # the business key's hash, when the row has a full key
+    reason_codes: list[str]  # why a held row is held
+
+
+def profile_rules_sha256(rules: Mapping[str, Mapping[str, str]]) -> str:
+    """Content hash of a profile's rules. Migration 0015 holds a frozen copy."""
+    text = json.dumps(rules, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def profile_entries(
+    rules: Mapping[str, Mapping[str, str]],
+) -> dict[ValidationCode, tuple[ValidationSeverity, IssueDisposition]]:
+    """A stored profile as the engine applies it. A code the profile lacks, or an entry
+    whose disposition does not fit its severity, fails closed: a file-level code blocks the
+    file, a row-level code quarantines the row."""
+    entries: dict[ValidationCode, tuple[ValidationSeverity, IssueDisposition]] = {}
+    for code in ValidationCode:
+        file_level = code in FILE_LEVEL_CODES
+        entries[code] = _entry(rules.get(code.value), file_level) or (
+            (ValidationSeverity.BLOCKER, IssueDisposition.FILE_BLOCKED)
+            if file_level
+            else (ValidationSeverity.ERROR, IssueDisposition.QUARANTINED)
+        )
+    return entries
+
+
+def _entry(
+    entry: Mapping[str, str] | None, file_level: bool
+) -> tuple[ValidationSeverity, IssueDisposition] | None:
+    """A profile entry, if it is well formed and fits its code's level."""
+    try:
+        severity = ValidationSeverity(entry["severity"]) if entry else None
+        disposition = IssueDisposition(entry["disposition"]) if entry else None
+    except (KeyError, TypeError, ValueError):
+        return None
+    if severity is None or disposition is None:
+        return None
+    if disposition not in SEVERITY_DISPOSITIONS[severity]:
+        return None
+    if (disposition == IssueDisposition.FILE_BLOCKED) != (
+        file_level and severity == ValidationSeverity.BLOCKER
+    ):
+        return None
+    if file_level and disposition in (IssueDisposition.QUARANTINED, IssueDisposition.REJECTED):
+        return None  # a file-level issue blocks the file or warns; it holds no row
+    return severity, disposition
+
+
+# Transform engine reason codes (D-19) -> validation codes; anything else is INVALID_TYPE.
+_REASONS: dict[str, ValidationCode] = {
+    "required_value_missing": ValidationCode.REQUIRED_VALUE_MISSING,
+    "null_value": ValidationCode.REQUIRED_VALUE_MISSING,
+    "invalid_date": ValidationCode.INVALID_DATE,
+    "not_a_date": ValidationCode.INVALID_DATE,
+    "scale_exceeded": ValidationCode.SCALE_EXCEEDED,
+    "precision_exceeded": ValidationCode.PRECISION_EXCEEDED,
+    "unmapped_value": ValidationCode.UNMAPPED_VALUE,
+}
+# Row facts (D-25) that are issues. NULL_VALUE is not: an empty value meets the required
+# check like any other.
+_FLAG_CODES: dict[str, ValidationCode] = {
+    RowFlagCode.BLANK_ROW: ValidationCode.BLANK_ROW,
+    RowFlagCode.EXTRA_CELLS: ValidationCode.EXTRA_CELLS,
+    RowFlagCode.MISSING_CELLS: ValidationCode.MISSING_CELLS,
+    RowFlagCode.CELL_ERROR: ValidationCode.CELL_ERROR,
+    RowFlagCode.FORMULA_WITHOUT_CACHED_VALUE: ValidationCode.FORMULA_WITHOUT_CACHED_VALUE,
+    RowFlagCode.FORMULA_CACHED_VALUE: ValidationCode.FORMULA_CACHED_VALUE,
+    RowFlagCode.PRECISION_BEYOND_15_DIGITS: ValidationCode.PRECISION_BEYOND_15_DIGITS,
+}
+_FLAG_MESSAGES: dict[ValidationCode, str] = {
+    ValidationCode.BLANK_ROW: "The row is blank.",
+    ValidationCode.EXTRA_CELLS: "The row has more cells than the header.",
+    ValidationCode.MISSING_CELLS: "The row has fewer cells than the header.",
+    ValidationCode.CELL_ERROR: "The cell holds a spreadsheet error value.",
+    ValidationCode.FORMULA_WITHOUT_CACHED_VALUE: "The cell is a formula without a cached value.",
+    ValidationCode.FORMULA_CACHED_VALUE: "The cell's value is a formula's cached result.",
+    ValidationCode.PRECISION_BEYOND_15_DIGITS: "The spreadsheet number has more than 15 "
+    "significant digits, so digits may have been lost.",
+}
+_OUTCOME_RANK = {
+    IssueDisposition.ACCEPTED_WITH_WARNING: 0,
+    IssueDisposition.QUARANTINED: 1,
+    IssueDisposition.REJECTED: 2,
+    IssueDisposition.FILE_BLOCKED: 3,
+}
+MESSAGE_MAX = 500
+
+
+def _field_problem(code: ValidationCode, target: TargetField) -> str:
+    match code:
+        case ValidationCode.REQUIRED_VALUE_MISSING:
+            return "a required value is missing"
+        case ValidationCode.INVALID_DATE:
+            return "the value is not a valid date in the expected format"
+        case ValidationCode.SCALE_EXCEEDED:
+            return f"the value has more than {target.scale} decimal places (never rounded)"
+        case ValidationCode.PRECISION_EXCEEDED:
+            digits = (target.precision or 0) - (target.scale or 0)
+            return f"the value has more than {digits} integer digits"
+        case ValidationCode.INVALID_CURRENCY_CODE:
+            return "the value is not an ISO 4217 currency code"
+        case ValidationCode.UNMAPPED_VALUE:
+            return "the value is not in the rule's value table"
+        case _:
+            return f"the value is not a valid {target.data_type}"
+
+
+def business_key_sha256(values: Mapping[str, str], columns: Sequence[str]) -> str | None:
+    """The hash of a row's business key (trimmed), or None when any part is empty."""
+    key = [(values.get(c) or "").strip() for c in columns]
+    if not columns or not all(key):
+        return None
+    return hashlib.sha256(json.dumps(key, ensure_ascii=False).encode()).hexdigest()
+
+
+def payload_sha256(payload: Mapping[str, str | None]) -> str:
+    text = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+ValidatorInput = tuple[int, Mapping[str, str], Sequence[str], Sequence[Mapping[str, Any]]]
+
+
+class Validator:
+    """Feed records (ordinal, values, extras, flags) in file order with `add`; read the
+    file-level `findings` first and the `tally` at the end.
+
+    Checks: per `schema_field` type and required (an empty or blank cell is missing, so the
+    "" an XLSX pads with is missing too, D-25), DECIMAL precision and scale (over-scale is an
+    error, never rounded), date validity and format, ISO 4217 codes for fields whose unit is
+    ISO 4217, duplicate and empty business keys, the adapter's row facts, and file-level
+    blockers. Columns PRESERVEd or not mapped stay in `source_record` and give one
+    UNMAPPED_COLUMN warning each (never dropped)."""
+
+    def __init__(
+        self,
+        rules: Sequence[MappedRule],
+        fields: Mapping[str, TargetField],
+        units: Mapping[str, str | None],
+        columns: Sequence[str],
+        business_keys: Sequence[str],
+        profile: Mapping[ValidationCode, tuple[ValidationSeverity, IssueDisposition]],
+    ) -> None:
+        self.fields = dict(fields)
+        self.columns = list(columns)
+        self.business_keys = list(business_keys)
+        self.profile = profile
+        self.currency = frozenset(n for n, u in units.items() if is_iso4217_unit(u))
+        self.findings: list[Finding] = []  # file-level, available after __init__
+        self._sequence = 0
+        self._first: dict[str, int] = {}  # business key hash -> first row
+        self.accepted = self.quarantined = self.rejected = 0
+        self.warnings = 0
+        present = set(self.columns)
+        self.runs: list[tuple[MappedRule, Transform, TargetField]] = []
+        mapped_columns: set[str] = set()
+        for rule in rules:
+            if rule.column_policy != "MAP":
+                continue
+            target = self.fields.get(rule.target_field or "")
+            try:
+                transform = compile_transform(rule.transform_code, rule.transform_params)
+            except TransformError:
+                transform = None
+            if target is None or transform is None:
+                self._file(
+                    ValidationCode.MAPPING_RULE_INVALID,
+                    f"Rule {rule.position} cannot be applied to the pinned schema version.",
+                    field=rule.target_field,
+                    column=rule.source_column,
+                    rule=rule.position,
+                )
+                continue
+            if rule.source_column is not None:
+                mapped_columns.add(rule.source_column)
+                if rule.source_column not in present:
+                    code = (
+                        ValidationCode.REQUIRED_COLUMN_MISSING
+                        if target.required
+                        else ValidationCode.SOURCE_COLUMN_MISSING
+                    )
+                    self._file(
+                        code,
+                        f"Column '{rule.source_column}' (rule {rule.position}) feeds "
+                        f"{'required ' if target.required else ''}field '{target.name}' but "
+                        "is not in the file.",
+                        field=target.name,
+                        column=rule.source_column,
+                        rule=rule.position,
+                    )
+                    continue
+            self.runs.append((rule, transform, target))
+        targeted = {r.target_field for r in rules if r.column_policy == "MAP"}
+        for name, target in self.fields.items():
+            if target.required and name not in targeted:
+                self._file(
+                    ValidationCode.REQUIRED_FIELD_UNMAPPED,
+                    f"Required field '{name}' is not mapped by the mapping version.",
+                    field=name,
+                )
+        for column in self.business_keys:
+            if column not in present:
+                self._file(
+                    ValidationCode.BUSINESS_KEY_COLUMN_MISSING,
+                    f"Business key column '{column}' is not in the file.",
+                    column=column,
+                )
+        for column in self.columns:
+            if column not in mapped_columns:
+                self._file(
+                    ValidationCode.UNMAPPED_COLUMN,
+                    f"Column '{column}' is not mapped to a schema field; its values are kept "
+                    "in the source record.",
+                    column=column,
+                )
+        self.blocked = [f.code for f in self.findings if f.disposition == "FILE_BLOCKED"]
+        self.key_field = next(
+            (r.target_field for r, _, _ in self.runs if r.source_column in self.business_keys[:1]),
+            None,
+        )
+
+    # --- findings ---------------------------------------------------------------------------
+
+    def _finding(
+        self,
+        ordinal: int | None,
+        code: ValidationCode,
+        message: str,
+        field: str | None = None,
+        column: str | None = None,
+        rule: int | None = None,
+    ) -> Finding:
+        severity, disposition = self.profile[code]
+        self._sequence += 1
+        if severity == ValidationSeverity.WARNING:
+            self.warnings += 1
+        return Finding(
+            self._sequence,
+            ordinal,
+            code,
+            severity,
+            disposition,
+            field,
+            column,
+            rule,
+            message[:MESSAGE_MAX],
+        )
+
+    def _file(self, code: ValidationCode, message: str, **where: Any) -> None:
+        self.findings.append(self._finding(None, code, message, **where))
+
+    # --- rows --------------------------------------------------------------------------------
+
+    def add(
+        self,
+        ordinal: int,
+        values: Mapping[str, str],
+        extras: Sequence[str],
+        flags: Sequence[Mapping[str, Any]],
+    ) -> RowResult:
+        key = business_key_sha256(values, self.business_keys)
+        if self.blocked:
+            # D-20 §1: a file-level BLOCKER fails the import; no row is accepted or dropped.
+            self.rejected += 1
+            return RowResult(
+                ordinal, RowOutcome.REJECTED, [], None, [], key, sorted(set(self.blocked))
+            )
+        findings: list[Finding] = []
+        blank = False
+        for flag in flags:
+            fact = _FLAG_CODES.get(str(flag.get("code")))
+            if fact is None:
+                continue
+            blank = blank or fact == ValidationCode.BLANK_ROW
+            position = flag.get("column")
+            column = (
+                self.columns[position - 1]
+                if isinstance(position, int) and 1 <= position <= len(self.columns)
+                else None
+            )
+            findings.append(self._finding(ordinal, fact, _FLAG_MESSAGES[fact], column=column))
+        payload: dict[str, str | None] = dict.fromkeys(sorted(self.fields))
+        trace: list[dict[str, Any]] = []
+        if not blank:
+            for rule, transform, target in self.runs:
+                raw = values.get(rule.source_column) if rule.source_column is not None else None
+                outcome = apply(transform, raw, rule.null_policy, rule.default_value, target)
+                code: ValidationCode | None = None
+                if outcome.reason is not None:
+                    code = _REASONS.get(outcome.reason, ValidationCode.INVALID_TYPE)
+                elif outcome.text is not None:
+                    if target.name in self.currency and outcome.text not in ISO_4217_CODES:
+                        code = ValidationCode.INVALID_CURRENCY_CODE
+                    else:
+                        payload[target.name] = outcome.text
+                if code is not None:
+                    findings.append(
+                        self._finding(
+                            ordinal,
+                            code,
+                            f"'{target.name}' (rule {rule.position}): "
+                            f"{_field_problem(code, target)}.",
+                            field=target.name,
+                            column=rule.source_column,
+                            rule=rule.position,
+                        )
+                    )
+                trace.append(
+                    {
+                        "field": target.name,
+                        "source_column": rule.source_column,
+                        "rule_position": rule.position,
+                        "transform": transform.code.value,
+                    }
+                )
+            findings.extend(self._key_findings(ordinal, key, values))
+        worst = max((_OUTCOME_RANK[f.disposition] for f in findings), default=0)
+        held = sorted({f.code.value for f in findings if _OUTCOME_RANK[f.disposition] > 0})
+        if worst >= _OUTCOME_RANK[IssueDisposition.REJECTED]:
+            self.rejected += 1
+            return RowResult(ordinal, RowOutcome.REJECTED, findings, None, [], key, held)
+        if worst == _OUTCOME_RANK[IssueDisposition.QUARANTINED]:
+            self.quarantined += 1
+            return RowResult(ordinal, RowOutcome.QUARANTINED, findings, None, [], key, held)
+        self.accepted += 1
+        return RowResult(ordinal, RowOutcome.ACCEPTED, findings, payload, trace, key, [])
+
+    def _key_findings(
+        self, ordinal: int, key: str | None, values: Mapping[str, str]
+    ) -> list[Finding]:
+        if not self.business_keys:
+            return []
+        label = ", ".join(self.business_keys)
+        field, column = self.key_field, self.business_keys[0]
+        if key is None:
+            return [
+                self._finding(
+                    ordinal,
+                    ValidationCode.MISSING_BUSINESS_KEY,
+                    f"The business key ({label}) is empty.",
+                    field=field,
+                    column=column,
+                )
+            ]
+        first = self._first.setdefault(key, ordinal)
+        if first == ordinal:
+            return []
+        return [
+            self._finding(
+                ordinal,
+                ValidationCode.DUPLICATE_BUSINESS_KEY,
+                f"The business key ({label}) repeats the one of row {first}.",
+                field=field,
+                column=column,
+            )
+        ]
+
+    def add_all(self, rows: Iterable[ValidatorInput]) -> list[RowResult]:
+        return [self.add(*row) for row in rows]
+
+    # --- the result ----------------------------------------------------------------------------
+
+    def status(self) -> ImportStatus:
+        """D-21: FAILED on a file-level BLOCKER, QUARANTINED with any held row, else
+        COMPLETED (with warnings, when any)."""
+        if self.blocked:
+            return ImportStatus.FAILED
+        if self.quarantined or self.rejected:
+            return ImportStatus.QUARANTINED
+        return ImportStatus.COMPLETED_WITH_WARNINGS if self.warnings else ImportStatus.COMPLETED
+
+
+def validate_rows(
+    rules: Sequence[MappedRule],
+    fields: Mapping[str, TargetField],
+    units: Mapping[str, str | None],
+    columns: Sequence[str],
+    business_keys: Sequence[str],
+    profile: Mapping[ValidationCode, tuple[ValidationSeverity, IssueDisposition]],
+    rows: Iterable[ValidatorInput],
+) -> tuple[Validator, list[RowResult]]:
+    """The validation of these records (a pure function; BE-11.2)."""
+    validator = Validator(rules, fields, units, columns, business_keys, profile)
+    return validator, validator.add_all(rows)
+
+
+def target_fields_of(version: Any) -> tuple[dict[str, TargetField], dict[str, str | None]]:
+    """A schema version's fields as the transform engine fits values to them, and units."""
+    fields = {
+        f.name: TargetField(
+            name=f.name,
+            data_type=FieldType(f.data_type),
+            required=f.required,
+            precision=f.precision,
+            scale=f.scale,
+            classification=f.classification,
+        )
+        for f in version.fields
+    }
+    return fields, {f.name: f.unit for f in version.fields}
+
+
+# The engine's parts, for the test that proves it holds no float (BE-11.2).
+VALIDATOR_PARTS = (
+    "profile_entries",
+    "business_key_sha256",
+    "payload_sha256",
+    "Validator",
+    "validate_rows",
+)
+
+
+# --- Phase 11: quarantine review and retry (BE-11.4, D-20) ---------------------------------------
+
+DISPOSITION = "quarantine.disposition"  # a reviewer's move; refusals under the same action
+# Moves made when a retry import is validated (D-20 §2), audited under these actions.
+AUTOMATIC_MOVES = {
+    QuarantineStatus.CORRECTED: "quarantine.correct",
+    QuarantineStatus.RESOLVED: "quarantine.resolve",
+    QuarantineStatus.RETRY_READY: "quarantine.retry_ready",
+}
+
+
+def manual_moves(status: str) -> list[QuarantineStatus]:
+    """The dispositions a reviewer may give an item in `status`."""
+    return sorted(to for frm, to in MANUAL_QUARANTINE_MOVES if frm == status)
+
+
+@dataclass(frozen=True)
+class QuarantineView:
+    """One batch's quarantine items as stored, with what masking their values needs: each
+    column's classification (the mapped field's, else the source profile's default, D-20)."""
+
+    batch: ImportBatch
+    job: ImportJob
+    items: list[tuple[QuarantineItem, SourceRecord]]
+    total: int
+    status_counts: dict[str, int]
+    classifications: dict[str, str]
+    default_classification: str
+
+
+class QuarantineService:
+    """Read and disposition held rows (D-20). A disposition only moves an item's status
+    along the D-20 table; nothing is deleted and no source record is edited."""
+
+    def __init__(self, session: AsyncSession, principal: Principal) -> None:
+        self.session = session
+        self.principal = principal
+        self.repo = ImportRepository(session, principal.scope)
+        self.imports = ImportService(session, principal)
+
+    async def _refuse(self, resource_id: uuid.UUID | None, error: ApiError) -> NoReturn:
+        await record_denial(
+            self.session,
+            self.principal,
+            DISPOSITION,
+            "quarantine_item",
+            str(resource_id) if resource_id else None,
+            error.code,
+        )
+        raise error
+
+    async def batch_view(
+        self, batch_id: uuid.UUID, status: QuarantineStatus | None, limit: int, offset: int
+    ) -> QuarantineView:
+        found = await self.repo.batch(batch_id)
+        if found is None:
+            # Same response whether the batch is absent or in another tenant (D-04).
+            raise ApiError(404, "not_found", "Batch not found.")
+        batch, job = found
+        items, total = await self.repo.quarantine_page(batch.id, status, limit, offset)
+        source = await self.imports.sources.get(job.source_system_id)
+        default = profile_of(source).default_classification
+        mapped = await self.imports.mapped_classifications(job)
+        return QuarantineView(
+            batch=batch,
+            job=job,
+            items=items,
+            total=total,
+            status_counts=await self.repo.status_counts(batch.id),
+            classifications={c: mapped.get(c, default) for c in batch.columns},
+            default_classification=default,
+        )
+
+    async def item_view(self, batch_id: uuid.UUID, item_id: uuid.UUID) -> QuarantineView:
+        """One item, as `batch_view` shows it."""
+        view = await self.batch_view(batch_id, None, 1, 0)
+        found = await self.repo.batch_item(batch_id, item_id)
+        assert found is not None
+        return QuarantineView(
+            view.batch,
+            view.job,
+            [found],
+            1,
+            view.status_counts,
+            view.classifications,
+            view.default_classification,
+        )
+
+    async def disposition(
+        self,
+        batch_id: uuid.UUID,
+        item_id: uuid.UUID,
+        to: QuarantineStatus,
+        comment: str | None,
+    ) -> QuarantineView:
+        """A reviewer's move (D-20 §2: OPEN->UNDER_REVIEW, UNDER_REVIEW->REJECTED |
+        RETRY_READY | OPEN), audited. Any other move is 409 `invalid_transition` (audited):
+        CORRECTED and RESOLVED are reached only by a retry import."""
+        item = await self.repo.lock_item(batch_id, item_id)
+        if item is None:
+            await self._refuse(item_id, ApiError(404, "not_found", "Quarantine item not found."))
+        current = QuarantineStatus(item.status)
+        if (current, to) not in MANUAL_QUARANTINE_MOVES:
+            automatic = to in QUARANTINE_TRANSITIONS[current]
+            await self._refuse(
+                item.id,
+                ApiError(
+                    409,
+                    "invalid_transition",
+                    f"A quarantine item cannot be moved from {current} to {to}"
+                    + (" by hand; a retry import does that (D-20)." if automatic else "."),
+                    {"from": current.value, "to": to.value, "allowed": manual_moves(current)},
+                ),
+            )
+        item.status = to
+        await self.repo.flush()
+        details: dict[str, Any] = {
+            "batch_id": str(item.batch_id),
+            "import_id": str(item.import_job_id),
+            "from": current.value,
+            "to": to.value,
+            "comment": comment,
+        }
+        audit_by(
+            self.session,
+            self.principal,
+            DISPOSITION,
+            "quarantine_item",
+            resource_id=str(item.id),
+            details=details,
+            details_classification={
+                **_public("batch_id", "import_id", "from", "to"),
+                "comment": ClassificationCode.INTERNAL,
+            },
+        )
+        await self.session.commit()
+        return await self.item_view(batch_id, item_id)
+
+    async def resolve_retry(
+        self,
+        retry_id: uuid.UUID,
+        original_id: uuid.UUID,
+        present: set[str],
+        accepted: set[str],
+    ) -> None:
+        """D-20 §2, automatic and audited, in the retry's validation transaction: each
+        RETRY_READY item of the original whose business key the retry contains moves to
+        CORRECTED, then to RESOLVED (resolved_by the retry) when the retry accepted that key,
+        else back to RETRY_READY. Each move is its own UPDATE, so the DB trigger checks it."""
+        for item in await self.repo.retry_ready_items(original_id):
+            key = item.business_key_sha256
+            if key is None or key not in present:
+                continue
+            await self._auto(item, QuarantineStatus.CORRECTED, retry_id)
+            if key in accepted:
+                item.resolved_by_import_id = retry_id
+                await self._auto(item, QuarantineStatus.RESOLVED, retry_id)
+            else:
+                await self._auto(item, QuarantineStatus.RETRY_READY, retry_id)
+
+    async def _auto(self, item: QuarantineItem, to: QuarantineStatus, retry_id: uuid.UUID) -> None:
+        current = QuarantineStatus(item.status)
+        assert to in QUARANTINE_TRANSITIONS[current]
+        item.status = to
+        await self.repo.flush()
+        details: dict[str, Any] = {
+            "batch_id": str(item.batch_id),
+            "import_id": str(item.import_job_id),
+            "from": current.value,
+            "to": to.value,
+            "retry_import_id": str(retry_id),
+            "automatic": True,
+        }
+        audit_by(
+            self.session,
+            self.principal,
+            AUTOMATIC_MOVES[to],
+            "quarantine_item",
+            resource_id=str(item.id),
+            details=details,
+            details_classification=_public(*details),
+        )
