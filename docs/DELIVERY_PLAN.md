@@ -1890,7 +1890,7 @@ Goal: methodology parameters change only through versioned, maker-checker-approv
 versions. A new run pins the new ACTIVE versions. An old run, and a re-run of it, stays
 reproducible on its original pins. Rules, modules and assumption sets can be browsed.
 
-- [ ] **BE-16.1** The parameter-kind allowlist (D-32):
+- [x] **BE-16.1** The parameter-kind allowlist (D-32):
   - `DECIMAL(min, max, scale)`;
   - `INTEGER(min, max)`;
   - `ENUM(values)`;
@@ -1903,7 +1903,7 @@ reproducible on its original pins. Rules, modules and assumption sets can be bro
   - *Done-when:* `test_rules.py` (new, the phase's one test) loops over valid and invalid
     parameter sets for each kind, and every invalid one gets 422 `invalid_parameters` with a
     value-free message.
-- [ ] **BE-16.2** `GET /rules` and `GET /rules/{rule_id}` (versions, status, author,
+- [x] **BE-16.2** `GET /rules` and `GET /rules/{rule_id}` (versions, status, author,
   approver, and the runs that pin each version). Also:
   - `POST /rules/{rule_id}/versions`: a DRAFT copied from the ACTIVE version plus a
     parameter patch; `no_change` is refused;
@@ -1919,7 +1919,7 @@ reproducible on its original pins. Rules, modules and assumption sets can be bro
     - DRAFT → ACTIVE without submit is refused;
     - the switch-off 409;
     - the WS1 audit-completeness test lists the three POST routes.
-- [ ] **BE-16.3** Pinning across rule changes. A run submitted after an approval pins the
+- [x] **BE-16.3** Pinning across rule changes. A run submitted after an approval pins the
   new version, in a new `rule_set`. `POST /calculation-runs` with `rerun_of: run_id`
   re-executes on the original run's exact pins, even when they are SUPERSEDED. The new run
   records `rerun_of`.
@@ -1927,12 +1927,12 @@ reproducible on its original pins. Rules, modules and assumption sets can be bro
     - the new run differs in `rule_set_id` and `result_sha256`;
     - the old run's rows are unchanged (row hash before and after);
     - a re-run of the old run has the old run's `manifest_sha256` and `result_sha256`.
-- [ ] **BE-16.4** `GET /assumption-sets` and `GET /assumption-sets/{assumption_set_id}`
+- [x] **BE-16.4** `GET /assumption-sets` and `GET /assumption-sets/{assumption_set_id}`
   (versions, provenance, owner, effective dates, status). They are read-only in this
   feature; authoring is deferred.
   - *Done-when:* the WS1 matrix lists both with 2xx for every role, and the run manifest's
     `assumption_set_id` resolves through the detail route.
-- [ ] **FE-16.1** Registry pages under `/domain`:
+- [x] **FE-16.1** Registry pages under `/domain`:
   - rules: list and detail, with a version history, a parameter diff between versions, and
     "used by N runs";
   - modules: AVAILABLE and PLANNED shown distinctly, never as ready;
@@ -1940,7 +1940,7 @@ reproducible on its original pins. Rules, modules and assumption sets can be bro
   - *Done-when:* a Playwright test opens the seeded `maturity_buckets` rule and sees its
     ILLUSTRATIVE badge and version history; a vitest snapshot shows the PLANNED-module
     rendering.
-- [ ] **FE-16.2** Propose → submit → approve flow for a rule version: a typed parameter
+- [x] **FE-16.2** Propose → submit → approve flow for a rule version: a typed parameter
   editor per kind, with client-side checks mirroring BE-16.1 (cosmetic only). The approval
   dialog has a required comment, and the approve button is hidden from the author.
   - *Done-when:*
@@ -1950,6 +1950,10 @@ reproducible on its original pins. Rules, modules and assumption sets can be bro
       version;
     - the author sees no Approve button and gets a backend 409 `self_approval` on a direct
       POST.
+  - *As built:* the author's own role (`risk_analyst`) has no `rule:approve`, so the
+    author's direct POST gets 403 `forbidden` first. The spec asserts that, and that the version
+    stays IN_REVIEW. The 409 `self_approval` path (a user who holds both roles) is asserted in
+    `test_rules.py`.
 
 *Test budget:* 47 → 48 (+`test_rules.py`).
 *Reversibility:* no new tables beyond Phase 15. If a lifecycle trigger is needed, it ships as

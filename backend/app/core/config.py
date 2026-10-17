@@ -109,6 +109,10 @@ class Settings(BaseSettings):
     # A run still RUNNING this many seconds after it started is presumed stopped: a replay of
     # its Idempotency-Key ends it FAILED (ENGINE_ERROR) and returns it.
     CALC_RUN_STALE_SECONDS: int = 900
+    # Phase 16 (FC-07, D-32 §3, D-02): governed rule changes (propose, submit, approve or
+    # reject a rule version). Off freezes the rules at their ACTIVE versions: the writes
+    # answer 409 rule_change_disabled (audited); reads and runs keep working.
+    RULE_CHANGE_ENABLED: bool = True
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
 
     # D-15: root of the write-once raw artifact store. Required outside local/test (D-13);

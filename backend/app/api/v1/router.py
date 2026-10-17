@@ -16,6 +16,7 @@ from app.governance import router as governance
 from app.ingestion import router as ingestion
 from app.mapping import router as mapping
 from app.reconciliation import router as reconciliation
+from app.rules import assumptions_router
 from app.rules import router as rules
 
 
@@ -29,6 +30,7 @@ def build_api_router(settings: Settings) -> APIRouter:
     api_router.include_router(reconciliation.router)
     api_router.include_router(domain.router)
     api_router.include_router(rules.router)
+    api_router.include_router(assumptions_router.router)
     api_router.include_router(calculations.router)
     if settings.dev_sessions_enabled:
         api_router.include_router(governance.dev_router)

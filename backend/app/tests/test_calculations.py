@@ -44,7 +44,7 @@ from collections.abc import Sequence
 from datetime import date, timedelta
 from decimal import Decimal, Inexact, Rounded, localcontext
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import asyncpg
@@ -61,6 +61,7 @@ from app.calculations.constants import (
     CalculationWarningCode,
     InputRefType,
     IntermediateCode,
+    PostCheck,
     WarningSeverity,
 )
 from app.calculations.modules import REGISTRY, maturity_ladder
@@ -71,6 +72,7 @@ from app.calculations.modules.base import (
     PinnedRule,
     RegisteredModule,
 )
+from app.calculations.service import ladder_classes, reproduce, result_document
 from app.core.config import Settings
 from app.core.decimals import exact_context
 from app.domain.constants import CashflowOrigin, DomainSchemaCode
@@ -92,12 +94,13 @@ from app.rules.constants import (
     RuleCategory,
     RuleVersionStatus,
 )
-from app.rules.service import canonical_sha256
+from app.rules.service import canonical_sha256, check_parameters, exact_json
 from app.tests.conftest import alembic_config, clean, dev_token, sql
 from app.tests.helpers import (
     IMPORTS,
     MAPPINGS,
     MODULES,
+    RULES,
     RUNS,
     SNAPSHOTS,
     SOURCES,
@@ -109,6 +112,7 @@ from app.tests.helpers import (
     module_version_id,
     mrule,
     project,
+    rule_id,
     sample_rules,
     source_body,
     start_run,
@@ -926,6 +930,137 @@ def test_registry_snapshot_run_and_maturity_ladder(
     with TestClient(create_app(unthresholded)) as plain:
         seen = plain.get(f"{RUNS}/{run_id}/maturity-ladder", headers=analyst).json()
         assert seen["currencies"] == ladder["currencies"] and seen["min_aggregate_count"] == 1
+    # D-33, Phase 15 open item: a cumulative gap of exactly zero after a masked net gap stays
+    # masked (masked wins over "zeros stay clear": a clear zero would reveal that the masked
+    # amounts cancel). Only a figure with no contribution at all stays clear.
+    rows = [
+        SimpleNamespace(
+            id=uuid.uuid4(), currency="EUR", bucket_sequence=i, classification="internal"
+        )
+        for i in (1, 2, 3)
+    ]
+    parts = [
+        (rows[0].id, "INFLOW", "CONTRACTUAL", "confidential", 1),  # +100.00
+        (rows[1].id, "OUTFLOW", "CONTRACTUAL", "confidential", 1),  # -100.00: cumulative 0
+    ]
+    classes = ladder_classes(rows, parts, 3)
+    assert [classes[r.id]["cumulative_gap"] for r in rows] == ["confidential"] * 3
+    assert classes[rows[2].id]["net_gap"] == classes[rows[2].id]["inflows"] == "internal"
+
+    # --- Phase 16 (BE-16.3): pinning across a rule change, and re-runs --------------------------
+    def run_rows(run: str) -> str:
+        """A hash of a run's row and every output row (to prove they never change)."""
+        found = [sql(db, "SELECT * FROM calculation_run WHERE id = $1", uuid.UUID(run))]
+        found += [
+            sql(
+                db,
+                f"SELECT * FROM {t} WHERE calculation_run_id = $1 ORDER BY sequence",
+                uuid.UUID(run),
+            )
+            for t in OUTPUT_TABLES
+        ]
+        return hashlib.sha256(repr(found).encode()).hexdigest()
+
+    old_rows = run_rows(run_id)
+    bucket_rule = f"{RULES}/{rule_id(db, MATURITY_BUCKETS)}"
+    new_buckets = [
+        {"code": "B01", "lower_exclusive": -1, "upper_inclusive": 7},  # day 0 included
+        {"code": "B02", "lower_exclusive": 7, "upper_inclusive": None},
+    ]
+    r = api.post(
+        f"{bucket_rule}/versions",
+        json={"parameters_patch": {"buckets": new_buckets}, "change_summary": "Two buckets."},
+        headers=analyst,
+    )
+    assert r.status_code == 201 and r.json()["status"] == "DRAFT", r.text
+    proposed = r.json()
+    assert proposed["parameters"]["buckets"][1]["label"] == "(7,inf)"  # derived from the bounds
+    number = proposed["version"]
+    r = api.post(f"{bucket_rule}/versions/{number}/submit", json={}, headers=analyst)
+    assert r.status_code == 200 and r.json()["status"] == "IN_REVIEW", r.text
+    # D-32 §5: materialised in the submit transaction, while the version was still DRAFT.
+    assert [
+        (b["code"], b["lower_exclusive_days"], b["upper_inclusive_days"])
+        for b in sql(
+            db,
+            "SELECT * FROM maturity_bucket_definition WHERE rule_version_id = $1 ORDER BY sequence",
+            uuid.UUID(proposed["rule_version_id"]),
+        )
+    ] == [("B01", -1, 7), ("B02", 7, None)]
+    r = api.post(
+        f"{bucket_rule}/versions/{number}/approval",
+        json={"decision": "APPROVE", "comment": "Engineering check."},
+        headers=approver,
+    )
+    assert r.status_code == 200 and r.json()["status"] == "ACTIVE", r.text
+    changed = no_float(start_run(api, analyst, body).text)
+    assert changed["status"] == "SUCCEEDED_WITH_WARNINGS", changed
+    assert changed["rule_set_id"] != run["rule_set_id"]
+    assert changed["result_sha256"] != run["result_sha256"]
+    pinned_buckets = [
+        m["rule_version_id"]
+        for m in changed["manifest"]["rule_set"]["members"]
+        if m["rule_code"] == MATURITY_BUCKETS
+    ]
+    assert pinned_buckets == [proposed["rule_version_id"]]
+    # A re-run of the old run pins its original (now SUPERSEDED) versions and reproduces it.
+    c = cid()
+    rerun = start_run(api, analyst, {"rerun_of": run_id}, **{"X-Correlation-ID": c})
+    assert rerun.status_code == 201, rerun.text
+    again = no_float(rerun.text)
+    assert again["run_id"] not in (run_id, changed["run_id"])
+    assert again["rerun_of_run_id"] == run_id
+    assert {"check": "RERUN_REPRODUCED", "passed": True} in again["outcome"]["post_checks"]
+    for key in ("manifest_sha256", "result_sha256", "rule_set_id", "assumption_set_id", "status"):
+        assert again[key] == run[key], key
+    assert [(e["action"], e["outcome"]) for e in events(db, c)] == [
+        ("calculation_run.create", "SUCCESS"),
+        ("calculation_run.finish", "SUCCESS"),
+    ]
+    assert run_rows(run_id) == old_rows  # the old run's rows never change
+    # A re-run that does not reproduce its original's result_sha256 ends FAILED with no
+    # result (D-31 §5): the finish helper, with a tampered expected hash.
+    ok = CalculationRunStatus.SUCCEEDED
+    same = canonical_sha256(result_document(ok, [], [], []))
+    assert reproduce(same, ok, (), (), [], {})[0] == ok
+    verdict, gap, kept, found, checks, sha = reproduce("0" * 64, ok, (), (), [], {})
+    assert (verdict, gap, kept, checks) == (
+        CalculationRunStatus.FAILED,
+        [],
+        [],
+        {PostCheck.RERUN_REPRODUCED: False},
+    )
+    assert [(w.code, dict(w.details)) for w in found] == [
+        (CalculationWarningCode.POST_CHECK_FAILED, {"check": "RERUN_REPRODUCED"})
+    ]
+    assert sha == canonical_sha256(result_document(verdict, [], [], found)) != same
+    c = cid()
+    r = start_run(api, analyst, {"rerun_of": str(uuid.uuid4())}, **{"X-Correlation-ID": c})
+    assert (r.status_code, r.json()["code"]) == (404, "not_found")
+    denied(db, c, "calculation_run.create", "not_found")
+    r = start_run(api, analyst, {"rerun_of": run_id, "reporting_date": "2026-12-31"})
+    assert (r.status_code, r.json()["code"]) == (422, "validation_error")
+    # Carry-over (JSONB decimals): a JSON fraction never reaches a rule parameter. It is
+    # refused on the way in (decimals are exact text) and none is stored.
+    for patch in ({"buckets": [{"code": "B01", "lower_exclusive": 0.5, "upper_inclusive": None}]},):
+        r = api.post(
+            f"{bucket_rule}/versions",
+            json={"parameters_patch": patch, "change_summary": "x"},
+            headers=analyst,
+        )
+        assert (r.status_code, r.json()["code"]) == (422, "invalid_parameters"), r.text
+        assert r.json()["details"]["problems"] == [
+            {"path": "buckets[0].lower_exclusive", "code": "inexact_number"}
+        ]
+    decimal_schema = {"kind": "DECIMAL", "min": "0", "max": "1", "scale": 4}
+    assert check_parameters(decimal_schema, {"value": 0.1}, frozenset())[1]
+    assert check_parameters(decimal_schema, {"value": "0.1"}, frozenset()) == (
+        {"value": "0.1000"},
+        [],
+    )
+    assert not exact_json({"map": {"LOAN": 0.5}}) and exact_json({"value": "0.5"})
+    for stored in sql(db, "SELECT parameters::text AS p FROM rule_version"):
+        assert exact_json(no_float(stored["p"]))
 
     # --- 6. Guards (BE-15.1, BE-15.2) ----------------------------------------------------------
     bucket_version = uuid.UUID(seeded_versions[MATURITY_BUCKETS])
@@ -965,12 +1100,12 @@ def test_registry_snapshot_run_and_maturity_ladder(
 
     # A new version is DRAFT; it is editable only while DRAFT; at most one ACTIVE (DB).
     with pytest.raises(IMMUTABLE, match="is DRAFT"):
-        sql(db, copy("rule_version", "'version', 2, 'seeded_by', NULL", "id = $1"), bucket_version)
+        sql(db, copy("rule_version", "'version', 9, 'seeded_by', NULL", "id = $1"), bucket_version)
     draft = sql(
         db,
         copy(
             "rule_version",
-            "'version', 2, 'status', 'DRAFT', 'seeded_by', NULL, 'approved_by', NULL,"
+            "'version', 9, 'status', 'DRAFT', 'seeded_by', NULL, 'approved_by', NULL,"
             " 'approved_at', NULL, 'decision_comment', NULL",
             "id = $1",
         ),
@@ -1017,6 +1152,11 @@ def test_registry_snapshot_run_and_maturity_ladder(
         " GROUP BY rule_definition_id",
     )
     assert [a["n"] for a in actives] == [1, 1, 1]
+    # One ACTIVE bucket version: the approved one; the seeded one is SUPERSEDED, never deleted.
+    assert (
+        sql(db, "SELECT status FROM rule_version WHERE id = $1", bucket_version)[0]["status"]
+        == "SUPERSEDED"
+    )
 
     # A finished run refuses any change, and any new output row; nothing is ever deleted.
     run_uuid = uuid.UUID(run_id)

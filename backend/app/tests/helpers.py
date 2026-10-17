@@ -443,3 +443,13 @@ def blocked_run(api: TestClient, import_id: str) -> dict[str, Any]:
     run = start_run(api, analyst, body)
     assert run.status_code == 201, run.text
     return {"snapshot_id": r.json()["snapshot_id"], "run_id": run.json()["run_id"]}
+
+
+# --- Phase 16: rules and governed rule changes (D-32) ------------------------------------------
+
+RULES = "/api/v1/rules"
+
+
+def rule_id(db: str, code: str) -> str:
+    """The id of a rule definition of the default tenant, by code."""
+    return str(sql(db, "SELECT id FROM rule_definition WHERE code = $1", code)[0]["id"])

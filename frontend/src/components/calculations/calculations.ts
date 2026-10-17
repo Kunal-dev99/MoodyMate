@@ -116,6 +116,7 @@ export const POST_CHECK_TEXT: Record<PostCheck, string> = {
   BUCKET_DEFINED: 'Every contribution lands in a pinned bucket.',
   BUCKET_TOTALS: 'Every bucket total equals the sum of its contributions.',
   CUMULATIVE_GAP: 'The cumulative gap is the running sum of the net gaps.',
+  RERUN_REPRODUCED: 'A re-run reproduces the original run\'s result hash on the original pins.',
 }
 
 export const INPUT_REF_TEXT: Record<InputRefType, string> = {
