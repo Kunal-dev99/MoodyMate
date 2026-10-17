@@ -239,6 +239,7 @@ def test_quarantine_masking_dispositions_and_retry(api: TestClient, db: str) -> 
     )
     actions = sorted(e["action"] for e in events(db, c))
     assert actions == [
+        "import.reconcile",  # Phase 12: written with the validation
         "import.validate",
         "quarantine.correct",
         "quarantine.correct",

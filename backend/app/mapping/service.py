@@ -1,6 +1,7 @@
 """mapping.service
 
-The versioned mapping workbench (BE-10.3 – BE-10.5, DI-03, D-18, D-19).
+The versioned mapping workbench (BE-10.3 – BE-10.5, DI-03, D-18, D-19), and drift
+detection and review (BE-12.3, BE-12.4, DI-06) at the end of this module.
 
 - A mapping maps one source contract to that contract's target schema. Each version pins
   the target's ACTIVE schema version when it is created and is immutable once it leaves
@@ -22,6 +23,8 @@ import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from decimal import Context as DecimalContext
+from decimal import Decimal, Inexact, InvalidOperation, Rounded, localcontext
 from typing import Any, NoReturn
 
 from sqlalchemy.exc import IntegrityError
@@ -40,11 +43,15 @@ from app.governance.constants import (
 from app.governance.models import SchemaDefinition, SchemaVersion
 from app.governance.service import SchemaService, audit_by, effective_version, record_denial
 from app.ingestion.constants import ContractStatus
-from app.ingestion.models import ImportJob, SourceContract
-from app.ingestion.service import ImportService, SourceService
+from app.ingestion.models import DataProfileSnapshot, ImportJob, SourceContract
+from app.ingestion.service import DriftThresholds, ImportService, SourceService
 from app.mapping.constants import (
+    DRIFT_DETECTOR_VERSION,
+    DRIFT_TRANSITIONS,
     MAPPING_VERSION_TRANSITIONS,
     ColumnPolicy,
+    DriftStatus,
+    DriftType,
     IssueCode,
     IssueSeverity,
     MappingVersionStatus,
@@ -53,8 +60,14 @@ from app.mapping.constants import (
     TransformCode,
     ValidationOutcome,
 )
-from app.mapping.models import FieldMapping, MappingRule, MappingValidation, MappingVersion
-from app.mapping.repository import MappingRepository
+from app.mapping.models import (
+    DataDriftEvent,
+    FieldMapping,
+    MappingRule,
+    MappingValidation,
+    MappingVersion,
+)
+from app.mapping.repository import DriftRepository, MappingRepository
 from app.mapping.transforms import (
     COMPATIBLE,
     TargetField,
@@ -1188,3 +1201,293 @@ def _rank(code: str) -> int:
 
 def _duplicate(code: str) -> ApiError:
     return ApiError(409, Refusal.DUPLICATE_CODE, "A mapping with this code exists.", {"code": code})
+
+
+# --- Phase 12: drift detection and review (BE-12.3, BE-12.4, DI-06) ------------------------------
+#
+# Detection is a pure, deterministic comparison of two stored profiles (BE-9.2): the new
+# import's and its baseline's (the latest COMPLETED or COMPLETED_WITH_WARNINGS import of the
+# same source). It writes OPEN events for a person to review and changes nothing else: no
+# schema, contract or mapping (Arch §6.1 step 7). Decimal only, never float.
+
+DETECT_DRIFT = "import.drift_detect"  # audited with the profile it compares
+REVIEW_DRIFT = "drift_event.review"  # a reviewer's decision; refusals under the same action
+# The Phase 5 new-proposal page (frontend/src/app/(platform)/schemas/proposals/new), with the
+# import's target schema prefilled: the only follow-up ACTION_REQUIRED points to.
+PROPOSAL_PAGE = "/schemas/proposals/new"
+_DRIFT_EXACT = DecimalContext(prec=100_000, traps=[Inexact, Rounded, InvalidOperation])
+# The profile statistics a drift summary keeps (never top values). `min` and `max` are data
+# and are masked by the column's classification on read, as on the profile (BE-9.3).
+SUMMARY_KEYS = (
+    "position",
+    "value_count",
+    "null_count",
+    "null_rate",
+    "distinct_count",
+    "candidate_types",
+    "min",
+    "max",
+)
+
+
+def drift_summary(column: Mapping[str, Any]) -> dict[str, Any]:
+    """The statistics of one profiled column that a drift event keeps."""
+    summary = {key: column.get(key) for key in SUMMARY_KEYS}
+    types = column.get("candidate_types") or []
+    summary["suggested_type"] = types[0] if types else None
+    return summary
+
+
+def _null_rate(column: Mapping[str, Any]) -> Decimal | None:
+    rate = column.get("null_rate")
+    return Decimal(rate) if isinstance(rate, str) else None
+
+
+def _numeric_range(column: Mapping[str, Any]) -> tuple[Decimal, Decimal] | None:
+    """A numeric column's (min, max); None when the column is not numeric throughout."""
+    if FieldType.DECIMAL.value not in (column.get("candidate_types") or []):
+        return None
+    low, high = column.get("min"), column.get("max")
+    if not isinstance(low, str) or not isinstance(high, str):
+        return None
+    try:
+        return Decimal(low), Decimal(high)
+    except InvalidOperation:
+        return None
+
+
+@dataclass(frozen=True)
+class DriftFinding:
+    """One drift event before it has ids."""
+
+    drift_type: DriftType
+    column: str
+    observed: dict[str, Any] | None
+    baseline: dict[str, Any] | None
+
+
+def detect_drift(
+    observed: Sequence[Mapping[str, Any]],
+    baseline: Sequence[Mapping[str, Any]],
+    null_rate_threshold: Decimal,
+    range_threshold: Decimal,
+) -> list[DriftFinding]:
+    """Compare two profiles' columns (BE-12.3), in the observed file order, then the removed
+    columns in the baseline's order:
+
+    - COLUMN_ADDED / COLUMN_REMOVED: a column only one side has (exact name);
+    - TYPE_CHANGED: the suggested (most specific) type differs, both sides having values;
+    - NULL_RATE_SHIFT: the null rate moved by more than `null_rate_threshold`;
+    - RANGE_SHIFT: a numeric column's min or max lies beyond the baseline's by more than
+      `range_threshold` x the baseline's range (x |baseline max| when the range is zero)."""
+    before = {str(c["name"]): c for c in baseline}
+    after = {str(c["name"]): c for c in observed}
+    found: list[DriftFinding] = []
+    with localcontext(_DRIFT_EXACT):
+        for name, column in after.items():
+            old = before.get(name)
+            if old is None:
+                found.append(
+                    DriftFinding(DriftType.COLUMN_ADDED, name, drift_summary(column), None)
+                )
+                continue
+            now, then = drift_summary(column), drift_summary(old)
+            if now["suggested_type"] and then["suggested_type"]:
+                if now["suggested_type"] != then["suggested_type"]:
+                    found.append(DriftFinding(DriftType.TYPE_CHANGED, name, now, then))
+            rate_now, rate_then = _null_rate(column), _null_rate(old)
+            if rate_now is not None and rate_then is not None:
+                if (rate_now - rate_then).copy_abs() > null_rate_threshold:
+                    found.append(DriftFinding(DriftType.NULL_RATE_SHIFT, name, now, then))
+            range_now, range_then = _numeric_range(column), _numeric_range(old)
+            if range_now is not None and range_then is not None:
+                low, high = range_then
+                span = high - low if high != low else high.copy_abs()
+                margin = range_threshold * span
+                if range_now[0] < low - margin or range_now[1] > high + margin:
+                    found.append(DriftFinding(DriftType.RANGE_SHIFT, name, now, then))
+        for name, column in before.items():
+            if name not in after:
+                found.append(
+                    DriftFinding(DriftType.COLUMN_REMOVED, name, None, drift_summary(column))
+                )
+    return found
+
+
+# The detector's parts, for the test that proves it holds no float (BE-12.3).
+DRIFT_PARTS = ("drift_summary", "_null_rate", "_numeric_range", "detect_drift")
+
+
+@dataclass(frozen=True)
+class DriftView:
+    """An import's drift events with what masking and the follow-up link need."""
+
+    job: ImportJob
+    events: list[DataDriftEvent]
+    classifications: dict[str, str]  # column -> classification of its mapped field
+    default_classification: str
+    schema_id: uuid.UUID  # the import's target schema (the proposal page's prefill)
+
+    def classification(self, column: str) -> str:
+        """BE-9.3: the mapped field's classification, else the source profile's default."""
+        return self.classifications.get(column, self.default_classification)
+
+    def proposal_href(self) -> str:
+        return f"{PROPOSAL_PAGE}?schema={self.schema_id}"
+
+
+class DriftService:
+    """Detect drift after profiling (BE-12.3) and record a person's review (BE-12.4).
+    Nothing here changes a schema, a contract or a mapping."""
+
+    def __init__(self, session: AsyncSession, principal: Principal) -> None:
+        self.session = session
+        self.principal = principal
+        self.repo = DriftRepository(session, principal.scope)
+        self.imports = ImportService(session, principal)
+
+    async def detect(
+        self, job: ImportJob, snapshot: DataProfileSnapshot, thresholds: DriftThresholds
+    ) -> list[DriftFinding]:
+        """Compare a new profile with the source's baseline, in the profiling transaction
+        (the caller commits), audited `import.drift_detect` with the baseline, counts and
+        types only. A first import has no baseline: nothing is compared or written."""
+        found = await self.imports.drift_baseline(job)
+        if found is None:
+            return []
+        baseline, base_snapshot = found
+        findings = await run_in_threadpool(
+            detect_drift,
+            snapshot.columns,
+            base_snapshot.columns,
+            thresholds.null_rate,
+            thresholds.range_share,
+        )
+        applied = {
+            "null_rate_threshold": format(thresholds.null_rate, "f"),
+            "range_threshold": format(thresholds.range_share, "f"),
+            "provisional": True,
+        }
+        await self.repo.insert_events(
+            [
+                {
+                    "id": uuid.uuid4(),
+                    "tenant_id": job.tenant_id,
+                    "import_job_id": job.id,
+                    "sequence": position,
+                    "baseline_import_id": baseline.id,
+                    "observed_snapshot_id": snapshot.id,
+                    "baseline_snapshot_id": base_snapshot.id,
+                    "drift_type": f.drift_type.value,
+                    "column_name": f.column,
+                    "observed_summary": f.observed,
+                    "baseline_summary": f.baseline,
+                    "thresholds": applied,
+                    "detector_version": DRIFT_DETECTOR_VERSION,
+                    "status": DriftStatus.OPEN.value,
+                    "created_by": self.principal.actor,
+                }
+                for position, f in enumerate(findings, start=1)
+            ]
+        )
+        types: dict[str, int] = {}
+        for f in findings:
+            types[f.drift_type.value] = types.get(f.drift_type.value, 0) + 1
+        details: dict[str, Any] = {
+            "baseline_import_id": str(baseline.id),
+            "event_count": len(findings),
+            "drift_types": dict(sorted(types.items())),
+            "detector_version": DRIFT_DETECTOR_VERSION,
+        }
+        audit_by(
+            self.session,
+            self.principal,
+            DETECT_DRIFT,
+            "import_job",
+            resource_id=str(job.id),
+            details=details,
+            details_classification=_public(*details),
+        )
+        return findings
+
+    async def _view(self, job: ImportJob, events: list[DataDriftEvent]) -> DriftView:
+        source, contract = await self.sources.get_contract(job.source_contract_id)
+        return DriftView(
+            job=job,
+            events=events,
+            classifications=await self.imports.mapped_classifications(job),
+            default_classification=source.profiles[0].default_classification,
+            schema_id=contract.schema_id,
+        )
+
+    @property
+    def sources(self) -> SourceService:
+        return self.imports.sources
+
+    async def view(self, import_id: uuid.UUID) -> DriftView:
+        """An import's drift events (GET /imports/{id}/drift); 404 alike for an absent and
+        a foreign import (D-04)."""
+        job = await self.imports.get(import_id)
+        return await self._view(job, await self.repo.for_import(job.id))
+
+    async def _refuse(self, resource_id: uuid.UUID, error: ApiError) -> NoReturn:
+        await record_denial(
+            self.session,
+            self.principal,
+            REVIEW_DRIFT,
+            "data_drift_event",
+            str(resource_id),
+            error.code,
+        )
+        raise error
+
+    async def review(
+        self, event_id: uuid.UUID, outcome: DriftStatus, comment: str
+    ) -> tuple[DriftView, DataDriftEvent]:
+        """A person's review (BE-12.4): OPEN -> ACKNOWLEDGED | ACTION_REQUIRED, once, with
+        the reviewer, the comment and the time, audited `drift_event.review`. A second
+        review is 409 `already_reviewed` (audited). ACTION_REQUIRED creates nothing: the
+        response points to the Phase 5 proposal page."""
+        event = await self.repo.lock(event_id)
+        if event is None:
+            # Absent and foreign look alike (D-04); the requested id is audited.
+            await self._refuse(event_id, ApiError(404, "not_found", "Drift event not found."))
+        current = DriftStatus(event.status)
+        if outcome not in DRIFT_TRANSITIONS[current]:
+            await self._refuse(
+                event.id,
+                ApiError(
+                    409,
+                    "already_reviewed",
+                    f"This drift event was reviewed already ({current}); a review is final.",
+                    {"status": current.value},
+                ),
+            )
+        event.status = outcome
+        event.reviewed_by = self.principal.actor
+        event.review_comment = comment
+        event.reviewed_at = datetime.now(UTC)
+        await self.repo.flush()
+        details: dict[str, Any] = {
+            "import_id": str(event.import_job_id),
+            "drift_type": event.drift_type,
+            "from": current.value,
+            "to": outcome.value,
+            "comment": comment,
+        }
+        audit_by(
+            self.session,
+            self.principal,
+            REVIEW_DRIFT,
+            "data_drift_event",
+            resource_id=str(event.id),
+            details=details,
+            details_classification={
+                **_public("import_id", "drift_type", "from", "to"),
+                "comment": ClassificationCode.INTERNAL,
+            },
+        )
+        await self.session.commit()
+        job = await self.imports.get(event.import_job_id)
+        events = await self.repo.for_import(job.id)
+        return await self._view(job, events), next(e for e in events if e.id == event_id)

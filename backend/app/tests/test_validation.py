@@ -208,13 +208,16 @@ def test_validation_tables_are_guarded_in_the_database(api: TestClient, db: str)
             seeded["id"],
         )
 
-    # The downgrade refuses while results exist, and changes nothing.
+    # The downgrade refuses while results exist, and changes nothing. (Since Phase 12 a
+    # validated import also has a reconciliation run, so 0016 refuses first; the 0015
+    # refusal itself is checked in test_reconciliation once the Phase 12 rows are gone.)
     tables = ("canonical_record", "quarantine_item", "validation_issue", "import_manifest")
     before = {t: sql(db, f"SELECT count(*) AS n FROM {t}")[0]["n"] for t in tables}
+    head = sql(db, "SELECT version_num FROM alembic_version")[0]["version_num"]
     try:
-        with pytest.raises(Exception, match="validation results exist"):
+        with pytest.raises(Exception, match=r"they are kept \(D-20\), so this downgrade"):
             command.downgrade(alembic_config(db), "0014")
-        assert sql(db, "SELECT version_num FROM alembic_version")[0]["version_num"] == "0015"
+        assert sql(db, "SELECT version_num FROM alembic_version")[0]["version_num"] == head
         assert {t: sql(db, f"SELECT count(*) AS n FROM {t}")[0]["n"] for t in tables} == before
     finally:
         command.upgrade(alembic_config(db), "head")
@@ -447,8 +450,11 @@ def test_validate_statuses_issues_and_identical_payloads(api: TestClient, db: st
         assert stored["items"] == quality["quarantined_records"] + quality["rejected_records"]
         listed = api.get(f"{IMPORTS}/{imported['id']}/issues", headers=steward).json()
         assert listed["total"] == issues, fixture
-        [event] = events(db, c)
-        assert (event["action"], event["outcome"]) == ("import.validate", "SUCCESS")
+        # Phase 12: validation also records its reconciliation, in the same transaction.
+        assert sorted((e["action"], e["outcome"]) for e in events(db, c)) == [
+            ("import.reconcile", "SUCCESS"),
+            ("import.validate", "SUCCESS"),
+        ]
         if status == "FAILED":  # a file-level BLOCKER: nothing accepted, every row held
             assert quality["rejected_records"] == 25 and stored["canonical"] == 0
             assert listed["items"][0]["code"] == "REQUIRED_COLUMN_MISSING"

@@ -10,6 +10,7 @@ never inside the repository; upload bounds (D-16) may be lowered, never raised.
 """
 
 import tempfile
+from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -77,6 +78,18 @@ class Settings(BaseSettings):
     # Off freezes mappings at their ACTIVE versions: writes answer 409
     # mapping_change_disabled (audited), reads and imports using ACTIVE versions still work.
     MAPPING_CHANGE_ENABLED: bool = True
+    # Phase 12 (DI-05): the absolute tolerance of control-total reconciliation items,
+    # PROVISIONAL until the client sets one (Decimal, never float). Row counts always have
+    # zero tolerance. Reconciliation is a control: it has no off switch.
+    RECONCILIATION_TOLERANCE: Decimal = Decimal("0")
+    # Phase 12 (DI-06, D-02): compare each new profile with the source's baseline and raise
+    # drift events. Off stops new events; existing ones stay readable and reviewable.
+    DRIFT_DETECTION_ENABLED: bool = True
+    # PROVISIONAL thresholds: a null rate moving by more than this (0..1) is a
+    # NULL_RATE_SHIFT; a numeric min or max beyond the baseline's by more than this share of
+    # the baseline's range is a RANGE_SHIFT.
+    DRIFT_NULL_RATE_THRESHOLD: Decimal = Decimal("0.10")
+    DRIFT_RANGE_THRESHOLD: Decimal = Decimal("0.25")
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
 
     # D-15: root of the write-once raw artifact store. Required outside local/test (D-13);
@@ -137,6 +150,7 @@ class Settings(BaseSettings):
         if self.DATA_CLASS == "client" and self.ENV != "production":  # D-14
             raise ValueError(f"DATA_CLASS=client is not allowed when ENV={self.ENV}")
         self._guard_imports()
+        self._guard_quality()
         return self
 
     def _guard_imports(self) -> None:
@@ -155,6 +169,19 @@ class Settings(BaseSettings):
                 raise ValueError(f"{name} must be at least 1")
             if value > ceiling:
                 raise ValueError(f"{name} may only lower the hard ceiling ({ceiling})")
+
+    def _guard_quality(self) -> None:
+        """Phase 12 thresholds: finite, not negative; a null-rate threshold is a rate."""
+        for name in (
+            "RECONCILIATION_TOLERANCE",
+            "DRIFT_NULL_RATE_THRESHOLD",
+            "DRIFT_RANGE_THRESHOLD",
+        ):
+            value: Decimal = getattr(self, name)
+            if not value.is_finite() or value < 0:
+                raise ValueError(f"{name} must be a finite decimal of at least 0")
+        if self.DRIFT_NULL_RATE_THRESHOLD > 1:
+            raise ValueError("DRIFT_NULL_RATE_THRESHOLD must be at most 1")
 
     @property
     def artifact_store_dir(self) -> Path:

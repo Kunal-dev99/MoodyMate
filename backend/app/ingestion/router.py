@@ -82,6 +82,7 @@ from app.ingestion.schemas import (
 )
 from app.ingestion.service import (
     ContractSpec,
+    DriftThresholds,
     ImportLabels,
     ImportPolicy,
     ImportService,
@@ -403,6 +404,13 @@ def limits_from(settings: Settings) -> Limits:
     )
 
 
+def drift_thresholds(settings: Settings) -> DriftThresholds | None:
+    """BE-12.3: the PROVISIONAL thresholds, or None while DRIFT_DETECTION_ENABLED is off."""
+    if not settings.DRIFT_DETECTION_ENABLED:
+        return None
+    return DriftThresholds(settings.DRIFT_NULL_RATE_THRESHOLD, settings.DRIFT_RANGE_THRESHOLD)
+
+
 def _import_fields(job: ImportJob, labels: ImportLabels, principal: Principal) -> ImportSummary:
     artifact = job.artifact
     schema = labels.schema_versions.get(job.schema_version_id)
@@ -543,6 +551,7 @@ async def create_import(
             limits,
             request.app.state.artifact_store,
             settings.IMPORT_PROFILING_ENABLED,
+            drift_thresholds(settings),
         ),
     )
     if not created:
@@ -667,15 +676,21 @@ async def get_import_profile(
     "/imports/{import_id}/validate", response_model=ImportDetail, operation_id="validateImport"
 )
 async def validate_import(
-    import_id: uuid.UUID, principal: ImportWriter, session: SessionDep, _: IngestionEnabled
+    request: Request,
+    import_id: uuid.UUID,
+    principal: ImportWriter,
+    session: SessionDep,
+    _: IngestionEnabled,
 ) -> ImportDetail:
     """Validate the import with its usable ACTIVE mapping version, once (D-21): it is pinned,
     every row is accepted (a canonical record), quarantined or rejected, and the import ends
     COMPLETED, COMPLETED_WITH_WARNINGS, QUARANTINED or FAILED (a file-level BLOCKER: no row
     accepted). 409 `mapping_required` without a usable mapping version, 409
-    `already_validated` on a second call: a re-run is a new import."""
+    `already_validated` on a second call: a re-run is a new import. The import is
+    reconciled in the same transaction (BE-12.2, GET /imports/{import_id}/reconciliation)."""
+    settings: Settings = request.app.state.settings
     service = ImportService(session, principal)
-    job = await service.validate(import_id)
+    job = await service.validate(import_id, settings.RECONCILIATION_TOLERANCE)
     return _import_detail(job, await service.labels([job]), principal, await service.manifest(job))
 
 

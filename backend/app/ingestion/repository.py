@@ -7,13 +7,16 @@ in the caller's tenant; artifacts, batches and records only through an import jo
 
 import uuid
 from collections.abc import AsyncIterator, Sequence
+from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import Row, Select, exists, func, insert, or_, select, tuple_
+from sqlalchemy import Numeric, Row, Select, case, cast, exists, func, insert, or_, select, tuple_
 
 from app.db.base import Base
 from app.db.repository import ScopedRepository
+from app.ingestion.constants import ImportStatus
 from app.ingestion.models import (
+    CanonicalRecord,
     DataProfileSnapshot,
     ImportBatch,
     ImportJob,
@@ -26,6 +29,16 @@ from app.ingestion.models import (
     ValidationIssue,
     ValidationProfile,
 )
+
+# BE-12.2: a control-total value is "parseable" when, spaces trimmed, it is plain decimal
+# text (no exponent, grouping or currency), as the profiler reads numbers (BE-9.2).
+PLAIN_DECIMAL = r"^[+-]?[0-9]+(\.[0-9]+)?$"
+# Per control-total column: (source total, accepted total, held total, parseable,
+# unparseable, empty).
+ColumnTotals = tuple[Decimal, Decimal, Decimal, int, int, int]
+
+# BE-12.3: a drift baseline is the latest import in one of these statuses.
+DRIFT_BASELINE_STATUSES = (ImportStatus.COMPLETED, ImportStatus.COMPLETED_WITH_WARNINGS)
 
 # One page of an import's records for validation: (id, batch id, batch number, ordinal,
 # values, extras, flags).
@@ -419,6 +432,76 @@ class ImportRepository(ScopedRepository[ImportJob]):
             .add_columns(SourceRecord)
             .join(SourceRecord, SourceRecord.id == QuarantineItem.source_record_id)
             .execution_options(populate_existing=True)
+        )
+        row = result.one_or_none()
+        return (row[0], row[1]) if row is not None else None
+
+    # --- Phase 12: reconciliation figures and the drift baseline (BE-12.2, BE-12.3) ---------
+
+    async def reconciliation_figures(
+        self, import_id: uuid.UUID, columns: Sequence[str]
+    ) -> tuple[int, int, int, dict[str, ColumnTotals]]:
+        """What validation stored for an import, read back in one scoped aggregate: source
+        rows, rows with a canonical record, rows with a quarantine item and, per column, the
+        exact NUMERIC totals of its parseable values over all, accepted and held rows."""
+        accepted = CanonicalRecord.id.isnot(None)
+        held = QuarantineItem.id.isnot(None)
+        measures: list[Any] = [
+            func.count(),
+            func.count(CanonicalRecord.id),
+            func.count(QuarantineItem.id),
+        ]
+        for column in columns:
+            text_value = func.btrim(SourceRecord.raw_values[column].astext)
+            parseable = text_value.op("~")(PLAIN_DECIMAL)
+            number = case((parseable, cast(text_value, Numeric)), else_=None)
+            empty = func.coalesce(text_value, "") == ""
+            measures += [
+                func.coalesce(func.sum(number), 0),
+                func.coalesce(func.sum(number).filter(accepted), 0),
+                func.coalesce(func.sum(number).filter(held), 0),
+                func.count(number),
+                func.count().filter(~empty, ~parseable),
+                func.count().filter(empty),
+            ]
+        row = (
+            await self.session.execute(
+                select(*measures)
+                .select_from(SourceRecord)
+                .join(ImportBatch, ImportBatch.id == SourceRecord.batch_id)
+                .join(ImportJob, ImportJob.id == ImportBatch.import_job_id)
+                .outerjoin(CanonicalRecord, CanonicalRecord.source_record_id == SourceRecord.id)
+                .outerjoin(QuarantineItem, QuarantineItem.source_record_id == SourceRecord.id)
+                .where(ImportJob.id == import_id, ImportJob.tenant_id == self.scope.tenant_id)
+            )
+        ).one()
+        totals: dict[str, ColumnTotals] = {}
+        for i, column in enumerate(columns):
+            src, acc, hld, n_ok, n_bad, n_empty = row[3 + 6 * i : 9 + 6 * i]
+            totals[column] = (
+                Decimal(src),
+                Decimal(acc),
+                Decimal(hld),
+                int(n_ok),
+                int(n_bad),
+                int(n_empty),
+            )
+        return int(row[0]), int(row[1]), int(row[2]), totals
+
+    async def drift_baseline(self, job: ImportJob) -> tuple[ImportJob, DataProfileSnapshot] | None:
+        """BE-12.3: the latest COMPLETED or COMPLETED_WITH_WARNINGS import of the same source
+        (one profile per source) other than `job`, that has a profile. Scoped."""
+        result = await self.session.execute(
+            select(ImportJob, DataProfileSnapshot)
+            .join(DataProfileSnapshot, DataProfileSnapshot.import_job_id == ImportJob.id)
+            .where(
+                ImportJob.tenant_id == self.scope.tenant_id,
+                ImportJob.source_system_id == job.source_system_id,
+                ImportJob.id != job.id,
+                ImportJob.status.in_(DRIFT_BASELINE_STATUSES),
+            )
+            .order_by(ImportJob.created_at.desc(), ImportJob.id.desc())
+            .limit(1)
         )
         row = result.one_or_none()
         return (row[0], row[1]) if row is not None else None
