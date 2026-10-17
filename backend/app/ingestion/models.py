@@ -17,6 +17,12 @@ moves, along IMPORT_TRANSITIONS. TRUNCATE is refused on all four.
 
 Profiles (migration 0013): `data_profile_snapshot`, one per import, append-only and reached
 only through a scoped import.
+
+Validation (migration 0015, BE-11.1): `validation_profile` (tenant-scoped, versioned),
+and per import `validation_issue`, `quarantine_item`, `canonical_record`, `record_lineage`
+and `import_manifest`, all reached through a scoped import. All are append-only except
+`quarantine_item`, whose status alone moves (along QUARANTINE_TRANSITIONS) and whose
+`resolved_by_import_id` is written once, with RESOLVED. TRUNCATE is refused on all six.
 """
 
 import uuid
@@ -42,10 +48,13 @@ from app.ingestion.constants import (
     ContractStatus,
     DataClass,
     ImportStatus,
+    IssueDisposition,
+    QuarantineStatus,
     RetentionState,
     SourceEncoding,
     SourceFormat,
     SourceKind,
+    ValidationSeverity,
 )
 
 
@@ -340,3 +349,204 @@ class DataProfileSnapshot(AuditColumns, Base):
     summary: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     columns: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
     content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+# --- Phase 11: validation, quarantine and canonical records (BE-11.1) ----------------------
+
+SHA256_CHECK = "~ '^[0-9a-f]{64}$'"
+
+
+class ValidationProfile(ScopedModel, Base):
+    """A versioned, immutable set of checks: issue code -> {severity, disposition}
+    (append-only, DB trigger). The default one is seeded PROVISIONAL (D-11)."""
+
+    __tablename__ = "validation_profile"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "code", "version"),
+        CheckConstraint("version >= 1", name="version"),
+        CheckConstraint("jsonb_typeof(rules) = 'object'", name="rules"),
+        CheckConstraint(f"content_sha256 {SHA256_CHECK}", name="content_sha256"),
+    )
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenant.id"), index=True, nullable=False
+    )
+    code: Mapped[str] = mapped_column(String(100), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    description: Mapped[str | None] = mapped_column(String(1000))
+    # {code: {"severity": ValidationSeverity, "disposition": IssueDisposition}}
+    rules: Mapped[dict[str, dict[str, str]]] = mapped_column(JSONB, nullable=False)
+    content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    provisional: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    seeded_by: Mapped[str | None] = mapped_column(String(100))
+
+
+class ValidationIssue(AuditColumns, Base):
+    """One finding of an import's validation. Names a row (`source_record_id`, `ordinal`;
+    none for a file-level issue), a schema field and/or a source column and the rule (mapping
+    rule position, profile), never a value. Append-only."""
+
+    __tablename__ = "validation_issue"
+    __table_args__ = (
+        UniqueConstraint("import_job_id", "sequence"),
+        CheckConstraint(_in("severity", ValidationSeverity), name="severity"),
+        CheckConstraint(_in("disposition", IssueDisposition), name="disposition"),
+        CheckConstraint("sequence >= 1", name="sequence"),
+        CheckConstraint("(source_record_id IS NULL) = (ordinal IS NULL)", name="row_ref"),
+        # A file-level issue blocks the file or warns; it never quarantines one row.
+        CheckConstraint(
+            "source_record_id IS NOT NULL OR disposition IN ('FILE_BLOCKED',"
+            " 'ACCEPTED_WITH_WARNING')",
+            name="file_level",
+        ),
+        Index("ix_validation_issue_import_code", "import_job_id", "code"),
+    )
+
+    import_job_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("import_job.id"), index=True, nullable=False
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_record_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("source_record.id"), index=True
+    )
+    ordinal: Mapped[int | None] = mapped_column(Integer)
+    code: Mapped[str] = mapped_column(String(50), nullable=False)
+    severity: Mapped[str] = mapped_column(String(10), nullable=False)
+    disposition: Mapped[str] = mapped_column(String(30), nullable=False)
+    field: Mapped[str | None] = mapped_column(String(100))
+    source_column: Mapped[str | None] = mapped_column(String(200))
+    rule_position: Mapped[int | None] = mapped_column(Integer)
+    validation_profile_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("validation_profile.id"), nullable=False
+    )
+    message: Mapped[str] = mapped_column(String(500), nullable=False)
+
+
+class QuarantineItem(AuditColumns, Base):
+    """A held (OPEN) or rejected (REJECTED) source row (D-20). Its reference, reasons and
+    owner are frozen; only `status` moves, along QUARANTINE_TRANSITIONS, and
+    `resolved_by_import_id` is written once with RESOLVED (DB trigger). `audit_event` is its
+    disposition history. `business_key_sha256` matches it to a retry's rows without keeping
+    the key's values here."""
+
+    __tablename__ = "quarantine_item"
+    __table_args__ = (
+        CheckConstraint(_in("status", QuarantineStatus), name="status"),
+        CheckConstraint("jsonb_typeof(reason_codes) = 'array'", name="reason_codes"),
+        CheckConstraint(
+            f"business_key_sha256 IS NULL OR business_key_sha256 {SHA256_CHECK}",
+            name="business_key_sha256",
+        ),
+        CheckConstraint(
+            "(resolved_by_import_id IS NULL) = (status <> 'RESOLVED')", name="resolution"
+        ),
+        Index("ix_quarantine_item_batch_status", "batch_id", "status"),
+    )
+
+    import_job_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("import_job.id"), index=True, nullable=False
+    )
+    batch_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("import_batch.id"), nullable=False
+    )
+    source_record_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("source_record.id"), unique=True, nullable=False
+    )
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason_codes: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    business_key_sha256: Mapped[str | None] = mapped_column(String(64))
+    owner: Mapped[str] = mapped_column(String(200), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    resolved_by_import_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("import_job.id")
+    )
+
+
+class CanonicalRecord(AuditColumns, Base):
+    """An accepted row under the import's pinned schema and mapping versions (D-22).
+    `payload` is keyed by schema field name, typed strings only (decimals at the field's
+    scale, dates ISO-8601, never JSON numbers); `payload_sha256` hashes it. Append-only."""
+
+    __tablename__ = "canonical_record"
+    __table_args__ = (
+        CheckConstraint("jsonb_typeof(payload) = 'object'", name="payload"),
+        CheckConstraint(f"payload_sha256 {SHA256_CHECK}", name="payload_sha256"),
+    )
+
+    import_job_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("import_job.id"), index=True, nullable=False
+    )
+    schema_version_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("schema_version.id"), nullable=False
+    )
+    mapping_version_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("mapping_version.id"), nullable=False
+    )
+    source_record_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("source_record.id"), unique=True, nullable=False
+    )
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    payload: Mapped[dict[str, str | None]] = mapped_column(JSONB, nullable=False)
+    payload_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class RecordLineage(AuditColumns, Base):
+    """Canonical record -> its source record, the mapping version and the transforms that
+    made each field ([{field, source_column, rule_position, transform}], no values).
+    Append-only."""
+
+    __tablename__ = "record_lineage"
+    __table_args__ = (
+        CheckConstraint("jsonb_typeof(transform_trace) = 'array'", name="transform_trace"),
+    )
+
+    canonical_record_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("canonical_record.id"), unique=True, nullable=False
+    )
+    source_record_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("source_record.id"), index=True, nullable=False
+    )
+    mapping_version_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("mapping_version.id"), nullable=False
+    )
+    transform_trace: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
+
+
+class ImportManifest(AuditColumns, Base):
+    """What one validation pinned and produced (BE-11.5, Data Model §10): written once, with
+    the final status, and append-only, so it is what a calculation run pins (D-22). The
+    counts always add up to the import's rows (CHECK)."""
+
+    __tablename__ = "import_manifest"
+    __table_args__ = (
+        CheckConstraint(
+            "row_count = accepted_count + quarantined_count + rejected_count", name="conservation"
+        ),
+        CheckConstraint(
+            "accepted_count >= 0 AND quarantined_count >= 0 AND rejected_count >= 0"
+            " AND warning_count >= 0",
+            name="counts",
+        ),
+        CheckConstraint("jsonb_typeof(manifest) = 'object'", name="manifest"),
+        CheckConstraint(f"manifest_sha256 {SHA256_CHECK}", name="manifest_sha256"),
+    )
+
+    import_job_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("import_job.id"), unique=True, index=True, nullable=False
+    )
+    validation_profile_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("validation_profile.id"), nullable=False
+    )
+    mapping_version_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("mapping_version.id"), nullable=False
+    )
+    schema_version_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("schema_version.id"), nullable=False
+    )
+    row_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    accepted_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    quarantined_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    rejected_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    warning_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    manifest: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    manifest_sha256: Mapped[str] = mapped_column(String(64), nullable=False)

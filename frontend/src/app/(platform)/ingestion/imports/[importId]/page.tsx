@@ -8,6 +8,7 @@ import { api, call } from '@/api/client'
 import { AuditTimeline } from '@/components/audit/AuditTimeline'
 import { Forbidden } from '@/components/auth/Forbidden'
 import { RequirePermission } from '@/components/auth/RequirePermission'
+import { useCurrentSession } from '@/components/auth/SessionProvider'
 import { EmptyState } from '@/components/common/EmptyState'
 import { LoadFailed } from '@/components/common/LoadFailed'
 import { LoadingBlock } from '@/components/common/LoadingBlock'
@@ -16,6 +17,8 @@ import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
 import { startLoad, type LoadFailure } from '@/components/common/load'
 import { ImportProfileTab } from '@/components/ingestion/ImportProfileTab'
+import { ImportQuarantineTab } from '@/components/ingestion/ImportQuarantineTab'
+import { ImportValidationTab } from '@/components/ingestion/ImportValidationTab'
 import { ImportStatusPill } from '@/components/ingestion/ImportStatusPill'
 import { ImportsPlanned } from '@/components/ingestion/ImportsTab'
 import { MapImportLink } from '@/components/ingestion/MapImportLink'
@@ -23,7 +26,7 @@ import { formatBytes, type ImportDetail } from '@/components/ingestion/imports'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { IMPORT_PROFILE_UI_ENABLED, IMPORTS_UI_ENABLED, MAPPING_UI_ENABLED } from '@/config/features'
+import { IMPORT_PROFILE_UI_ENABLED, IMPORTS_UI_ENABLED, MAPPING_UI_ENABLED, VALIDATION_UI_ENABLED } from '@/config/features'
 
 type State = { kind: 'loading' } | { kind: 'ready'; job: ImportDetail } | LoadFailure
 
@@ -41,17 +44,28 @@ function Field({ label, children, testId }: { label: string; children: ReactNode
   )
 }
 
+type TabKey = 'status' | 'profile' | 'validation' | 'quarantine'
+
 /**
  * FE-9.1: Status and Profile tabs, with the open one in `?tab=` so a link can open the
  * profile. Behind IMPORT_PROFILE_UI_ENABLED: off, the page is the Phase 8 layout.
+ * FE-11.1/11.2: Validation and Quarantine tabs behind VALIDATION_UI_ENABLED; Quarantine
+ * only with quarantine:read (cosmetic: the server refuses the call too, D-04).
  */
-function ImportTabs({ importId, status }: { importId: string; status: ReactNode }) {
+function ImportTabs({ job, status, onChanged }: { job: ImportDetail; status: ReactNode; onChanged: (job: ImportDetail | null) => void }) {
+  const importId = job.id
   const router = useRouter()
   const params = useSearchParams()
-  const tab = params.get('tab') === 'profile' ? 'profile' : 'status'
+  const { has } = useCurrentSession()
+  const tabs: TabKey[] = ['status']
+  if (IMPORT_PROFILE_UI_ENABLED) tabs.push('profile')
+  if (VALIDATION_UI_ENABLED) tabs.push('validation')
+  if (VALIDATION_UI_ENABLED && has('quarantine:read')) tabs.push('quarantine')
+  const requested = params.get('tab') as TabKey | null
+  const tab: TabKey = requested && tabs.includes(requested) ? requested : 'status'
   const select = (value: string) => {
     const next = new URLSearchParams(params.toString())
-    if (value === 'profile') next.set('tab', 'profile')
+    if (value !== 'status') next.set('tab', value)
     else next.delete('tab')
     const query = next.toString()
     router.replace(`/ingestion/imports/${importId}${query ? `?${query}` : ''}`, { scroll: false })
@@ -62,16 +76,40 @@ function ImportTabs({ importId, status }: { importId: string; status: ReactNode 
         <TabsTrigger value="status" data-testid="import-tab-status">
           Status
         </TabsTrigger>
-        <TabsTrigger value="profile" data-testid="import-tab-profile">
-          Profile
-        </TabsTrigger>
+        {tabs.includes('profile') && (
+          <TabsTrigger value="profile" data-testid="import-tab-profile">
+            Profile
+          </TabsTrigger>
+        )}
+        {tabs.includes('validation') && (
+          <TabsTrigger value="validation" data-testid="import-tab-validation">
+            Validation
+          </TabsTrigger>
+        )}
+        {tabs.includes('quarantine') && (
+          <TabsTrigger value="quarantine" data-testid="import-tab-quarantine">
+            Quarantine
+          </TabsTrigger>
+        )}
       </TabsList>
       <TabsContent value="status" className="mt-4 space-y-4">
         {status}
       </TabsContent>
-      <TabsContent value="profile" className="mt-4">
-        <ImportProfileTab importId={importId} />
-      </TabsContent>
+      {tabs.includes('profile') && (
+        <TabsContent value="profile" className="mt-4">
+          <ImportProfileTab importId={importId} />
+        </TabsContent>
+      )}
+      {tabs.includes('validation') && (
+        <TabsContent value="validation" className="mt-4">
+          <ImportValidationTab job={job} onChanged={onChanged} />
+        </TabsContent>
+      )}
+      {tabs.includes('quarantine') && (
+        <TabsContent value="quarantine" className="mt-4">
+          <ImportQuarantineTab job={job} />
+        </TabsContent>
+      )}
     </Tabs>
   )
 }
@@ -287,7 +325,18 @@ function ImportView({ importId }: { importId: string }) {
           </p>
         )}
 
-        {IMPORT_PROFILE_UI_ENABLED ? <ImportTabs importId={job.id} status={sections} /> : sections}
+        {IMPORT_PROFILE_UI_ENABLED || VALIDATION_UI_ENABLED ? (
+          <ImportTabs
+            job={job}
+            status={sections}
+            onChanged={(next) => {
+              if (next) setState({ kind: 'ready', job: next })
+              else load()
+            }}
+          />
+        ) : (
+          sections
+        )}
       </div>
     </>
   )

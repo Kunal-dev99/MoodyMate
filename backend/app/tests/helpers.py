@@ -185,3 +185,102 @@ def assert_denied(db: str, correlation_id: str, reason: str, action: str = "impo
     [event] = events(db, correlation_id)
     assert (event["outcome"], event["action"]) == ("DENIED", action), dict(event)
     assert json.loads(event["details"])["reason"] == reason
+
+
+# --- Phase 11: an ACTIVE mapping for the seeded instrument contract, and validation ----------
+
+SAMPLE_DIR = Path(__file__).resolve().parents[2] / "samples" / "synthetic"
+MAPPINGS = "/api/v1/mappings"
+
+
+def mrule(source: str, target: str | None, code: str = "COPY", **kw: Any) -> dict[str, Any]:
+    return {
+        "source_column": source,
+        "target_field": target,
+        "transform": {"code": code, "params": kw.pop("params", {})},
+        **kw,
+    }
+
+
+# instrument.csv -> instrument v1: every column mapped (book_code -> legacy_book_code), the
+# maturity date parsed so that a bad date is caught, decimals parsed exactly.
+INSTRUMENT_RULES = [
+    mrule("instrument_id", "instrument_id"),
+    mrule("instrument_type", "instrument_type"),
+    mrule("currency", "currency"),
+    mrule("counterparty_id", "counterparty_id"),
+    mrule("product_family", "product_family"),
+    mrule("notional", "notional", "PARSE_DECIMAL"),
+    mrule("interest_rate", "interest_rate", "PARSE_DECIMAL"),
+    mrule("maturity_date", "maturity_date", "PARSE_DATE", params={"format": "YYYY-MM-DD"}),
+    mrule("book_code", "legacy_book_code"),
+]
+
+
+def seeded_contract_id(db: str) -> str:
+    return str(
+        sql(
+            db,
+            "SELECT c.id FROM source_contract c"
+            " JOIN source_profile p ON p.id = c.source_profile_id"
+            " JOIN source_system s ON s.id = p.source_system_id"
+            " WHERE s.code = 'core_banking' AND c.status <> 'SUPERSEDED'",
+        )[0]["id"]
+    )
+
+
+def sample(name: str) -> bytes:
+    return (SAMPLE_DIR / name).read_bytes()
+
+
+def import_sample(api: TestClient, headers: dict[str, str], db: str, data: bytes, **kw: Any) -> Any:
+    r = upload(api, headers, seeded_source_id(db), data, **kw)
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def activate_version(
+    api: TestClient,
+    steward: dict[str, str],
+    approver: dict[str, str],
+    version: dict[str, Any],
+    import_id: str,
+) -> dict[str, Any]:
+    """Dry-run (ok), submit and approve a mapping version: it becomes ACTIVE."""
+    r = api.post(
+        f"/api/v1/imports/{import_id}/mappings/validate",
+        json={"mapping_version_id": version["id"]},
+        headers=steward,
+    )
+    assert r.status_code == 201 and r.json()["ok"], r.text
+    base = f"{MAPPINGS}/{version['mapping_id']}/versions/{version['version']}"
+    assert api.post(f"{base}/submit", json={}, headers=steward).status_code == 200
+    r = api.post(f"{base}/approval", json={"decision": "APPROVE"}, headers=approver)
+    assert r.status_code == 200 and r.json()["status"] == "ACTIVE", r.text
+    return dict(r.json())
+
+
+def instrument_mapping(
+    api: TestClient,
+    db: str,
+    steward: dict[str, str],
+    approver: dict[str, str],
+    import_id: str,
+    rules: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """The core_banking contract's mapping, v1 ACTIVE (dry-run against `import_id`)."""
+    body = {
+        "code": "core_instrument",
+        "name": "Core banking instruments",
+        "source_contract_id": seeded_contract_id(db),
+        "rules": rules or INSTRUMENT_RULES,
+    }
+    r = api.post(MAPPINGS, json=body, headers=steward)
+    assert r.status_code == 201, r.text
+    return activate_version(api, steward, approver, r.json()["versions"][0], import_id)
+
+
+def validate_import(
+    api: TestClient, headers: dict[str, str], import_id: str, **kw: Any
+) -> Response:
+    return api.post(f"{IMPORTS}/{import_id}/validate", headers={**headers, **kw})

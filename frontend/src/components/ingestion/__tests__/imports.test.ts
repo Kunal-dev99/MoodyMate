@@ -220,6 +220,9 @@ describe('upload error titles', () => {
     'xlsx_invalid',
     'artifact_integrity_error',
     'validation_error',
+    // Phase 11: a retry upload (D-20 §3).
+    'retry_source_mismatch',
+    'retry_not_applicable',
   ]
 
   it('has a specific title for every documented code', () => {

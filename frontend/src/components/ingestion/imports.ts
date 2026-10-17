@@ -63,14 +63,17 @@ export interface ImportDraft {
   expectedRowCount: string
   /** Control-total column → decimal text; empty values are not sent. */
   controlTotals: Record<string, string>
+  /** FE-11.2: the earlier import this corrected file retries (D-20 §3); empty for a new upload. */
+  retryOfImportId?: string
 }
 
-export const emptyImportDraft = (sourceId = ''): ImportDraft => ({
+export const emptyImportDraft = (sourceId = '', retryOfImportId = ''): ImportDraft => ({
   sourceId,
   file: null,
   attested: false,
   expectedRowCount: '',
   controlTotals: {},
+  ...(retryOfImportId ? { retryOfImportId } : {}),
 })
 
 /**
@@ -118,6 +121,7 @@ export function toImportFields(d: ImportDraft, file: File, dataClass: DataClass 
     synthetic_attested: attestationRequired(dataClass) ? d.attested : false,
     ...(count ? { expected_row_count: Number(count) } : {}),
     ...(Object.keys(totals).length > 0 ? { control_totals: JSON.stringify(totals) } : {}),
+    ...(d.retryOfImportId ? { retry_of_import_id: d.retryOfImportId } : {}),
   }
 }
 
@@ -166,6 +170,8 @@ const ERROR_TITLES: Record<string, string> = {
   sheet_not_found: 'The sheet was not found',
   xlsx_invalid: 'The workbook could not be read',
   artifact_integrity_error: 'The stored file failed its integrity check',
+  retry_source_mismatch: 'A retry must be for the same source as the import it corrects',
+  retry_not_applicable: 'Only a quarantined or failed import can be retried',
   validation_error: 'Some values were rejected',
 }
 

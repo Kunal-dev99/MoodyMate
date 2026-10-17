@@ -12,7 +12,8 @@ Datasets: `instrument` (CSV), `position` (XLSX) and `cashflow_event` (JSON), wit
 from the illustrative schemas seeded by migration 0007. Each also has deliberately bad
 variants (`<dataset>__<variant>.<ext>`), one defect each: a missing required column, a
 bad date, an over-scale decimal, a duplicate business key, an unknown extra column,
-non-UTF-8 bytes (CSV/JSON only) and a bad currency code.
+non-UTF-8 bytes (CSV/JSON only) and a bad currency code; `mixed_errors` combines the bad
+date, over-scale decimal, duplicate key and bad currency with an empty required value.
 
 Output is byte-for-byte reproducible: a fixed seed, no clock, and XLSX written with the
 standard library using fixed ZIP timestamps and no compression (zlib builds can differ).
@@ -205,6 +206,14 @@ def _bad_currency_code(ds: Dataset, t: Table) -> Table:
     return _set(t, 5, ds.currency_column, "EURO")
 
 
+def _mixed_errors(ds: Dataset, t: Table) -> Table:
+    """Several row-level defects in one file (rows 3-6 and 8), for the validation dashboard
+    and the quarantine flow: each row is held for exactly one reason."""
+    for variant in (_bad_date, _over_scale_decimal, _duplicate_business_key, _bad_currency_code):
+        t = variant(ds, t)
+    return _set(t, 7, ds.required_to_drop, "")  # a required value left empty
+
+
 VARIANTS: dict[str, Callable[[Dataset, Table], Table]] = {
     "missing_required_column": _missing_required_column,
     "bad_date": _bad_date,
@@ -213,6 +222,7 @@ VARIANTS: dict[str, Callable[[Dataset, Table], Table]] = {
     "unknown_extra_column": _unknown_extra_column,
     "non_utf8": _non_utf8,
     "bad_currency_code": _bad_currency_code,
+    "mixed_errors": _mixed_errors,
 }
 TEXT_ONLY = {"non_utf8"}  # meaningless for XLSX, whose XML parts are always UTF-8
 

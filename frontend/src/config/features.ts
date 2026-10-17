@@ -20,3 +20,10 @@ export const IMPORT_PROFILE_UI_ENABLED = process.env.NEXT_PUBLIC_IMPORT_PROFILE_
  * The backend's own switch is MAPPING_CHANGE_ENABLED, which refuses mapping writes (409).
  */
 export const MAPPING_UI_ENABLED = process.env.NEXT_PUBLIC_MAPPING_UI !== 'off'
+
+/**
+ * NEXT_PUBLIC_VALIDATION_UI=off (FE-11.1/11.2): the import page loses its Validation and
+ * Quarantine tabs and the wizard ignores `?retry_of=`, restoring the Phase 10 UI exactly.
+ * The backend's own switch is INGESTION_ENABLED, which refuses validation and dispositions.
+ */
+export const VALIDATION_UI_ENABLED = process.env.NEXT_PUBLIC_VALIDATION_UI !== 'off'
