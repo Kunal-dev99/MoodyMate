@@ -2099,3 +2099,597 @@ Playwright in CI.
   model.
 - **Exports of results:** these need their own permission and CSV-injection safe output
   (WS4 reports).
+
+## Feature 04 — Credit Risk (PD/LGD/EAD, ECL, rating workflow)
+
+Kickoff: `docs/prompts/kickoffs/04-credit-risk.md` · Status: **APPROVED by the user 2026-10-19.** D-37…D-43 are active. The user
+approved both hard stops: D-38 (widen the CHECKs) and D-40 (analyst proposes, approver
+approves). The open questions below are answered.
+
+Numbering (D-08): Feature 04 uses global **Phases 19–23**, with task IDs `BE-19.1`/`FE-19.1` to
+`BE-23.n`/`FE-23.n`. Credit risk is not in the signed-off WS1–WS5 plans, so this plan uses
+**added, provisional feature IDs**:
+
+| ID | Feature | Relates to |
+|---|---|---|
+| CR-01 | Counterparty and credit-exposure data with lineage | FC-01 (counterparties), Data Model §4 `counterparty` |
+| CR-02 | Rating master scale and obligor rating workflow (maker-checker) | Data Model §4 `reference_data_item` (rating categories) |
+| CR-03 | PD, LGD and EAD derivation (master scale, TTC→PIT, CCF, collateral haircuts) | FC-06 (collateral haircuts, simplified), FC-07 |
+| CR-04 | IFRS 9-style staging and ECL measurement, with drill-down | FC-07, FC-08 (pinning) |
+| CR-05 | CECL-style lifetime variant module | FC-07 |
+| CR-06 | Credit validation pack, documentation and verification | WS3-P6 pattern |
+
+**Order.** A thin vertical slice comes first:
+- Phase 19 brings counterparty and exposure data into the domain.
+- Phase 20 adds obligor ratings.
+- Phase 21 runs one ECL calculation end to end with drill-down.
+
+Breadth follows:
+- Phase 22: the CECL variant, governed credit rule changes and pinning across rating changes.
+- Phase 23: the validation pack and verification.
+
+Phase 20 may start in its own worktree once BE-19.1's migration is on the Phase 19 branch
+(CLAUDE.md protocol step 6).
+
+**Methodology.** Everything is pluggable (D-31) and seeded **ILLUSTRATIVE / PROVISIONAL**
+(D-42), as D-35 did for liquidity:
+- PD comes from a neutral-grade master scale (G01…G08, D) with one TTC→PIT scalar and a
+  constant-hazard lifetime structure.
+- LGD comes from segment LGDs and collateral-type haircuts.
+- EAD = drawn + CCF × undrawn.
+- ECL = PD × LGD amount, discounted annually at the exposure's EIR.
+- Staging follows IFRS 9 style: Stage 3 is credit-impaired (90 DPD, the default grade or the
+  default flag), Stage 2 is SICR (3 notches or 30 DPD), Stage 1 is everything else.
+- The CECL-style variant is a separate module that reads the same rules.
+
+No output is described as IFRS 9 or CECL compliant, regulatory, validated or comparable to
+Moody's or any rating agency.
+
+Constraining decisions:
+- **D-01** Only tables are added, **except D-38**, which widens two `schema_code` CHECKs. That
+  is a hard stop, with fallback B if it is declined. `calculation_warning.code`,
+  `calculation_input_ref.ref_type` and `rule_definition.category` are not widened.
+- **D-02** Downgrades are tested and refuse while non-seed rows exist. Every phase sits behind
+  a switch:
+  - backend: `CREDIT_PROJECTION_ENABLED` and `RATING_CHANGE_ENABLED`, plus module
+    retirement by status;
+  - frontend: `NEXT_PUBLIC_CREDIT_DOMAIN_UI`, `NEXT_PUBLIC_RATINGS_UI` and
+    `NEXT_PUBLIC_CREDIT_LOSS_UI`.
+- **D-03 / D-36** Each phase follows the CLAUDE.md phase build protocol: one worktree, one DB
+  copy (`createdb -T moodymate_dev`), contract first, a one-message fan-out, and
+  pre-numbered migrations (0022–0025).
+- **D-04** Fail closed. Each endpoint names its permission (table below). Every new table
+  carries `tenant_id` and is read through `ScopedRepository`.
+- **D-06** Enums are UPPERCASE. `obligor_rating.status` is a subset of the rule-version set.
+- **D-10/D-24 §4** Every mutation and every refused write is audited.
+- **D-11** Schemas, vocabularies, permissions, modules and rule versions are seeded with tags
+  and marked PROVISIONAL.
+- **D-14** Synthetic data only outside production.
+- **D-26** The backend suite stays under 50 tests. It has 48 now, and this feature adds +1.
+- **D-29 / D-30 / D-31 / D-32 / D-33 / D-35** are reused unchanged, and extended by
+  D-37 / D-41 / D-43 / D-42.
+- **New, proposed:**
+  - D-37: credit data;
+  - D-38: CHECK widening (**hard stop**);
+  - D-39: rating workflow;
+  - D-40: permissions (**hard stop**);
+  - D-41: ECL modules and engine;
+  - D-42: illustrative methodology;
+  - D-43: masking.
+
+Pre-plan findings (codebase at master `2db56b7`):
+- **No credit data anywhere.**
+  - `domain/models.py` has no counterparty, rating, DPD, default flag, undrawn amount or
+    limit, facility type, collateral, origination grade or EIR.
+  - `instrument` v1 carries `counterparty_id` (0007:62), but projector v1 leaves it in
+    `canonical_record` only (`domain/constants.py:133-147`).
+  - `rating_category` exists only in the DRAFT `instrument` v2 (0007:85).
+  - `instrument_version.maturity_date` is NULL for v1 (free text, D-29 §4).
+  - There are no synthetic counterparty or credit samples (`backend/samples/synthetic/`).
+- **Closed CHECKs block new schema codes.** `domain_projection.schema_code`
+  (`domain/models.py:67`) and `dataset_snapshot_member.schema_code`
+  (`calculations/models.py:109`) are limited to the three Feature 03 codes → D-38.
+- **Closed CHECKs block new warnings and pins.**
+  - `calculation_warning.code` (0018) and `calculation_input_ref.ref_type` (0018:928) are
+    closed lists.
+  - `intermediate_value` must reference a ladder row (0018:497-520).
+  - So credit outputs, warnings and rating pins need their own tables (the Phase 17
+    precedent, `calculations/constants.py:120-124`).
+- **Engine pinning is version-gated.** Re-runs refuse once `ENGINE_VERSION` or
+  `MANIFEST_VERSION` changes (`calculations/service.py:1040-1044`), so the rating pins must
+  not bump either (D-41 §3).
+- **Rules resolve by code** from the module version's input contract
+  (`rules/service.py:434-451`), so a variant module can share rules.
+  `PARAMETER_VOCABULARIES` is `("instrument_type",)` only (`rules/constants.py:259`), and
+  `rule_definition.category` is a closed CHECK (0018:757). Credit rules use existing
+  categories.
+- **One declared rounding per module** (`modules/base.py` `RegisteredModule.rounding`, plus
+  `divide`). The ECL design needs only one (D-41 §6).
+- **Projector column kinds** are TEXT, DECIMAL and DATE only (`domain/constants.py:60-67`).
+  INTEGER (DPD) and BOOLEAN (default flag) are added; `FieldType` already has both.
+- **Roles and clearances** (0005:32-38): risk_analyst `internal`, approver `confidential`,
+  data_steward `restricted`. No rating permission exists (`governance/constants.py:12-34`)
+  → D-40.
+- **Migrations.** The head is `0021` (0019 is unused: 0020 revises 0018). Feature 04 uses
+  0022–0025.
+- **Tests.** There are 48 backend test functions (21 files). The generic WS1 matrix,
+  isolation and audit tests in `test_ws1_verification.py` pick up new routes through `ids`
+  and `AUDITED` at no test cost.
+- **Frontend.**
+  - `/domain` has Instruments, Rules, Modules and Assumption-set tabs
+    (`config/navigation.ts:155-163`).
+  - The run detail has ladder and liquidity views.
+  - The `scenarios` and `reports` placeholders say `phase: 'Feature 04'` (WS4) at
+    `navigation.ts:102,110`. That now collides with this feature's name, so FE-19.1 relabels
+    them.
+
+### Credit endpoints and permissions (all under `/api/v1`)
+
+There are no WS plan names for credit (D-05), so every endpoint is "added" and named in the
+WS3 style.
+
+| Endpoint | Permission | Phase |
+|---|---|---|
+| `POST imports/{import_id}/projection` (existing; accepts `counterparty`, `credit_exposure`) | `domain:project` | 19 |
+| `POST dataset-snapshots` (existing; accepts the two codes) | `calc:run` | 19 |
+| `GET credit-vocabularies` | `domain:read` | 19 |
+| `GET counterparties`, `GET counterparties/{counterparty_id}` | `domain:read` | 19 |
+| `GET credit-exposures`, `GET credit-exposures/{exposure_id}` | `domain:read` | 19 |
+| `GET obligor-ratings` (filter status, counterparty), `GET obligor-ratings/{rating_id}` | `domain:read` | 20 |
+| `POST counterparties/{counterparty_id}/ratings` | `rating:propose` | 20 |
+| `POST obligor-ratings/{rating_id}/approval` | `rating:approve` | 20 |
+| `GET dataset-snapshots/{snapshot_id}/rating-coverage?reporting_date=` | `calc:read` | 21 |
+| `GET calculation-runs/{run_id}/credit-loss` | `calc:read` | 21 |
+| `GET calculation-runs/{run_id}/credit-loss/exposures` (paginated; currency, stage, status) | `calc:read` | 21 |
+| `GET calculation-runs/{run_id}/credit-loss/exposures/{exposure_result_id}` | `calc:read` | 21 |
+
+ECL runs use the existing `POST calculation-runs` (`calc:run`). Credit rule changes use the
+existing Phase 16 routes (`rule:propose` / `rule:approve`).
+
+### Role → permission matrix additions (seed, BE-20.1; PROVISIONAL, D-11, D-40, **hard stop**)
+
+| Role | rating:propose | rating:approve |
+|---|---|---|
+| platform_admin | | |
+| data_steward | | |
+| risk_analyst | ✓ | |
+| approver | | ✓ |
+| auditor | | |
+
+Everything else is unchanged, and no clearance changes. The final role model, including any
+credit-officer role or committee approval, needs the client (Arch §10).
+
+### Test budget (D-26)
+
+The suite is at **48** (cap: under 50).
+
+| Phase | Change | Count after |
+|---|---|---|
+| 19 | +1 `test_credit.py` | 49 |
+| 20 | +0 (folded into `test_credit.py`, WS1 matrix and audit tests) | 49 |
+| 21 | +0 (folded into the `test_calculations.py` guard and golden loops, and `test_credit.py`) | 49 |
+| 22 | +0 (folded into `test_rules.py`, `test_calculations.py` and `test_credit.py`) | 49 |
+| 23 | +0 (marker and folds only) | 49 |
+
+This leaves **no spare slot** after Feature 04. If the user prefers to keep one, BE-19.1 may
+fold `test_config.py`'s three functions into one (−2) at no assertion cost (open question).
+Checked with `pytest --collect-only -q`.
+
+### Migrations (pre-numbered, CLAUDE.md protocol step 6)
+
+| Rev | Phase | Content | Downgrade refuses while |
+|---|---|---|---|
+| 0022 | 19 | credit schemas, vocabularies, domain tables, D-38 CHECK widening | any credit projection, credit snapshot member or credit domain row exists |
+| 0023 | 20 | `obligor_rating`, credit permissions seed | any `obligor_rating` row exists |
+| 0024 | 21 | ECL result tables, rating pins, `credit_ecl` v1 and rule seed | any ECL result, rating pin or non-seed version of a credit rule exists |
+| 0025 | 22 | `credit_ecl_cecl` v1 seed | any run of it exists |
+
+### Phase 19 — Counterparty and credit-exposure data in the domain (CR-01; FC-01)
+
+Goal: a data steward imports and projects synthetic counterparty and credit-exposure files
+through the unchanged WS2 pipeline. Everyone with `domain:read` can browse counterparties and
+their exposures, with amounts masked and a lineage link to the source row. A risk analyst can
+build a credit snapshot.
+
+- [ ] **BE-19.1** Migration 0022 (`0022_credit_domain`, tagged):
+  - (a) the seeded ACTIVE schemas `counterparty` v1 and `credit_exposure` v1 (D-37 §1), with
+    `schema_dependency` rows;
+  - (b) the D-38 CHECK widening on `domain_projection` and `dataset_snapshot_member`;
+  - (c) `counterparty`, `counterparty_version`, `credit_exposure` and
+    `credit_exposure_version`. These are append-only, including TRUNCATE, with the 0017
+    same-tenant and canonical-repeat insert triggers, NUMERIC amounts, DATE dates, INTEGER
+    DPD and BOOLEAN default flag;
+  - (d) `credit_vocabulary`, append-only, seeded per D-37 §5.
+
+  `test_domain`'s frozen-copy check becomes the union of the 0017 and 0022 copies.
+  *If D-38 is declined:* (b) is replaced by `credit_domain_projection` and
+  `dataset_snapshot_credit_member` (D-38 B), with the same Done-when.
+  - *Done-when:*
+    - the 0021 → head → 0021 → head round trip passes;
+    - `test_credit.py` (new, the phase's one test) proves UPDATE, DELETE and TRUNCATE are
+      refused on the four tables and on `credit_vocabulary`;
+    - an unknown sixth `schema_code` is still refused by both CHECKs;
+    - the downgrade refuses while a credit projection exists;
+    - every seed row carries the `0022_credit_domain` tag.
+- [ ] **BE-19.2** Synthetic samples: `backend/samples/synthetic/counterparty.csv` (about 8
+  rows, four segments) and `credit_exposure.csv` (about 14 rows, EUR and USD), each with the
+  D-24 synthetic marker and `SHA256SUMS` updated. The exposures cover:
+  - a revolver with undrawn;
+  - a guarantee;
+  - DPD 0, 35 and 95;
+  - `default_flag`;
+  - CASH, REAL_ESTATE and unmapped collateral;
+  - a 3-notch downgrade against origination;
+  - an unknown origination grade;
+  - a passed maturity;
+  - a counterparty key missing from the counterparty file.
+
+  Sources and mappings follow the path Phase 14/15 used for the position and cash-flow
+  samples.
+  - *Done-when:*
+    - `test_committed_artifacts.py` passes with the new sums;
+    - `test_credit.py` validates both imports to COMPLETED with
+      `accepted_count` equal to the row count.
+- [ ] **BE-19.3** Projector specs for `counterparty` and `credit_exposure` under
+  `projector_version` 1 (D-37 §3), `ColumnKind` INTEGER and BOOLEAN, and
+  `CREDIT_PROJECTION_ENABLED`, validated at startup (D-13).
+  - *Done-when:* `test_credit.py` projects both imports and proves:
+    - rows = `accepted_count`;
+    - a second call writes nothing;
+    - each row's `canonical_record_id` resolves to a `record_lineage` row of its import;
+    - no stored value is a float;
+    - with the switch off, 409 `projection_unsupported`, audited DENIED, with nothing written;
+    - the three Feature 03 specs are unchanged (the `test_domain` frozen-copy check stays
+      green).
+- [ ] **BE-19.4** Snapshots accept the two codes. `ambiguous_business_key` also covers
+  counterparty keys. Feature 03 snapshot hashing is unchanged.
+  - *Done-when:*
+    - `test_credit.py` builds a credit snapshot (counterparty + credit_exposure), gets the
+      same id for the same members, and gets 409 `ambiguous_business_key` for a duplicated
+      counterparty key;
+    - the existing `test_calculations.py` snapshot assertions pass unchanged.
+- [ ] **BE-19.5** Reads:
+  - `GET credit-vocabularies`;
+  - `GET counterparties` (paginated; filter segment, country, source, import);
+  - `GET counterparties/{id}`: versions, plus exposure versions matching the business key in
+    the tenant;
+  - `GET credit-exposures` and `GET credit-exposures/{id}`: versions with import id, source
+    ordinal and canonical record id.
+
+  Masking follows D-43 §1. Another tenant's id gets the same 404 as a random id.
+  - *Done-when:*
+    - the WS1 matrix and isolation tests list all five routes, with 2xx for every role;
+    - `test_credit.py` asserts `counterparty_name` and `drawn_amount` are masked for
+      risk_analyst and clear for data_steward, and walks one exposure version → canonical
+      record → source row.
+- [ ] **BE-19.6** Contract and reversibility: the `openapi.json` export (contract first), the
+  RETENTION.md PROVISIONAL rows for the five new tables, and ARCHITECTURE.md updated by the
+  architect once D-37 is active.
+  - *Done-when:*
+    - the CI OpenAPI drift check passes;
+    - RETENTION.md lists every new table (grep).
+- [ ] **FE-19.1** A Counterparties tab under `/domain` (gated on `domain:read`;
+  `NEXT_PUBLIC_CREDIT_DOMAIN_UI=off` removes it and its routes):
+  - a catalogue with filters;
+  - counterparty detail with versions and exposures;
+  - exposure detail with versions and a lineage link to `/ingestion/imports/{id}` and the
+    source row;
+  - `MaskedValue`;
+  - a "Provisional / illustrative" badge on the vocabularies.
+
+  The same owner of `navigation.ts` relabels the `scenarios` and `reports` placeholders from
+  "Feature 04" to "WS4 (planned)".
+  - *Done-when:*
+    - a Playwright test projects both credit imports, then browses counterparty → exposure →
+      import;
+    - risk_analyst sees `drawn_amount` as "masked";
+    - there are no hand-written payload types (grep);
+    - a vitest covers the relabelled placeholders.
+- [ ] **FE-19.2** The "Project to domain" action (FE-14.2) offers the two new schema codes,
+  taken from the `openapi.json` enum.
+  - *Done-when:*
+    - a Playwright test: the steward projects the `credit_exposure` import, and the summary
+      counts equal the manifest's accepted count;
+    - auditor has no button and gets a backend 403 on a direct POST.
+
+*Test budget:* 48 → 49 (+`test_credit.py`).
+*Reversibility:* additive tables and tagged seeds. The 0022 downgrade refuses while credit
+rows exist, then restores the narrow CHECKs. `CREDIT_PROJECTION_ENABLED=false` restores the
+pre-Feature-04 `projection_unsupported` for the two codes, and existing rows stay readable.
+`NEXT_PUBLIC_CREDIT_DOMAIN_UI=off` restores the Phase 18 `/domain` exactly.
+
+### Phase 20 — Obligor rating workflow (CR-02)
+
+Goal: a risk analyst proposes an obligor rating (grade, effective date and rationale), and a
+different person, an approver, approves or rejects it. Ratings are immutable versions with a
+history, and the service can say which rating was in effect for an obligor on any date.
+
+- [ ] **BE-20.1** Migration 0023:
+  - `obligor_rating` (D-39 §1–2), with the lifecycle trigger, the partial unique index on
+    one ACTIVE per (counterparty, `effective_from`), and refused DELETE and TRUNCATE;
+  - the tagged seed `0023_credit_permissions`: `rating:propose` and `rating:approve` and
+    their grants (D-40, **hard stop**);
+  - `CREDIT_ROLE_PERMISSIONS` in `governance/constants.py`.
+  - *Done-when:*
+    - the round trip passes;
+    - `test_credit.py` proves a content UPDATE is refused, an illegal move is refused, a
+      second ACTIVE for the same counterparty and date is refused by the DB, and DELETE and
+      TRUNCATE are refused;
+    - the seeded `role_permission` join equals `ROLE_PERMISSIONS`, including the table above
+      (the architect checks it);
+    - the downgrade refuses while a rating exists.
+- [ ] **BE-20.2** `POST counterparties/{id}/ratings` and `POST obligor-ratings/{id}/approval`
+  (D-39 §3), audited `obligor_rating.*`, with `RATING_CHANGE_ENABLED` validated at startup.
+  - *Done-when:* `test_credit.py` asserts:
+    - a user with both roles cannot decide their own proposal (409 `self_approval`);
+    - after approval there is exactly one ACTIVE version per counterparty and date, and the
+      earlier one is SUPERSEDED;
+    - `stale_version`, `invalid_status`, 422 `invalid_grade`, and the switch-off 409;
+    - each refusal has its DENIED audit event;
+    - the WS1 audit-completeness test lists both POST routes.
+- [ ] **BE-20.3** `GET obligor-ratings` and `GET obligor-ratings/{id}`, the rating history
+  in the counterparty detail, and the service function "rating in effect at date" (D-39 §4)
+  that Phase 21 uses.
+  - *Done-when:*
+    - a loop in `test_credit.py` over dates before, at, between and after two effective
+      dates returns the expected version, or none before the first;
+    - the WS1 matrix lists both GET routes with 2xx for every role.
+- [ ] **FE-20.1** A Ratings panel on the counterparty detail, behind
+  `NEXT_PUBLIC_RATINGS_UI`:
+  - the history: grade, effective date, status, proposer and decider;
+  - a "Propose rating" dialog (gated on `rating:propose`) with a grade picker from
+    `credit-vocabularies`, an effective date and a required rationale with a character
+    counter.
+  - *Done-when:*
+    - a Playwright test: risk_analyst proposes, and the panel shows IN_REVIEW;
+    - a vitest covers the form's validation states.
+- [ ] **FE-20.2** A ratings review queue at `/domain/ratings` (read with `domain:read`;
+  actions gated on `rating:approve`). The approve/reject dialog has a required comment.
+  - *Done-when:*
+    - a Playwright test: approver approves, and the counterparty shows ACTIVE;
+    - the proposer (risk_analyst) sees no Approve button and gets a backend 403 on a direct
+      POST, because the role lacks `rating:approve` (as FE-16.2 was built);
+    - a vitest checks the rating-status pill against the `openapi.json` enum.
+
+*Test budget:* 49 → 49 (folded).
+*Reversibility:* an additive table and a tagged permission seed. The downgrade refuses while
+a rating exists. `RATING_CHANGE_ENABLED=false` freezes ratings: writes get 409 (audited), and
+reads and runs keep working. Superseded and rejected versions are hidden by status, never
+deleted. `NEXT_PUBLIC_RATINGS_UI=off` restores the Phase 19 UI.
+
+### Phase 21 — One ECL run end to end with drill-down (CR-03, CR-04; FC-07, FC-08)
+
+Goal: a risk analyst runs the illustrative `credit_ecl` v1 on a credit snapshot for a
+reporting date. Before submitting, the analyst sees which ratings and rule versions will be
+pinned. The run shows ECL per currency and stage. Any figure drills down to the exposure's
+factors (grade, rating version, PD, CCF, EAD, LGD amount, stage and reason, yearly terms), then
+to the counterparty, the import and the source row. Re-running reproduces the run exactly.
+
+- [ ] **BE-21.1** Migration 0024:
+  - `calculation_rating_pin`, `ecl_exposure_result`, `ecl_term_result` and `ecl_result`
+    (D-41 §4), under 0018's run-output guards, with the CHECK identities (EAD, uncovered EAD,
+    LGD amount, Stage 3 ECL) and closed exclusion, stage-reason and warning lists;
+  - a tagged seed: module `credit_ecl` v1 AVAILABLE, plus ACTIVE ILLUSTRATIVE rule versions
+    `pd_master_scale`, `pd_pit_scalar`, `lifetime_max_years`, `ccf`, `lgd_unsecured`,
+    `collateral_haircut`, `stage2_dpd_backstop`, `stage3_dpd_backstop` and
+    `sicr_notch_threshold` (D-42), using existing rule categories.
+  - *Done-when:*
+    - the round trip passes;
+    - the Phase 15 guard loop in `test_calculations.py` also covers the four new tables (+0);
+    - the seed rows are tagged and illustrative;
+    - the downgrade refuses while an ECL result or a rating pin exists.
+- [ ] **BE-21.2** Engine extension (D-41 §3, §5, §7):
+  - credit inputs;
+  - rating pins and the `ratings` manifest section, only for modules that declare ratings;
+  - the four credit post-checks;
+  - `PARAMETER_VOCABULARIES` and the rules read path know the four credit vocabularies;
+  - `ENGINE_VERSION` and `MANIFEST_VERSION` unchanged.
+  - *Done-when:* `test_calculations.py` asserts:
+    - a `maturity_ladder` run's manifest has exactly the Feature 03 key set (no `ratings`);
+    - `ENGINE_VERSION == "1"` and `MANIFEST_VERSION == 1`;
+    - the `calculation_rating_pin` rows of a credit run equal BE-20.3's resolution at the
+      reporting date;
+    - `GET rules` lists the credit rules with their vocabularies.
+- [ ] **BE-21.3** Module `credit_ecl` v1 (D-42 §1–8), pure and Decimal only, with one declared
+  rounding.
+  - *Done-when:*
+    - the `test_calculations.py` golden loop reads
+      `backend/app/calculations/golden/credit_ecl_v1_engineering_cases.json` (status
+      `ENGINEERING — awaiting domain-expert approval`). Its hand-computed cases cover:
+      - Stage 1;
+      - Stage 2 by notches, by 30 DPD and by an unknown origination grade;
+      - Stage 3 by 90 DPD, by the default grade and by the default flag;
+      - revolver CCF;
+      - collateral fully covering (ECL 0);
+      - unmapped collateral;
+      - a passed maturity and the lifetime cap;
+      - an unrated obligor (excluded `NO_APPROVED_RATING`);
+      - a missing counterparty;
+      - two currencies;
+    - the status is SUCCEEDED_WITH_WARNINGS;
+    - a re-run has the same `manifest_sha256` and `result_sha256`;
+    - the existing no-float source grep passes.
+- [ ] **BE-21.4** Reads:
+  - `GET …/credit-loss`: per currency and stage, exposure counts, EAD, ECL and the exclusion
+    counts by reason;
+  - `GET …/credit-loss/exposures` (paginated);
+  - `GET …/credit-loss/exposures/{id}`: factors, terms and lineage (exposure version →
+    canonical record → import and source row; counterparty version; rating version);
+  - `GET dataset-snapshots/{id}/rating-coverage`.
+
+  Exact decimal text everywhere, and masking per D-43.
+  - *Done-when:*
+    - the WS1 matrix lists all four routes with 2xx for every role;
+    - `test_calculations.py` asserts that a stage's ECL total equals the sum of its included
+      rows, and an exposure's ECL equals the sum of its terms;
+    - amounts are masked and factors clear for risk_analyst;
+    - an aggregate built from fewer than `CALC_MIN_AGGREGATE_COUNT` non-zero contributions is
+      masked, and so is its currency total;
+    - the rating-coverage counts equal the next run's pins.
+- [ ] **FE-21.1** The New-run panel offers `credit_ecl` for a credit snapshot. Before
+  submitting, it shows the rating coverage (rated obligors, and unrated ones that will be
+  excluded) and the pinned rule versions.
+  - *Done-when:*
+    - a Playwright test: risk_analyst submits a `credit_ecl` run that reaches
+      SUCCEEDED_WITH_WARNINGS;
+    - a vitest covers the coverage panel's states.
+- [ ] **FE-21.2** A Credit-loss view in the run detail (`NEXT_PUBLIC_CREDIT_LOSS_UI=off`
+  restores the Phase 20 layout):
+  - a currency × stage table;
+  - an exclusions table with reasons;
+  - exposure drill-down with factors, the stage reason, the horizon and the yearly terms;
+  - links to the counterparty, the rating version, the exposure, the import and the source
+    row;
+  - the illustrative banner (D-42 §9).
+  - *Done-when:*
+    - a Playwright test, as data_steward (clear amounts), checks one stage's ECL total
+      against the sum of its drill-down rows, and follows a row to its source row;
+    - a vitest covers masked-aggregate rendering;
+    - a vitest checks the stage and exclusion-reason pills against the `openapi.json` enums.
+
+*Test budget:* 49 → 49 (folded).
+*Reversibility:* additive tables and a tagged seed. The downgrade refuses while results
+exist. Retiring `credit_ecl` v1 (hidden by status) removes it from "New run", and existing
+runs stay readable. The frontend switch restores the Phase 20 run detail. Feature 03 manifests
+and re-runs are unaffected (BE-21.2).
+
+### Phase 22 — CECL variant, governed credit rule changes and pinning across rating changes (CR-05, CR-03, CR-04 breadth)
+
+Goal: a CECL-style lifetime variant runs on the same snapshot and pins. Credit parameters
+change only through maker-checker rule versions. A new rating or rule version changes new
+runs only, and old runs and their re-runs stay reproducible.
+
+- [ ] **BE-22.1** Migration 0025: module `credit_ecl_cecl` v1 AVAILABLE (tagged). It reads the
+  Phase 21 rules by code and adds no table.
+  - *Done-when:*
+    - the round trip passes;
+    - the downgrade refuses while a run of it exists.
+- [ ] **BE-22.2** Module `credit_ecl_cecl` v1 (D-41 §2, D-42 §7).
+  - *Done-when:*
+    - the golden loop reads `credit_ecl_cecl_v1_engineering_cases.json` over the same
+      exposures as BE-21.3, and asserts that Stage 1 rows are lifetime while Stage 2 and 3
+      rows equal the v1 values row by row;
+    - a re-run reproduces `result_sha256`.
+- [ ] **BE-22.3** Governed credit rules and pinning.
+  - Phase 16 propose, submit and approve work for DECIMAL_MAP and INTEGER rules over the
+    credit vocabularies, with `not_in_vocabulary` for an unknown key.
+  - Stage 2 ≥ Stage 3 thresholds BLOCK the run with `PARAMETERS_INVALID`.
+  - After a new rating and a new `pd_master_scale` version are approved:
+    - a new run differs in `manifest_sha256` and `result_sha256`;
+    - the old run's rows are unchanged;
+    - a re-run of the old run reproduces it on the SUPERSEDED rating and rule.
+  - *Done-when:*
+    - the `test_rules.py` per-kind loop gains the credit vocabularies (+0);
+    - `test_credit.py` asserts the pinning sequence and the BLOCKED threshold case (+0).
+- [ ] **FE-22.1** The New-run picker offers the CECL variant. The run detail labels the
+  measurement basis, and the module registry shows the variant's shared rules.
+  - *Done-when:*
+    - a Playwright test runs both modules on one snapshot and sees different Stage 1 totals;
+    - a vitest covers the basis label.
+- [ ] **FE-22.2** The rule editor (FE-16.2) offers key pickers for the credit vocabularies,
+  read from `credit-vocabularies`.
+  - *Done-when:* a Playwright test:
+    - the analyst proposes a `pd_master_scale` change and the approver approves;
+    - a new run's manifest shows the new version;
+    - the old run still shows the old one.
+
+*Test budget:* 49 → 49 (folded).
+*Reversibility:* a tagged seed with no tables. Retiring `credit_ecl_cecl` v1 hides it. Rule
+and rating switches as in Phases 16 and 20. Superseded versions are hidden by status.
+
+### Phase 23 — Credit validation pack, documentation and verification (CR-06)
+
+Goal: the credit methodology, its limitations and its golden cases are documented, awaiting a
+named domain expert. The feature is proven by a verification marker and a Playwright smoke in
+CI.
+
+- [ ] **BE-23.1** Documentation:
+  - `docs/CALCULATION_MODULES.md` gains credit sections: interfaces, contracts, the rounding
+    policy, every D-42 limitation and the disclaimers;
+  - the golden README names who must approve the credit fixtures;
+  - RETENTION.md rows for the Phase 20–22 tables.
+  - *Done-when:* grep shows both modules, every seeded credit rule and every new table in
+    those files.
+- [ ] **BE-23.2** A `credit` pytest marker, as a CI step printing the credit matrix. It is
+  applied to:
+  - the WS1 matrix, isolation and audit tests;
+  - `test_credit.py`, `test_calculations.py` and `test_rules.py`;
+  - the migration round trip.
+  - *Done-when:*
+    - `pytest -m credit` runs green in CI on the Phase 23 PR;
+    - `pytest --collect-only -q` reports 49 or fewer.
+- [ ] **BE-23.3** No leaks: a sentinel `counterparty_name`, `drawn_amount` and rating
+  rationale never reach logs, error bodies, audit details or warning details.
+  - *Done-when:* the check is folded into
+    `test_import_no_leak.py::test_no_sentinel_in_logs_error_bodies_or_audit` (+0) and passes.
+- [ ] **FE-23.1** Playwright credit smoke:
+  1. the steward projects both credit imports;
+  2. the analyst proposes ratings and the approver approves;
+  3. the analyst runs `credit_ecl` and `credit_ecl_cecl`;
+  4. a drill-down to a source row;
+  5. a rating change is approved;
+  6. a new run differs, and the old run is unchanged.
+  - *Done-when:* the `e2e` job passes in CI with the credit specs, and the `playwright-report`
+    artifact exists.
+- [ ] **FE-23.2** Disclaimer guard: every credit page shows the illustrative statement and
+  the D-42 §9 line.
+  - *Done-when:* a vitest renders each credit page and greps that no text claims compliance,
+    certification, regulatory status or parity with Moody's or any agency, other than the
+    negating disclaimer.
+
+*Test budget:* 49 → 49.
+*Reversibility:* docs, a marker and tests only.
+
+### Deferred (out of scope for Feature 04)
+
+- **Real methodology and approved golden cases.** The master scale, PIT conversion, LGDs,
+  CCFs, haircuts, SICR criteria, discounting and rounding all wait for the client's named
+  financial owner (Arch §12, §17). The seeds are ILLUSTRATIVE.
+- **Macroeconomic scenarios and forward-looking weighting** (IFRS 9 multiple scenarios),
+  PD model calibration, and migration-matrix or Markov term structures. These belong to WS4
+  scenarios, and the methodology is the client's.
+- **Within-year granularity:** monthly terms, Stage 1 pro-rating below 12 months,
+  amortising EAD, prepayment and behavioural lives. These are documented limitations.
+- **Full collateral modelling** (`collateral_asset`, `collateral_link`, several items or
+  exposures, allocation, revaluation) and the PLANNED `collateral` module (FC-06). The
+  per-exposure haircut is a simplification.
+- **Capital and RWA** (the PLANNED `capital` module): no regulatory capital.
+- **Rating models and scorecards**, external rating feeds and rating-provider licensing
+  (Data Model §11 :1225), plus rating withdrawal (RETIRED), watch lists and overrides.
+- **Committee approval, approval limits and a credit-officer role:** these need the client
+  role model (D-40).
+- **Bulk rating proposals and rating imports.**
+- **Stage-transfer reports, ECL movement analysis and run-to-run comparison views:** WS4
+  RO-02/RO-05.
+- **FX and cross-currency totals:** ECL is per currency.
+- **Accounting postings, GL reconciliation and disclosure templates.** There are no
+  regulatory or accounting outputs.
+- **AI-assisted rating suggestions or ECL explanations:** WS5 only, never on the calculation
+  path.
+- **Projecting `instrument` v1 `counterparty_id`** onto `instrument_version`. That needs a
+  new projector version, and credit uses `credit_exposure` instead.
+
+### Open questions for the user (Feature 04)
+
+**Answered 2026-10-19.** The user answered 1–3: the CHECKs are widened, the D-40 grants are
+approved, and the scope is confirmed under CR-01…CR-06. Questions 4–7 were auto-resolved
+with the safer default (D-36):
+- **4.** The rating rationale is `confidential`.
+- **5.** Unrated obligors are excluded with a warning.
+- **6.** Stage 3 is undiscounted and Stage 1 is not pro-rated, both PROVISIONAL.
+- **7.** The suite stays at 49 tests.
+
+1. **D-38 (hard stop):** approve widening the two `schema_code` CHECKs, or choose fallback B
+   (parallel tables, no D-01 exception)?
+2. **D-40 (hard stop):** approve `rating:propose` → risk_analyst and `rating:approve` →
+   approver, or name other holders or a new role?
+3. **Scope:** Data Model §11 (:1231) leaves impairment scope open, and credit is not in the
+   WS plans. Confirm that Feature 04 is in scope, under the added CR-01…CR-06 IDs.
+4. **Rating text classification** (D-43 §2): is the rationale `internal` (the analyst can
+   read their own), or `confidential` (the analyst then cannot)?
+5. **Unrated obligors** (D-39 §5): exclude them with a warning (proposed), or measure them
+   at an illustrative UNRATED grade?
+6. **Illustrative simplifications** (D-42 §7): are an undiscounted Stage 3 and no Stage 1
+   pro-rating acceptable for the prototype?
+7. **Test headroom:** stay at 49 with no spare slot, or fold `test_config.py` in BE-19.1 to
+   free two?
