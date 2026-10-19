@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { Suspense } from 'react'
-import { Plus } from 'lucide-react'
+import { Plus, Sparkles } from 'lucide-react'
 import { Forbidden } from '@/components/auth/Forbidden'
 import { RequirePermission } from '@/components/auth/RequirePermission'
 import { ScenarioLibrary } from '@/components/advanced/ScenarioLibrary'
@@ -23,6 +23,13 @@ export default function StressExplorerPage() {
         title="Agentic Stress-Test Explorer"
         description="Author stress scenarios from the approved shock templates, confirm them for exploration, and promote them through maker-checker approval."
         actions={
+          <div className="flex items-center gap-2">
+          <Button asChild size="sm" variant="outline" data-testid="agent-demo">
+            <Link href="/advanced/stress-explorer/agent-demo">
+              <Sparkles className="mr-1 h-3.5 w-3.5" />
+              Agent demo
+            </Link>
+          </Button>
           <RequirePermission permission="scenario:propose" fallback={null}>
             <Button asChild size="sm" data-testid="new-scenario">
               <Link href={newScenarioHref}>
@@ -31,6 +38,7 @@ export default function StressExplorerPage() {
               </Link>
             </Button>
           </RequirePermission>
+          </div>
         }
       />
       <div className="space-y-4 px-6 pb-6">

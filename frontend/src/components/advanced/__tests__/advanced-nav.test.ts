@@ -74,6 +74,7 @@ describe('the Advanced sidebar section (FE-24.1)', () => {
       ...PHASE_23_MAIN.map(([, label]) => label),
       'Advanced',
       'Agentic Stress-Test Explorer',
+      'Liquidity Intelligence',
       'Administration',
       ...PHASE_23_ADMIN.map(([, label]) => label),
     ])
@@ -86,6 +87,7 @@ describe('the Advanced sidebar section (FE-24.1)', () => {
     const { FlaskConical } = await import('lucide-react')
     expect(advancedWorkspaces.map(({ slug, href, label, permission, planned }) => ({ slug, href, label, permission, planned }))).toEqual([
       { slug: 'stress-explorer', href: '/advanced/stress-explorer', label: 'Agentic Stress-Test Explorer', permission: 'calc:read', planned: undefined },
+      { slug: 'liquidity-intelligence', href: '/advanced/liquidity-intelligence', label: 'Liquidity Intelligence', permission: 'calc:read', planned: undefined },
     ])
     expect(advancedWorkspaces[0].icon).toBe(FlaskConical)
     // findWorkspace includes the Advanced section.

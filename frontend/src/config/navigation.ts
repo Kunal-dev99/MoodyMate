@@ -6,6 +6,7 @@ import {
   FileStack,
   FlaskConical,
   GitCompare,
+  Gauge,
   Landmark,
   LayoutDashboard,
   ScrollText,
@@ -156,6 +157,15 @@ export const advancedWorkspaces: Workspace[] = STRESS_EXPLORER_UI_ENABLED
         description: STRESS_COMPARE_UI_ENABLED
           ? 'Author scenarios from the approved shock templates, confirm them for exploration, promote them through maker-checker approval, run them against a baseline maturity ladder and compare baseline with stress. Illustrative, not a regulatory stress test.'
           : 'Author scenarios from the approved shock templates, confirm them for exploration and promote them through maker-checker approval. Illustrative, not a regulatory stress test.',
+        permission: 'calc:read',
+      },
+      {
+        slug: 'liquidity-intelligence',
+        href: '/advanced/liquidity-intelligence',
+        label: 'Liquidity Intelligence',
+        icon: Gauge,
+        description:
+          'Prototype: explain an LCR movement between two runs and test a 25% deposit-outflow shock as a separate scenario. Mock agent, synthetic data.',
         permission: 'calc:read',
       },
     ]
