@@ -23,7 +23,7 @@ from alembic.script import ScriptDirectory
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
-from app.core.auth import AUTHENTICATED, PUBLIC_PATHS, declared_permission
+from app.core.auth import AUTHENTICATED, PUBLIC_PATHS, declared_permission, permission_alternatives
 from app.governance.constants import ROLE_PERMISSIONS, Role
 from app.tests.conftest import WS1_MATRIX, alembic_config, clean, dev_token, insert_tenant, sql
 from app.tests.credit_kit import COUNTERPARTIES, EXPOSURES, VOCABULARIES, projected_credit
@@ -53,6 +53,7 @@ from app.tests.helpers import (
     upload,
     validated_sample,
 )
+from app.tests.scenario_kit import SCENARIOS, create_scenario
 
 # BE-18.3: every test here (matrix, isolation, audit, round trip) is in the WS3 suite too.
 pytestmark = [pytest.mark.db, pytest.mark.ws1, pytest.mark.ws3]
@@ -195,6 +196,8 @@ def test_route_by_role_authorization_matrix(api: TestClient, db: str) -> None:
         "assumption_set_id": api.get(f"{RUNS}/{calculated['run_id']}", headers=steward).json()[
             "manifest"
         ]["assumption_set"]["assumption_set_id"],
+        # Phase 24: GET /scenarios/{scenario_id}
+        "scenario_id": create_scenario(api, analyst)["scenario_id"],
     }
     tokens = {role: dev_token(api, role) for role in ROLES}
     failures = []
@@ -203,7 +206,10 @@ def test_route_by_role_authorization_matrix(api: TestClient, db: str) -> None:
     for method, path, permission in routes:
         row: dict[str, Any] = {"route": f"{method} {path}", "permission": permission}
         for role in ROLES:
-            allowed = permission == AUTHENTICATED or permission in ROLE_PERMISSIONS[Role(role)]
+            # Phase 24: an any-of declaration ("a|b", close) admits a role holding either.
+            allowed = permission == AUTHENTICATED or bool(
+                permission_alternatives(permission) & ROLE_PERMISSIONS[Role(role)]
+            )
             r = api.request(
                 method,
                 fill(path, lcr_ids if path.endswith("/liquidity") else ids),
@@ -314,6 +320,34 @@ def test_route_by_role_authorization_matrix(api: TestClient, db: str) -> None:
         assert {role: row[role] for role in ROLES} == {
             role: 422 if role == writer else 403 for role in ROLES
         }, row
+    # BE-24.2 / BE-24.4 (D-47 §2): the scenario reads are calc:read, 2xx for every seeded role;
+    # the writes are scenario:propose (risk_analyst), the decision scenario:approve
+    # (approver), close either (checked by the service): their empty body or unknown version
+    # is a 422, everyone else a 403.
+    for route in (
+        "GET /api/v1/scenario-templates",
+        "GET /api/v1/scenarios",
+        "GET /api/v1/scenarios/{scenario_id}",
+    ):
+        [row] = [r for r in WS1_MATRIX if r["route"] == route]
+        assert row["permission"] == "calc:read", route
+        assert all(row[role] == 200 for role in ROLES), row
+    version_route = "/api/v1/scenarios/{scenario_id}/versions/{version}"
+    for route, permission, writers in (
+        ("POST /api/v1/scenarios", "scenario:propose", {"risk_analyst"}),
+        ("POST /api/v1/scenarios/{scenario_id}/versions", "scenario:propose", {"risk_analyst"}),
+        (f"PUT {version_route}", "scenario:propose", {"risk_analyst"}),
+        (f"POST {version_route}/confirm", "scenario:propose", {"risk_analyst"}),
+        (f"POST {version_route}/submit", "scenario:propose", {"risk_analyst"}),
+        (f"POST {version_route}/approval", "scenario:approve", {"approver"}),
+        (f"POST {version_route}/close", "scenario:propose|scenario:approve",
+         {"risk_analyst", "approver"}),
+    ):  # fmt: skip
+        [row] = [r for r in WS1_MATRIX if r["route"] == route]
+        assert row["permission"] == permission, route
+        assert {role: row[role] for role in ROLES} == {
+            role: 422 if role in writers else 403 for role in ROLES
+        }, row
     assert len(WS1_MATRIX) >= 12
 
 
@@ -341,6 +375,7 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
     here_rating = proposed_rating(
         api, dev_token(api, "risk_analyst"), here_credit["counterparty_id"]
     )
+    here_scenario = create_scenario(api, dev_token(api, "risk_analyst"))["scenario_id"]  # P24
 
     other_tenant = insert_tenant(db, f"other-{uuid.uuid4().hex[:6]}")
     outsider = token_for(
@@ -369,6 +404,8 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
         RUNS,
         MODULES,
         "/api/v1/assumption-sets",  # BE-16.4
+        SCENARIOS,  # Phase 24: the shared library, and this tenant's DRAFT by status
+        f"{SCENARIOS}?status=DRAFT",
     ):
         assert api.get(path, headers=outsider).json()["total"] == 0, path
     # Phase 19: the credit vocabularies are seeded for this tenant only.
@@ -432,6 +469,8 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
             f"/api/v1/assumption-sets/{here_assumption_set}",
             f"/api/v1/assumption-sets/{uuid.uuid4()}",
         ),
+        # Phase 24: this tenant's scenario.
+        (f"{SCENARIOS}/{here_scenario}", f"{SCENARIOS}/{uuid.uuid4()}"),
     ):
         mine, absent = api.get(real, headers=outsider), api.get(random_id, headers=outsider)
         assert mine.status_code == absent.status_code == 404, real
@@ -533,6 +572,37 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
         assert (r.status_code, r.json()["code"]) == (404, "not_found"), path
         [denied] = events(db, correlation)
         assert (denied["action"], denied["outcome"]) == (action, "DENIED"), path
+    # Phase 24: every scenario write on this tenant's scenario is the same 404 as on an absent
+    # one, audited DENIED.
+    shocks = {
+        "shocks": [
+            {
+                "template": "DEPOSIT_WITHDRAWAL",
+                "parameters": {"cashflow_type": "DEPOSIT", "increase_fraction": "0.15"},
+            }
+        ]
+    }
+    scenario_writes: tuple[tuple[str, str, str, dict[str, Any]], ...] = (
+        ("POST", "versions", "scenario.version", shocks),
+        ("PUT", "versions/1", "scenario.edit", shocks),
+        ("POST", "versions/1/confirm", "scenario.confirm", {}),
+        ("POST", "versions/1/submit", "scenario.submit", {}),
+        ("POST", "versions/1/approval", "scenario.approve",
+         {"decision": "APPROVE", "comment": "Cross tenant"}),
+        ("POST", "versions/1/close", "scenario.close", {}),
+    )  # fmt: skip
+    for target in (here_scenario, str(uuid.uuid4())):
+        for method, path, action, payload in scenario_writes:
+            correlation = cid()
+            r = api.request(
+                method,
+                f"{SCENARIOS}/{target}/{path}",
+                json=payload,
+                headers={**outsider, "X-Correlation-ID": correlation},
+            )
+            assert (r.status_code, r.json()["code"]) == (404, "not_found"), (method, path, r.text)
+            [denied] = events(db, correlation)
+            assert (denied["action"], denied["outcome"]) == (action, "DENIED"), path
     for run_id in (here_calculated["run_id"], str(uuid.uuid4())):
         correlation = cid()
         r = api.post(
@@ -565,6 +635,8 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
         "calculation_run",
         "rule_set",
         "rule_version",
+        "scenario",  # Phase 24
+        "scenario_version",
     ):
         n = sql(db, f"SELECT count(*) AS n FROM {table} WHERE tenant_id = $1", other_tenant)
         assert n[0]["n"] == 0, table
@@ -622,6 +694,14 @@ AUDITED = {
     # Phase 20 (BE-20.2): the obligor rating workflow.
     "POST /api/v1/counterparties/{counterparty_id}/ratings": "obligor_rating.propose",
     "POST /api/v1/obligor-ratings/{rating_id}/approval": "obligor_rating.approve",
+    # Phase 24 (BE-24.3): the scenario lifecycle.
+    "POST /api/v1/scenarios": "scenario.create",
+    "POST /api/v1/scenarios/{scenario_id}/versions": "scenario.version",
+    "PUT /api/v1/scenarios/{scenario_id}/versions/{version}": "scenario.edit",
+    "POST /api/v1/scenarios/{scenario_id}/versions/{version}/confirm": "scenario.confirm",
+    "POST /api/v1/scenarios/{scenario_id}/versions/{version}/submit": "scenario.submit",
+    "POST /api/v1/scenarios/{scenario_id}/versions/{version}/approval": "scenario.approve",
+    "POST /api/v1/scenarios/{scenario_id}/versions/{version}/close": "scenario.close",
 }
 
 
@@ -810,6 +890,37 @@ def test_every_mutating_route_is_listed_and_emits_an_audit_event(api: TestClient
         {"decision": "APPROVE", "comment": "Audit check."},
     )
     assert decided["status"] == "ACTIVE", decided
+    # Phase 24: create, a second DRAFT, edit it; confirm, submit, approve and close v1.
+    scenario = call(
+        "POST /api/v1/scenarios",
+        analyst,
+        body={
+            "name": "Audit check",
+            "shocks": [
+                {
+                    "template": "DEPOSIT_WITHDRAWAL",
+                    "parameters": {"cashflow_type": "DEPOSIT", "increase_fraction": "0.15"},
+                }
+            ],
+        },
+    )
+    shocks = scenario["versions"][0]["shocks"]
+    scenario_path = f"{SCENARIOS}/{scenario['scenario_id']}/versions"
+    versions_route = "/api/v1/scenarios/{scenario_id}/versions"
+    call(f"POST {versions_route}", analyst, scenario_path, {"shocks": shocks, "parent_version": 1})
+    call(f"PUT {versions_route}/{{version}}", analyst, f"{scenario_path}/2", {"shocks": shocks})
+    call(f"POST {versions_route}/{{version}}/confirm", analyst, f"{scenario_path}/1/confirm", {})
+    call(f"POST {versions_route}/{{version}}/submit", analyst, f"{scenario_path}/1/submit", {})
+    call(
+        f"POST {versions_route}/{{version}}/approval",
+        approver,
+        f"{scenario_path}/1/approval",
+        {"decision": "APPROVE", "comment": "Audit check."},
+    )
+    closed = call(
+        f"POST {versions_route}/{{version}}/close", approver, f"{scenario_path}/1/close", {}
+    )
+    assert closed["status"] == "CLOSED", closed
     wider = upload(
         api,
         steward,
@@ -839,6 +950,53 @@ def test_migration_round_trip_and_downgrade_guards(api: TestClient, db: str) -> 
 
     def revision() -> str:
         return str(sql(db, "SELECT version_num FROM alembic_version")[0]["version_num"])
+
+    # BE-24.1: previous head -> 0026 -> previous head -> 0026. The downgrade refuses while a
+    # scenario exists (in one transaction: nothing changes); the tagged seed
+    # 0026_scenario_permissions grants scenario:propose to risk_analyst and scenario:approve to
+    # approver, every row carries its tag, and the whole role_permission join is
+    # ROLE_PERMISSIONS.
+    m0026 = ScriptDirectory.from_config(Config("alembic.ini")).get_revision("0026")
+    assert m0026 is not None and isinstance(m0026.down_revision, str)
+    previous = m0026.down_revision
+    scenario_tables = ("scenario", "scenario_version", "scenario_change")
+    create_scenario(api, dev_token(api, "risk_analyst"))
+
+    def scenario_rows() -> dict[str, list[Any]]:
+        return {t: sql(db, f"SELECT to_jsonb(t)::text AS j FROM {t} t") for t in scenario_tables}
+
+    kept = scenario_rows()
+    with pytest.raises(Exception, match="scenario"):
+        command.downgrade(alembic_config(db), previous)
+    assert revision() == head
+    assert scenario_rows() == kept
+    clean(db)
+    command.downgrade(alembic_config(db), previous)
+    assert revision() == previous
+    for table in scenario_tables:
+        assert sql(db, "SELECT to_regclass($1) AS t", table)[0]["t"] is None, table
+    assert sql(db, "SELECT code FROM permission WHERE code LIKE 'scenario:%'") == []
+    command.upgrade(alembic_config(db), "head")
+    assert revision() == head
+    tag = "0026_scenario_permissions"
+    joined = sql(
+        db,
+        "SELECT r.code AS role, p.code AS permission, p.seeded_by AS p_tag, rp.seeded_by AS g_tag"
+        " FROM role_permission rp JOIN role r ON r.id = rp.role_id"
+        " JOIN permission p ON p.id = rp.permission_id",
+    )
+    seeded_matrix: dict[str, set[str]] = {role: set() for role in ROLES}
+    for grant in joined:
+        seeded_matrix[grant["role"]].add(grant["permission"])
+    assert seeded_matrix == {r.value: {p.value for p in ps} for r, ps in ROLE_PERMISSIONS.items()}
+    assert {(g["role"], g["permission"]) for g in joined if g["p_tag"] == tag} == {
+        ("risk_analyst", "scenario:propose"), ("approver", "scenario:approve")
+    }  # fmt: skip
+    assert all(g["g_tag"] == tag for g in joined if g["p_tag"] == tag)
+    assert {
+        (p["code"], p["seeded_by"])
+        for p in sql(db, "SELECT code, seeded_by FROM permission WHERE code LIKE 'scenario:%'")
+    } == {("scenario:propose", tag), ("scenario:approve", tag)}
 
     # User data blocks the downgrade, in one transaction: nothing is removed or downgraded.
     steward = dev_token(api, "data_steward")

@@ -92,3 +92,11 @@ export const CREDIT_DOMAIN_UI_ENABLED = process.env.NEXT_PUBLIC_CREDIT_DOMAIN_UI
  * freezes ratings (writes 409 `rating_change_disabled`, audited); reads and runs keep working.
  */
 export const RATINGS_UI_ENABLED = process.env.NEXT_PUBLIC_RATINGS_UI !== 'off'
+
+/**
+ * NEXT_PUBLIC_STRESS_EXPLORER_UI=off (FE-24.1/24.2): the sidebar loses its "Advanced" section
+ * (the Agentic Stress-Test Explorer) and every /advanced route is a 404 again, restoring the
+ * Phase 23 sidebar exactly. The backend's own switch is SCENARIOS_ENABLED, which refuses
+ * scenario writes (409 `scenarios_disabled`, audited); reads keep working either way.
+ */
+export const STRESS_EXPLORER_UI_ENABLED = process.env.NEXT_PUBLIC_STRESS_EXPLORER_UI !== 'off'

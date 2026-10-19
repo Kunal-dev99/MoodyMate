@@ -36,6 +36,8 @@ export interface SidebarUser {
 
 export interface SidebarProps {
   mainNav: NavItem[]
+  /** FE-24.1: the "Advanced" group, right after the main nav and before "Administration". */
+  advancedNav?: NavItem[]
   adminNav?: NavItem[]
   /** Full brand name shown when expanded. */
   brandName?: string
@@ -61,6 +63,7 @@ function readSidebarOpen(): boolean {
 
 export function Sidebar({
   mainNav,
+  advancedNav,
   adminNav,
   brandName = 'Brand',
   brandTagline,
@@ -157,6 +160,22 @@ export function Sidebar({
             </div>
           )}
           <nav className="space-y-0.5 px-2">{mainNav.map(renderItem)}</nav>
+
+          {advancedNav && advancedNav.length > 0 && (
+            <>
+              <Separator className="my-4 mx-2 bg-border" />
+              {sidebarOpen && (
+                <div className="px-4 mb-2">
+                  <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest">
+                    Advanced
+                  </span>
+                </div>
+              )}
+              <nav aria-label="Advanced" className="space-y-0.5 px-2">
+                {advancedNav.map(renderItem)}
+              </nav>
+            </>
+          )}
 
           {adminNav && adminNav.length > 0 && (
             <>

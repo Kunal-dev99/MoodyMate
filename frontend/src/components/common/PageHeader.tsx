@@ -39,6 +39,8 @@ const ROUTE_LABELS: Record<string, string> = {
   scenarios: 'Reconciliation & Scenarios',
   reports: 'Reports',
   assistant: 'AI Assistant',
+  advanced: 'Advanced',
+  'stress-explorer': 'Agentic Stress-Test Explorer',
   audit: 'Audit',
   access: 'Access & Roles',
   users: 'Users',

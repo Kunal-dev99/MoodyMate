@@ -1098,6 +1098,212 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/scenario-templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Scenario Templates
+         * @description The three v1 templates (D-44 §2): parameters with kinds and bounds, the selector
+         *     fields, and the instrument types of the ACTIVE cashflow_direction rule each accepts.
+         */
+        get: operations["listScenarioTemplates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/scenarios": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Scenarios
+         * @description Scenarios of the caller's tenant with at least one version matching the filter. CLOSED
+         *     versions are hidden from pickers unless asked for by status.
+         */
+        get: operations["listScenarios"];
+        put?: never;
+        /**
+         * Create Scenario
+         * @description A scenario and its first DRAFT version (origin MANUAL). Refusals, audited DENIED
+         *     (`scenario.create`): 409 `scenarios_disabled`, 409 `duplicate_code`, 422
+         *     `invalid_shock` (value-free details `{"problems": [{shock_index, field, code}]}`).
+         */
+        post: operations["createScenario"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/scenarios/{scenario_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Scenario
+         * @description One scenario with every version (status, shocks, provenance, author, decider), CLOSED
+         *     and REJECTED included. 404 alike for an absent and a foreign id (D-04).
+         */
+        get: operations["getScenario"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/scenarios/{scenario_id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Scenario Version
+         * @description A new DRAFT version, optionally adapting `parent_version` (e.g. a rejected one, or
+         *     "what if 30 days?"). Refusals, audited (`scenario.version`): 404 `not_found` (scenario
+         *     or parent_version not found; another tenant's id answers the same), 409
+         *     `scenarios_disabled`, 422 `invalid_shock` (value-free details
+         *     `{"problems": [{shock_index, field, code}]}`).
+         */
+        post: operations["createScenarioVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/scenarios/{scenario_id}/versions/{version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update Scenario Version
+         * @description Replace a DRAFT's shocks; the author only. Refusals, audited (`scenario.edit`): 404
+         *     `not_found`, 409 `scenarios_disabled`, 409 `not_author`, 409 `invalid_status`, 422
+         *     `invalid_shock` (value-free details `{"problems": [{shock_index, field, code}]}`).
+         */
+        put: operations["updateScenarioVersion"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/scenarios/{scenario_id}/versions/{version}/approval": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decide Scenario Version
+         * @description Maker-checker promotion (D-44 §6): APPROVE -> APPROVED_FOR_TEST (the shared library),
+         *     REJECT -> REJECTED. Refusals, audited (`scenario.approve` / `scenario.reject`): 404, 409
+         *     `scenarios_disabled`, `self_approval` (the author), `invalid_status` (not IN_REVIEW).
+         */
+        post: operations["decideScenarioVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/scenarios/{scenario_id}/versions/{version}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Close Scenario Version
+         * @description Any status but DRAFT -> CLOSED: hidden from pickers, still readable by id, its runs
+         *     still re-runnable. The author (`scenario:propose`) closes a non-approved version; an
+         *     approver (`scenario:approve`) closes an approved one. Refusals, audited
+         *     (`scenario.close`): 404, 409 `scenarios_disabled`, `not_author`, `invalid_status`, 403
+         *     `forbidden` (the permission that applies is missing).
+         */
+        post: operations["closeScenarioVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/scenarios/{scenario_id}/versions/{version}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm Scenario Version
+         * @description DRAFT -> CONFIRMED_FOR_EXPLORATION by the author alone (D-47 §3): exploration runs
+         *     only, labelled "Exploration, not approved". Refusals, audited (`scenario.confirm`): 404,
+         *     409 `scenarios_disabled`, `not_author`, `invalid_status`; 422 `ai_review_required`,
+         *     `unacknowledged_defaults`.
+         */
+        post: operations["confirmScenarioVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/scenarios/{scenario_id}/versions/{version}/submit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit Scenario Version
+         * @description DRAFT or CONFIRMED_FOR_EXPLORATION -> IN_REVIEW (promotion), by the author. Refusals,
+         *     audited (`scenario.submit`): 404, 409 `scenarios_disabled`, `not_author`,
+         *     `invalid_status`; 422 `ai_review_required`, `unacknowledged_defaults`.
+         */
+        post: operations["submitScenarioVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/schema-change-proposals": {
         parameters: {
             query?: never;
@@ -1351,6 +1557,12 @@ export interface components {
             comment?: string | null;
             decision: components["schemas"]["ProposalDecision"];
         };
+        /**
+         * ApprovalLabel
+         * @description D-44 §8: what a version (and its runs) is labelled with.
+         * @enum {string}
+         */
+        ApprovalLabel: "Exploration, not approved" | "Approved scenario (illustrative)";
         /** ArtifactOut */
         ArtifactOut: {
             /**
@@ -2476,10 +2688,71 @@ export interface components {
             params: components["schemas"]["ValueParams"];
         };
         /**
+         * DelayCalendar
+         * @enum {string}
+         */
+        DelayCalendar: "CALENDAR_DAYS";
+        /** DelayedInflowsParameters */
+        DelayedInflowsParameters: {
+            /**
+             * Affected Fraction
+             * @description 0 < f <= 1, scale 4.
+             */
+            affected_fraction: string;
+            /**
+             * Cashflow Type
+             * @description An INFLOW instrument type, e.g. LOAN.
+             */
+            cashflow_type: string;
+            /** @default CALENDAR_DAYS */
+            delay_calendar: components["schemas"]["DelayCalendar"];
+            /** Delay Days */
+            delay_days: number;
+        };
+        /**
+         * DelayedInflowsShock
+         * @description Delayed loan repayments: f x amount of each matching INFLOW moves delay_days later.
+         */
+        DelayedInflowsShock: {
+            parameters: components["schemas"]["DelayedInflowsParameters"];
+            selector?: components["schemas"]["ShockSelector"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            template: "DELAYED_INFLOWS";
+        };
+        /**
          * DependentType
          * @enum {string}
          */
         DependentType: "SCHEMA" | "MAPPING" | "RULE" | "MODULE" | "REPORT" | "INTEGRATION";
+        /** DepositWithdrawalParameters */
+        DepositWithdrawalParameters: {
+            /**
+             * Cashflow Type
+             * @description An OUTFLOW instrument type, e.g. DEPOSIT.
+             */
+            cashflow_type: string;
+            /**
+             * Increase Fraction
+             * @description 0 < x <= 1, scale 4 (PROVISIONAL bound); '+15%' is '0.1500'.
+             */
+            increase_fraction: string;
+        };
+        /**
+         * DepositWithdrawalShock
+         * @description Increased deposit withdrawals: each matching OUTFLOW amount x (1 + x).
+         */
+        DepositWithdrawalShock: {
+            parameters: components["schemas"]["DepositWithdrawalParameters"];
+            selector?: components["schemas"]["ShockSelector"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            template: "DEPOSIT_WITHDRAWAL";
+        };
         /** DevPersona */
         DevPersona: {
             /** Description */
@@ -2705,6 +2978,77 @@ export interface components {
          * @enum {string}
          */
         FieldType: "STRING" | "INTEGER" | "DECIMAL" | "BOOLEAN" | "DATE" | "TIMESTAMP";
+        /**
+         * FlowDirection
+         * @enum {string}
+         */
+        FlowDirection: "INFLOW" | "OUTFLOW";
+        /**
+         * FlowOrigin
+         * @enum {string}
+         */
+        FlowOrigin: "CONTRACTUAL" | "BEHAVIOURAL";
+        /**
+         * FundingSourceSelector
+         * @description FUNDING_UNAVAILABLE's funding-source selector (D-44 §3). Counterparty selection is not
+         *     possible in v1.
+         */
+        FundingSourceSelector: {
+            /** Currency */
+            currency?: string | null;
+            /**
+             * Due From Day
+             * @description Inclusive, in days after the reporting date.
+             */
+            due_from_day?: number | null;
+            /**
+             * Due To Day
+             * @description Inclusive, in days after the reporting date; not before due_from_day.
+             */
+            due_to_day?: number | null;
+            /**
+             * Instrument Keys
+             * @description At most 50 instrument business keys, picked by the analyst (never by the model, D-49 §3). Writes take strings only: each must be an instrument of the tenant with a version of instrument_type that the author is cleared to see, else 422 invalid_shock code unknown_instrument. Reads mask each key the caller is not cleared for (the instrument_id field's classification, D-33) as a MaskedValue.
+             */
+            instrument_keys?: (string | components["schemas"]["MaskedValue"])[] | null;
+            /**
+             * Instrument Type
+             * @description An INFLOW instrument type.
+             */
+            instrument_type: string;
+            origin?: components["schemas"]["FlowOrigin"] | null;
+            /**
+             * Source System Code
+             * @description Matches all of a snapshot's cash flows or none in v1 (D-30 §1).
+             */
+            source_system_code?: string | null;
+        };
+        /** FundingUnavailableParameters */
+        FundingUnavailableParameters: {
+            /**
+             * Affected Fraction
+             * @description 0 < f <= 1, scale 4; 1 is fully off.
+             */
+            affected_fraction: string;
+            /** @default CALENDAR_DAYS */
+            delay_calendar: components["schemas"]["DelayCalendar"];
+            /** Unavailable Days */
+            unavailable_days: number;
+        };
+        /**
+         * FundingUnavailableShock
+         * @description A funding source unavailable: f x amount of matching INFLOWs due in (0, days] moves to
+         *     day days + 1 (timing only).
+         */
+        FundingUnavailableShock: {
+            parameters: components["schemas"]["FundingUnavailableParameters"];
+            selector: components["schemas"]["FundingSourceSelector"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            template: "FUNDING_UNAVAILABLE";
+        };
         /** HealthResponse */
         HealthResponse: {
             /**
@@ -4591,6 +4935,18 @@ export interface components {
          * @enum {string}
          */
         OnMissing: "ERROR" | "NULL" | "KEEP";
+        /**
+         * ParameterKind
+         * @description The kinds a template parameter or selector field takes (GET scenario-templates).
+         * @enum {string}
+         */
+        ParameterKind: "DECIMAL" | "INTEGER" | "ENUM" | "INSTRUMENT_TYPE" | "INSTRUMENT_KEYS" | "CURRENCY" | "TEXT";
+        /**
+         * ParameterSource
+         * @description Per AI-filled parameter (D-44 §7, D-48 §4); null for manual versions.
+         * @enum {string}
+         */
+        ParameterSource: "STATED" | "PROPOSED_DEFAULT";
         /** ParseBooleanParams */
         ParseBooleanParams: {
             /** False Values */
@@ -4650,7 +5006,7 @@ export interface components {
          * Permission
          * @enum {string}
          */
-        Permission: "schema:read" | "schema:propose" | "schema:approve" | "audit:read" | "admin:read" | "source:read" | "source:manage" | "import:read" | "import:write" | "mapping:read" | "mapping:propose" | "mapping:approve" | "quarantine:read" | "quality:review" | "domain:read" | "domain:project" | "rule:read" | "rule:propose" | "rule:approve" | "calc:read" | "calc:run" | "rating:propose" | "rating:approve";
+        Permission: "schema:read" | "schema:propose" | "schema:approve" | "audit:read" | "admin:read" | "source:read" | "source:manage" | "import:read" | "import:write" | "mapping:read" | "mapping:propose" | "mapping:approve" | "quarantine:read" | "quality:review" | "domain:read" | "domain:project" | "rule:read" | "rule:propose" | "rule:approve" | "calc:read" | "calc:run" | "rating:propose" | "rating:approve" | "scenario:propose" | "scenario:approve";
         /**
          * PinningRun
          * @description A calculation run that pins a rule version (through its rule set).
@@ -5940,6 +6296,318 @@ export interface components {
             code: "SCALE";
             params: components["schemas"]["ScaleParams"];
         };
+        /**
+         * ScenarioChangeOut
+         * @description One `scenario_change` row: a shock materialised when the version left DRAFT.
+         */
+        ScenarioChangeOut: {
+            /** Shock */
+            shock: components["schemas"]["DelayedInflowsShock"] | components["schemas"]["DepositWithdrawalShock"] | components["schemas"]["FundingUnavailableShock"];
+            /** Shock Index */
+            shock_index: number;
+            template: components["schemas"]["ScenarioTemplate"];
+        };
+        /**
+         * ScenarioCreate
+         * @description A scenario and its first DRAFT version (origin MANUAL).
+         */
+        ScenarioCreate: {
+            /** Change Summary */
+            change_summary?: string | null;
+            /**
+             * Code
+             * @description Unique per tenant (409 duplicate_code); assigned by the service if absent.
+             */
+            code?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Name */
+            name: string;
+            /**
+             * Shocks
+             * @description 1 to 5 shocks (D-44 §1). Any refusal is 422 invalid_shock with value-free details exactly {"problems": [{"shock_index": int | null, "field": str, "code": str}, ...]}: shock_index null for the list itself, field a structural path (e.g. parameters.affected_fraction), code a ShockProblem code; never a submitted value or an unknown key's name.
+             */
+            shocks: (components["schemas"]["DelayedInflowsShock"] | components["schemas"]["DepositWithdrawalShock"] | components["schemas"]["FundingUnavailableShock"])[];
+        };
+        /** ScenarioDetail */
+        ScenarioDetail: {
+            /** Code */
+            code: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by: string;
+            /** Description */
+            description: string | null;
+            labels: components["schemas"]["ScenarioLabels"];
+            /** Name */
+            name: string;
+            /**
+             * Scenario Id
+             * Format: uuid
+             */
+            scenario_id: string;
+            /**
+             * Scenarios Enabled
+             * @description SCENARIOS_ENABLED: false means 409 on writes.
+             */
+            scenarios_enabled: boolean;
+            /**
+             * Versions
+             * @description Every version, by version number (CLOSED and REJECTED included).
+             */
+            versions: components["schemas"]["ScenarioVersionOut"][];
+        };
+        /** ScenarioLabels */
+        ScenarioLabels: {
+            /**
+             * Statement
+             * @description D-44 §8: 'Illustrative stress exploration, not a regulatory stress test. Not a regulatory calculation; no parity with any vendor system is claimed.'
+             */
+            statement: string;
+        };
+        /**
+         * ScenarioOrigin
+         * @enum {string}
+         */
+        ScenarioOrigin: "MANUAL" | "AI_PROPOSED";
+        /** ScenarioPage */
+        ScenarioPage: {
+            /**
+             * Items
+             * @description Newest first.
+             */
+            items: components["schemas"]["ScenarioSummary"][];
+            labels: components["schemas"]["ScenarioLabels"];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /** Total */
+            total: number;
+        };
+        /** ScenarioSummary */
+        ScenarioSummary: {
+            /**
+             * Approved Version
+             * @description The newest APPROVED_FOR_TEST version.
+             */
+            approved_version: number | null;
+            /** Code */
+            code: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by: string;
+            /** Description */
+            description: string | null;
+            latest_status: components["schemas"]["ScenarioVersionStatus"];
+            /** Latest Version */
+            latest_version: number;
+            /**
+             * Matching Versions
+             * @description The versions that match the list filter (status, origin, mine).
+             */
+            matching_versions: number[];
+            /** Name */
+            name: string;
+            /**
+             * Scenario Id
+             * Format: uuid
+             */
+            scenario_id: string;
+        };
+        /**
+         * ScenarioTemplate
+         * @description The closed template list (D-44 §2, design §8). A new template needs code, tests and an
+         *     appended decision.
+         * @enum {string}
+         */
+        ScenarioTemplate: "DELAYED_INFLOWS" | "DEPOSIT_WITHDRAWAL" | "FUNDING_UNAVAILABLE";
+        /**
+         * ScenarioVersionClose
+         * @description Any status but DRAFT -> CLOSED: the author (scenario:propose) for a non-approved
+         *     version, an approver (scenario:approve) for an approved one.
+         */
+        ScenarioVersionClose: {
+            /** Comment */
+            comment?: string | null;
+        };
+        /**
+         * ScenarioVersionConfirm
+         * @description DRAFT -> CONFIRMED_FOR_EXPLORATION, by the author.
+         */
+        ScenarioVersionConfirm: {
+            /**
+             * Acknowledge Ai Origin
+             * @default false
+             */
+            acknowledge_ai_origin: boolean;
+            /**
+             * Acknowledged Defaults
+             * @description The parameter paths of every PROPOSED_DEFAULT parameter.
+             */
+            acknowledged_defaults?: string[];
+        };
+        /**
+         * ScenarioVersionCreate
+         * @description A new DRAFT version; `parent_version` records an adaptation (D-44 §7).
+         */
+        ScenarioVersionCreate: {
+            /** Change Summary */
+            change_summary?: string | null;
+            /** Parent Version */
+            parent_version?: number | null;
+            /**
+             * Shocks
+             * @description 1 to 5 shocks (D-44 §1). Any refusal is 422 invalid_shock with value-free details exactly {"problems": [{"shock_index": int | null, "field": str, "code": str}, ...]}: shock_index null for the list itself, field a structural path (e.g. parameters.affected_fraction), code a ShockProblem code; never a submitted value or an unknown key's name.
+             */
+            shocks: (components["schemas"]["DelayedInflowsShock"] | components["schemas"]["DepositWithdrawalShock"] | components["schemas"]["FundingUnavailableShock"])[];
+        };
+        /**
+         * ScenarioVersionDecision
+         * @description IN_REVIEW -> APPROVED_FOR_TEST or REJECTED, by an approver who is not the author.
+         */
+        ScenarioVersionDecision: {
+            /** Comment */
+            comment: string;
+            decision: components["schemas"]["ProposalDecision"];
+        };
+        /** ScenarioVersionOut */
+        ScenarioVersionOut: {
+            /** Acknowledged Defaults */
+            acknowledged_defaults: string[];
+            /** Ai Acknowledged */
+            ai_acknowledged: boolean;
+            /** @description 'Exploration, not approved' or 'Approved scenario (illustrative)'; None for versions that cannot run. */
+            approval_label: components["schemas"]["ApprovalLabel"] | null;
+            /**
+             * Author User Id
+             * Format: uuid
+             */
+            author_user_id: string;
+            /** Authored By */
+            authored_by: string;
+            /** Change Summary */
+            change_summary: string | null;
+            /**
+             * Changes
+             * @description Empty while DRAFT.
+             */
+            changes: components["schemas"]["ScenarioChangeOut"][];
+            /** Close Comment */
+            close_comment: string | null;
+            /** Closed At */
+            closed_at: string | null;
+            /** Closed By */
+            closed_by: string | null;
+            /** Confirmed At */
+            confirmed_at: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Decided At */
+            decided_at: string | null;
+            /** Decided By */
+            decided_by: string | null;
+            /** Decision Comment */
+            decision_comment: string | null;
+            labels: components["schemas"]["ScenarioLabels"];
+            origin: components["schemas"]["ScenarioOrigin"];
+            /**
+             * Parameter Sources
+             * @description Per AI-filled parameter path; null for MANUAL versions.
+             */
+            parameter_sources: {
+                [key: string]: components["schemas"]["ParameterSource"];
+            } | null;
+            /** Parent Version */
+            parent_version: number | null;
+            /** Parent Version Id */
+            parent_version_id: string | null;
+            /**
+             * Runnable
+             * @description CONFIRMED_FOR_EXPLORATION or APPROVED_FOR_TEST.
+             */
+            runnable: boolean;
+            /**
+             * Scenario Id
+             * Format: uuid
+             */
+            scenario_id: string;
+            /**
+             * Scenario Version Id
+             * Format: uuid
+             */
+            scenario_version_id: string;
+            /** Shocks */
+            shocks: (components["schemas"]["DelayedInflowsShock"] | components["schemas"]["DepositWithdrawalShock"] | components["schemas"]["FundingUnavailableShock"])[];
+            /**
+             * Shocks Sha256
+             * @description SHA-256 of the canonical JSON of `shocks`.
+             */
+            shocks_sha256: string;
+            status: components["schemas"]["ScenarioVersionStatus"];
+            /** Submit Comment */
+            submit_comment: string | null;
+            /** Submitted At */
+            submitted_at: string | null;
+            /** Submitted By */
+            submitted_by: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Version */
+            version: number;
+        };
+        /**
+         * ScenarioVersionStatus
+         * @description Data Model §9 `scenario.status` plus CONFIRMED_FOR_EXPLORATION (D-06, D-44 §5).
+         *     RUNNING and TESTED are reserved: runs are synchronous.
+         * @enum {string}
+         */
+        ScenarioVersionStatus: "DRAFT" | "CONFIRMED_FOR_EXPLORATION" | "IN_REVIEW" | "APPROVED_FOR_TEST" | "RUNNING" | "TESTED" | "REJECTED" | "CLOSED";
+        /**
+         * ScenarioVersionSubmit
+         * @description DRAFT or CONFIRMED_FOR_EXPLORATION -> IN_REVIEW, by the author.
+         */
+        ScenarioVersionSubmit: {
+            /**
+             * Acknowledge Ai Origin
+             * @default false
+             */
+            acknowledge_ai_origin: boolean;
+            /**
+             * Acknowledged Defaults
+             * @description The parameter paths of every PROPOSED_DEFAULT parameter.
+             */
+            acknowledged_defaults?: string[];
+            /** Comment */
+            comment?: string | null;
+        };
+        /**
+         * ScenarioVersionUpdate
+         * @description Replace a DRAFT's shocks (author only).
+         */
+        ScenarioVersionUpdate: {
+            /** Change Summary */
+            change_summary?: string | null;
+            /**
+             * Shocks
+             * @description 1 to 5 shocks (D-44 §1). Any refusal is 422 invalid_shock with value-free details exactly {"problems": [{"shock_index": int | null, "field": str, "code": str}, ...]}: shock_index null for the list itself, field a structural path (e.g. parameters.affected_fraction), code a ShockProblem code; never a submitted value or an unknown key's name.
+             */
+            shocks: (components["schemas"]["DelayedInflowsShock"] | components["schemas"]["DepositWithdrawalShock"] | components["schemas"]["FundingUnavailableShock"])[];
+        };
         /** SchemaDependent */
         SchemaDependent: {
             /** Dependent Ref */
@@ -6144,6 +6812,25 @@ export interface components {
          * @enum {string}
          */
         SchemaVersionStatus: "DRAFT" | "IN_REVIEW" | "APPROVED" | "ACTIVE" | "DEPRECATED" | "RETIRED" | "REJECTED";
+        /**
+         * ShockSelector
+         * @description The common optional selector fields (D-44 §3).
+         */
+        ShockSelector: {
+            /** Currency */
+            currency?: string | null;
+            /**
+             * Due From Day
+             * @description Inclusive, in days after the reporting date.
+             */
+            due_from_day?: number | null;
+            /**
+             * Due To Day
+             * @description Inclusive, in days after the reporting date; not before due_from_day.
+             */
+            due_to_day?: number | null;
+            origin?: components["schemas"]["FlowOrigin"] | null;
+        };
         /** SnapshotCreate */
         SnapshotCreate: {
             /**
@@ -6370,6 +7057,81 @@ export interface components {
         SubmitIn: {
             /** Comment */
             comment?: string | null;
+        };
+        /** TemplateField */
+        TemplateField: {
+            /** Description */
+            description: string;
+            kind: components["schemas"]["ParameterKind"];
+            /**
+             * Max
+             * @description Inclusive upper bound (exact text), if any.
+             */
+            max: string | null;
+            /**
+             * Max Items
+             * @description INSTRUMENT_KEYS: at most this many.
+             */
+            max_items: number | null;
+            /**
+             * Min
+             * @description Inclusive lower bound (exact text), if any.
+             */
+            min: string | null;
+            /**
+             * Min Exclusive
+             * @description True: the bound itself is refused (0 < f).
+             */
+            min_exclusive: boolean;
+            /** Name */
+            name: string;
+            /** Required */
+            required: boolean;
+            /**
+             * Scale
+             * @description DECIMAL: the places text is padded to.
+             */
+            scale: number | null;
+            /**
+             * Unit
+             * @description e.g. 'fraction' or 'days'.
+             */
+            unit: string | null;
+            /**
+             * Values
+             * @description ENUM / INSTRUMENT_TYPE: the allowed values.
+             */
+            values: string[];
+        };
+        /** TemplateOut */
+        TemplateOut: {
+            /**
+             * Changes Amounts
+             * @description Only DEPOSIT_WITHDRAWAL changes amounts.
+             */
+            changes_amounts: boolean;
+            /** Description */
+            description: string;
+            /** @description The direction the matched flows must have. */
+            direction: components["schemas"]["FlowDirection"];
+            /** Name */
+            name: string;
+            /** Parameters */
+            parameters: components["schemas"]["TemplateField"][];
+            /** Selector */
+            selector: components["schemas"]["TemplateField"][];
+            template: components["schemas"]["ScenarioTemplate"];
+        };
+        /** TemplatePage */
+        TemplatePage: {
+            /**
+             * Items
+             * @description The three v1 templates, in template order.
+             */
+            items: components["schemas"]["TemplateOut"][];
+            labels: components["schemas"]["ScenarioLabels"];
+            /** Max Shocks */
+            max_shocks: number;
         };
         /** TopValue */
         TopValue: {
@@ -8934,6 +9696,441 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RuleVersionOut"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    listScenarioTemplates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TemplatePage"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    listScenarios: {
+        parameters: {
+            query?: {
+                /** @description Versions in these statuses. Default: APPROVED_FOR_TEST only (the shared library); exploration versions are never listed by default. */
+                status?: components["schemas"]["ScenarioVersionStatus"][] | null;
+                origin?: components["schemas"]["ScenarioOrigin"] | null;
+                /** @description Only versions the caller authored ('My explorations'). */
+                mine?: boolean;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScenarioPage"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    createScenario: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScenarioCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScenarioDetail"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    getScenario: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScenarioDetail"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    createScenarioVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScenarioVersionCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScenarioVersionOut"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    updateScenarioVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: string;
+                version: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScenarioVersionUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScenarioVersionOut"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    decideScenarioVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: string;
+                version: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScenarioVersionDecision"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScenarioVersionOut"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    closeScenarioVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: string;
+                version: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScenarioVersionClose"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScenarioVersionOut"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    confirmScenarioVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: string;
+                version: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScenarioVersionConfirm"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScenarioVersionOut"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    submitScenarioVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: string;
+                version: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScenarioVersionSubmit"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScenarioVersionOut"];
                 };
             };
             /** @description Client error (standard envelope) */

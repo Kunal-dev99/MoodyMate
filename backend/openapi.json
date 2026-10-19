@@ -27,6 +27,15 @@
         "title": "ApprovalIn",
         "type": "object"
       },
+      "ApprovalLabel": {
+        "description": "D-44 \u00a78: what a version (and its runs) is labelled with.",
+        "enum": [
+          "Exploration, not approved",
+          "Approved scenario (illustrative)"
+        ],
+        "title": "ApprovalLabel",
+        "type": "string"
+      },
       "ArtifactOut": {
         "properties": {
           "classification": {
@@ -2661,6 +2670,71 @@
         "title": "DefaultTransform",
         "type": "object"
       },
+      "DelayCalendar": {
+        "enum": [
+          "CALENDAR_DAYS"
+        ],
+        "title": "DelayCalendar",
+        "type": "string"
+      },
+      "DelayedInflowsParameters": {
+        "additionalProperties": false,
+        "properties": {
+          "affected_fraction": {
+            "description": "0 < f <= 1, scale 4.",
+            "pattern": "^[0-9]+(\\.[0-9]{1,4})?$",
+            "title": "Affected Fraction",
+            "type": "string"
+          },
+          "cashflow_type": {
+            "description": "An INFLOW instrument type, e.g. LOAN.",
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Cashflow Type",
+            "type": "string"
+          },
+          "delay_calendar": {
+            "$ref": "#/components/schemas/DelayCalendar",
+            "default": "CALENDAR_DAYS"
+          },
+          "delay_days": {
+            "maximum": 3650.0,
+            "minimum": 1.0,
+            "title": "Delay Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cashflow_type",
+          "affected_fraction",
+          "delay_days"
+        ],
+        "title": "DelayedInflowsParameters",
+        "type": "object"
+      },
+      "DelayedInflowsShock": {
+        "additionalProperties": false,
+        "description": "Delayed loan repayments: f x amount of each matching INFLOW moves delay_days later.",
+        "properties": {
+          "parameters": {
+            "$ref": "#/components/schemas/DelayedInflowsParameters"
+          },
+          "selector": {
+            "$ref": "#/components/schemas/ShockSelector"
+          },
+          "template": {
+            "const": "DELAYED_INFLOWS",
+            "title": "Template",
+            "type": "string"
+          }
+        },
+        "required": [
+          "template",
+          "parameters"
+        ],
+        "title": "DelayedInflowsShock",
+        "type": "object"
+      },
       "DependentType": {
         "enum": [
           "SCHEMA",
@@ -2672,6 +2746,53 @@
         ],
         "title": "DependentType",
         "type": "string"
+      },
+      "DepositWithdrawalParameters": {
+        "additionalProperties": false,
+        "properties": {
+          "cashflow_type": {
+            "description": "An OUTFLOW instrument type, e.g. DEPOSIT.",
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Cashflow Type",
+            "type": "string"
+          },
+          "increase_fraction": {
+            "description": "0 < x <= 1, scale 4 (PROVISIONAL bound); '+15%' is '0.1500'.",
+            "pattern": "^[0-9]+(\\.[0-9]{1,4})?$",
+            "title": "Increase Fraction",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cashflow_type",
+          "increase_fraction"
+        ],
+        "title": "DepositWithdrawalParameters",
+        "type": "object"
+      },
+      "DepositWithdrawalShock": {
+        "additionalProperties": false,
+        "description": "Increased deposit withdrawals: each matching OUTFLOW amount x (1 + x).",
+        "properties": {
+          "parameters": {
+            "$ref": "#/components/schemas/DepositWithdrawalParameters"
+          },
+          "selector": {
+            "$ref": "#/components/schemas/ShockSelector"
+          },
+          "template": {
+            "const": "DEPOSIT_WITHDRAWAL",
+            "title": "Template",
+            "type": "string"
+          }
+        },
+        "required": [
+          "template",
+          "parameters"
+        ],
+        "title": "DepositWithdrawalShock",
+        "type": "object"
       },
       "DevPersona": {
         "properties": {
@@ -3250,6 +3371,179 @@
         ],
         "title": "FieldType",
         "type": "string"
+      },
+      "FlowDirection": {
+        "enum": [
+          "INFLOW",
+          "OUTFLOW"
+        ],
+        "title": "FlowDirection",
+        "type": "string"
+      },
+      "FlowOrigin": {
+        "enum": [
+          "CONTRACTUAL",
+          "BEHAVIOURAL"
+        ],
+        "title": "FlowOrigin",
+        "type": "string"
+      },
+      "FundingSourceSelector": {
+        "additionalProperties": false,
+        "description": "FUNDING_UNAVAILABLE's funding-source selector (D-44 \u00a73). Counterparty selection is not\npossible in v1.",
+        "properties": {
+          "currency": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Z]{3}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "due_from_day": {
+            "anyOf": [
+              {
+                "maximum": 3650.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Inclusive, in days after the reporting date.",
+            "title": "Due From Day"
+          },
+          "due_to_day": {
+            "anyOf": [
+              {
+                "maximum": 3650.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Inclusive, in days after the reporting date; not before due_from_day.",
+            "title": "Due To Day"
+          },
+          "instrument_keys": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "maxLength": 200,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MaskedValue"
+                    }
+                  ]
+                },
+                "maxItems": 50,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "At most 50 instrument business keys, picked by the analyst (never by the model, D-49 \u00a73). Writes take strings only: each must be an instrument of the tenant with a version of instrument_type that the author is cleared to see, else 422 invalid_shock code unknown_instrument. Reads mask each key the caller is not cleared for (the instrument_id field's classification, D-33) as a MaskedValue.",
+            "title": "Instrument Keys"
+          },
+          "instrument_type": {
+            "description": "An INFLOW instrument type.",
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Instrument Type",
+            "type": "string"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FlowOrigin"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source_system_code": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Matches all of a snapshot's cash flows or none in v1 (D-30 \u00a71).",
+            "title": "Source System Code"
+          }
+        },
+        "required": [
+          "instrument_type"
+        ],
+        "title": "FundingSourceSelector",
+        "type": "object"
+      },
+      "FundingUnavailableParameters": {
+        "additionalProperties": false,
+        "properties": {
+          "affected_fraction": {
+            "description": "0 < f <= 1, scale 4; 1 is fully off.",
+            "pattern": "^[0-9]+(\\.[0-9]{1,4})?$",
+            "title": "Affected Fraction",
+            "type": "string"
+          },
+          "delay_calendar": {
+            "$ref": "#/components/schemas/DelayCalendar",
+            "default": "CALENDAR_DAYS"
+          },
+          "unavailable_days": {
+            "maximum": 365.0,
+            "minimum": 1.0,
+            "title": "Unavailable Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "unavailable_days",
+          "affected_fraction"
+        ],
+        "title": "FundingUnavailableParameters",
+        "type": "object"
+      },
+      "FundingUnavailableShock": {
+        "additionalProperties": false,
+        "description": "A funding source unavailable: f x amount of matching INFLOWs due in (0, days] moves to\nday days + 1 (timing only).",
+        "properties": {
+          "parameters": {
+            "$ref": "#/components/schemas/FundingUnavailableParameters"
+          },
+          "selector": {
+            "$ref": "#/components/schemas/FundingSourceSelector"
+          },
+          "template": {
+            "const": "FUNDING_UNAVAILABLE",
+            "title": "Template",
+            "type": "string"
+          }
+        },
+        "required": [
+          "template",
+          "parameters",
+          "selector"
+        ],
+        "title": "FundingUnavailableShock",
+        "type": "object"
       },
       "HealthResponse": {
         "properties": {
@@ -7317,6 +7611,29 @@
         "title": "OnMissing",
         "type": "string"
       },
+      "ParameterKind": {
+        "description": "The kinds a template parameter or selector field takes (GET scenario-templates).",
+        "enum": [
+          "DECIMAL",
+          "INTEGER",
+          "ENUM",
+          "INSTRUMENT_TYPE",
+          "INSTRUMENT_KEYS",
+          "CURRENCY",
+          "TEXT"
+        ],
+        "title": "ParameterKind",
+        "type": "string"
+      },
+      "ParameterSource": {
+        "description": "Per AI-filled parameter (D-44 \u00a77, D-48 \u00a74); null for manual versions.",
+        "enum": [
+          "STATED",
+          "PROPOSED_DEFAULT"
+        ],
+        "title": "ParameterSource",
+        "type": "string"
+      },
       "ParseBooleanParams": {
         "additionalProperties": false,
         "properties": {
@@ -7470,7 +7787,9 @@
           "calc:read",
           "calc:run",
           "rating:propose",
-          "rating:approve"
+          "rating:approve",
+          "scenario:propose",
+          "scenario:approve"
         ],
         "title": "Permission",
         "type": "string"
@@ -10283,6 +10602,888 @@
         "title": "ScaleTransform",
         "type": "object"
       },
+      "ScenarioChangeOut": {
+        "description": "One `scenario_change` row: a shock materialised when the version left DRAFT.",
+        "properties": {
+          "shock": {
+            "discriminator": {
+              "mapping": {
+                "DELAYED_INFLOWS": "#/components/schemas/DelayedInflowsShock",
+                "DEPOSIT_WITHDRAWAL": "#/components/schemas/DepositWithdrawalShock",
+                "FUNDING_UNAVAILABLE": "#/components/schemas/FundingUnavailableShock"
+              },
+              "propertyName": "template"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DelayedInflowsShock"
+              },
+              {
+                "$ref": "#/components/schemas/DepositWithdrawalShock"
+              },
+              {
+                "$ref": "#/components/schemas/FundingUnavailableShock"
+              }
+            ],
+            "title": "Shock"
+          },
+          "shock_index": {
+            "title": "Shock Index",
+            "type": "integer"
+          },
+          "template": {
+            "$ref": "#/components/schemas/ScenarioTemplate"
+          }
+        },
+        "required": [
+          "shock_index",
+          "template",
+          "shock"
+        ],
+        "title": "ScenarioChangeOut",
+        "type": "object"
+      },
+      "ScenarioCreate": {
+        "additionalProperties": false,
+        "description": "A scenario and its first DRAFT version (origin MANUAL).",
+        "properties": {
+          "change_summary": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Summary"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Unique per tenant (409 duplicate_code); assigned by the service if absent.",
+            "title": "Code"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "shocks": {
+            "description": "1 to 5 shocks (D-44 \u00a71). Any refusal is 422 invalid_shock with value-free details exactly {\"problems\": [{\"shock_index\": int | null, \"field\": str, \"code\": str}, ...]}: shock_index null for the list itself, field a structural path (e.g. parameters.affected_fraction), code a ShockProblem code; never a submitted value or an unknown key's name.",
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "DELAYED_INFLOWS": "#/components/schemas/DelayedInflowsShock",
+                  "DEPOSIT_WITHDRAWAL": "#/components/schemas/DepositWithdrawalShock",
+                  "FUNDING_UNAVAILABLE": "#/components/schemas/FundingUnavailableShock"
+                },
+                "propertyName": "template"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/DelayedInflowsShock"
+                },
+                {
+                  "$ref": "#/components/schemas/DepositWithdrawalShock"
+                },
+                {
+                  "$ref": "#/components/schemas/FundingUnavailableShock"
+                }
+              ]
+            },
+            "maxItems": 5,
+            "minItems": 1,
+            "title": "Shocks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "shocks"
+        ],
+        "title": "ScenarioCreate",
+        "type": "object"
+      },
+      "ScenarioDetail": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "labels": {
+            "$ref": "#/components/schemas/ScenarioLabels"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "scenario_id": {
+            "format": "uuid",
+            "title": "Scenario Id",
+            "type": "string"
+          },
+          "scenarios_enabled": {
+            "description": "SCENARIOS_ENABLED: false means 409 on writes.",
+            "title": "Scenarios Enabled",
+            "type": "boolean"
+          },
+          "versions": {
+            "description": "Every version, by version number (CLOSED and REJECTED included).",
+            "items": {
+              "$ref": "#/components/schemas/ScenarioVersionOut"
+            },
+            "title": "Versions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "scenario_id",
+          "code",
+          "name",
+          "description",
+          "created_by",
+          "created_at",
+          "versions",
+          "scenarios_enabled",
+          "labels"
+        ],
+        "title": "ScenarioDetail",
+        "type": "object"
+      },
+      "ScenarioLabels": {
+        "properties": {
+          "statement": {
+            "description": "D-44 \u00a78: 'Illustrative stress exploration, not a regulatory stress test. Not a regulatory calculation; no parity with any vendor system is claimed.'",
+            "title": "Statement",
+            "type": "string"
+          }
+        },
+        "required": [
+          "statement"
+        ],
+        "title": "ScenarioLabels",
+        "type": "object"
+      },
+      "ScenarioOrigin": {
+        "enum": [
+          "MANUAL",
+          "AI_PROPOSED"
+        ],
+        "title": "ScenarioOrigin",
+        "type": "string"
+      },
+      "ScenarioPage": {
+        "properties": {
+          "items": {
+            "description": "Newest first.",
+            "items": {
+              "$ref": "#/components/schemas/ScenarioSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "labels": {
+            "$ref": "#/components/schemas/ScenarioLabels"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset",
+          "labels"
+        ],
+        "title": "ScenarioPage",
+        "type": "object"
+      },
+      "ScenarioSummary": {
+        "properties": {
+          "approved_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The newest APPROVED_FOR_TEST version.",
+            "title": "Approved Version"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "latest_status": {
+            "$ref": "#/components/schemas/ScenarioVersionStatus"
+          },
+          "latest_version": {
+            "title": "Latest Version",
+            "type": "integer"
+          },
+          "matching_versions": {
+            "description": "The versions that match the list filter (status, origin, mine).",
+            "items": {
+              "type": "integer"
+            },
+            "title": "Matching Versions",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "scenario_id": {
+            "format": "uuid",
+            "title": "Scenario Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scenario_id",
+          "code",
+          "name",
+          "description",
+          "created_by",
+          "created_at",
+          "latest_version",
+          "latest_status",
+          "matching_versions",
+          "approved_version"
+        ],
+        "title": "ScenarioSummary",
+        "type": "object"
+      },
+      "ScenarioTemplate": {
+        "description": "The closed template list (D-44 \u00a72, design \u00a78). A new template needs code, tests and an\nappended decision.",
+        "enum": [
+          "DELAYED_INFLOWS",
+          "DEPOSIT_WITHDRAWAL",
+          "FUNDING_UNAVAILABLE"
+        ],
+        "title": "ScenarioTemplate",
+        "type": "string"
+      },
+      "ScenarioVersionClose": {
+        "additionalProperties": false,
+        "description": "Any status but DRAFT -> CLOSED: the author (scenario:propose) for a non-approved\nversion, an approver (scenario:approve) for an approved one.",
+        "properties": {
+          "comment": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          }
+        },
+        "title": "ScenarioVersionClose",
+        "type": "object"
+      },
+      "ScenarioVersionConfirm": {
+        "additionalProperties": false,
+        "description": "DRAFT -> CONFIRMED_FOR_EXPLORATION, by the author.",
+        "properties": {
+          "acknowledge_ai_origin": {
+            "default": false,
+            "title": "Acknowledge Ai Origin",
+            "type": "boolean"
+          },
+          "acknowledged_defaults": {
+            "description": "The parameter paths of every PROPOSED_DEFAULT parameter.",
+            "items": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Acknowledged Defaults",
+            "type": "array"
+          }
+        },
+        "title": "ScenarioVersionConfirm",
+        "type": "object"
+      },
+      "ScenarioVersionCreate": {
+        "additionalProperties": false,
+        "description": "A new DRAFT version; `parent_version` records an adaptation (D-44 \u00a77).",
+        "properties": {
+          "change_summary": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Summary"
+          },
+          "parent_version": {
+            "anyOf": [
+              {
+                "maximum": 1000000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Version"
+          },
+          "shocks": {
+            "description": "1 to 5 shocks (D-44 \u00a71). Any refusal is 422 invalid_shock with value-free details exactly {\"problems\": [{\"shock_index\": int | null, \"field\": str, \"code\": str}, ...]}: shock_index null for the list itself, field a structural path (e.g. parameters.affected_fraction), code a ShockProblem code; never a submitted value or an unknown key's name.",
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "DELAYED_INFLOWS": "#/components/schemas/DelayedInflowsShock",
+                  "DEPOSIT_WITHDRAWAL": "#/components/schemas/DepositWithdrawalShock",
+                  "FUNDING_UNAVAILABLE": "#/components/schemas/FundingUnavailableShock"
+                },
+                "propertyName": "template"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/DelayedInflowsShock"
+                },
+                {
+                  "$ref": "#/components/schemas/DepositWithdrawalShock"
+                },
+                {
+                  "$ref": "#/components/schemas/FundingUnavailableShock"
+                }
+              ]
+            },
+            "maxItems": 5,
+            "minItems": 1,
+            "title": "Shocks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "shocks"
+        ],
+        "title": "ScenarioVersionCreate",
+        "type": "object"
+      },
+      "ScenarioVersionDecision": {
+        "additionalProperties": false,
+        "description": "IN_REVIEW -> APPROVED_FOR_TEST or REJECTED, by an approver who is not the author.",
+        "properties": {
+          "comment": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Comment",
+            "type": "string"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/ProposalDecision"
+          }
+        },
+        "required": [
+          "decision",
+          "comment"
+        ],
+        "title": "ScenarioVersionDecision",
+        "type": "object"
+      },
+      "ScenarioVersionOut": {
+        "properties": {
+          "acknowledged_defaults": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Acknowledged Defaults",
+            "type": "array"
+          },
+          "ai_acknowledged": {
+            "title": "Ai Acknowledged",
+            "type": "boolean"
+          },
+          "approval_label": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApprovalLabel"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "'Exploration, not approved' or 'Approved scenario (illustrative)'; None for versions that cannot run."
+          },
+          "author_user_id": {
+            "format": "uuid",
+            "title": "Author User Id",
+            "type": "string"
+          },
+          "authored_by": {
+            "title": "Authored By",
+            "type": "string"
+          },
+          "change_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Summary"
+          },
+          "changes": {
+            "description": "Empty while DRAFT.",
+            "items": {
+              "$ref": "#/components/schemas/ScenarioChangeOut"
+            },
+            "title": "Changes",
+            "type": "array"
+          },
+          "close_comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Close Comment"
+          },
+          "closed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed At"
+          },
+          "closed_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed By"
+          },
+          "confirmed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "decided_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided By"
+          },
+          "decision_comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Comment"
+          },
+          "labels": {
+            "$ref": "#/components/schemas/ScenarioLabels"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/ScenarioOrigin"
+          },
+          "parameter_sources": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/ParameterSource"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per AI-filled parameter path; null for MANUAL versions.",
+            "title": "Parameter Sources"
+          },
+          "parent_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Version"
+          },
+          "parent_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Version Id"
+          },
+          "runnable": {
+            "description": "CONFIRMED_FOR_EXPLORATION or APPROVED_FOR_TEST.",
+            "title": "Runnable",
+            "type": "boolean"
+          },
+          "scenario_id": {
+            "format": "uuid",
+            "title": "Scenario Id",
+            "type": "string"
+          },
+          "scenario_version_id": {
+            "format": "uuid",
+            "title": "Scenario Version Id",
+            "type": "string"
+          },
+          "shocks": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "DELAYED_INFLOWS": "#/components/schemas/DelayedInflowsShock",
+                  "DEPOSIT_WITHDRAWAL": "#/components/schemas/DepositWithdrawalShock",
+                  "FUNDING_UNAVAILABLE": "#/components/schemas/FundingUnavailableShock"
+                },
+                "propertyName": "template"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/DelayedInflowsShock"
+                },
+                {
+                  "$ref": "#/components/schemas/DepositWithdrawalShock"
+                },
+                {
+                  "$ref": "#/components/schemas/FundingUnavailableShock"
+                }
+              ]
+            },
+            "title": "Shocks",
+            "type": "array"
+          },
+          "shocks_sha256": {
+            "description": "SHA-256 of the canonical JSON of `shocks`.",
+            "title": "Shocks Sha256",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ScenarioVersionStatus"
+          },
+          "submit_comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Submit Comment"
+          },
+          "submitted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Submitted At"
+          },
+          "submitted_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Submitted By"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "scenario_version_id",
+          "scenario_id",
+          "version",
+          "status",
+          "origin",
+          "parent_version",
+          "parent_version_id",
+          "parameter_sources",
+          "shocks",
+          "shocks_sha256",
+          "change_summary",
+          "changes",
+          "authored_by",
+          "author_user_id",
+          "created_at",
+          "updated_at",
+          "confirmed_at",
+          "submitted_by",
+          "submitted_at",
+          "submit_comment",
+          "decided_by",
+          "decided_at",
+          "decision_comment",
+          "closed_by",
+          "closed_at",
+          "close_comment",
+          "ai_acknowledged",
+          "acknowledged_defaults",
+          "runnable",
+          "approval_label",
+          "labels"
+        ],
+        "title": "ScenarioVersionOut",
+        "type": "object"
+      },
+      "ScenarioVersionStatus": {
+        "description": "Data Model \u00a79 `scenario.status` plus CONFIRMED_FOR_EXPLORATION (D-06, D-44 \u00a75).\nRUNNING and TESTED are reserved: runs are synchronous.",
+        "enum": [
+          "DRAFT",
+          "CONFIRMED_FOR_EXPLORATION",
+          "IN_REVIEW",
+          "APPROVED_FOR_TEST",
+          "RUNNING",
+          "TESTED",
+          "REJECTED",
+          "CLOSED"
+        ],
+        "title": "ScenarioVersionStatus",
+        "type": "string"
+      },
+      "ScenarioVersionSubmit": {
+        "additionalProperties": false,
+        "description": "DRAFT or CONFIRMED_FOR_EXPLORATION -> IN_REVIEW, by the author.",
+        "properties": {
+          "acknowledge_ai_origin": {
+            "default": false,
+            "title": "Acknowledge Ai Origin",
+            "type": "boolean"
+          },
+          "acknowledged_defaults": {
+            "description": "The parameter paths of every PROPOSED_DEFAULT parameter.",
+            "items": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Acknowledged Defaults",
+            "type": "array"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          }
+        },
+        "title": "ScenarioVersionSubmit",
+        "type": "object"
+      },
+      "ScenarioVersionUpdate": {
+        "additionalProperties": false,
+        "description": "Replace a DRAFT's shocks (author only).",
+        "properties": {
+          "change_summary": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Summary"
+          },
+          "shocks": {
+            "description": "1 to 5 shocks (D-44 \u00a71). Any refusal is 422 invalid_shock with value-free details exactly {\"problems\": [{\"shock_index\": int | null, \"field\": str, \"code\": str}, ...]}: shock_index null for the list itself, field a structural path (e.g. parameters.affected_fraction), code a ShockProblem code; never a submitted value or an unknown key's name.",
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "DELAYED_INFLOWS": "#/components/schemas/DelayedInflowsShock",
+                  "DEPOSIT_WITHDRAWAL": "#/components/schemas/DepositWithdrawalShock",
+                  "FUNDING_UNAVAILABLE": "#/components/schemas/FundingUnavailableShock"
+                },
+                "propertyName": "template"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/DelayedInflowsShock"
+                },
+                {
+                  "$ref": "#/components/schemas/DepositWithdrawalShock"
+                },
+                {
+                  "$ref": "#/components/schemas/FundingUnavailableShock"
+                }
+              ]
+            },
+            "maxItems": 5,
+            "minItems": 1,
+            "title": "Shocks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "shocks"
+        ],
+        "title": "ScenarioVersionUpdate",
+        "type": "object"
+      },
       "SchemaDependent": {
         "properties": {
           "dependent_ref": {
@@ -10877,6 +12078,64 @@
         "title": "SchemaVersionStatus",
         "type": "string"
       },
+      "ShockSelector": {
+        "additionalProperties": false,
+        "description": "The common optional selector fields (D-44 \u00a73).",
+        "properties": {
+          "currency": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Z]{3}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "due_from_day": {
+            "anyOf": [
+              {
+                "maximum": 3650.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Inclusive, in days after the reporting date.",
+            "title": "Due From Day"
+          },
+          "due_to_day": {
+            "anyOf": [
+              {
+                "maximum": 3650.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Inclusive, in days after the reporting date; not before due_from_day.",
+            "title": "Due To Day"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FlowOrigin"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "ShockSelector",
+        "type": "object"
+      },
       "SnapshotCreate": {
         "additionalProperties": false,
         "properties": {
@@ -11362,6 +12621,188 @@
           }
         },
         "title": "SubmitIn",
+        "type": "object"
+      },
+      "TemplateField": {
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ParameterKind"
+          },
+          "max": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Inclusive upper bound (exact text), if any.",
+            "title": "Max"
+          },
+          "max_items": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "INSTRUMENT_KEYS: at most this many.",
+            "title": "Max Items"
+          },
+          "min": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Inclusive lower bound (exact text), if any.",
+            "title": "Min"
+          },
+          "min_exclusive": {
+            "description": "True: the bound itself is refused (0 < f).",
+            "title": "Min Exclusive",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "required": {
+            "title": "Required",
+            "type": "boolean"
+          },
+          "scale": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "DECIMAL: the places text is padded to.",
+            "title": "Scale"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "e.g. 'fraction' or 'days'.",
+            "title": "Unit"
+          },
+          "values": {
+            "description": "ENUM / INSTRUMENT_TYPE: the allowed values.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Values",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "required",
+          "min",
+          "min_exclusive",
+          "max",
+          "scale",
+          "max_items",
+          "values",
+          "unit",
+          "description"
+        ],
+        "title": "TemplateField",
+        "type": "object"
+      },
+      "TemplateOut": {
+        "properties": {
+          "changes_amounts": {
+            "description": "Only DEPOSIT_WITHDRAWAL changes amounts.",
+            "title": "Changes Amounts",
+            "type": "boolean"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "direction": {
+            "$ref": "#/components/schemas/FlowDirection",
+            "description": "The direction the matched flows must have."
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "parameters": {
+            "items": {
+              "$ref": "#/components/schemas/TemplateField"
+            },
+            "title": "Parameters",
+            "type": "array"
+          },
+          "selector": {
+            "items": {
+              "$ref": "#/components/schemas/TemplateField"
+            },
+            "title": "Selector",
+            "type": "array"
+          },
+          "template": {
+            "$ref": "#/components/schemas/ScenarioTemplate"
+          }
+        },
+        "required": [
+          "template",
+          "name",
+          "description",
+          "direction",
+          "changes_amounts",
+          "parameters",
+          "selector"
+        ],
+        "title": "TemplateOut",
+        "type": "object"
+      },
+      "TemplatePage": {
+        "properties": {
+          "items": {
+            "description": "The three v1 templates, in template order.",
+            "items": {
+              "$ref": "#/components/schemas/TemplateOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "labels": {
+            "$ref": "#/components/schemas/ScenarioLabels"
+          },
+          "max_shocks": {
+            "title": "Max Shocks",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "max_shocks",
+          "labels"
+        ],
+        "title": "TemplatePage",
         "type": "object"
       },
       "TopValue": {
@@ -16050,6 +17491,757 @@
         "summary": "Submit Rule Version",
         "tags": [
           "rules"
+        ]
+      }
+    },
+    "/api/v1/scenario-templates": {
+      "get": {
+        "description": "The three v1 templates (D-44 \u00a72): parameters with kinds and bounds, the selector\nfields, and the instrument types of the ACTIVE cashflow_direction rule each accepts.",
+        "operationId": "listScenarioTemplates",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplatePage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Scenario Templates",
+        "tags": [
+          "scenarios"
+        ]
+      }
+    },
+    "/api/v1/scenarios": {
+      "get": {
+        "description": "Scenarios of the caller's tenant with at least one version matching the filter. CLOSED\nversions are hidden from pickers unless asked for by status.",
+        "operationId": "listScenarios",
+        "parameters": [
+          {
+            "description": "Versions in these statuses. Default: APPROVED_FOR_TEST only (the shared library); exploration versions are never listed by default.",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/components/schemas/ScenarioVersionStatus"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Versions in these statuses. Default: APPROVED_FOR_TEST only (the shared library); exploration versions are never listed by default.",
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "origin",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ScenarioOrigin"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Origin"
+            }
+          },
+          {
+            "description": "Only versions the caller authored ('My explorations').",
+            "in": "query",
+            "name": "mine",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Only versions the caller authored ('My explorations').",
+              "title": "Mine",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScenarioPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Scenarios",
+        "tags": [
+          "scenarios"
+        ]
+      },
+      "post": {
+        "description": "A scenario and its first DRAFT version (origin MANUAL). Refusals, audited DENIED\n(`scenario.create`): 409 `scenarios_disabled`, 409 `duplicate_code`, 422\n`invalid_shock` (value-free details `{\"problems\": [{shock_index, field, code}]}`).",
+        "operationId": "createScenario",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScenarioCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScenarioDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Scenario",
+        "tags": [
+          "scenarios"
+        ]
+      }
+    },
+    "/api/v1/scenarios/{scenario_id}": {
+      "get": {
+        "description": "One scenario with every version (status, shocks, provenance, author, decider), CLOSED\nand REJECTED included. 404 alike for an absent and a foreign id (D-04).",
+        "operationId": "getScenario",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Scenario Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScenarioDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Scenario",
+        "tags": [
+          "scenarios"
+        ]
+      }
+    },
+    "/api/v1/scenarios/{scenario_id}/versions": {
+      "post": {
+        "description": "A new DRAFT version, optionally adapting `parent_version` (e.g. a rejected one, or\n\"what if 30 days?\"). Refusals, audited (`scenario.version`): 404 `not_found` (scenario\nor parent_version not found; another tenant's id answers the same), 409\n`scenarios_disabled`, 422 `invalid_shock` (value-free details\n`{\"problems\": [{shock_index, field, code}]}`).",
+        "operationId": "createScenarioVersion",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Scenario Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScenarioVersionCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScenarioVersionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Scenario Version",
+        "tags": [
+          "scenarios"
+        ]
+      }
+    },
+    "/api/v1/scenarios/{scenario_id}/versions/{version}": {
+      "put": {
+        "description": "Replace a DRAFT's shocks; the author only. Refusals, audited (`scenario.edit`): 404\n`not_found`, 409 `scenarios_disabled`, 409 `not_author`, 409 `invalid_status`, 422\n`invalid_shock` (value-free details `{\"problems\": [{shock_index, field, code}]}`).",
+        "operationId": "updateScenarioVersion",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Scenario Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "maximum": 1000000,
+              "minimum": 1,
+              "title": "Version",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScenarioVersionUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScenarioVersionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Scenario Version",
+        "tags": [
+          "scenarios"
+        ]
+      }
+    },
+    "/api/v1/scenarios/{scenario_id}/versions/{version}/approval": {
+      "post": {
+        "description": "Maker-checker promotion (D-44 \u00a76): APPROVE -> APPROVED_FOR_TEST (the shared library),\nREJECT -> REJECTED. Refusals, audited (`scenario.approve` / `scenario.reject`): 404, 409\n`scenarios_disabled`, `self_approval` (the author), `invalid_status` (not IN_REVIEW).",
+        "operationId": "decideScenarioVersion",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Scenario Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "maximum": 1000000,
+              "minimum": 1,
+              "title": "Version",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScenarioVersionDecision"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScenarioVersionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Decide Scenario Version",
+        "tags": [
+          "scenarios"
+        ]
+      }
+    },
+    "/api/v1/scenarios/{scenario_id}/versions/{version}/close": {
+      "post": {
+        "description": "Any status but DRAFT -> CLOSED: hidden from pickers, still readable by id, its runs\nstill re-runnable. The author (`scenario:propose`) closes a non-approved version; an\napprover (`scenario:approve`) closes an approved one. Refusals, audited\n(`scenario.close`): 404, 409 `scenarios_disabled`, `not_author`, `invalid_status`, 403\n`forbidden` (the permission that applies is missing).",
+        "operationId": "closeScenarioVersion",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Scenario Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "maximum": 1000000,
+              "minimum": 1,
+              "title": "Version",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScenarioVersionClose"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScenarioVersionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Close Scenario Version",
+        "tags": [
+          "scenarios"
+        ]
+      }
+    },
+    "/api/v1/scenarios/{scenario_id}/versions/{version}/confirm": {
+      "post": {
+        "description": "DRAFT -> CONFIRMED_FOR_EXPLORATION by the author alone (D-47 \u00a73): exploration runs\nonly, labelled \"Exploration, not approved\". Refusals, audited (`scenario.confirm`): 404,\n409 `scenarios_disabled`, `not_author`, `invalid_status`; 422 `ai_review_required`,\n`unacknowledged_defaults`.",
+        "operationId": "confirmScenarioVersion",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Scenario Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "maximum": 1000000,
+              "minimum": 1,
+              "title": "Version",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScenarioVersionConfirm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScenarioVersionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Confirm Scenario Version",
+        "tags": [
+          "scenarios"
+        ]
+      }
+    },
+    "/api/v1/scenarios/{scenario_id}/versions/{version}/submit": {
+      "post": {
+        "description": "DRAFT or CONFIRMED_FOR_EXPLORATION -> IN_REVIEW (promotion), by the author. Refusals,\naudited (`scenario.submit`): 404, 409 `scenarios_disabled`, `not_author`,\n`invalid_status`; 422 `ai_review_required`, `unacknowledged_defaults`.",
+        "operationId": "submitScenarioVersion",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Scenario Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "maximum": 1000000,
+              "minimum": 1,
+              "title": "Version",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScenarioVersionSubmit"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScenarioVersionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Submit Scenario Version",
+        "tags": [
+          "scenarios"
         ]
       }
     },

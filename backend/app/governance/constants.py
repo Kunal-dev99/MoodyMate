@@ -35,6 +35,10 @@ class Permission(StrEnum):
     # Feature 04 credit (BE-20.1, D-40; seeded by the tagged migration 0023_credit_permissions).
     RATING_PROPOSE = "rating:propose"
     RATING_APPROVE = "rating:approve"
+    # Feature 05 stress scenarios (BE-24.1, D-47, user-approved 2026-10-19; seeded by the
+    # tagged migration 0026_scenario_permissions).
+    SCENARIO_PROPOSE = "scenario:propose"
+    SCENARIO_APPROVE = "scenario:approve"
 
 
 class Role(StrEnum):
@@ -134,13 +138,26 @@ CREDIT_ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
     Role.AUDITOR: frozenset(),
 }
 
-# The full seeded matrix (0003 + 0010 + 0017 + 0023). Authorization reads the database, not
-# this table.
+# docs/DELIVERY_PLAN.md Feature 05 "Role -> permission matrix additions" (D-47, PROVISIONAL
+# D-11; hard stop approved by the user 2026-10-19), seeded by migration 0026 (frozen copy
+# there). Analysts author scenarios and confirm their own for exploration; approvers promote
+# them; platform_admin, data_steward and auditor gain nothing. Reads reuse calc:read.
+SCENARIO_ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
+    Role.PLATFORM_ADMIN: frozenset(),
+    Role.DATA_STEWARD: frozenset(),
+    Role.RISK_ANALYST: frozenset({Permission.SCENARIO_PROPOSE}),
+    Role.APPROVER: frozenset({Permission.SCENARIO_APPROVE}),
+    Role.AUDITOR: frozenset(),
+}
+
+# The full seeded matrix (0003 + 0010 + 0017 + 0023 + 0026). Authorization reads the
+# database, not this table.
 ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
     role: WS1_ROLE_PERMISSIONS[role]
     | WS2_ROLE_PERMISSIONS[role]
     | WS3_ROLE_PERMISSIONS[role]
     | CREDIT_ROLE_PERMISSIONS[role]
+    | SCENARIO_ROLE_PERMISSIONS[role]
     for role in Role
 }
 

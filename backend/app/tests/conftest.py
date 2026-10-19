@@ -340,8 +340,23 @@ ALTER TABLE obligor_rating ENABLE TRIGGER USER;
 COMMIT;
 """
 
+# Phase 24 scenarios (0026) reference their author's user account: removed before it.
+# Lifecycle-guarded (DELETE and TRUNCATE refused), so the user triggers are lifted for this
+# one transaction.
+_SCENARIO_TABLES = ("scenario_change", "scenario_version", "scenario")
+_SCENARIO_CLEANUP = "\n".join(
+    [
+        "BEGIN;",
+        *(f"ALTER TABLE {t} DISABLE TRIGGER USER;" for t in _SCENARIO_TABLES),
+        *(f"DELETE FROM {t};" for t in _SCENARIO_TABLES),
+        *(f"ALTER TABLE {t} ENABLE TRIGGER USER;" for t in _SCENARIO_TABLES),
+        "COMMIT;",
+    ]
+)
+
 # Deletes everything that is not seed data (D-11), children first.
 _CLEANUP = [
+    _SCENARIO_CLEANUP,
     _RATING_CLEANUP,
     "DELETE FROM user_role",
     "DELETE FROM user_account",
@@ -400,6 +415,7 @@ def script(url: str, statements: str) -> None:
 def clean(url: str) -> None:
     for statement in _CLEANUP:
         if statement in (
+            _SCENARIO_CLEANUP,
             _RATING_CLEANUP,
             _CALC_CLEANUP,
             _CREDIT_CLEANUP,

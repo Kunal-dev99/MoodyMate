@@ -22,6 +22,9 @@ essential test (D-26), in four parts:
    rule_set and gives another result_sha256; the old run's rows are unchanged; a re-run of
    the old run (rerun_of) repeats its pins, manifest_sha256 and result_sha256; GET
    /rules/{rule_id} lists the runs that pin each version.
+5. Stress scenarios (Phase 24, BE-24.1 - BE-24.4; D-44, D-47), the same governed-change
+   pattern: templates and static validation, exploration confirmation, maker-checker
+   promotion, the 0026 triggers and the SCENARIOS_ENABLED switch (app/tests/scenario_kit.py).
 """
 
 import json
@@ -72,6 +75,7 @@ from app.tests.helpers import (
     upload,
     validate_import,
 )
+from app.tests.scenario_kit import check_scenarios
 
 pytestmark = pytest.mark.db
 
@@ -780,3 +784,6 @@ def test_governed_rule_changes_and_pinning(api: TestClient, db: str, artifact_di
     assert [run["run_id"] for run in shown[new["version"]]["runs"]] == [fresh["run_id"]]
     assert shown[new["version"]]["approved_by"] == approved["approved_by"]
     assert shown[stale["version"]]["status"] == "IN_REVIEW"
+
+    # --- 5. Stress scenarios (Phase 24, BE-24.1 - BE-24.4) -------------------------------------
+    check_scenarios(api, db, artifact_dir, tokens, both)

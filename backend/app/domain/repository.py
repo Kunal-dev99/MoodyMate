@@ -225,6 +225,33 @@ class DomainRepository(ScopedRepository[DomainProjection]):
         )
         return list(result.scalars())
 
+    async def instrument_versions_by_key(self, keys: Sequence[str]) -> list[InstrumentVersion]:
+        """Every version of the tenant's instruments with one of these business keys (any
+        source), oldest first per instrument; each carries `instrument_id` for grouping."""
+        if not keys:
+            return []
+        result = await self.session.execute(
+            select(InstrumentVersion)
+            .join(Instrument, Instrument.id == InstrumentVersion.instrument_id)
+            .where(
+                Instrument.tenant_id == self.scope.tenant_id,
+                InstrumentVersion.tenant_id == self.scope.tenant_id,
+                Instrument.business_key.in_(list(keys)),
+            )
+            .order_by(InstrumentVersion.instrument_id, InstrumentVersion.version)
+        )
+        return list(result.scalars())
+
+    async def instruments_by_id(self, ids: Sequence[uuid.UUID]) -> list[Instrument]:
+        if not ids:
+            return []
+        result = await self.session.execute(
+            select(Instrument).where(
+                Instrument.tenant_id == self.scope.tenant_id, Instrument.id.in_(list(ids))
+            )
+        )
+        return list(result.scalars())
+
     async def attribute_values(
         self, version_ids: Sequence[uuid.UUID]
     ) -> list[tuple[InstrumentAttributeValue, InstrumentAttributeDefinition]]:
