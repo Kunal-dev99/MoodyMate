@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type APIRequestContext } from '@playwright/test'
 import type { components } from '../src/api/schema'
-import { API, SAMPLES, bearer, signIn, uploadSample } from './support'
+import { API, SAMPLES, actorTitle, bearer, signIn, uploadSample } from './support'
 
 /**
  * Feature 04 Phase 20 browser check against the real stack (backend ENV=test, synthetic).
@@ -150,7 +150,9 @@ test('FE-20.1: risk_analyst proposes a rating from the counterparty Ratings pane
   await expect(row).toHaveAttribute('data-status', 'IN_REVIEW')
   await expect(row.getByTestId('rating-status')).toHaveText('In review')
   await expect(row.getByTestId('rating-effective-from-cell')).toHaveText('2026-09-30')
-  await expect(row.getByTestId('rating-proposer')).toContainText(created.proposed_by)
+  // The proposer is the signed-in user: "You", the raw actor in the tooltip (P-1).
+  await expect(row.getByTestId('rating-proposer')).toContainText('You')
+  await expect(row.getByTestId('rating-proposer').locator('[data-actor-kind]')).toHaveAttribute('title', actorTitle(created.proposed_by))
   await expect(row.getByTestId('rating-decider')).toHaveText('—')
   await expect(panel.getByTestId('rating-row')).toHaveCount(1)
   if (process.env.DOMAIN_SCREENSHOT) await page.screenshot({ path: `${process.env.DOMAIN_SCREENSHOT}/ratings-panel.png`, fullPage: true })

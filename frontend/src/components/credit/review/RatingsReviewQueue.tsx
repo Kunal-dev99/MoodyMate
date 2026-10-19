@@ -29,6 +29,8 @@ import {
   type RatingPage,
   type StatusFilter,
 } from './review'
+import { formatTimestamp } from '@/lib/format'
+import { ActorLabel } from '@/components/common/ActorLabel'
 
 const selectClass = 'h-9 rounded-md border border-input bg-background px-2 text-sm'
 const filterLabel = (s: StatusFilter): string => (s === 'ALL' ? 'All statuses' : RATING_STATUS_STYLE[s].label)
@@ -72,9 +74,8 @@ function Row({ r, onDecided }: { r: ObligorRating; onDecided: (r: ObligorRating)
         <RatingStatusPill status={r.status} testId="review-status" />
       </TableCell>
       <TableCell data-testid="review-proposer">
-        <span className="font-mono text-xs">{r.proposed_by}</span>
-        {isProposer(r, me) && <span className="text-xs text-muted-foreground"> (you)</span>}
-        <div className="font-mono text-xs text-muted-foreground">{new Date(r.proposed_at).toLocaleString()}</div>
+        <ActorLabel actor={r.proposed_by} you={isProposer(r, me)} className="text-xs" />
+        <div className="font-mono text-xs text-muted-foreground">{formatTimestamp(r.proposed_at)}</div>
       </TableCell>
       <TableCell className="max-w-sm text-sm">
         <Text value={r.rationale} testId="review-rationale" className="whitespace-pre-wrap break-words" />
@@ -82,8 +83,8 @@ function Row({ r, onDecided }: { r: ObligorRating; onDecided: (r: ObligorRating)
       <TableCell data-testid="review-decider">
         {r.decided_by ? (
           <>
-            <span className="font-mono text-xs">{r.decided_by}</span>
-            {r.decided_at && <div className="font-mono text-xs text-muted-foreground">{new Date(r.decided_at).toLocaleString()}</div>}
+            <ActorLabel actor={r.decided_by} className="text-xs" />
+            {r.decided_at && <div className="font-mono text-xs text-muted-foreground">{formatTimestamp(r.decided_at)}</div>}
             <div className="mt-1 text-xs">
               <Text value={r.decision_comment} testId="review-decision-comment" className="whitespace-pre-wrap break-words" />
             </div>
@@ -213,7 +214,7 @@ export function RatingsReviewQueue() {
     <PageSection
       icon={ClipboardCheck}
       title="Review queue"
-      description="Maker-checker (D-39 §3): a risk analyst proposes, an approver who is not the proposer approves or rejects with a comment. Every step and refusal is audited. Approving one version supersedes any ACTIVE version for the same counterparty and date."
+      description="Maker-checker: a risk analyst proposes, an approver who is not the proposer approves or rejects with a comment. Every step and refusal is audited. Approving one version supersedes any ACTIVE version for the same counterparty and date."
       headerRight={
         <label className="flex items-center gap-2 text-xs text-muted-foreground">
           Status

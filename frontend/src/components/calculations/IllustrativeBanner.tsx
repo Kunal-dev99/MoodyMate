@@ -22,7 +22,7 @@ export function IllustrativeBanner({ statement, className, compact }: { statemen
       <FlaskConical className="h-4 w-4" />
       <AlertTitle>Illustrative prototype — not regulatory</AlertTitle>
       <AlertDescription className="text-foreground" data-testid="illustrative-statement">
-        {text} Methodology parameters are seeded, provisional and illustrative (D-35); nothing here may be used for client decisions.
+        {text} Methodology parameters are seeded, provisional and illustrative; nothing here may be used for client decisions.
       </AlertDescription>
     </Alert>
   )

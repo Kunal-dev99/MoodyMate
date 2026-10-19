@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { API, bearer, shownFigure, signIn, uploadInBrowser, validateInBrowser, type ReconItem } from './support'
+import { API, actorTitle, bearer, shownFigure, signIn, uploadInBrowser, validateInBrowser, type ReconItem } from './support'
 
 /**
  * Feature 02 Phase 13, FE-13.1: the WS2 smoke, one serial journey against the real stack
@@ -261,7 +261,8 @@ test('FE-13.1: WS2 smoke: register → upload → profile → map → approve �
     expect(reviewed).toMatchObject({ status: 'ACKNOWLEDGED', reviewed_by: `user:${me.user_id}`, review_comment: comment })
     await expect(dialog).toHaveCount(0)
     await expect(alert).toHaveAttribute('data-status', 'ACKNOWLEDGED')
-    await expect(alert.getByTestId('drift-reviewed-by')).toHaveText(reviewed.reviewed_by)
+    await expect(alert.getByTestId('drift-reviewed-by')).toHaveText('You')
+    await expect(alert.getByTestId('drift-reviewed-by')).toHaveAttribute('title', actorTitle(reviewed.reviewed_by))
     await expect(alert.getByTestId('drift-review-comment')).toHaveText(comment)
     await expect(alert.getByTestId('drift-review-open')).toHaveCount(0)
     if (process.env.WS2_SMOKE_SCREENSHOT) await steward.screenshot({ path: `${process.env.WS2_SMOKE_SCREENSHOT}/drift-reviewed.png`, fullPage: true })

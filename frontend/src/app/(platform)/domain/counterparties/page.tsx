@@ -14,7 +14,7 @@ export default function CounterpartiesPage() {
     <>
       <PageHeader
         title="Counterparties"
-        description="Counterparties and credit exposures projected from validated imports, with their immutable versions and lineage to each source row. Vocabularies are seeded, provisional and illustrative (D-37)."
+        description="Counterparties and credit exposures projected from validated imports, with their immutable versions and lineage to each source row. Vocabularies are seeded, provisional and illustrative."
       />
       <RegistryTabs />
       <div className="px-6 pb-6">

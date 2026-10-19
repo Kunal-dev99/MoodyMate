@@ -12,7 +12,7 @@ export default function RulesPage() {
     <>
       <PageHeader
         title="Rules"
-        description="Methodology rules, their parameter kinds and versions. Seeded values are illustrative and provisional (D-35); they change only through maker-checker approval."
+        description="Methodology rules, their parameter kinds and versions. Seeded values are illustrative and provisional; they change only through maker-checker approval."
       />
       <RegistryTabs />
       <div className="px-6 pb-6">

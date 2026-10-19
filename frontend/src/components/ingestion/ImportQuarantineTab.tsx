@@ -268,7 +268,7 @@ export function ImportQuarantineTab({ job }: { job: ImportDetail }) {
       >
         <p className="text-sm text-muted-foreground">
           A retry is a new import of the same source with <code className="font-mono">retry_of_import_id</code> = this import. When it is
-          validated, items marked Retry ready whose business key it accepts move to Corrected, then Resolved (D-20).
+          validated, items marked Retry ready whose business key it accepts move to Corrected, then Resolved.
         </p>
       </PageSection>
       {!job.manifest ? (

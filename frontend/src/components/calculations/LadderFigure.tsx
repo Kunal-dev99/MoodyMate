@@ -20,7 +20,7 @@ export function LadderFigureValue({
   const hint = ladderMaskHint(row, figure, minAggregateCount)
   return (
     <span className="inline-flex flex-col items-end">
-      <ShownValue value={row[figure]} testId={testId} />
+      <ShownValue value={row[figure]} testId={testId} money />
       {hint && (
         <span className="mt-0.5 text-[11px] leading-tight text-muted-foreground" data-testid={`${testId}-hint`}>
           {hint}

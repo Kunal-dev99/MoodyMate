@@ -16,6 +16,8 @@ import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { RunStatusPill } from './RunStatusPill'
 import { NO_RUN_FILTERS, RUN_STATUSES, RUN_STATUS_STYLE, fetchModules, runHref, runQuery, type RunFilters, type RunPage } from './calculations'
+import { formatTimestamp } from '@/lib/format'
+import { ActorLabel } from '@/components/common/ActorLabel'
 
 const PAGE_SIZE = 50
 const selectClass = 'h-9 rounded-md border border-input bg-background px-2 text-sm'
@@ -225,10 +227,12 @@ export function RunList() {
                   </TableCell>
                   <TableCell className="text-right font-mono text-sm">{r.warning_count}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">
-                    {new Date(r.started_at).toLocaleString()}
-                    {r.ended_at && <div>ended {new Date(r.ended_at).toLocaleString()}</div>}
+                    {formatTimestamp(r.started_at)}
+                    {r.ended_at && <div>ended {formatTimestamp(r.ended_at)}</div>}
                   </TableCell>
-                  <TableCell className="font-mono text-xs">{r.created_by}</TableCell>
+                  <TableCell className="text-xs">
+                    <ActorLabel actor={r.created_by} />
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -258,7 +262,7 @@ export function RunList() {
     <PageSection
       icon={Calculator}
       title={state.kind === 'ready' ? `${state.page.total} run${state.page.total === 1 ? '' : 's'}` : 'Runs'}
-      description="Newest first. A run is immutable: it ends once, in the status the server sets, and is never updated or deleted (D-31 §5)."
+      description="Newest first. A run is immutable: it ends once, in the status the server sets, and is never updated or deleted."
     >
       {filters}
       {body}

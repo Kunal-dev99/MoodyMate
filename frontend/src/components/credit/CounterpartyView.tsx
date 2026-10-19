@@ -18,6 +18,7 @@ import { CreditValueCell } from './CreditValueCell'
 import { RatingsPanel } from './ratings/RatingsPanel'
 import { CREDIT_CRUMBS, Field, ImportRowLink, Lineage, Mono, NotInVocabulary } from './CreditParts'
 import { exposureHref, keyText, latestExposures, type CounterpartyDetail, type CounterpartyVersion } from './credit'
+import { formatTimestamp } from '@/lib/format'
 
 function Version({ v }: { v: CounterpartyVersion }) {
   return (
@@ -25,7 +26,7 @@ function Version({ v }: { v: CounterpartyVersion }) {
       <PageSection
         icon={GitBranch}
         title={`Version ${v.version}`}
-        description={`Projected ${new Date(v.projected_at).toLocaleString()}. Immutable: a later import of the same key adds a version.`}
+        description={`Projected ${formatTimestamp(v.projected_at)}. Immutable: a later import of the same key adds a version.`}
         headerRight={<ImportRowLink importId={v.import_id} ordinal={v.source_ordinal} testId="version-import-link" />}
       >
         <div className="grid gap-6 lg:grid-cols-2">
@@ -56,7 +57,7 @@ function Exposures({ detail }: { detail: CounterpartyDetail }) {
     <PageSection
       icon={Wallet}
       title={`Credit exposures (${rows.length})`}
-      description="Projected credit-exposure versions naming this counterparty's business key in your tenant; the latest version of each is shown. A calculation resolves the counterparty within its dataset snapshot (D-37 §4)."
+      description="Projected credit-exposure versions naming this counterparty's business key in your tenant; the latest version of each is shown. A calculation resolves the counterparty within its dataset snapshot."
     >
       {rows.length === 0 ? (
         <p className="text-sm text-muted-foreground" data-testid="no-exposures">
@@ -92,10 +93,10 @@ function Exposures({ detail }: { detail: CounterpartyDetail }) {
                   <CreditValueCell value={x.facility_type} />
                 </TableCell>
                 <TableCell className="text-right text-sm">
-                  <CreditValueCell value={x.drawn_amount} testId="counterparty-exposure-drawn" />
+                  <CreditValueCell value={x.drawn_amount} testId="counterparty-exposure-drawn" money />
                 </TableCell>
                 <TableCell className="text-right text-sm">
-                  <CreditValueCell value={x.undrawn_amount} />
+                  <CreditValueCell value={x.undrawn_amount} money />
                 </TableCell>
                 <TableCell className="text-sm">
                   <CreditValueCell value={x.currency} />
@@ -160,11 +161,11 @@ export function CounterpartyView({ counterpartyId }: { counterpartyId: string })
     <>
       <PageHeader
         title={`Counterparty ${label}`}
-        description={`Source ${detail.source_code} · ${detail.versions.length} version${detail.versions.length === 1 ? '' : 's'}, oldest first. Values are masked by the classification of their pinned schema field (D-43).`}
+        description={`Source ${detail.source_code} · ${detail.versions.length} version${detail.versions.length === 1 ? '' : 's'}, oldest first. Values are masked by the classification of their pinned schema field.`}
         breadcrumbs={[...CREDIT_CRUMBS, { label }]}
       />
       <div className="space-y-4 px-6 pb-6">
-        <PageSection icon={ListTree} title="Identity" description="Stable per tenant, source system and business key (D-37 §2).">
+        <PageSection icon={ListTree} title="Identity" description="Stable per tenant, source system and business key.">
           <dl className="grid grid-cols-[200px_1fr] gap-y-1 text-sm" data-testid="counterparty-identity">
             <Field label="Counterparty ID" testId="counterparty-id">
               <Mono>{detail.counterparty_id}</Mono>
@@ -178,7 +179,7 @@ export function CounterpartyView({ counterpartyId }: { counterpartyId: string })
               </Link>
             </Field>
             <Field label="First seen">
-              <Mono>{new Date(detail.created_at).toLocaleString()}</Mono>
+              <Mono>{formatTimestamp(detail.created_at)}</Mono>
             </Field>
           </dl>
         </PageSection>

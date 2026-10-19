@@ -277,7 +277,7 @@ export function describeShock(shock: Shock): string {
     return `Deposit withdrawal: ${p.cashflow_type} outflows +${pct(p.increase_fraction)}`
   }
   const p = shock.parameters
-  const keys = shock.selector.instrument_keys?.length ? ` (${shock.selector.instrument_keys.length} picked instruments)` : ''
+  const keys = shock.selector.instrument_keys?.length ? ` (${shock.selector.instrument_keys.length} picked instrument${shock.selector.instrument_keys.length === 1 ? '' : 's'})` : ''
   return `Funding unavailable: ${pct(p.affected_fraction)} of ${shock.selector.instrument_type}${keys} inflows due within ${p.unavailable_days} days move to day ${p.unavailable_days + 1}`
 }
 

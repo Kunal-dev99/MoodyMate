@@ -28,7 +28,7 @@ export const RATING_STATUS_STYLE: Record<ObligorRatingStatus, { label: string; c
     className: 'status-draft',
     description: 'Replaced by a later approval for the same effective date. Runs that pinned it keep it.',
   },
-  RETIRED: { label: 'Retired', className: 'status-draft', description: 'Reserved: withdrawal is deferred (D-39 §2).' },
+  RETIRED: { label: 'Retired', className: 'status-draft', description: 'Reserved: withdrawal is deferred.' },
 }
 export const RATING_STATUSES = Object.keys(RATING_STATUS_STYLE) as ObligorRatingStatus[]
 

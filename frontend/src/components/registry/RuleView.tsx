@@ -32,6 +32,8 @@ import {
   type RuleDetail,
   type RuleVersion,
 } from './registry'
+import { formatTimestamp } from '@/lib/format'
+import { ApprovalActor, AuthorActor, isSeededVersion } from './GovernedActor'
 
 const CRUMBS = [
   { label: 'Financial Domain', href: '/domain' },
@@ -52,7 +54,7 @@ function Field({ label, children, testId }: { label: string; children: ReactNode
 }
 
 const Mono = ({ children }: { children: ReactNode }) => <span className="break-all font-mono text-xs">{children}</span>
-const when = (at: string | null) => (at ? new Date(at).toLocaleString() : '—')
+const when = (at: string | null) => (at ? formatTimestamp(at) : '—')
 
 /** Every version of the rule, newest first, with who wrote and decided it and how many runs pin it. */
 function VersionHistory({ versions, shown, onShow }: { versions: RuleVersion[]; shown: number | null; onShow: (version: number) => void }) {
@@ -60,7 +62,7 @@ function VersionHistory({ versions, shown, onShow }: { versions: RuleVersion[]; 
     <PageSection
       icon={History}
       title={`Version history (${versions.length})`}
-      description="Every version, newest first. A version is immutable once it leaves DRAFT; superseded and rejected versions are kept, never deleted (D-32 §2)."
+      description="Every version, newest first. A version is immutable once it leaves DRAFT; superseded and rejected versions are kept, never deleted."
     >
       <Table data-testid="rule-versions">
         <TableHeader>
@@ -70,7 +72,7 @@ function VersionHistory({ versions, shown, onShow }: { versions: RuleVersion[]; 
             <TableHead>Author</TableHead>
             <TableHead>Approver</TableHead>
             <TableHead>Change</TableHead>
-            <TableHead>Parameters SHA-256</TableHead>
+            <TableHead className="whitespace-nowrap">Parameters SHA-256</TableHead>
             <TableHead>Runs</TableHead>
           </TableRow>
         </TableHeader>
@@ -101,10 +103,10 @@ function VersionHistory({ versions, shown, onShow }: { versions: RuleVersion[]; 
                 <VersionStatusPill status={v.status} testId="rule-version-status" />
               </TableCell>
               <TableCell className="text-xs" data-testid="rule-version-author">
-                {v.authored_by}
+                <AuthorActor actor={v.authored_by} />
               </TableCell>
               <TableCell className="text-xs" data-testid="rule-version-approver">
-                {v.decided_by ?? v.approved_by ?? <span className="text-muted-foreground">—</span>}
+                <ApprovalActor actor={v.decided_by ?? v.approved_by} seeded={isSeededVersion(v)} />
                 {(v.decided_at ?? v.approved_at) && <div className="text-muted-foreground">{when(v.decided_at ?? v.approved_at)}</div>}
               </TableCell>
               <TableCell className="max-w-xs text-xs">
@@ -149,21 +151,30 @@ function VersionPanel({ version: v }: { version: RuleVersion }) {
               <Mono>{v.parameters_sha256}</Mono>
             </Field>
             <Field label="Authored by">
-              <span className="text-xs">{v.authored_by}</span> <span className="text-xs text-muted-foreground">{when(v.created_at)}</span>
+              <span className="text-xs">
+                <AuthorActor actor={v.authored_by} />
+              </span>{' '}
+              <span className="text-xs text-muted-foreground">{when(v.created_at)}</span>
             </Field>
             <Field label="Approved by">
-              <span className="text-xs">{v.approved_by ?? '—'}</span> <span className="text-xs text-muted-foreground">{v.approved_at ? when(v.approved_at) : ''}</span>
+              <span className="text-xs">
+                <ApprovalActor actor={v.approved_by} seeded={isSeededVersion(v)} />
+              </span>{' '}
+              <span className="text-xs text-muted-foreground">{v.approved_at ? when(v.approved_at) : ''}</span>
             </Field>
             {v.decided_by && (
               <Field label="Decided by">
-                <span className="text-xs">{v.decided_by}</span> <span className="text-xs text-muted-foreground">{when(v.decided_at)}</span>
+                <span className="text-xs">
+                  <ApprovalActor actor={v.decided_by} seeded={isSeededVersion(v)} />
+                </span>{' '}
+                <span className="text-xs text-muted-foreground">{when(v.decided_at)}</span>
               </Field>
             )}
             {v.decision_comment && <Field label="Decision comment">{v.decision_comment}</Field>}
             {v.change_summary && <Field label="Change summary">{v.change_summary}</Field>}
             <Field label="Effective">
               <Mono>
-                {v.effective_from ?? '—'} → {v.effective_to ?? 'open'}
+                {v.effective_from === null && v.effective_to === null ? 'Open-ended' : `${v.effective_from ?? '—'} → ${v.effective_to ?? 'open'}`}
               </Mono>
             </Field>
             {v.superseded_at && <Field label="Superseded">{when(v.superseded_at)}</Field>}
@@ -349,7 +360,7 @@ export function RuleView({ ruleId }: { ruleId: string }) {
       />
       <div className="space-y-4 px-6 pb-6" data-testid="rule-detail" data-code={detail.code} data-rule-id={detail.rule_id}>
         {detail.illustrative && <IllustrativeBanner statement={detail.statement} />}
-        <PageSection icon={SlidersHorizontal} title="Definition" description="A rule is data: one closed parameter kind, no expressions or code (D-32 §1).">
+        <PageSection icon={SlidersHorizontal} title="Definition" description="A rule is data: one closed parameter kind, no expressions or code.">
           <div className="grid gap-6 lg:grid-cols-2">
             <dl className="grid grid-cols-[160px_1fr] gap-y-1 text-sm" data-testid="rule-definition">
               <Field label="Code" testId="rule-code">

@@ -2,6 +2,7 @@ import { Badge } from '@/components/ui/badge'
 import { CompatibilityBadge } from './CompatibilityBadge'
 import { valueLabel } from './registry'
 import type { Proposal } from './proposals'
+import { formatTimestamp } from '@/lib/format'
 
 type Impact = NonNullable<Proposal['impact']>
 
@@ -16,7 +17,7 @@ export function ImpactPanel({ impact }: { impact: Impact }) {
         </span>
         <span className="text-xs text-muted-foreground">
           {impact.changes.length} change{impact.changes.length === 1 ? '' : 's'} · {impact.dependents.length} dependent
-          {impact.dependents.length === 1 ? '' : 's'} · analysed {new Date(impact.analysed_at).toLocaleString()}
+          {impact.dependents.length === 1 ? '' : 's'} · analysed {formatTimestamp(impact.analysed_at)}
         </span>
       </div>
 

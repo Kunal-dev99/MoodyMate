@@ -29,6 +29,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { formatTimestamp } from '@/lib/format'
 
 /*
  * FE-9.1: the import's field profile, read-only. This file only reads (GET); the one
@@ -166,7 +167,7 @@ function ProfileView({ profile: p }: { profile: ImportProfile }) {
             <span className="text-muted-foreground"> · profiler v{p.profiler_version}</span>
           </Field>
           <Field label="Profiled">
-            <span className="font-mono text-xs">{new Date(p.profiled_at).toLocaleString()}</span>
+            <span className="font-mono text-xs">{formatTimestamp(p.profiled_at)}</span>
           </Field>
           <Field label="Source contract">
             <span className="font-mono">v{p.contract_version}</span>{' '}

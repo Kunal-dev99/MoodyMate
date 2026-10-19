@@ -20,8 +20,18 @@ UI. It is safe to run again: steps already done are skipped.
 
 It creates:
 - **Projected data:** the synthetic instrument, position and cash-flow samples (25 rows each),
-  mapped by data_steward, approved by approver, validated and projected. Skipped if the
-  tenant already has instruments.
+  mapped by data_steward, approved by approver, validated and projected. Instruments and cash
+  flows share the source "Core banking instruments (demo)" (`demo_instruments`: contract v1
+  for instruments, v2 for the cash-flow schedule), so each instrument's detail lists its cash
+  flows. Positions come from "Positions (demo)" (`demo_positions`).
+- **Credit data:** the counterparty and credit-exposure samples, from "Counterparty master
+  (demo)" and "Credit exposures (demo)", the same way.
+- **Ratings:** one ACTIVE obligor rating and one IN_REVIEW for the Ratings review queue.
+- **Calculations:** a maturity ladder run and an LCR/HQLA run (reporting date 2026-12-20) on
+  one snapshot of the instrument, position and cash-flow imports.
+
+Sources and mappings have stable codes (`demo_instruments`, `demo_cashflows`, ...). A re-run
+finds them by code and skips what is already projected.
 - **"Two-week loan repayment delay"** (`DEMO_LOAN_DELAY`): delay 20% of LOAN inflows by 14
   days. risk_analyst confirmed it for exploration, so it shows under "My explorations".
 - **"Combined funding stress"** (`DEMO_COMBINED_STRESS`): the loan delay, DEPOSIT outflows

@@ -30,6 +30,14 @@ export function useCurrentSession(): SessionContextValue {
   return value
 }
 
+/**
+ * Same as useCurrentSession, but returns null outside <SessionProvider> (e.g. a
+ * component rendered in a unit test). For cosmetic use only, such as labelling "You".
+ */
+export function useOptionalSession(): SessionContextValue | null {
+  return useContext(SessionContext)
+}
+
 type State =
   | { kind: 'loading' }
   | { kind: 'ready'; me: Me; permissions: Permission[]; authConfig: AuthConfig }

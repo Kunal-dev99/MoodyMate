@@ -15,6 +15,8 @@ import type { Schemas } from '@/api/client'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { formatTimestamp } from '@/lib/format'
+import { ActorLabel } from '@/components/common/ActorLabel'
 
 const PAGE_SIZE = 50
 
@@ -122,8 +124,8 @@ export function MappingsTab({ sourceId }: { sourceId?: string }) {
                 </TableCell>
                 <TableCell className="text-right font-mono text-sm">{m.version_count}</TableCell>
                 <TableCell className="text-xs text-muted-foreground">
-                  <span className="font-mono">{m.created_by}</span>
-                  <div>{new Date(m.created_at).toLocaleString()}</div>
+                  <ActorLabel actor={m.created_by} />
+                  <div>{formatTimestamp(m.created_at)}</div>
                 </TableCell>
               </TableRow>
             ))}

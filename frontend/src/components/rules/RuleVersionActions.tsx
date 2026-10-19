@@ -33,6 +33,8 @@ import {
   type RuleDetail,
   type RuleVersion,
 } from './rules'
+import { formatTimestamp } from '@/lib/format'
+import { ActorLabel, SEED_LABEL_ILLUSTRATIVE } from '@/components/common/ActorLabel'
 
 /** A refused rule request, inline: the server's envelope as it came, with its correlation ID. */
 export function RuleRefusalNotice({ refusal }: { refusal: Refusal }) {
@@ -192,8 +194,7 @@ function OpenVersion({ rule, version, onChanged }: { rule: RuleDetail; version: 
         <span className="font-mono font-medium">v{version.version}</span>
         <RuleVersionStatusPill status={version.status} />
         <span className="text-xs text-muted-foreground">
-          proposed by <span className="font-mono">{version.authored_by}</span>
-          {mine && ' (you)'} · {new Date(version.created_at).toLocaleString()}
+          proposed by <ActorLabel actor={version.authored_by} seedLabel={SEED_LABEL_ILLUSTRATIVE} /> · {formatTimestamp(version.created_at)}
         </span>
         <span className="ml-auto flex flex-wrap gap-2">
           {canSubmit(rule, version, has) && (
@@ -265,7 +266,7 @@ export function RuleVersionActions({ ruleId, onChanged }: { ruleId: string; onCh
     <PageSection
       icon={GitPullRequestArrow}
       title="Change this rule"
-      description="Maker-checker (D-32 §3): an analyst proposes a version from the ACTIVE one and submits it; an approver who is not the author activates or rejects it. Every step is audited."
+      description="Maker-checker: an analyst proposes a version from the ACTIVE one and submits it; an approver who is not the author activates or rejects it. Every step is audited."
       headerRight={
         canPropose(rule, has) ? (
           <Button size="sm" variant="outline" asChild data-testid="propose-link">

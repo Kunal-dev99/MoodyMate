@@ -59,7 +59,7 @@ export const ILLUSTRATIVE_STATEMENT =
  * shown as finished with a result; RUNNING is "in progress", never success.
  */
 export const RUN_STATUS_STYLE: Record<RunStatus, { label: string; className: string; description: string }> = {
-  QUEUED: { label: 'Queued', className: 'status-draft', description: 'Reserved for WS4: runs are synchronous in the MVP.' },
+  QUEUED: { label: 'Queued', className: 'status-draft', description: 'Reserved for a later release: runs are synchronous in this release.' },
   RUNNING: {
     label: 'Running',
     className: 'status-building',
@@ -76,7 +76,7 @@ export const RUN_STATUS_STYLE: Record<RunStatus, { label: string; className: str
     className: 'status-failed',
     description: 'A post-check or the engine failed: the outputs are not a result (never a silent success).',
   },
-  CANCELLED: { label: 'Cancelled', className: 'status-draft', description: 'Reserved for WS4.' },
+  CANCELLED: { label: 'Cancelled', className: 'status-draft', description: 'Reserved for a later release.' },
   BLOCKED: {
     label: 'Blocked',
     className: 'status-failed',
@@ -110,7 +110,7 @@ export const SEVERITY_VARIANT: Record<WarningSeverity, 'info' | 'warning' | 'des
 
 /** What each warning code means (value-free, as the server's messages are). */
 export const WARNING_TEXT: Record<WarningCode, string> = {
-  INSTRUMENT_NOT_IN_SNAPSHOT: 'Excluded: the cash flow names an instrument key with no instrument version in the snapshot (D-30 §4).',
+  INSTRUMENT_NOT_IN_SNAPSHOT: 'Excluded: the cash flow names an instrument key with no instrument version in the snapshot.',
   UNMAPPED_INSTRUMENT_TYPE: 'Excluded: the instrument type is not a key of the pinned cashflow_direction rule.',
   PAST_DUE_EXCLUDED: 'Excluded: due before the reporting date (past_due_treatment EXCLUDE_WITH_WARNING).',
   PAST_DUE_IN_FIRST_BUCKET: 'Past due, counted in the first bucket (past_due_treatment INCLUDE_IN_FIRST_BUCKET).',

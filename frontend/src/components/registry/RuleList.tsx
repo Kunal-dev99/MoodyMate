@@ -42,7 +42,7 @@ export function RuleList() {
       />
     )
   else if (state.value.items.length === 0)
-    body = <EmptyState icon={SlidersHorizontal} title="No rule is registered" description="Rules are seeded by a tagged migration (D-32 §7)." />
+    body = <EmptyState icon={SlidersHorizontal} title="No rule is registered" description="Rules are seeded by the platform." />
   else
     body = (
       <Table data-testid="rule-list">
@@ -91,7 +91,7 @@ export function RuleList() {
     <PageSection
       icon={SlidersHorizontal}
       title={state.kind === 'ready' ? `Rules (${state.value.total})` : 'Rules'}
-      description="Methodology parameters as data (D-32): each rule has one closed parameter kind and versions that change only through maker-checker approval. A run pins the ACTIVE version of every rule its module reads."
+      description="Methodology parameters as data: each rule has one closed parameter kind and versions that change only through maker-checker approval. A run pins the ACTIVE version of every rule its module reads."
     >
       {body}
     </PageSection>

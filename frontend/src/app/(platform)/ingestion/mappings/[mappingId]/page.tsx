@@ -45,6 +45,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { MAPPING_UI_ENABLED } from '@/config/features'
 import { cn } from '@/lib/utils'
+import { formatTimestamp } from '@/lib/format'
+import { ActorLabel } from '@/components/common/ActorLabel'
 
 type State = { kind: 'loading' } | { kind: 'ready'; m: MappingDetail } | LoadFailure
 type Profile = Schemas['ImportProfile']
@@ -143,7 +145,7 @@ function ValidationResult({ v }: { v: MappingValidation }) {
         </TableBody>
       </Table>
       <p className="font-mono text-xs text-muted-foreground">
-        Validation {v.id} · import {v.import_id} · content {v.mapping_sha256.slice(0, 12)}… · by {v.created_by} · {new Date(v.created_at).toLocaleString()}
+        Validation {v.id} · import {v.import_id} · content {v.mapping_sha256.slice(0, 12)}… · by <ActorLabel actor={v.created_by} /> · {formatTimestamp(v.created_at)}
       </p>
     </div>
   )
@@ -407,7 +409,7 @@ function Workbench({ mappingId }: { mappingId: string }) {
             </Field>
             <Field label="Created">
               <span className="font-mono text-xs">
-                {m.created_by} · {new Date(m.created_at).toLocaleString()}
+                <ActorLabel actor={m.created_by} /> · {formatTimestamp(m.created_at)}
               </span>
             </Field>
           </dl>
@@ -424,7 +426,7 @@ function Workbench({ mappingId }: { mappingId: string }) {
                 <TableHead>Author</TableHead>
                 <TableHead>Last dry run</TableHead>
                 <TableHead>Decision</TableHead>
-                <TableHead>Content SHA-256</TableHead>
+                <TableHead className="whitespace-nowrap">Content SHA-256</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -452,9 +454,9 @@ function Workbench({ mappingId }: { mappingId: string }) {
                   </TableCell>
                   <TableCell className="font-mono text-xs">{v.schema_version != null ? `v${v.schema_version}` : '—'}</TableCell>
                   <TableCell className="font-mono text-xs">{v.rules.length}</TableCell>
-                  <TableCell className="font-mono text-xs">
-                    {v.author} {v.author_user_id === me.user_id && <span className="font-sans text-muted-foreground">(you)</span>}
-                    <div className="font-sans text-muted-foreground">{new Date(v.created_at).toLocaleString()}</div>
+                  <TableCell className="text-xs">
+                    <ActorLabel actor={v.author} />
+                    <div className="font-sans text-muted-foreground">{formatTimestamp(v.created_at)}</div>
                     {v.change_summary && <div className="font-sans text-foreground">“{v.change_summary}”</div>}
                   </TableCell>
                   <TableCell className="text-xs">
@@ -467,8 +469,8 @@ function Workbench({ mappingId }: { mappingId: string }) {
                   <TableCell className="text-xs">
                     {v.decided_by ? (
                       <>
-                        <span className="font-mono">{v.decided_by}</span>
-                        <div className="text-muted-foreground">{v.decided_at && new Date(v.decided_at).toLocaleString()}</div>
+                        <ActorLabel actor={v.decided_by} />
+                        <div className="text-muted-foreground">{v.decided_at && formatTimestamp(v.decided_at)}</div>
                         {v.decision_comment && <div>“{v.decision_comment}”</div>}
                       </>
                     ) : (
@@ -503,6 +505,8 @@ function Workbench({ mappingId }: { mappingId: string }) {
           }
         >
           <div className="mb-3 flex flex-wrap items-end gap-3">
+            {/* Only a user who may propose runs a dry run, so only they pick an import (P-9). */}
+            {mayPropose && (
             <div className="grid gap-1">
               <label htmlFor="mapping-import" className="text-xs text-muted-foreground">
                 Import to validate against
@@ -518,11 +522,12 @@ function Workbench({ mappingId }: { mappingId: string }) {
                 {importId && !selectedImport && <option value={importId}>{importId.slice(0, 8)}</option>}
                 {(imports ?? []).map((i) => (
                   <option key={i.id} value={i.id}>
-                    {i.id.slice(0, 8)} · {i.status} · {i.artifact.original_filename ?? 'unnamed'} · {new Date(i.created_at).toLocaleString()}
+                    {i.id.slice(0, 8)} · {i.status} · {i.artifact.original_filename ?? 'unnamed'} · {formatTimestamp(i.created_at)}
                   </option>
                 ))}
               </select>
             </div>
+            )}
             {selectedImport && (
               <span className="flex items-center gap-2 text-xs text-muted-foreground">
                 <Link href={`/ingestion/imports/${selectedImport.id}`} className="font-mono text-primary hover:underline">

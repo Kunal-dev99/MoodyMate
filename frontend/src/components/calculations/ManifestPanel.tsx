@@ -40,7 +40,7 @@ export function ManifestPanel({ run }: { run: RunDetail }) {
     <PageSection
       icon={FileLock2}
       title="Manifest"
-      description="Everything this run pinned, written once with the run. manifest_sha256 covers the pinned content only, so a run on the same pins has the same hash (D-31 §4)."
+      description="Everything this run pinned, written once with the run. manifest_sha256 covers the pinned content only, so a run on the same pins has the same hash."
       headerRight={
         <span className="flex gap-2">
           {m.labels.illustrative && <Badge variant="warning">Illustrative</Badge>}
@@ -91,7 +91,7 @@ export function ManifestPanel({ run }: { run: RunDetail }) {
                 <TableHead>Rule</TableHead>
                 <TableHead>Version</TableHead>
                 <TableHead>IDs</TableHead>
-                <TableHead>Parameters SHA-256</TableHead>
+                <TableHead className="whitespace-nowrap">Parameters SHA-256</TableHead>
                 <TableHead>Parameters</TableHead>
               </TableRow>
             </TableHeader>
@@ -163,7 +163,7 @@ export function ManifestPanel({ run }: { run: RunDetail }) {
                 <TableHead>Type</TableHead>
                 <TableHead>Pin</TableHead>
                 <TableHead>ID</TableHead>
-                <TableHead>SHA-256</TableHead>
+                <TableHead className="whitespace-nowrap">SHA-256</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>

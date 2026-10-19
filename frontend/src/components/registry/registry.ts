@@ -46,12 +46,12 @@ export const RULE_VERSION_STATUS_STYLE: Record<RuleVersionStatus, { label: strin
   IN_REVIEW: {
     label: 'In review',
     className: 'status-testing',
-    description: 'Submitted and immutable. Waiting for an approver who is not the author (D-32 §3).',
+    description: 'Submitted and immutable. Waiting for an approver who is not the author.',
   },
   APPROVED: {
     label: 'Approved',
     className: 'status-building',
-    description: 'Reserved: an approval activates the version in the same transaction (D-32 §2).',
+    description: 'Reserved: an approval activates the version in the same transaction.',
   },
   ACTIVE: { label: 'Active', className: 'status-published', description: 'What a run submitted now pins. At most one per rule.' },
   SUPERSEDED: {
@@ -77,11 +77,11 @@ export const MODULE_GROUPS: Record<ImplementationStatus, { title: string; descri
   AVAILABLE: {
     title: 'Available',
     description:
-      'Implemented in this release as illustrative prototypes (D-35). Not regulatory calculations; a version runs only while every rule it reads has an ACTIVE version.',
+      'Implemented in this release as illustrative prototypes. Not regulatory calculations; a version runs only while every rule it reads has an ACTIVE version.',
   },
   PLANNED: {
     title: 'Planned',
-    description: 'Declared extension points (D-31 §1). Not implemented in this release: they never run and are not production-ready.',
+    description: 'Declared extension points. Not implemented in this release: they never run and are not production-ready.',
   },
 }
 export const IMPLEMENTATION_STATUSES = Object.keys(MODULE_GROUPS) as ImplementationStatus[]

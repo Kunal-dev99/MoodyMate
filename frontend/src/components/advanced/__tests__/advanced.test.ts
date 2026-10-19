@@ -272,6 +272,9 @@ describe('the plan example as a payload (FE-24.2)', () => {
       selector: { instrument_type: 'LOAN', instrument_keys: ['L-1', 'L-2'], currency: 'EUR' },
     })
     expect(describeShock(shock)).toBe('Funding unavailable: 100% of LOAN (2 picked instruments) inflows due within 7 days move to day 8')
+    // Singular for one pick (P-11).
+    const one = buildShock(FUNDING, fill(FUNDING, { unavailable_days: '7', affected_fraction: '100' }, { instrument_type: 'LOAN', currency: 'EUR' }, ['L-1']))
+    expect(describeShock(one)).toBe('Funding unavailable: 100% of LOAN (1 picked instrument) inflows due within 7 days move to day 8')
   })
 
   it('keeps masked picks out of every request and blocks the shock until they are removed', () => {

@@ -207,8 +207,8 @@ describe('the rating history (FE-20.1)', () => {
     expect(text(html)).toContain('dev:approver')
     expect(text(html)).toContain('2026-09-30')
     expect(text(html)).toContain('rank 5')
-    expect(text(html)).toContain('(you)') // r2 is mine
-    expect((text(html).match(/\(you\)/g) ?? []).length).toBe(1)
+    expect(text(html)).toContain('You') // r2 is mine (P-1: "You", not the raw actor)
+    expect((text(html).match(/You(?![a-z])/g) ?? []).length).toBe(1)
     expect(text(html)).toContain('masked') // r1's grade and rationale
     expect(text(html)).toContain('Waiting for an approver who is not the proposer.')
   })

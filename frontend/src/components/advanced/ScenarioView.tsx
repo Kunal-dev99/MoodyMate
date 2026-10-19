@@ -15,13 +15,15 @@ import { ScenarioStatusPill } from './ScenarioStatusPill'
 import { VersionActions, type StepVerb } from './VersionActions'
 import { MaskedValue, isMasked } from '@/components/common/MaskedValue'
 import { describeSelector, describeShock, explorerHref, fetchScenario, type ScenarioDetail, type ScenarioVersion } from './scenarios'
+import { formatTimestamp } from '@/lib/format'
+import { ActorLabel } from '@/components/common/ActorLabel'
 
 const CRUMBS = [
   { label: 'Advanced' },
   { label: 'Agentic Stress-Test Explorer', href: explorerHref },
 ]
 
-const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString() : null)
+const when = (iso: string | null) => (iso ? formatTimestamp(iso) : null)
 
 const STEP_TEXT: Record<StepVerb, string> = {
   confirmed: 'accepted the confirmation of',
@@ -71,7 +73,7 @@ export function ScenarioView({ scenarioId }: { scenarioId: string }) {
       <PageHeader title={s.name} description={s.description ?? undefined} breadcrumbs={[...CRUMBS, { label: s.name }]} />
       <div className="space-y-4 px-6 pb-6" data-testid="scenario-view" data-id={s.scenario_id}>
         <p className="text-sm text-muted-foreground">
-          Code <span className="font-mono text-foreground" data-testid="scenario-code">{s.code}</span> · created by <span className="font-mono">{s.created_by}</span> · {when(s.created_at)}
+          Code <span className="font-mono text-foreground" data-testid="scenario-code">{s.code}</span> · created by <ActorLabel actor={s.created_by} /> · {when(s.created_at)}
         </p>
         {!s.scenarios_enabled && <DisabledNotice />}
         {outcome && (
@@ -79,7 +81,7 @@ export function ScenarioView({ scenarioId }: { scenarioId: string }) {
             The server {STEP_TEXT[outcome.verb]} v{outcome.version.version}: it is now <ScenarioStatusPill status={outcome.version.status} testId="scenario-step-status" />.
           </p>
         )}
-        <PageSection icon={History} title="Versions" description="Newest first. A version's shocks freeze when it leaves DRAFT. Runs arrive in a later phase.">
+        <PageSection icon={History} title="Versions" description="Newest first. A version's shocks freeze when it leaves DRAFT. Running scenarios against the maturity ladder is coming next.">
           <ul className="space-y-3">
             {versions.map((v) => (
               <VersionCard key={v.scenario_version_id} scenarioId={s.scenario_id} version={v} enabled={s.scenarios_enabled} onDone={done} />
@@ -97,7 +99,8 @@ function VersionCard({ scenarioId, version: v, enabled, onDone }: { scenarioId: 
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <span className="font-mono font-medium">v{v.version}</span>
         <ScenarioStatusPill status={v.status} testId="version-status" />
-        {v.approval_label && (
+        {/* "Approved for test" (the status pill) already says it: no duplicate badge (P-11). */}
+        {v.approval_label && v.status !== 'APPROVED_FOR_TEST' && (
           <Badge variant={v.approval_label === 'Exploration, not approved' ? 'warning' : 'success'} data-testid="approval-label">
             {v.approval_label}
           </Badge>
@@ -122,24 +125,24 @@ function VersionCard({ scenarioId, version: v, enabled, onDone }: { scenarioId: 
 
       <dl className="grid gap-x-6 gap-y-1 text-xs md:grid-cols-2">
         <Meta label="Author" testId="version-author">
-          <span className="font-mono">{v.authored_by}</span> · {when(v.created_at)}
+          <ActorLabel actor={v.authored_by} /> · {when(v.created_at)}
         </Meta>
         {v.confirmed_at && <Meta label="Confirmed for exploration">{when(v.confirmed_at)}</Meta>}
         {v.submitted_by && (
           <Meta label="Submitted" testId="version-submitter">
-            <span className="font-mono">{v.submitted_by}</span> · {when(v.submitted_at)}
+            <ActorLabel actor={v.submitted_by} /> · {when(v.submitted_at)}
             {v.submit_comment && <> · “{v.submit_comment}”</>}
           </Meta>
         )}
         {v.decided_by && (
           <Meta label="Decided" testId="version-decider">
-            <span className="font-mono">{v.decided_by}</span> · {when(v.decided_at)}
+            <ActorLabel actor={v.decided_by} /> · {when(v.decided_at)}
             {v.decision_comment && <> · “{v.decision_comment}”</>}
           </Meta>
         )}
         {v.closed_by && (
           <Meta label="Closed">
-            <span className="font-mono">{v.closed_by}</span> · {when(v.closed_at)}
+            <ActorLabel actor={v.closed_by} /> · {when(v.closed_at)}
             {v.close_comment && <> · “{v.close_comment}”</>}
           </Meta>
         )}

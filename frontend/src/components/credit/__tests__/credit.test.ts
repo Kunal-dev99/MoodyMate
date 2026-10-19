@@ -199,9 +199,10 @@ describe('placeholders relabelled (FE-19.1)', () => {
     vi.resetModules()
     const { PlannedWorkspace } = await import('@/components/common/PlannedWorkspace')
     const html = renderToStaticMarkup(createElement(PlannedWorkspace, { slug: 'reports' }))
-    expect(html).toContain('Scheduled for <strong>WS4</strong> (planned)')
-    expect(html.replace(/<[^>]+>|<!-- -->/g, '')).toContain('Scheduled for WS4 (planned)')
-    expect(html).not.toContain('(planned) (')
+    // P-12: product copy, no delivery-plan reference.
+    expect(html.replace(/<[^>]+>|<!-- -->/g, '')).toContain('Planned for a later release.')
+    expect(html).not.toContain('WS4')
+    expect(html).not.toContain('DELIVERY_PLAN')
     expect(html).not.toContain('Feature 04')
   })
 })

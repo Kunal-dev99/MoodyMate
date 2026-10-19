@@ -16,12 +16,13 @@ import { Badge } from '@/components/ui/badge'
 import { CreditValueCell } from './CreditValueCell'
 import { CREDIT_CRUMBS, Field, ImportRowLink, Lineage, Mono, NotInVocabulary } from './CreditParts'
 import { EXPOSURE_PARAM_PREFIX, counterpartiesHref, keyText, type ExposureDetail, type ExposureVersion } from './credit'
+import { formatTimestamp } from '@/lib/format'
 
 /** The value with its currency when both are in clear (the currency is public, D-43 §1). */
 function Amount({ value, currency, testId }: { value: ExposureVersion['drawn_amount']; currency: ExposureVersion['currency']; testId: string }) {
   return (
     <>
-      <CreditValueCell value={value} testId={testId} />
+      <CreditValueCell value={value} testId={testId} money />
       {!isMasked(value) && value !== null && !isMasked(currency) && currency && <span className="text-muted-foreground"> {currency}</span>}
     </>
   )
@@ -34,7 +35,7 @@ function Version({ v }: { v: ExposureVersion }) {
       <PageSection
         icon={GitBranch}
         title={`Version ${v.version}`}
-        description={`Projected ${new Date(v.projected_at).toLocaleString()}. Immutable: a later import of the same key adds a version.`}
+        description={`Projected ${formatTimestamp(v.projected_at)}. Immutable: a later import of the same key adds a version.`}
         headerRight={<ImportRowLink importId={v.import_id} ordinal={v.source_ordinal} testId="version-import-link" />}
       >
         <div className="grid gap-6 lg:grid-cols-2">
@@ -159,11 +160,11 @@ export function ExposureView({ exposureId }: { exposureId: string }) {
     <>
       <PageHeader
         title={`Credit exposure ${label}`}
-        description={`Source ${detail.source_code} · ${detail.versions.length} version${detail.versions.length === 1 ? '' : 's'}, oldest first. Amounts are exact decimal text; drawn, undrawn and collateral amounts are confidential and masked by your clearance (D-43).`}
+        description={`Source ${detail.source_code} · ${detail.versions.length} version${detail.versions.length === 1 ? '' : 's'}, oldest first. Amounts are exact decimal text; drawn, undrawn and collateral amounts are confidential and masked by your clearance.`}
         breadcrumbs={[...CREDIT_CRUMBS, { label }]}
       />
       <div className="space-y-4 px-6 pb-6">
-        <PageSection icon={ListTree} title="Identity" description="Stable per tenant, source system and business key (D-37 §2).">
+        <PageSection icon={ListTree} title="Identity" description="Stable per tenant, source system and business key.">
           <dl className="grid grid-cols-[200px_1fr] gap-y-1 text-sm" data-testid="exposure-identity">
             <Field label="Exposure ID" testId="exposure-id">
               <Mono>{detail.credit_exposure_id}</Mono>
@@ -177,7 +178,7 @@ export function ExposureView({ exposureId }: { exposureId: string }) {
               </Link>
             </Field>
             <Field label="First seen">
-              <Mono>{new Date(detail.created_at).toLocaleString()}</Mono>
+              <Mono>{formatTimestamp(detail.created_at)}</Mono>
             </Field>
           </dl>
         </PageSection>

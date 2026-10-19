@@ -16,6 +16,8 @@ import { IMPORT_STATUSES, IMPORT_STATUS_STYLE, formatBytes, type ImportPage, typ
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { formatTimestamp } from '@/lib/format'
+import { ActorLabel } from '@/components/common/ActorLabel'
 
 const PAGE_SIZE = 50
 const selectClass = 'h-8 rounded-md border border-input bg-background px-2 text-sm'
@@ -168,8 +170,8 @@ function ImportsList() {
                   {i.schema_code ? `${i.schema_code} v${i.schema_version}` : '—'}
                 </TableCell>
                 <TableCell className="text-xs text-muted-foreground">
-                  <span className="font-mono">{i.created_by}</span>
-                  <div>{new Date(i.created_at).toLocaleString()}</div>
+                  <ActorLabel actor={i.created_by} />
+                  <div>{formatTimestamp(i.created_at)}</div>
                 </TableCell>
               </TableRow>
             ))}

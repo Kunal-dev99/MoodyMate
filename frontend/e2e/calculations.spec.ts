@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import type { components } from '../src/api/schema'
-import { API, bearer, cashflowImportReady, ensureActiveMapping, registerInstrumentSource, signIn, uploadSample, validateAndProject } from './support'
+import { API, bearer, cashflowImportReady, ensureActiveMapping, groupDecimal, registerInstrumentSource, signIn, uploadSample, validateAndProject } from './support'
 
 /**
  * Feature 03 Phase 15 browser checks against the real stack (backend ENV=test, synthetic).
@@ -51,7 +51,8 @@ let run: Schemas['RunDetail'] | null = null
 // --- exact decimal text (test arithmetic only: the UI never parses a value) -------------------
 
 function units(text: string): { value: bigint; scale: number } {
-  const m = /^(-?)(\d+)(?:\.(\d+))?$/.exec(text.trim())
+  // Money is shown grouped by thousands (P-7): the grouping commas are display-only.
+  const m = /^(-?)(\d+)(?:\.(\d+))?$/.exec(text.trim().replace(/,/g, ''))
   expect(m, `"${text}" is exact decimal text`).toBeTruthy()
   const [, sign, whole, frac = ''] = m!
   const value = BigInt(`${whole}${frac}`)
@@ -258,10 +259,11 @@ test('FE-15.2: the run shows its manifest, warnings and ladder; a bucket total e
   await expect(page.getByTestId('ladder-min-aggregate-count')).toHaveText(String(ladder.min_aggregate_count))
   const shownInflows = (await row.getByTestId('ladder-inflows').textContent())!.trim()
   const shownOutflows = (await row.getByTestId('ladder-outflows').textContent())!.trim()
-  expect(shownInflows).toBe(target.row.inflows)
-  expect(shownOutflows).toBe(target.row.outflows)
-  await expect(row.getByTestId('ladder-net')).toHaveText(target.row.net_gap as string)
-  await expect(row.getByTestId('ladder-cumulative')).toHaveText(target.row.cumulative_gap as string)
+  // Shown grouped by thousands (P-7), on the server's exact decimal text.
+  expect(shownInflows).toBe(groupDecimal(target.row.inflows as string))
+  expect(shownOutflows).toBe(groupDecimal(target.row.outflows as string))
+  await expect(row.getByTestId('ladder-net')).toHaveText(groupDecimal(target.row.net_gap as string))
+  await expect(row.getByTestId('ladder-cumulative')).toHaveText(groupDecimal(target.row.cumulative_gap as string))
   await expect(row.getByTestId('ladder-count')).toHaveText(String(target.row.contribution_count))
 
   // 3. Drill down: the bucket's contributions; their displayed values sum to the displayed totals.
@@ -333,7 +335,7 @@ test('FE-15.2: the run shows its manifest, warnings and ladder; a bucket total e
     const cell = analystRow.getByTestId(FIGURE_TEST_IDS[figure])
     // The UI shows exactly what the server sent: the decimal text, or "masked".
     if (typeof value === 'string') {
-      await expect(cell).toHaveText(value)
+      await expect(cell).toHaveText(groupDecimal(value))
       await expect(cell).not.toHaveAttribute('data-masked', 'true')
     } else {
       await expect(cell).toHaveAttribute('data-masked', 'true')

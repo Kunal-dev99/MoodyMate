@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import type { components } from '../src/api/schema'
-import { API, bearer, signIn } from './support'
+import { API, actorTitle, bearer, signIn } from './support'
 
 /**
  * Feature 05 Phase 24 browser check against the real stack (backend ENV=test, synthetic).
@@ -160,8 +160,12 @@ test('FE-24.2: the approver approves it from the Review tab with a comment, and 
   expect(approved.decided_by).toBeTruthy()
   await expect(dialog).toBeHidden()
   await expect(versionCard(page)).toHaveAttribute('data-status', 'APPROVED_FOR_TEST')
-  await expect(versionCard(page).getByTestId('approval-label')).toHaveText(APPROVED)
-  await expect(versionCard(page).getByTestId('version-decider')).toContainText(approved.decided_by!)
+  // The status pill says it; the API's approval label is not repeated beside it (P-11).
+  await expect(versionCard(page).getByTestId('version-status')).toHaveText('Approved for test')
+  await expect(versionCard(page).getByTestId('approval-label')).toHaveCount(0)
+  // The approver decided it: shown as "You", the raw actor kept in the tooltip (P-1).
+  await expect(versionCard(page).getByTestId('version-decider')).toContainText('You')
+  await expect(versionCard(page).getByTestId('version-decider').locator('[data-actor-kind]')).toHaveAttribute('title', actorTitle(approved.decided_by!))
   await expect(versionCard(page).getByTestId('version-decider')).toContainText(comment)
 
   // The Shared library (the default tab) now lists it, with its approved version.

@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 import type { components } from '../src/api/schema'
 import { sameDecimal, sumDecimals } from './calc-support'
-import { API, SAMPLES, bearer, ensureActiveMapping, signIn, uploadSample } from './support'
+import { API, SAMPLES, bearer, ensureActiveMapping, groupDecimal, signIn, uploadSample } from './support'
 
 /**
  * Feature 03 Phase 18, FE-18.2 (and the Playwright half of FE-18.1): the WS3 smoke, one serial
@@ -406,7 +406,7 @@ test('FE-18.2: WS3 smoke: project → catalogue → snapshot (PLANNED not select
       await expect(block.getByTestId('hqla-asset')).toHaveCount(c.assets.length)
       const values = (await block.locator('[data-testid="hqla-asset"][data-included="true"]').getByTestId('hqla-asset-hqla').allTextContents()).map((t) => t.trim())
       const total = (await block.getByTestId('lcr-hqla').textContent())!.trim()
-      expect(total).toBe(c.hqla_total)
+      expect(total).toBe(groupDecimal(c.hqla_total as string))
       expect(sameDecimal(sumDecimals(values), total), `${c.currency}: HQLA ${values.join(' + ')} = ${total}`).toBe(true)
     }
     if (process.env.WS3_SMOKE_SCREENSHOT) await approver.screenshot({ path: `${process.env.WS3_SMOKE_SCREENSHOT}/liquidity.png`, fullPage: true })
@@ -425,8 +425,8 @@ test('FE-18.2: WS3 smoke: project → catalogue → snapshot (PLANNED not select
     expect(target, 'the ladder has a bucket with contributions').toBeTruthy()
     const row = approver.locator(`[data-testid="ladder-row"][data-currency="${target.currency}"][data-bucket="${target.row.bucket_code}"]`)
     await expect(row.getByTestId('ladder-count')).toHaveText(String(target.row.contribution_count))
-    if (typeof target.row.inflows === 'string') await expect(row.getByTestId('ladder-inflows')).toHaveText(target.row.inflows)
-    if (typeof target.row.outflows === 'string') await expect(row.getByTestId('ladder-outflows')).toHaveText(target.row.outflows)
+    if (typeof target.row.inflows === 'string') await expect(row.getByTestId('ladder-inflows')).toHaveText(groupDecimal(target.row.inflows))
+    if (typeof target.row.outflows === 'string') await expect(row.getByTestId('ladder-outflows')).toHaveText(groupDecimal(target.row.outflows))
 
     const resultsRead = approver.waitForResponse(
       (r) =>

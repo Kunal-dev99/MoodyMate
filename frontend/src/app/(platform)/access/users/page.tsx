@@ -17,14 +17,18 @@ type UserPage = Schemas['UserPage']
 type State = { kind: 'loading' } | { kind: 'ready'; page: UserPage } | { kind: 'forbidden'; cid: string | null }
 
 /**
- * Read-only users list (admin:read). The request is always sent: the backend decides.
- * A 403 from the server renders the 403 state even if the client thought it was allowed.
+ * Read-only users list (admin:read). Without admin:read the request is not sent at all (the
+ * 403 state shows straight away); with it, the backend still decides, and a 403 from the server
+ * renders the 403 state even if the client thought it was allowed (D-04).
  */
 export default function UsersPage() {
   const { has } = useCurrentSession()
   const [state, setState] = useState<State>({ kind: 'loading' })
 
+  const mayRead = has('admin:read')
+
   useEffect(() => {
+    if (!mayRead) return
     call(() => api.GET('/api/v1/users', { params: { query: { limit: 100 } } }))
       .then((page) => setState({ kind: 'ready', page }))
       .catch((err: unknown) => {
@@ -34,7 +38,7 @@ export default function UsersPage() {
           toastApiError(err, 'Could not load users')
         }
       })
-  }, [])
+  }, [mayRead])
 
   return (
     <>

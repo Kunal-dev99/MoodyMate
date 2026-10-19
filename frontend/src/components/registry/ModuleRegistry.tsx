@@ -81,9 +81,7 @@ export function ModuleCard({ module: m }: { module: ModuleVersion }) {
         </p>
       ) : (
         <>
-          <p className="mt-1 text-xs text-[hsl(var(--warning))]" data-testid="module-statement">
-            {m.statement}
-          </p>
+          {/* The server's non-regulatory statement is shown once per page, above the groups (ModuleRegistry). */}
           <p className={cn('mt-1 text-xs', m.runnable ? 'text-muted-foreground' : 'text-destructive')} data-testid="module-runnable" data-runnable={m.runnable}>
             {m.runnable
               ? 'Runnable now: every rule it reads has an ACTIVE version and a baseline assumption set is ACTIVE.'
@@ -95,8 +93,10 @@ export function ModuleCard({ module: m }: { module: ModuleVersion }) {
       <dl className="mt-3 grid grid-cols-[160px_1fr] gap-y-1 text-sm">
         {!planned && (
           <>
-            <Row label="Engine">
-              <span className="font-mono text-xs">{m.engine_version}</span>
+            <Row label="Engine version">
+              <span className="font-mono text-xs" title="The calculation engine a run of this version pins">
+                {m.engine_version}
+              </span>
             </Row>
             <Row label="Input schemas">
               {m.input_contract.schemas.length === 0 ? (
@@ -148,8 +148,15 @@ export function ModuleRegistry() {
     return <EmptyState icon={Puzzle} title="Modules could not be listed" description={`The request was refused.${state.cid ? ` Correlation ID: ${state.cid}` : ''}`} />
 
   const groups = groupModules(state.value.items)
+  // The server's statement (not regulatory, no vendor parity), once per page rather than per card.
+  const statements = Array.from(new Set(groups.AVAILABLE.map((m) => m.statement).filter(Boolean)))
   return (
     <div className="space-y-4">
+      {statements.map((text) => (
+        <p key={text} className="text-sm text-[hsl(var(--warning))]" data-testid="module-statement">
+          {text}
+        </p>
+      ))}
       {IMPLEMENTATION_STATUSES.map((status) => (
         <PageSection
           key={status}
