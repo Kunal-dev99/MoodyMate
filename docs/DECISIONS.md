@@ -1286,9 +1286,10 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
      - Internal: segment, grades, DPD, default flag, EIR, facility type, collateral type and
        business keys.
      - Public: country and currency.
-  2. **Ratings.** The grade, rationale and decision comment are `internal`, so the proposing
-     analyst (clearance `internal`) can read their own rationale. This is an open item for the
-     client.
+  2. **Ratings.** The grade is `internal`. The rationale and the decision comment are
+     `confidential`, so they are masked for risk_analyst, including the analyst's own
+     rationale once submitted. Auto-resolved 2026-10-19 (D-36): this is the safer default,
+     and an open item for the client.
   3. **Exposure result rows.**
      - Amounts take their inputs' classification (confidential), so they are masked for
        risk_analyst: drawn, undrawn, EAD, collateral after haircut, uncovered EAD, LGD amount,
