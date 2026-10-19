@@ -12,7 +12,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from app.core.classification import MaskedValue
-from app.domain.constants import DomainSchemaCode
+from app.domain.constants import CreditVocabularyKind, DomainSchemaCode
 from app.governance.constants import FieldType
 from app.ingestion.constants import ImportStatus
 
@@ -158,3 +158,178 @@ class InstrumentDetail(BaseModel):
     source_code: str
     created_at: datetime
     versions: list[InstrumentVersionOut] = Field(description="Oldest first.")
+
+
+# --- Feature 04 credit reads (BE-19.5, D-37, D-43) -------------------------------------------
+# Masking (D-43 §1): counterparty_name, drawn_amount, undrawn_amount and collateral_value are
+# confidential; segment, grades, DPD, default flag, EIR, facility type, collateral type and
+# business keys are internal; country and currency are public. Every value is masked by the
+# classification of the schema field it was projected from, in the version the row pins.
+
+IntValue = int | MaskedValue
+BoolValue = bool | MaskedValue
+
+
+class CreditVocabularyEntryOut(BaseModel):
+    vocabulary: CreditVocabularyKind
+    code: str = Field(description="Neutral code (grades G01..G08 and D; no agency symbols).")
+    name: str
+    rank: int | None = Field(
+        description="rating_grade only: the order of the grade, 1 = best; else null."
+    )
+    is_default_grade: bool | None = Field(
+        description="rating_grade only: the grade denotes default; else null."
+    )
+    provisional: bool = Field(description="A PROVISIONAL / illustrative seeded value (D-11).")
+
+
+class CreditVocabularyList(BaseModel):
+    items: list[CreditVocabularyEntryOut] = Field(
+        description="The caller's tenant's credit vocabularies, by vocabulary then rank/code."
+    )
+
+
+class CounterpartySummary(BaseModel):
+    counterparty_id: uuid.UUID
+    business_key: Value = Field(description="The source's identifier of the counterparty.")
+    source_id: uuid.UUID
+    source_code: str
+    version_count: int
+    latest_version: int = Field(
+        description="The highest version number. 'Current' is not defined: a calculation "
+        "pins versions through a dataset snapshot (D-29 §3)."
+    )
+    latest_import_id: uuid.UUID
+    counterparty_name: Value | None = Field(description="Confidential; in the latest version.")
+    segment: Value | None = Field(description="As given, in the latest version.")
+    segment_known: bool = Field(
+        description="The segment is in the credit_segment vocabulary (else modules warn)."
+    )
+    country: Value | None = Field(description="ISO 3166-1 alpha-2, in the latest version.")
+    created_at: datetime
+
+
+class CounterpartyPage(BaseModel):
+    items: list[CounterpartySummary]
+    total: int
+    limit: int
+    offset: int
+
+
+class CounterpartyVersionOut(BaseModel):
+    version_id: uuid.UUID
+    version: int
+    import_id: uuid.UUID = Field(description="The import this version was projected from.")
+    projection_id: uuid.UUID
+    canonical_record_id: uuid.UUID = Field(
+        description="Lineage: canonical record -> source record -> import."
+    )
+    source_record_id: uuid.UUID
+    source_ordinal: int = Field(description="The source row's ordinal within its import.")
+    schema_version_id: uuid.UUID
+    schema_version: int | None
+    payload_sha256: str = Field(
+        description="The canonical payload's SHA-256, or the text 'masked' unless the caller "
+        "is cleared for the most sensitive field of the pinned schema version."
+    )
+    projected_at: datetime
+    counterparty_name: Value | None = Field(description="Confidential (D-43 §1).")
+    segment: Value | None = Field(description="As given.")
+    segment_known: bool
+    country: Value | None
+
+
+class CreditExposureVersionOut(BaseModel):
+    version_id: uuid.UUID
+    version: int
+    credit_exposure_id: uuid.UUID
+    business_key: Value = Field(description="The source's exposure identifier.")
+    import_id: uuid.UUID = Field(description="The import this version was projected from.")
+    projection_id: uuid.UUID
+    canonical_record_id: uuid.UUID = Field(
+        description="Lineage: canonical record -> source record -> import."
+    )
+    source_record_id: uuid.UUID
+    source_ordinal: int = Field(description="The source row's ordinal within its import.")
+    schema_version_id: uuid.UUID
+    schema_version: int | None
+    payload_sha256: str = Field(
+        description="The canonical payload's SHA-256, or the text 'masked' unless the caller "
+        "is cleared for the most sensitive field of the pinned schema version."
+    )
+    projected_at: datetime
+    counterparty_key: Value | None = Field(
+        description="The counterparty's business key as given. It is resolved within a "
+        "snapshot and the tenant (D-37 §4), not here."
+    )
+    instrument_key: Value | None = Field(description="Optional; not read by v1 modules.")
+    as_of_date: Value | None = Field(description="ISO date.")
+    currency: Value | None = Field(description="ISO 4217; the currency of every amount.")
+    facility_type: Value | None = Field(description="As given.")
+    facility_type_known: bool
+    drawn_amount: Value | None = Field(description="Exact decimal text, in `currency`.")
+    undrawn_amount: Value | None = Field(description="Exact decimal text, in `currency`.")
+    days_past_due: IntValue | None
+    default_flag: BoolValue | None
+    origination_date: Value | None = Field(description="ISO date.")
+    origination_grade: Value | None = Field(description="As given.")
+    origination_grade_known: bool = Field(
+        description="The grade is in the rating_grade vocabulary (else modules warn)."
+    )
+    maturity_date: Value | None = Field(description="ISO date.")
+    effective_interest_rate: Value | None = Field(
+        description="Exact decimal text, in `effective_interest_rate_unit`."
+    )
+    effective_interest_rate_unit: str | None = Field(
+        description="The pinned schema field's unit (a fraction in credit_exposure v1)."
+    )
+    collateral_type: Value | None = Field(description="As given.")
+    collateral_type_known: bool
+    collateral_value: Value | None = Field(description="Exact decimal text, in `currency`.")
+
+
+class CounterpartyDetail(BaseModel):
+    counterparty_id: uuid.UUID
+    business_key: Value
+    source_id: uuid.UUID
+    source_code: str
+    created_at: datetime
+    versions: list[CounterpartyVersionOut] = Field(description="Oldest first.")
+    exposure_versions: list[CreditExposureVersionOut] = Field(
+        description="Projected credit-exposure versions naming this counterparty's business "
+        "key, in the caller's tenant."
+    )
+
+
+class CreditExposureSummary(BaseModel):
+    credit_exposure_id: uuid.UUID
+    business_key: Value
+    source_id: uuid.UUID
+    source_code: str
+    version_count: int
+    latest_version: int
+    latest_import_id: uuid.UUID
+    counterparty_key: Value | None = Field(description="In the latest version.")
+    as_of_date: Value | None
+    currency: Value | None
+    facility_type: Value | None
+    drawn_amount: Value | None = Field(description="Exact decimal text, in `currency`.")
+    days_past_due: IntValue | None
+    default_flag: BoolValue | None
+    created_at: datetime
+
+
+class CreditExposurePage(BaseModel):
+    items: list[CreditExposureSummary]
+    total: int
+    limit: int
+    offset: int
+
+
+class CreditExposureDetail(BaseModel):
+    credit_exposure_id: uuid.UUID
+    business_key: Value
+    source_id: uuid.UUID
+    source_code: str
+    created_at: datetime
+    versions: list[CreditExposureVersionOut] = Field(description="Oldest first.")

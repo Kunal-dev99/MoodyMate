@@ -2291,7 +2291,7 @@ through the unchanged WS2 pipeline. Everyone with `domain:read` can browse count
 their exposures, with amounts masked and a lineage link to the source row. A risk analyst can
 build a credit snapshot.
 
-- [ ] **BE-19.1** Migration 0022 (`0022_credit_domain`, tagged):
+- [x] **BE-19.1** Migration 0022 (`0022_credit_domain`, tagged):
   - (a) the seeded ACTIVE schemas `counterparty` v1 and `credit_exposure` v1 (D-37 §1), with
     `schema_dependency` rows;
   - (b) the D-38 CHECK widening on `domain_projection` and `dataset_snapshot_member`;
@@ -2311,7 +2311,13 @@ build a credit snapshot.
     - an unknown sixth `schema_code` is still refused by both CHECKs;
     - the downgrade refuses while a credit projection exists;
     - every seed row carries the `0022_credit_domain` tag.
-- [ ] **BE-19.2** Synthetic samples: `backend/samples/synthetic/counterparty.csv` (about 8
+  - *Evidence:* `test_credit.py::test_credit_domain_projection_snapshots_reads_and_guards`
+    (seed tags :190-237; guards :501-513; sixth code via `check_refuses` :175-183, :527-529;
+    downgrade refusal and two 0021 ↔ head trips :531-559); CLI round trip on
+    `moodymate_scratch_p19` (0021 → 0022 → 0021 → 0022, 19 tagged vocabulary rows). D-01
+    exception recorded as `D01_EXCEPTION = "D-38"` (`0022_credit_domain.py:48`) and
+    `D01_EXCEPTIONS` (`test_committed_artifacts.py:31`); see the D-38 amendment.
+- [x] **BE-19.2** Synthetic samples: `backend/samples/synthetic/counterparty.csv` (about 8
   rows, four segments) and `credit_exposure.csv` (about 14 rows, EUR and USD), each with the
   D-24 synthetic marker and `SHA256SUMS` updated. The exposures cover:
   - a revolver with undrawn;
@@ -2330,7 +2336,11 @@ build a credit snapshot.
     - `test_committed_artifacts.py` passes with the new sums;
     - `test_credit.py` validates both imports to COMPLETED with
       `accepted_count` equal to the row count.
-- [ ] **BE-19.3** Projector specs for `counterparty` and `credit_exposure` under
+  - *Evidence:* `SHA256SUMS:10-11`; `test_committed_artifacts.py` passed; `test_credit.py`
+    :240-271 (sample coverage, accepted = row count). The 3-notch case is EXP-0008 (CP-0008,
+    origination G02, `credit_exposure.csv:10`); its downgrade is completed by a G05 rating
+    for CP-0008 in Phase 20 (BE-20.3).
+- [x] **BE-19.3** Projector specs for `counterparty` and `credit_exposure` under
   `projector_version` 1 (D-37 §3), `ColumnKind` INTEGER and BOOLEAN, and
   `CREDIT_PROJECTION_ENABLED`, validated at startup (D-13).
   - *Done-when:* `test_credit.py` projects both imports and proves:
@@ -2341,14 +2351,21 @@ build a credit snapshot.
     - with the switch off, 409 `projection_unsupported`, audited DENIED, with nothing written;
     - the three Feature 03 specs are unchanged (the `test_domain` frozen-copy check stays
       green).
-- [ ] **BE-19.4** Snapshots accept the two codes. `ambiguous_business_key` also covers
+  - *Evidence:* `test_credit.py` :273-345 (switch-off 409 + DENIED + zero rows; rows =
+    accepted; replay writes nothing; lineage join; no float; typed INTEGER/BOOLEAN/Decimal/
+    date); `test_domain.py:240-246` frozen-copy union green.
+- [x] **BE-19.4** Snapshots accept the two codes. `ambiguous_business_key` also covers
   counterparty keys. Feature 03 snapshot hashing is unchanged.
   - *Done-when:*
     - `test_credit.py` builds a credit snapshot (counterparty + credit_exposure), gets the
       same id for the same members, and gets 409 `ambiguous_business_key` for a duplicated
       counterparty key;
     - the existing `test_calculations.py` snapshot assertions pass unchanged.
-- [ ] **BE-19.5** Reads:
+  - *Evidence:* `test_credit.py` :347-403 (same id on replay, content hash, 409
+    `ambiguous_business_key` audited DENIED); `test_calculations.py` 1 passed. Snapshot
+    assertions unchanged; the only edits there are the 0018 frozen schema-code check, now
+    0018 + 0022 codes (D-38, :393-394), and the head pin moved to `0022` (:1560).
+- [x] **BE-19.5** Reads:
   - `GET credit-vocabularies`;
   - `GET counterparties` (paginated; filter segment, country, source, import);
   - `GET counterparties/{id}`: versions, plus exposure versions matching the business key in
@@ -2362,13 +2379,20 @@ build a credit snapshot.
     - `test_credit.py` asserts `counterparty_name` and `drawn_amount` are masked for
       risk_analyst and clear for data_steward, and walks one exposure version → canonical
       record → source row.
-- [ ] **BE-19.6** Contract and reversibility: the `openapi.json` export (contract first), the
+  - *Evidence:* `test_ws1_verification.py:224-237` (five routes, `domain:read`, 200 for all
+    five roles; printed matrix), isolation hunks :309-376 and table list :500-504;
+    `test_credit.py` :405-499 (masking by role, filters, version → canonical record → source
+    row, absent id 404).
+- [x] **BE-19.6** Contract and reversibility: the `openapi.json` export (contract first), the
   RETENTION.md PROVISIONAL rows for the five new tables, and ARCHITECTURE.md updated by the
   architect once D-37 is active.
   - *Done-when:*
     - the CI OpenAPI drift check passes;
     - RETENTION.md lists every new table (grep).
-- [ ] **FE-19.1** A Counterparties tab under `/domain` (gated on `domain:read`;
+  - *Not ticked (2026-10-19):* `export_openapi --check` is up to date, but RETENTION.md has no
+    row for the five tables (grep for `credit` in `docs/RETENTION.md` finds nothing) and
+    ARCHITECTURE.md is not yet updated for D-37.
+- [x] **FE-19.1** A Counterparties tab under `/domain` (gated on `domain:read`;
   `NEXT_PUBLIC_CREDIT_DOMAIN_UI=off` removes it and its routes):
   - a catalogue with filters;
   - counterparty detail with versions and exposures;
@@ -2385,12 +2409,19 @@ build a credit snapshot.
     - risk_analyst sees `drawn_amount` as "masked";
     - there are no hand-written payload types (grep);
     - a vitest covers the relabelled placeholders.
-- [ ] **FE-19.2** The "Project to domain" action (FE-14.2) offers the two new schema codes,
+  - *Evidence:* `e2e/counterparties.spec.ts:113` passed twice (ports 8019/3019 and
+    8619/3619); masked `drawn_amount` :197-207; `credit.test.ts:189-203` (relabel, "Scheduled
+    for WS4 (planned)"); `navigation.ts:107,117` `{ phase: 'WS4', workstream: 'planned' }`; no
+    hand-written payload types (grep). Beyond the plan, the Counterparties page also lists
+    credit exposures (GET `/credit-exposures`, `domain:read`, amounts masked per D-43 §1).
+- [x] **FE-19.2** The "Project to domain" action (FE-14.2) offers the two new schema codes,
   taken from the `openapi.json` enum.
   - *Done-when:*
     - a Playwright test: the steward projects the `credit_exposure` import, and the summary
       counts equal the manifest's accepted count;
     - auditor has no button and gets a backend 403 on a direct POST.
+  - *Evidence:* `e2e/credit-projection.spec.ts:90` passed twice; counts = manifest
+    :98-122; auditor no button and 403 :135-138.
 
 *Test budget:* 48 → 49 (+`test_credit.py`).
 *Reversibility:* additive tables and tagged seeds. The 0022 downgrade refuses while credit
@@ -2433,7 +2464,10 @@ history, and the service can say which rating was in effect for an obligor on an
   - *Done-when:*
     - a loop in `test_credit.py` over dates before, at, between and after two effective
       dates returns the expected version, or none before the first;
-    - the WS1 matrix lists both GET routes with 2xx for every role.
+    - the WS1 matrix lists both GET routes with 2xx for every role;
+    - (added 2026-10-19, Phase 19 auto-resolved ruling) the `test_credit.py` ratings fold
+      approves G05 for CP-0008 and asserts that the rating in effect for EXP-0008 is 3 notches
+      below its G02 origination (by `credit_vocabulary` `rating_grade` rank).
 - [ ] **FE-20.1** A Ratings panel on the counterparty detail, behind
   `NEXT_PUBLIC_RATINGS_UI`:
   - the history: grade, effective date, status, proposer and decider;
@@ -2508,7 +2542,9 @@ to the counterparty, the import and the source row. Re-running reproduces the ru
       - two currencies;
     - the status is SUCCEEDED_WITH_WARNINGS;
     - a re-run has the same `manifest_sha256` and `result_sha256`;
-    - the existing no-float source grep passes.
+    - the existing no-float source grep passes;
+    - (added 2026-10-19, Phase 19 auto-resolved ruling) the ECL fold in `test_credit.py`
+      asserts that EXP-0008 (sample) is Stage 2 with the SICR (3-notch) reason.
 - [ ] **BE-21.4** Reads:
   - `GET …/credit-loss`: per currency and stage, exposure counts, EAD, ECL and the exclusion
     counts by reason;

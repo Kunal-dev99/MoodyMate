@@ -26,6 +26,7 @@ from fastapi.testclient import TestClient
 from app.core.auth import AUTHENTICATED, PUBLIC_PATHS, declared_permission
 from app.governance.constants import ROLE_PERMISSIONS, Role
 from app.tests.conftest import WS1_MATRIX, alembic_config, clean, dev_token, insert_tenant, sql
+from app.tests.credit_kit import COUNTERPARTIES, EXPOSURES, VOCABULARIES, projected_credit
 from app.tests.helpers import (
     FIELD_KEYS,
     IMPORTS,
@@ -158,6 +159,9 @@ def test_route_by_role_authorization_matrix(api: TestClient, db: str) -> None:
         },
     )
     assert lcr_run.status_code == 201 and lcr_run.json()["status"] == "BLOCKED", lcr_run.text
+    # Phase 19: both credit samples projected, so the counterparty and exposure reads by id
+    # answer 2xx.
+    credit = projected_credit(api, db, steward, dev_token(api, "approver"))
     ids = {
         "schema_id": str(schema_id(db, "instrument")),
         "proposal_id": proposal["id"],
@@ -168,6 +172,8 @@ def test_route_by_role_authorization_matrix(api: TestClient, db: str) -> None:
         "rule_id": rule_id(db, "maturity_buckets"),  # Phase 16: GET /rules/{rule_id}
         "batch_id": imported.json()["batches"][0]["id"],  # Phase 11: GET /quarantine/{batch_id}
         "instrument_id": projected["instrument_id"],  # Phase 14: GET /instruments/{id}
+        "counterparty_id": credit["counterparty_id"],  # Phase 19: GET /counterparties/{id}
+        "exposure_id": credit["exposure_id"],  # Phase 19: GET /credit-exposures/{id}
         "snapshot_id": calculated["snapshot_id"],  # Phase 15: GET /dataset-snapshots/{id}
         "run_id": calculated["run_id"],  # Phase 15: GET /calculation-runs/{id}[/...]
         # Phase 16 (BE-16.4): the run manifest's pin resolves through the detail route.
@@ -215,10 +221,16 @@ def test_route_by_role_authorization_matrix(api: TestClient, db: str) -> None:
     # BE-14.4: the catalogue routes and the projection read are domain:read and 2xx for every
     # seeded role; BE-14.3:
     # the projection is domain:project, 2xx (the existing projection) for data_steward only.
+    # BE-19.5: the five credit reads likewise.
     for route in (
         "GET /api/v1/instruments",
         "GET /api/v1/instruments/{instrument_id}",
         "GET /api/v1/imports/{import_id}/projection",
+        "GET /api/v1/credit-vocabularies",
+        "GET /api/v1/counterparties",
+        "GET /api/v1/counterparties/{counterparty_id}",
+        "GET /api/v1/credit-exposures",
+        "GET /api/v1/credit-exposures/{exposure_id}",
     ):
         [row] = [r for r in WS1_MATRIX if r["route"] == route]
         assert row["permission"] == "domain:read"
@@ -294,6 +306,7 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
     )[0]["id"]
     here_rule = rule_id(db, "past_due_treatment")  # Phase 16
     here_assumption_set = sql(db, "SELECT id FROM assumption_set")[0]["id"]
+    here_credit = projected_credit(api, db, steward, dev_token(api, "approver"))  # Phase 19
 
     other_tenant = insert_tenant(db, f"other-{uuid.uuid4().hex[:6]}")
     outsider = token_for(
@@ -314,6 +327,8 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
         # a projected instrument import).
         f"{IMPORTS}?projected=true&schema_code=instrument",
         INSTRUMENTS,
+        COUNTERPARTIES,  # Phase 19: the credit catalogues are per tenant
+        EXPOSURES,
         RULES,  # Phase 16: the rule registry is per tenant
         SNAPSHOTS,
         RUNS,
@@ -321,6 +336,8 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
         "/api/v1/assumption-sets",  # BE-16.4
     ):
         assert api.get(path, headers=outsider).json()["total"] == 0, path
+    # Phase 19: the credit vocabularies are seeded for this tenant only.
+    assert api.get(VOCABULARIES, headers=outsider).json()["items"] == []
     audit = api.get("/api/v1/audit-events", params={"limit": 200}, headers=outsider).json()
     theirs = {
         str(r["id"])
@@ -351,6 +368,12 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
         (f"/api/v1/users/{here_user}", f"/api/v1/users/{uuid.uuid4()}"),
         # Phase 14: the instrument catalogue and the projection read.
         (f"{INSTRUMENTS}/{here_instrument}", f"{INSTRUMENTS}/{uuid.uuid4()}"),
+        # Phase 19: the counterparty and credit-exposure reads.
+        (
+            f"{COUNTERPARTIES}/{here_credit['counterparty_id']}",
+            f"{COUNTERPARTIES}/{uuid.uuid4()}",
+        ),
+        (f"{EXPOSURES}/{here_credit['exposure_id']}", f"{EXPOSURES}/{uuid.uuid4()}"),
         # Phase 16: this tenant's seeded rule.
         (f"{RULES}/{here_rule}", f"{RULES}/{uuid.uuid4()}"),
         (
@@ -474,6 +497,11 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
         "domain_projection",
         "instrument",
         "instrument_version",
+        "counterparty",  # Phase 19
+        "counterparty_version",
+        "credit_exposure",
+        "credit_exposure_version",
+        "credit_vocabulary",
         "dataset_snapshot",
         "calculation_run",
         "rule_set",
@@ -764,7 +792,7 @@ def test_migration_round_trip_and_downgrade_guards(api: TestClient, db: str) -> 
     command.upgrade(cfg, "head")
     assert revision() == head
     seeded = sql(db, "SELECT count(*) AS n FROM schema_version WHERE seeded_by IS NOT NULL")
-    assert seeded[0]["n"] == 4
+    assert seeded[0]["n"] == 6  # 0007's four, and 0022's counterparty v1 and credit_exposure v1
     assert (
         sql(db, "SELECT count(*) AS n FROM source_system WHERE seeded_by IS NOT NULL")[0]["n"] == 1
     )

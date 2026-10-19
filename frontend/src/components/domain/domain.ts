@@ -1,6 +1,7 @@
 import { ApiError, type Schemas } from '@/api/client'
 import type { ImportDetail, ImportStatus } from '@/components/ingestion/imports'
 import type { Refusal } from '@/components/ingestion/mappings'
+import { CREDIT_DOMAIN_UI_ENABLED } from '@/config/features'
 
 /*
  * FE-14.1/14.2: the Financial Domain workspace's pure helpers. Every payload type comes from
@@ -27,11 +28,29 @@ const SCHEMA_CODES: Record<DomainSchemaCode, { one: string; many: string }> = {
   instrument: { one: 'instrument version', many: 'instrument versions' },
   position: { one: 'position version', many: 'position versions' },
   cashflow_event: { one: 'cash-flow event', many: 'cash-flow events' },
+  // FE-19.2 (D-37 §3): the two Feature 04 codes, projected under projector_version 1.
+  counterparty: { one: 'counterparty version', many: 'counterparty versions' },
+  credit_exposure: { one: 'credit-exposure version', many: 'credit-exposure versions' },
 }
 export const DOMAIN_SCHEMA_CODES = Object.keys(SCHEMA_CODES) as DomainSchemaCode[]
 
 export const isDomainSchemaCode = (code: string | null | undefined): code is DomainSchemaCode =>
   !!code && (DOMAIN_SCHEMA_CODES as string[]).includes(code)
+
+/**
+ * FE-19.2: the Feature 04 credit codes (D-37). They sit behind NEXT_PUBLIC_CREDIT_DOMAIN_UI:
+ * turned off, the import page offers no "Project to domain" for them, exactly as in Phase 18.
+ * The server's own switch is CREDIT_PROJECTION_ENABLED (409 `projection_unsupported`).
+ */
+export const CREDIT_SCHEMA_CODES: readonly DomainSchemaCode[] = ['counterparty', 'credit_exposure']
+
+export const isCreditSchemaCode = (code: string | null | undefined): boolean =>
+  !!code && (CREDIT_SCHEMA_CODES as readonly string[]).includes(code)
+
+/** The schema codes the action is offered for: every API code, less the credit ones when their UI is off. */
+export function projectableSchemaCodes(creditEnabled: boolean = CREDIT_DOMAIN_UI_ENABLED): DomainSchemaCode[] {
+  return DOMAIN_SCHEMA_CODES.filter((code) => creditEnabled || !isCreditSchemaCode(code))
+}
 
 /** What projected rows are called for a schema code. */
 export const rowLabel = (code: DomainSchemaCode): string => SCHEMA_CODES[code].one
@@ -45,8 +64,16 @@ export const PROJECTABLE_STATUSES: readonly ImportStatus[] = ['COMPLETED', 'COMP
  * manifest and a projectable status) of a supported schema. Cosmetic: the server decides and
  * answers 409 `not_validated` or `projection_unsupported` otherwise (D-04).
  */
-export function canProject(job: Pick<ImportDetail, 'status' | 'manifest' | 'schema_code'>): boolean {
-  return !!job.manifest && PROJECTABLE_STATUSES.includes(job.status) && isDomainSchemaCode(job.schema_code)
+export function canProject(
+  job: Pick<ImportDetail, 'status' | 'manifest' | 'schema_code'>,
+  creditEnabled: boolean = CREDIT_DOMAIN_UI_ENABLED,
+): boolean {
+  return (
+    !!job.manifest &&
+    PROJECTABLE_STATUSES.includes(job.status) &&
+    isDomainSchemaCode(job.schema_code) &&
+    projectableSchemaCodes(creditEnabled).includes(job.schema_code)
+  )
 }
 
 /** D-29 §2: one row per accepted canonical record. Shown as a check, never computed for display. */
@@ -125,6 +152,24 @@ export function catalogueQuery(f: CatalogueFilters): {
 export const catalogueHref = (importId: string): string => `/domain?import_id=${encodeURIComponent(importId)}`
 export const instrumentHref = (instrumentId: string): string => `/domain/instruments/${encodeURIComponent(instrumentId)}`
 export const importHref = (importId: string): string => `/ingestion/imports/${encodeURIComponent(importId)}`
+/** FE-19.2 → FE-19.1: the Counterparties catalogue, filtered to the counterparties one import projected. */
+export const counterpartyCatalogueHref = (importId: string): string => `/domain/counterparties?import_id=${encodeURIComponent(importId)}`
+
+/**
+ * Where a projection summary links to browse what the import projected: the instrument
+ * catalogue for an instrument import, the Counterparties catalogue for a counterparty import
+ * (only while the credit UI is on). None otherwise: there is no position, cash-flow or
+ * credit-exposure catalogue (an exposure is reached from its counterparty).
+ */
+export function browseLink(
+  p: Pick<Projection, 'schema_code' | 'import_id'>,
+  creditEnabled: boolean = CREDIT_DOMAIN_UI_ENABLED,
+): { href: string; label: string } | null {
+  if (p.schema_code === 'instrument') return { href: catalogueHref(p.import_id), label: 'Browse the instruments this import projected' }
+  if (p.schema_code === 'counterparty' && creditEnabled)
+    return { href: counterpartyCatalogueHref(p.import_id), label: 'Browse the counterparties this import projected' }
+  return null
+}
 
 /**
  * The cash flows of an instrument, once: the API lists the same events (matched by business

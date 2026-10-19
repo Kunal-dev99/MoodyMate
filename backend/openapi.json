@@ -1561,6 +1561,1045 @@
         "title": "CopyTransform",
         "type": "object"
       },
+      "CounterpartyDetail": {
+        "properties": {
+          "business_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "title": "Business Key"
+          },
+          "counterparty_id": {
+            "format": "uuid",
+            "title": "Counterparty Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "exposure_versions": {
+            "description": "Projected credit-exposure versions naming this counterparty's business key, in the caller's tenant.",
+            "items": {
+              "$ref": "#/components/schemas/CreditExposureVersionOut"
+            },
+            "title": "Exposure Versions",
+            "type": "array"
+          },
+          "source_code": {
+            "title": "Source Code",
+            "type": "string"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          },
+          "versions": {
+            "description": "Oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/CounterpartyVersionOut"
+            },
+            "title": "Versions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "counterparty_id",
+          "business_key",
+          "source_id",
+          "source_code",
+          "created_at",
+          "versions",
+          "exposure_versions"
+        ],
+        "title": "CounterpartyDetail",
+        "type": "object"
+      },
+      "CounterpartyPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CounterpartySummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "CounterpartyPage",
+        "type": "object"
+      },
+      "CounterpartySummary": {
+        "properties": {
+          "business_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "description": "The source's identifier of the counterparty.",
+            "title": "Business Key"
+          },
+          "counterparty_id": {
+            "format": "uuid",
+            "title": "Counterparty Id",
+            "type": "string"
+          },
+          "counterparty_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Confidential; in the latest version.",
+            "title": "Counterparty Name"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO 3166-1 alpha-2, in the latest version.",
+            "title": "Country"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "latest_import_id": {
+            "format": "uuid",
+            "title": "Latest Import Id",
+            "type": "string"
+          },
+          "latest_version": {
+            "description": "The highest version number. 'Current' is not defined: a calculation pins versions through a dataset snapshot (D-29 \u00a73).",
+            "title": "Latest Version",
+            "type": "integer"
+          },
+          "segment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "As given, in the latest version.",
+            "title": "Segment"
+          },
+          "segment_known": {
+            "description": "The segment is in the credit_segment vocabulary (else modules warn).",
+            "title": "Segment Known",
+            "type": "boolean"
+          },
+          "source_code": {
+            "title": "Source Code",
+            "type": "string"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          },
+          "version_count": {
+            "title": "Version Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "counterparty_id",
+          "business_key",
+          "source_id",
+          "source_code",
+          "version_count",
+          "latest_version",
+          "latest_import_id",
+          "counterparty_name",
+          "segment",
+          "segment_known",
+          "country",
+          "created_at"
+        ],
+        "title": "CounterpartySummary",
+        "type": "object"
+      },
+      "CounterpartyVersionOut": {
+        "properties": {
+          "canonical_record_id": {
+            "description": "Lineage: canonical record -> source record -> import.",
+            "format": "uuid",
+            "title": "Canonical Record Id",
+            "type": "string"
+          },
+          "counterparty_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Confidential (D-43 \u00a71).",
+            "title": "Counterparty Name"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "import_id": {
+            "description": "The import this version was projected from.",
+            "format": "uuid",
+            "title": "Import Id",
+            "type": "string"
+          },
+          "payload_sha256": {
+            "description": "The canonical payload's SHA-256, or the text 'masked' unless the caller is cleared for the most sensitive field of the pinned schema version.",
+            "title": "Payload Sha256",
+            "type": "string"
+          },
+          "projected_at": {
+            "format": "date-time",
+            "title": "Projected At",
+            "type": "string"
+          },
+          "projection_id": {
+            "format": "uuid",
+            "title": "Projection Id",
+            "type": "string"
+          },
+          "schema_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Version"
+          },
+          "schema_version_id": {
+            "format": "uuid",
+            "title": "Schema Version Id",
+            "type": "string"
+          },
+          "segment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "As given.",
+            "title": "Segment"
+          },
+          "segment_known": {
+            "title": "Segment Known",
+            "type": "boolean"
+          },
+          "source_ordinal": {
+            "description": "The source row's ordinal within its import.",
+            "title": "Source Ordinal",
+            "type": "integer"
+          },
+          "source_record_id": {
+            "format": "uuid",
+            "title": "Source Record Id",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          },
+          "version_id": {
+            "format": "uuid",
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version_id",
+          "version",
+          "import_id",
+          "projection_id",
+          "canonical_record_id",
+          "source_record_id",
+          "source_ordinal",
+          "schema_version_id",
+          "schema_version",
+          "payload_sha256",
+          "projected_at",
+          "counterparty_name",
+          "segment",
+          "segment_known",
+          "country"
+        ],
+        "title": "CounterpartyVersionOut",
+        "type": "object"
+      },
+      "CreditExposureDetail": {
+        "properties": {
+          "business_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "title": "Business Key"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "credit_exposure_id": {
+            "format": "uuid",
+            "title": "Credit Exposure Id",
+            "type": "string"
+          },
+          "source_code": {
+            "title": "Source Code",
+            "type": "string"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          },
+          "versions": {
+            "description": "Oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/CreditExposureVersionOut"
+            },
+            "title": "Versions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "credit_exposure_id",
+          "business_key",
+          "source_id",
+          "source_code",
+          "created_at",
+          "versions"
+        ],
+        "title": "CreditExposureDetail",
+        "type": "object"
+      },
+      "CreditExposurePage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CreditExposureSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "CreditExposurePage",
+        "type": "object"
+      },
+      "CreditExposureSummary": {
+        "properties": {
+          "as_of_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of Date"
+          },
+          "business_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "title": "Business Key"
+          },
+          "counterparty_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "In the latest version.",
+            "title": "Counterparty Key"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "credit_exposure_id": {
+            "format": "uuid",
+            "title": "Credit Exposure Id",
+            "type": "string"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "days_past_due": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Days Past Due"
+          },
+          "default_flag": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Flag"
+          },
+          "drawn_amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Exact decimal text, in `currency`.",
+            "title": "Drawn Amount"
+          },
+          "facility_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Facility Type"
+          },
+          "latest_import_id": {
+            "format": "uuid",
+            "title": "Latest Import Id",
+            "type": "string"
+          },
+          "latest_version": {
+            "title": "Latest Version",
+            "type": "integer"
+          },
+          "source_code": {
+            "title": "Source Code",
+            "type": "string"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          },
+          "version_count": {
+            "title": "Version Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "credit_exposure_id",
+          "business_key",
+          "source_id",
+          "source_code",
+          "version_count",
+          "latest_version",
+          "latest_import_id",
+          "counterparty_key",
+          "as_of_date",
+          "currency",
+          "facility_type",
+          "drawn_amount",
+          "days_past_due",
+          "default_flag",
+          "created_at"
+        ],
+        "title": "CreditExposureSummary",
+        "type": "object"
+      },
+      "CreditExposureVersionOut": {
+        "properties": {
+          "as_of_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO date.",
+            "title": "As Of Date"
+          },
+          "business_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "description": "The source's exposure identifier.",
+            "title": "Business Key"
+          },
+          "canonical_record_id": {
+            "description": "Lineage: canonical record -> source record -> import.",
+            "format": "uuid",
+            "title": "Canonical Record Id",
+            "type": "string"
+          },
+          "collateral_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "As given.",
+            "title": "Collateral Type"
+          },
+          "collateral_type_known": {
+            "title": "Collateral Type Known",
+            "type": "boolean"
+          },
+          "collateral_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Exact decimal text, in `currency`.",
+            "title": "Collateral Value"
+          },
+          "counterparty_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The counterparty's business key as given. It is resolved within a snapshot and the tenant (D-37 \u00a74), not here.",
+            "title": "Counterparty Key"
+          },
+          "credit_exposure_id": {
+            "format": "uuid",
+            "title": "Credit Exposure Id",
+            "type": "string"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO 4217; the currency of every amount.",
+            "title": "Currency"
+          },
+          "days_past_due": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Days Past Due"
+          },
+          "default_flag": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Flag"
+          },
+          "drawn_amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Exact decimal text, in `currency`.",
+            "title": "Drawn Amount"
+          },
+          "effective_interest_rate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Exact decimal text, in `effective_interest_rate_unit`.",
+            "title": "Effective Interest Rate"
+          },
+          "effective_interest_rate_unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The pinned schema field's unit (a fraction in credit_exposure v1).",
+            "title": "Effective Interest Rate Unit"
+          },
+          "facility_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "As given.",
+            "title": "Facility Type"
+          },
+          "facility_type_known": {
+            "title": "Facility Type Known",
+            "type": "boolean"
+          },
+          "import_id": {
+            "description": "The import this version was projected from.",
+            "format": "uuid",
+            "title": "Import Id",
+            "type": "string"
+          },
+          "instrument_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional; not read by v1 modules.",
+            "title": "Instrument Key"
+          },
+          "maturity_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO date.",
+            "title": "Maturity Date"
+          },
+          "origination_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO date.",
+            "title": "Origination Date"
+          },
+          "origination_grade": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "As given.",
+            "title": "Origination Grade"
+          },
+          "origination_grade_known": {
+            "description": "The grade is in the rating_grade vocabulary (else modules warn).",
+            "title": "Origination Grade Known",
+            "type": "boolean"
+          },
+          "payload_sha256": {
+            "description": "The canonical payload's SHA-256, or the text 'masked' unless the caller is cleared for the most sensitive field of the pinned schema version.",
+            "title": "Payload Sha256",
+            "type": "string"
+          },
+          "projected_at": {
+            "format": "date-time",
+            "title": "Projected At",
+            "type": "string"
+          },
+          "projection_id": {
+            "format": "uuid",
+            "title": "Projection Id",
+            "type": "string"
+          },
+          "schema_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Version"
+          },
+          "schema_version_id": {
+            "format": "uuid",
+            "title": "Schema Version Id",
+            "type": "string"
+          },
+          "source_ordinal": {
+            "description": "The source row's ordinal within its import.",
+            "title": "Source Ordinal",
+            "type": "integer"
+          },
+          "source_record_id": {
+            "format": "uuid",
+            "title": "Source Record Id",
+            "type": "string"
+          },
+          "undrawn_amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Exact decimal text, in `currency`.",
+            "title": "Undrawn Amount"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          },
+          "version_id": {
+            "format": "uuid",
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version_id",
+          "version",
+          "credit_exposure_id",
+          "business_key",
+          "import_id",
+          "projection_id",
+          "canonical_record_id",
+          "source_record_id",
+          "source_ordinal",
+          "schema_version_id",
+          "schema_version",
+          "payload_sha256",
+          "projected_at",
+          "counterparty_key",
+          "instrument_key",
+          "as_of_date",
+          "currency",
+          "facility_type",
+          "facility_type_known",
+          "drawn_amount",
+          "undrawn_amount",
+          "days_past_due",
+          "default_flag",
+          "origination_date",
+          "origination_grade",
+          "origination_grade_known",
+          "maturity_date",
+          "effective_interest_rate",
+          "effective_interest_rate_unit",
+          "collateral_type",
+          "collateral_type_known",
+          "collateral_value"
+        ],
+        "title": "CreditExposureVersionOut",
+        "type": "object"
+      },
+      "CreditVocabularyEntryOut": {
+        "properties": {
+          "code": {
+            "description": "Neutral code (grades G01..G08 and D; no agency symbols).",
+            "title": "Code",
+            "type": "string"
+          },
+          "is_default_grade": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "rating_grade only: the grade denotes default; else null.",
+            "title": "Is Default Grade"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "provisional": {
+            "description": "A PROVISIONAL / illustrative seeded value (D-11).",
+            "title": "Provisional",
+            "type": "boolean"
+          },
+          "rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "rating_grade only: the order of the grade, 1 = best; else null.",
+            "title": "Rank"
+          },
+          "vocabulary": {
+            "$ref": "#/components/schemas/CreditVocabularyKind"
+          }
+        },
+        "required": [
+          "vocabulary",
+          "code",
+          "name",
+          "rank",
+          "is_default_grade",
+          "provisional"
+        ],
+        "title": "CreditVocabularyEntryOut",
+        "type": "object"
+      },
+      "CreditVocabularyKind": {
+        "description": "The seeded PROVISIONAL `credit_vocabulary` kinds (D-37 \u00a75, migration 0022). Grade\ncodes are neutral (G01..G08, D): no rating-agency symbol is used.",
+        "enum": [
+          "rating_grade",
+          "credit_segment",
+          "facility_type",
+          "collateral_type"
+        ],
+        "title": "CreditVocabularyKind",
+        "type": "string"
+      },
+      "CreditVocabularyList": {
+        "properties": {
+          "items": {
+            "description": "The caller's tenant's credit vocabularies, by vocabulary then rank/code.",
+            "items": {
+              "$ref": "#/components/schemas/CreditVocabularyEntryOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "CreditVocabularyList",
+        "type": "object"
+      },
       "CsvDelimiter": {
         "description": "D-16: the delimiters a CSV source profile may name.",
         "enum": [
@@ -1732,7 +2771,9 @@
         "enum": [
           "instrument",
           "position",
-          "cashflow_event"
+          "cashflow_event",
+          "counterparty",
+          "credit_exposure"
         ],
         "title": "DomainSchemaCode",
         "type": "string"
@@ -11407,6 +12448,482 @@
         "summary": "Get Calculation Run Results",
         "tags": [
           "calculations"
+        ]
+      }
+    },
+    "/api/v1/counterparties": {
+      "get": {
+        "description": "The counterparties of the caller's tenant, by business key. A filter matches a\ncounterparty when any of its versions matches.",
+        "operationId": "listCounterparties",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Counterparties with a version in it.",
+            "in": "query",
+            "name": "segment",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Counterparties with a version in it.",
+              "title": "Segment"
+            }
+          },
+          {
+            "description": "Counterparties with a version in it.",
+            "in": "query",
+            "name": "country",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^[A-Z]{2}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Counterparties with a version in it.",
+              "title": "Country"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source Id"
+            }
+          },
+          {
+            "description": "Counterparties with a version from this import.",
+            "in": "query",
+            "name": "import_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Counterparties with a version from this import.",
+              "title": "Import Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CounterpartyPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Counterparties",
+        "tags": [
+          "domain"
+        ]
+      }
+    },
+    "/api/v1/counterparties/{counterparty_id}": {
+      "get": {
+        "description": "One counterparty: every version (oldest first) with its import, source row ordinal and\ncanonical record, plus the credit-exposure versions naming its business key in the\ntenant. 404 `not_found` alike for an absent and another tenant's id (D-04).",
+        "operationId": "getCounterparty",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "counterparty_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Counterparty Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CounterpartyDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Counterparty",
+        "tags": [
+          "domain"
+        ]
+      }
+    },
+    "/api/v1/credit-exposures": {
+      "get": {
+        "description": "The credit exposures of the caller's tenant, by business key. A filter matches an\nexposure when any of its versions matches.",
+        "operationId": "listCreditExposures",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Exposures with a version in this currency.",
+            "in": "query",
+            "name": "currency",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^[A-Z]{3}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exposures with a version in this currency.",
+              "title": "Currency"
+            }
+          },
+          {
+            "description": "Exposures with a version of this type.",
+            "in": "query",
+            "name": "facility_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exposures with a version of this type.",
+              "title": "Facility Type"
+            }
+          },
+          {
+            "description": "Exposures with a version naming this counterparty.",
+            "in": "query",
+            "name": "counterparty_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exposures with a version naming this counterparty.",
+              "title": "Counterparty Key"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source Id"
+            }
+          },
+          {
+            "description": "Exposures with a version from this import.",
+            "in": "query",
+            "name": "import_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exposures with a version from this import.",
+              "title": "Import Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreditExposurePage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Credit Exposures",
+        "tags": [
+          "domain"
+        ]
+      }
+    },
+    "/api/v1/credit-exposures/{exposure_id}": {
+      "get": {
+        "description": "One credit exposure: every version (oldest first) with its import id, source row\nordinal and canonical record id. 404 `not_found` alike for an absent and another\ntenant's id (D-04).",
+        "operationId": "getCreditExposure",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "exposure_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Exposure Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreditExposureDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Credit Exposure",
+        "tags": [
+          "domain"
+        ]
+      }
+    },
+    "/api/v1/credit-vocabularies": {
+      "get": {
+        "description": "The seeded PROVISIONAL credit vocabularies of the caller's tenant (D-37 \u00a75): rating\ngrades (with rank and default flag), credit segments, facility types and collateral\ntypes.",
+        "operationId": "listCreditVocabularies",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreditVocabularyList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Credit Vocabularies",
+        "tags": [
+          "domain"
         ]
       }
     },

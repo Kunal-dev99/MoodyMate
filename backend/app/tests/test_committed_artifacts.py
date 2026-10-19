@@ -26,11 +26,22 @@ def test_committed_openapi_and_samples_are_current() -> None:
         ).read_bytes() == content, f"{name}: run `python -m scripts.make_synthetic_samples`"
 
 
+# D-01 exceptions approved by the user, each with its named decision and the one operation it
+# allows: 0022 replaces the two schema_code CHECKs with wider ones (D-38).
+D01_EXCEPTIONS = {"0022": ("D-38", "drop_constraint")}
+
+
 def test_migrations_are_additive_and_reversible() -> None:
     script = ScriptDirectory.from_config(Config("alembic.ini"))
     for rev in script.walk_revisions():
         assert hasattr(rev.module, "downgrade"), rev.revision
-        # D-01: upgrade() must be additive. Exceptions need a named decision.
-        src = inspect.getsource(rev.module.upgrade)
+        # D-01: the module minus its docstring and downgrade() (so upgrade() and every helper
+        # it calls) must be additive. Exceptions need a named decision.
+        src = inspect.getsource(rev.module)
+        for part in (rev.module.__doc__ or "", inspect.getsource(rev.module.downgrade)):
+            src = src.replace(part, "")
+        decision, allowed = D01_EXCEPTIONS.get(rev.revision, (None, None))
+        assert getattr(rev.module, "D01_EXCEPTION", None) == decision, rev.revision
         for forbidden in ("drop_table", "drop_column", "drop_constraint", "DROP "):
-            assert forbidden not in src, f"{rev.revision}: {forbidden} in upgrade()"
+            if forbidden != allowed:
+                assert forbidden not in src, f"{rev.revision}: {forbidden} outside downgrade()"

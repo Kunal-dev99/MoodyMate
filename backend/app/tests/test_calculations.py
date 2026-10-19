@@ -390,7 +390,10 @@ def test_registry_snapshot_run_and_maturity_ladder(
     assert m18.INTERMEDIATE_CODES == tuple(c.value for c in IntermediateCode)
     assert m18.DIRECTIONS == tuple(d.value for d in CashflowDirection)
     assert m18.ORIGINS == tuple(o.value for o in CashflowOrigin)
-    assert m18.SCHEMA_CODES == tuple(c.value for c in DomainSchemaCode)
+    # BE-19.4: 0022 widened the member CHECK (D-38); 0018's copy is the codes before it.
+    assert m18.SCHEMA_CODES + migration("0022_credit_domain").SCHEMA_CODES == tuple(
+        c.value for c in DomainSchemaCode
+    )
     assert m18.BUCKETS == SEEDED_BUCKETS
     assert m18.RULES == {
         code: (name, category.value, schema, params, description)
@@ -1554,7 +1557,7 @@ def test_registry_snapshot_run_and_maturity_ladder(
     # transaction: nothing changes; 0020 alone refuses while LCR results exist (BE-17.1).
     # Without them, head -> 0017 -> head.
     head = str(ScriptDirectory.from_config(Config("alembic.ini")).get_current_head())
-    assert sql(db, "SELECT version_num FROM alembic_version")[0]["version_num"] == head == "0021"
+    assert sql(db, "SELECT version_num FROM alembic_version")[0]["version_num"] == head == "0022"
     before = calc_counts(db)
     try:
         for target in (m20.down_revision, "0017"):

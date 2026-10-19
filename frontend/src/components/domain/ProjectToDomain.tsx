@@ -18,9 +18,10 @@ import type { Refusal } from '@/components/ingestion/mappings'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
+  browseLink,
   canProject,
-  catalogueHref,
   fieldCounts,
+  isCreditSchemaCode,
   isNotProjected,
   originOf,
   projectionConserves,
@@ -37,6 +38,8 @@ import {
  * (D-04). The summary is always the server's answer: read on load (GET, domain:read; 404
  * `projection_not_found` means not projected yet), or returned by the click (201 projected
  * now, 200 the existing projection, nothing written).
+ * FE-19.2: the same action for the two Feature 04 codes, `counterparty` and `credit_exposure`
+ * (D-37), taken from the OpenAPI enum; off with NEXT_PUBLIC_CREDIT_DOMAIN_UI (see domain.ts).
  */
 
 function Field({ label, children, testId }: { label: string; children: ReactNode; testId?: string }) {
@@ -90,6 +93,7 @@ export function ProjectionSummaryView({ projection, origin }: { projection: Proj
   const p = projection
   const s = p.summary
   const conserves = projectionConserves(p)
+  const browse = browseLink(p)
   return (
     <div className="space-y-4" data-testid="projection-summary" data-projection-id={p.projection_id} data-origin={origin}>
       <p className="rounded-md border border-border bg-surface-2 px-3 py-2 text-sm" data-testid="projection-outcome">
@@ -122,6 +126,11 @@ export function ProjectionSummaryView({ projection, origin }: { projection: Proj
             {p.schema_code} v{p.schema_version}
           </span>{' '}
           <span className="font-mono text-xs text-muted-foreground">{p.schema_version_id}</span>
+          {isCreditSchemaCode(p.schema_code) && (
+            <div className="text-xs text-muted-foreground" data-testid="projection-credit-schema">
+              Seeded illustrative credit schema (D-37), provisional.
+            </div>
+          )}
         </Field>
         <Field label="Projector version">
           <span className="font-mono">v{p.projector_version}</span>
@@ -155,9 +164,9 @@ export function ProjectionSummaryView({ projection, origin }: { projection: Proj
           </Mono>
         </Field>
       </dl>
-      {p.schema_code === 'instrument' && (
-        <Link href={catalogueHref(p.import_id)} className="text-sm text-primary hover:underline" data-testid="projection-browse">
-          Browse the instruments this import projected
+      {browse && (
+        <Link href={browse.href} className="text-sm text-primary hover:underline" data-testid="projection-browse">
+          {browse.label}
         </Link>
       )}
     </div>

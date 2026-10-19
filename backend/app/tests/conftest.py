@@ -38,7 +38,15 @@ WS2_MATRIX: list[dict[str, Any]] = []
 
 # BE-18.3: the WS3 matrix is the WS1 matrix's rows for WS3 routes, picked by path, so WS3
 # routes added later join it with no list to keep in step.
-WS3_PREFIXES = ("/instruments", "/dataset-snapshots", "/calculation-", "/rules", "/assumption-sets")
+WS3_PREFIXES = (
+    "/instruments",
+    "/dataset-snapshots",
+    "/calculation-",
+    "/rules",
+    "/assumption-sets",
+    "/counterparties",  # Phase 19: the credit reads are WS3 domain routes
+    "/credit-",
+)
 
 
 def is_ws3_route(route: str) -> bool:
@@ -256,6 +264,29 @@ _DOMAIN_CLEANUP = "\n".join(
     ]
 )
 
+# Feature 04 credit rows (Phase 19, 0022) reference domain projections, imports and canonical
+# records: removed before the domain rows. Append-only (TRUNCATE included), so every user
+# trigger is lifted for this one transaction; the tagged credit_vocabulary seed stays.
+_CREDIT_TABLES = (
+    "credit_exposure_version",
+    "counterparty_version",
+    "credit_exposure",
+    "counterparty",
+    "credit_vocabulary",
+)
+_CREDIT_CLEANUP = "\n".join(
+    [
+        "BEGIN;",
+        *(f"ALTER TABLE {t} DISABLE TRIGGER USER;" for t in _CREDIT_TABLES),
+        *(
+            f"DELETE FROM {t}" + (" WHERE seeded_by IS NULL;" if t == "credit_vocabulary" else ";")
+            for t in _CREDIT_TABLES
+        ),
+        *(f"ALTER TABLE {t} ENABLE TRIGGER USER;" for t in _CREDIT_TABLES),
+        "COMMIT;",
+    ]
+)
+
 # WS3 snapshots, runs and the rule registry (Phase 15) reference domain rows, imports and
 # reconciliation runs: removed first. Append-only or lifecycle-guarded (TRUNCATE included),
 # so every user trigger of these tables is lifted for this one transaction. The tagged seed
@@ -305,6 +336,7 @@ _CLEANUP = [
     "DELETE FROM role WHERE seeded_by IS NULL",
     "DELETE FROM permission WHERE seeded_by IS NULL",
     _CALC_CLEANUP,
+    _CREDIT_CLEANUP,
     _DOMAIN_CLEANUP,
     _PHASE12_CLEANUP,
     _VALIDATION_CLEANUP,
@@ -356,6 +388,7 @@ def clean(url: str) -> None:
     for statement in _CLEANUP:
         if statement in (
             _CALC_CLEANUP,
+            _CREDIT_CLEANUP,
             _DOMAIN_CLEANUP,
             _INGESTION_CLEANUP,
             _IMPORT_CLEANUP,

@@ -14,6 +14,11 @@ The WS3 domain tables of Phase 14 (BE-14.2, FC-01, Data Model §4, D-29), migrat
 - `instrument_attribute_definition` and `instrument_attribute_value`: extension-eligible
   instrument fields, kept as the canonical typed text.
 
+Feature 04 (BE-19.1, D-37), migration 0022: `counterparty` and `credit_exposure` identities,
+their `counterparty_version` and `credit_exposure_version` rows (as above: one per accepted
+canonical record; days past due INTEGER, the default flag BOOLEAN), and the seeded
+PROVISIONAL `credit_vocabulary`.
+
 Every table carries `tenant_id` and is read through `ScopedRepository` (D-04). All of them
 are append-only: UPDATE, DELETE and TRUNCATE raise (DB triggers). Insert triggers check that
 a row is in the tenant of the import, source, identity or projection it names, and that a
@@ -42,7 +47,12 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, ScopedModel
-from app.domain.constants import CashflowOrigin, CashflowType, DomainSchemaCode
+from app.domain.constants import (
+    CashflowOrigin,
+    CashflowType,
+    CreditVocabularyKind,
+    DomainSchemaCode,
+)
 from app.governance.constants import FieldType
 
 SHA256 = "~ '^[0-9a-f]{64}$'"
@@ -264,3 +274,104 @@ class InstrumentAttributeValue(ScopedModel, Base):
         UUID(as_uuid=True), ForeignKey("instrument_attribute_definition.id"), nullable=False
     )
     value_text: Mapped[str] = mapped_column(String, nullable=False)
+
+
+# --- Feature 04: credit data (BE-19.1, D-37), migration 0022 ---------------------------------
+
+
+class Counterparty(_Identity, ScopedModel, Base):
+    __tablename__ = "counterparty"
+    __table_args__ = (UniqueConstraint("tenant_id", "source_system_id", "business_key"),)
+
+
+class CreditExposure(_Identity, ScopedModel, Base):
+    __tablename__ = "credit_exposure"
+    __table_args__ = (UniqueConstraint("tenant_id", "source_system_id", "business_key"),)
+
+
+def _version_checks() -> tuple[CheckConstraint, ...]:
+    return (
+        CheckConstraint(f"payload_sha256 {SHA256}", name="payload_sha256"),
+        CheckConstraint("source_ordinal >= 1", name="source_ordinal"),
+        CheckConstraint("version >= 1", name="version"),
+    )
+
+
+class CounterpartyVersion(_Projected, ScopedModel, Base):
+    """One projected counterparty record. `segment` is kept as given (D-37 §3); `country`
+    is NULL unless ISO 3166-1 alpha-2 (UNKNOWN_VALUE)."""
+
+    __tablename__ = "counterparty_version"
+    __table_args__ = (
+        UniqueConstraint("counterparty_id", "version"),
+        CheckConstraint("country IS NULL OR country ~ '^[A-Z]{2}$'", name="country"),
+        *_version_checks(),
+    )
+
+    counterparty_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("counterparty.id"), index=True, nullable=False
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    counterparty_name: Mapped[str | None] = mapped_column(String)
+    segment: Mapped[str | None] = mapped_column(String)
+    country: Mapped[str | None] = mapped_column(String(2))
+
+
+class CreditExposureVersion(_Projected, ScopedModel, Base):
+    """One projected credit-exposure record. `counterparty_key` names its counterparty by
+    business key, resolved within a snapshot and the tenant (D-37 §4). Vocabulary fields
+    (facility type, origination grade, collateral type) are kept as given (D-37 §3)."""
+
+    __tablename__ = "credit_exposure_version"
+    __table_args__ = (
+        UniqueConstraint("credit_exposure_id", "version"),
+        CheckConstraint(f"currency IS NULL OR currency {CURRENCY}", name="currency"),
+        *_version_checks(),
+    )
+
+    credit_exposure_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("credit_exposure.id"), index=True, nullable=False
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    counterparty_key: Mapped[str | None] = mapped_column(String, index=True)
+    instrument_key: Mapped[str | None] = mapped_column(String)
+    as_of_date: Mapped[date | None] = mapped_column(Date)
+    currency: Mapped[str | None] = mapped_column(String(3))
+    facility_type: Mapped[str | None] = mapped_column(String)
+    drawn_amount: Mapped[Decimal | None] = mapped_column(Numeric(asdecimal=True))
+    undrawn_amount: Mapped[Decimal | None] = mapped_column(Numeric(asdecimal=True))
+    days_past_due: Mapped[int | None] = mapped_column(Integer)
+    default_flag: Mapped[bool | None] = mapped_column(Boolean)
+    origination_date: Mapped[date | None] = mapped_column(Date)
+    origination_grade: Mapped[str | None] = mapped_column(String)
+    maturity_date: Mapped[date | None] = mapped_column(Date)
+    effective_interest_rate: Mapped[Decimal | None] = mapped_column(Numeric(asdecimal=True))
+    collateral_type: Mapped[str | None] = mapped_column(String)
+    collateral_value: Mapped[Decimal | None] = mapped_column(Numeric(asdecimal=True))
+
+
+class CreditVocabulary(ScopedModel, Base):
+    """The seeded PROVISIONAL credit vocabularies (D-37 §5): neutral grade codes with rank
+    and default flag, credit segments, facility types and collateral types."""
+
+    __tablename__ = "credit_vocabulary"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "vocabulary", "code"),
+        CheckConstraint(_in("vocabulary", CreditVocabularyKind), name="vocabulary"),
+        CheckConstraint("code ~ '^[A-Z][A-Z0-9_]*$'", name="code"),
+        CheckConstraint(
+            "(vocabulary = 'rating_grade') = (rank IS NOT NULL AND is_default_grade IS NOT NULL)"
+            " AND (rank IS NULL OR rank >= 1)",
+            name="grade",
+        ),
+    )
+
+    tenant_id: Mapped[uuid.UUID] = _tenant()
+    vocabulary: Mapped[str] = mapped_column(String(30), nullable=False)
+    code: Mapped[str] = mapped_column(String(50), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    rank: Mapped[int | None] = mapped_column(Integer)
+    is_default_grade: Mapped[bool | None] = mapped_column(Boolean)
+    description: Mapped[str | None] = mapped_column(String(1000))
+    provisional: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    seeded_by: Mapped[str | None] = mapped_column(String(100))

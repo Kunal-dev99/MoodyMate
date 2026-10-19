@@ -1,0 +1,10 @@
+# ILLUSTRATIVE / SYNTHETIC sample: counterparty. Not client data. Fixed hand-written rows in backend/scripts/make_synthetic_samples.py.
+counterparty_id,counterparty_name,segment,country
+CP-0001,Alder Manufacturing (synthetic),CORPORATE,DE
+CP-0002,Birch Logistics (synthetic),CORPORATE,FR
+CP-0003,Cedar Tools (synthetic),SME,NL
+CP-0004,Dogwood Bakery (synthetic),SME,IE
+CP-0005,Elm Household (synthetic),RETAIL,ES
+CP-0006,Fir Household (synthetic),RETAIL,IT
+CP-0007,Examplia Treasury (synthetic),SOVEREIGN,AT
+CP-0008,Ginkgo Partners (synthetic),CORPORATE,US
