@@ -4,7 +4,9 @@ Module constants and enums (D-06, D-29). Every enum column is CHECK-constrained 
 database (migration 0017, which holds frozen copies kept equal by test_domain).
 
 The projection spec below is FROZEN for `PROJECTOR_VERSION` 1: changing what a schema
-field projects into is a new projector version (D-29 §4), never an edit of this one.
+field projects into is a new projector version (D-29 §4), never an edit of this one. Feature
+04 adds the `counterparty` and `credit_exposure` specs under version 1 (D-37 §3); the three
+Feature 03 specs are unchanged. Credit frozen copies live in migration 0022.
 """
 
 from dataclasses import dataclass
@@ -19,6 +21,9 @@ class DomainSchemaCode(StrEnum):
     INSTRUMENT = "instrument"
     POSITION = "position"
     CASHFLOW_EVENT = "cashflow_event"
+    # Feature 04 (D-37 §1, D-38): the credit schemas, CHECK-widened by migration 0022.
+    COUNTERPARTY = "counterparty"
+    CREDIT_EXPOSURE = "credit_exposure"
 
 
 class ProjectionRefusal(StrEnum):
@@ -57,6 +62,16 @@ class CashflowOrigin(StrEnum):
     BEHAVIOURAL = "BEHAVIOURAL"
 
 
+class CreditVocabularyKind(StrEnum):
+    """The seeded PROVISIONAL `credit_vocabulary` kinds (D-37 §5, migration 0022). Grade
+    codes are neutral (G01..G08, D): no rating-agency symbol is used."""
+
+    RATING_GRADE = "rating_grade"
+    CREDIT_SEGMENT = "credit_segment"
+    FACILITY_TYPE = "facility_type"
+    COLLATERAL_TYPE = "collateral_type"
+
+
 class ColumnKind(StrEnum):
     """The type of a typed domain column, as the schema field type it accepts. A field
     projects into the column only when its pinned data type is exactly this one: a STRING
@@ -65,6 +80,9 @@ class ColumnKind(StrEnum):
     TEXT = "STRING"
     DECIMAL = "DECIMAL"
     DATE = "DATE"
+    # Feature 04 (D-37 §3): days past due and the default flag.
+    INTEGER = "INTEGER"
+    BOOLEAN = "BOOLEAN"
 
 
 # PROVISIONAL / ILLUSTRATIVE instrument type vocabulary (D-11, D-29 §5), seeded by 0017 for
@@ -75,6 +93,29 @@ SEEDED_INSTRUMENT_TYPES: dict[str, str] = {
     "BOND": "Bond (illustrative)",
 }
 DOMAIN_SEED_TAG = "0017_domain"
+
+# Feature 04 (D-37): the credit schema codes, the 0022 seed tag and the seeded PROVISIONAL
+# credit vocabularies (a frozen copy in 0022, kept equal by test_domain). Grade codes are
+# neutral: no rating-agency symbol (no vendor or agency parity is implied).
+CREDIT_SCHEMA_CODES = frozenset({DomainSchemaCode.COUNTERPARTY, DomainSchemaCode.CREDIT_EXPOSURE})
+CREDIT_SEED_TAG = "0022_credit_domain"
+# (vocabulary, code) -> (rank, default grade); rank and flag are for rating_grade only.
+SEEDED_CREDIT_VOCABULARY: dict[tuple[CreditVocabularyKind, str], tuple[int | None, bool | None]] = {
+    **{(CreditVocabularyKind.RATING_GRADE, f"G0{i}"): (i, False) for i in range(1, 9)},
+    (CreditVocabularyKind.RATING_GRADE, "D"): (9, True),
+    **{
+        (CreditVocabularyKind.CREDIT_SEGMENT, c): (None, None)
+        for c in ("CORPORATE", "SME", "RETAIL", "SOVEREIGN")
+    },
+    **{
+        (CreditVocabularyKind.FACILITY_TYPE, c): (None, None)
+        for c in ("TERM_LOAN", "REVOLVER", "GUARANTEE")
+    },
+    **{
+        (CreditVocabularyKind.COLLATERAL_TYPE, c): (None, None)
+        for c in ("CASH", "SECURITIES", "REAL_ESTATE")
+    },
+}
 
 PROJECTOR_VERSION = 1
 # D-29 §1: an import is projected once it has a manifest and one of these statuses; only
@@ -102,6 +143,9 @@ class Column:
     # A seeded vocabulary the value must belong to; any other value leaves the column NULL
     # and is counted UNKNOWN_VALUE.
     vocabulary: frozenset[str] | None = None
+    # Feature 04 (D-37 §3): a credit vocabulary the value is checked against but kept as
+    # given; a value outside it is counted UNKNOWN_VALUE (modules map it, never silently).
+    credit_vocabulary: CreditVocabularyKind | None = None
 
 
 @dataclass(frozen=True)
@@ -178,3 +222,59 @@ PROJECTION_SPECS: dict[DomainSchemaCode, ProjectionSpec] = {
         schema_versions=frozenset({1}),
     ),
 }
+
+# Feature 04 (D-37 §3): the credit specs, added under projector version 1. The three specs
+# above stay frozen.
+PROJECTION_SPECS[DomainSchemaCode.COUNTERPARTY] = ProjectionSpec(
+    DomainSchemaCode.COUNTERPARTY,
+    business_key="counterparty_id",
+    instrument_key=None,
+    columns=(
+        Column("counterparty_name", "counterparty_name", ColumnKind.TEXT),
+        Column(
+            "segment",
+            "segment",
+            ColumnKind.TEXT,
+            credit_vocabulary=CreditVocabularyKind.CREDIT_SEGMENT,
+        ),
+        Column("country", "country", ColumnKind.TEXT),
+    ),
+    schema_versions=frozenset({1}),
+)
+PROJECTION_SPECS[DomainSchemaCode.CREDIT_EXPOSURE] = ProjectionSpec(
+    DomainSchemaCode.CREDIT_EXPOSURE,
+    business_key="exposure_id",
+    instrument_key="instrument_id",
+    columns=(
+        Column("counterparty_key", "counterparty_id", ColumnKind.TEXT),
+        Column("as_of_date", "as_of_date", ColumnKind.DATE),
+        Column("currency", "currency", ColumnKind.TEXT),
+        Column(
+            "facility_type",
+            "facility_type",
+            ColumnKind.TEXT,
+            credit_vocabulary=CreditVocabularyKind.FACILITY_TYPE,
+        ),
+        Column("drawn_amount", "drawn_amount", ColumnKind.DECIMAL),
+        Column("undrawn_amount", "undrawn_amount", ColumnKind.DECIMAL),
+        Column("days_past_due", "days_past_due", ColumnKind.INTEGER),
+        Column("default_flag", "default_flag", ColumnKind.BOOLEAN),
+        Column("origination_date", "origination_date", ColumnKind.DATE),
+        Column(
+            "origination_grade",
+            "origination_grade",
+            ColumnKind.TEXT,
+            credit_vocabulary=CreditVocabularyKind.RATING_GRADE,
+        ),
+        Column("maturity_date", "maturity_date", ColumnKind.DATE),
+        Column("effective_interest_rate", "effective_interest_rate", ColumnKind.DECIMAL),
+        Column(
+            "collateral_type",
+            "collateral_type",
+            ColumnKind.TEXT,
+            credit_vocabulary=CreditVocabularyKind.COLLATERAL_TYPE,
+        ),
+        Column("collateral_value", "collateral_value", ColumnKind.DECIMAL),
+    ),
+    schema_versions=frozenset({1}),
+)

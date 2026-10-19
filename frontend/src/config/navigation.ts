@@ -13,7 +13,7 @@ import {
 } from 'lucide-react'
 import type { Schemas } from '@/api/client'
 import type { NavItem } from '@/components/layout/sidebar'
-import { CALCULATIONS_UI_ENABLED, DOMAIN_UI_ENABLED, RULES_UI_ENABLED } from '@/config/features'
+import { CALCULATIONS_UI_ENABLED, CREDIT_DOMAIN_UI_ENABLED, DOMAIN_UI_ENABLED, RULES_UI_ENABLED } from '@/config/features'
 
 /**
  * Platform workspaces (Architecture §14). `planned` workspaces render a clear
@@ -61,9 +61,12 @@ export const mainWorkspaces: Workspace[] = [
         label: 'Financial Domain',
         icon: Landmark,
         // FE-16.1: the registry is named only while it is live (NEXT_PUBLIC_RULES_UI); off, the Phase 15 text.
-        description: RULES_UI_ENABLED
-          ? 'Instrument catalogue with its lineage to imports, and the registry: methodology rules and their versions, calculation modules and assumption sets.'
-          : 'Instrument catalogue: projected versions, attributes, cash flows and their lineage to imports.',
+        // FE-19.1: the counterparties are named only while they are live (NEXT_PUBLIC_CREDIT_DOMAIN_UI); off, the Phase 18 text.
+        description:
+          (RULES_UI_ENABLED
+            ? 'Instrument catalogue with its lineage to imports, and the registry: methodology rules and their versions, calculation modules and assumption sets.'
+            : 'Instrument catalogue: projected versions, attributes, cash flows and their lineage to imports.') +
+          (CREDIT_DOMAIN_UI_ENABLED ? ' Counterparties and credit exposures with their versions and lineage.' : ''),
         permission: 'domain:read',
       }
     : {
@@ -99,7 +102,9 @@ export const mainWorkspaces: Workspace[] = [
     label: 'Reconciliation & Scenarios',
     icon: GitCompare,
     description: 'Baseline versus scenario comparison, breaks and lineage drill-down.',
-    planned: { phase: 'Feature 04', workstream: 'WS4' },
+    // FE-19.1: Feature 04 is credit risk; this workspace stays planned under WS4.
+    // PlannedWorkspace renders "Scheduled for <phase> (<workstream>)": "Scheduled for WS4 (planned)".
+    planned: { phase: 'WS4', workstream: 'planned' },
   },
   {
     slug: 'reports',
@@ -107,7 +112,9 @@ export const mainWorkspaces: Workspace[] = [
     label: 'Reports',
     icon: FileBarChart,
     description: 'Run-linked reports and controlled exports.',
-    planned: { phase: 'Feature 04', workstream: 'WS4' },
+    // FE-19.1: Feature 04 is credit risk; this workspace stays planned under WS4.
+    // PlannedWorkspace renders "Scheduled for <phase> (<workstream>)": "Scheduled for WS4 (planned)".
+    planned: { phase: 'WS4', workstream: 'planned' },
   },
   {
     slug: 'assistant',
@@ -146,20 +153,30 @@ export interface WorkspaceSection {
   permission: Schemas['Permission']
 }
 
+/** FE-19.1: the Counterparties tab (domain:read), only while NEXT_PUBLIC_CREDIT_DOMAIN_UI is on. */
+const creditSections: WorkspaceSection[] = CREDIT_DOMAIN_UI_ENABLED
+  ? [{ slug: 'counterparties', href: '/domain/counterparties', label: 'Counterparties', permission: 'domain:read' }]
+  : []
+
+/** FE-16.1: the read-only registry tabs, only while NEXT_PUBLIC_RULES_UI is on. */
+const registrySections: WorkspaceSection[] = RULES_UI_ENABLED
+  ? [
+      { slug: 'rules', href: '/domain/rules', label: 'Rules', permission: 'rule:read' },
+      { slug: 'modules', href: '/domain/modules', label: 'Modules', permission: 'rule:read' },
+      { slug: 'assumption-sets', href: '/domain/assumption-sets', label: 'Assumption sets', permission: 'rule:read' },
+    ]
+  : []
+
 /**
  * FE-16.1: the Financial Domain's pages: the Phase 14 instrument catalogue (at /domain, as
- * before) and the read-only registry of rules, modules and assumption sets. Empty while
- * NEXT_PUBLIC_RULES_UI=off or the workspace is planned, so /domain shows no tab strip, as in
- * Phase 15 (D-02).
+ * before), FE-19.1's counterparties and the read-only registry of rules, modules and assumption
+ * sets. Empty while both NEXT_PUBLIC_RULES_UI and NEXT_PUBLIC_CREDIT_DOMAIN_UI are off or the
+ * workspace is planned, so /domain shows no tab strip, as in Phase 15 (D-02). With
+ * NEXT_PUBLIC_CREDIT_DOMAIN_UI=off alone the list is the Phase 18 one exactly.
  */
 export const domainSections: WorkspaceSection[] =
-  DOMAIN_UI_ENABLED && RULES_UI_ENABLED
-    ? [
-        { slug: 'instruments', href: '/domain', label: 'Instruments', permission: 'domain:read' },
-        { slug: 'rules', href: '/domain/rules', label: 'Rules', permission: 'rule:read' },
-        { slug: 'modules', href: '/domain/modules', label: 'Modules', permission: 'rule:read' },
-        { slug: 'assumption-sets', href: '/domain/assumption-sets', label: 'Assumption sets', permission: 'rule:read' },
-      ]
+  DOMAIN_UI_ENABLED && creditSections.length + registrySections.length > 0
+    ? [{ slug: 'instruments', href: '/domain', label: 'Instruments', permission: 'domain:read' }, ...creditSections, ...registrySections]
     : []
 
 export function findWorkspace(slug: string): Workspace | undefined {

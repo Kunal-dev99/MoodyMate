@@ -73,3 +73,13 @@ export const RULES_UI_ENABLED = process.env.NEXT_PUBLIC_RULES_UI !== 'off'
  * the module version (hidden from "New run" by status); existing runs stay readable either way.
  */
 export const LIQUIDITY_UI_ENABLED = process.env.NEXT_PUBLIC_LIQUIDITY_UI !== 'off'
+
+/**
+ * NEXT_PUBLIC_CREDIT_DOMAIN_UI=off (FE-19.1): the Financial Domain loses its Counterparties tab
+ * and every /domain/counterparties route is a 404 again, restoring the Phase 18 /domain exactly.
+ * The backend's own switch is CREDIT_PROJECTION_ENABLED, which refuses new counterparty and
+ * credit-exposure projections (409 `projection_unsupported`); projected rows stay readable.
+ * Off also hides the import page's 'Project to domain' action for counterparty and
+ * credit_exposure imports, as in Phase 18.
+ */
+export const CREDIT_DOMAIN_UI_ENABLED = process.env.NEXT_PUBLIC_CREDIT_DOMAIN_UI !== 'off'

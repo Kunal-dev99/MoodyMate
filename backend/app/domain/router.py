@@ -11,6 +11,10 @@ The WS3 domain endpoints of Phase 14 (the Feature 03 endpoint table, D-34):
 - GET /instruments and GET /instruments/{instrument_id} (`domain:read`): the instrument
   catalogue, with every value masked by its pinned schema field's classification (BE-3.5).
 
+- Feature 04 (Phase 19, D-37, D-43), all `domain:read`: GET /credit-vocabularies,
+  GET /counterparties, GET /counterparties/{counterparty_id}, GET /credit-exposures and
+  GET /credit-exposures/{exposure_id}. Confidential credit fields (D-43 §1) are masked on read.
+
 Tenant scope comes from the principal (D-04): another tenant's id is the same 404 as a
 random one.
 """
@@ -19,7 +23,7 @@ import uuid
 from collections.abc import Mapping
 from datetime import date
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,12 +32,27 @@ from app.core.auth import require_permission
 from app.core.classification import UNCLASSIFIED, mask_mapping
 from app.core.principal import Principal
 from app.db.session import get_session
-from app.domain.constants import DomainSchemaCode
-from app.domain.models import CashflowEvent, InstrumentVersion
-from app.domain.repository import InstrumentFilter
+from app.domain.constants import CreditVocabularyKind, DomainSchemaCode
+from app.domain.models import (
+    CashflowEvent,
+    CounterpartyVersion,
+    CreditExposureVersion,
+    InstrumentVersion,
+)
+from app.domain.repository import CounterpartyFilter, ExposureFilter, InstrumentFilter
 from app.domain.schemas import (
     AttributeOut,
     CashFlowOut,
+    CounterpartyDetail,
+    CounterpartyPage,
+    CounterpartySummary,
+    CounterpartyVersionOut,
+    CreditExposureDetail,
+    CreditExposurePage,
+    CreditExposureSummary,
+    CreditExposureVersionOut,
+    CreditVocabularyEntryOut,
+    CreditVocabularyList,
     InstrumentDetail,
     InstrumentPage,
     InstrumentSummary,
@@ -45,7 +64,9 @@ from app.domain.schemas import (
 )
 from app.domain.service import (
     AttributeView,
+    CounterpartyRow,
     DomainService,
+    ExposureRow,
     InstrumentRow,
     ProjectionView,
     SchemaPins,
@@ -61,10 +82,14 @@ router = APIRouter(tags=["domain"])
 MASKED_HASH = "masked"  # a string, so the payload_sha256 field keeps its type
 
 
-def _text(value: Decimal | date | str | None) -> str | None:
-    """Exact decimal text (never exponent form) or an ISO date."""
-    if value is None:
-        return None
+Shown = Decimal | date | str | int | bool | None
+
+
+def _text(value: Shown) -> str | int | bool | None:
+    """Exact decimal text (never exponent form) or an ISO date; integers and booleans (days
+    past due, the default flag) as they are."""
+    if value is None or isinstance(value, bool | int):
+        return value
     if isinstance(value, Decimal):
         return format(value, "f")
     if isinstance(value, date):
@@ -73,12 +98,12 @@ def _text(value: Decimal | date | str | None) -> str | None:
 
 
 def _shown(
-    values: Mapping[str, Decimal | date | str | None],
+    values: Mapping[str, Shown],
     fields: Mapping[str, str],
     pins: SchemaPins,
     schema_version_id: uuid.UUID,
     clear: frozenset[str],
-) -> dict[str, Value | None]:
+) -> dict[str, Any]:
     """`values` (output key -> value) masked by the classification of the schema field each
     is projected from (`fields`: output key -> field), in the pinned schema version. A field
     the version does not define is masked as unclassified (fail closed)."""
@@ -116,8 +141,10 @@ async def project_import(
     keeping lineage to it. 409 `projection_unsupported` for another schema (or schema
     version), 409 `not_validated` before validation (or for a FAILED import), 409
     `domain_projection_disabled` while the switch is off; each refusal is audited DENIED."""
-    enabled = request.app.state.settings.DOMAIN_PROJECTION_ENABLED
-    view, created = await DomainService(session, principal).project(import_id, enabled)
+    settings = request.app.state.settings
+    view, created = await DomainService(session, principal).project(
+        import_id, settings.DOMAIN_PROJECTION_ENABLED, settings.CREDIT_PROJECTION_ENABLED
+    )
     if not created:
         response.status_code = 200
         response.headers["Idempotent-Replayed"] = "true"
@@ -362,6 +389,362 @@ async def get_instrument(
         created_at=row.instrument.created_at,
         versions=[
             _version(v, view.attributes.get(v.id, []), cash_flows, view.pins, clear)
+            for v in row.versions
+        ],
+    )
+
+
+# --- Feature 04 credit reads (BE-19.5; contract first, implemented in Phase 19) -------------
+
+
+_VocabularyCodes = Mapping[CreditVocabularyKind, frozenset[str]]
+
+
+def _hash(
+    payload_sha256: str, pins: SchemaPins, version_id: uuid.UUID, clear: frozenset[str]
+) -> str:
+    """A small payload's hash can be brute-forced to its masked values: shown only to a
+    caller cleared for every field the payload may hold."""
+    return payload_sha256 if pins.most_sensitive(version_id) in clear else MASKED_HASH
+
+
+def _known(
+    shown: Mapping[str, Any], key: str, kind: CreditVocabularyKind, vocabulary: _VocabularyCodes
+) -> bool:
+    """The value, as shown to the caller, is in its vocabulary. A masked or absent value is
+    not known (nothing about a masked value is revealed)."""
+    value = shown.get(key)
+    return isinstance(value, str) and value in vocabulary.get(kind, frozenset())
+
+
+def _business_key(
+    key: str, field: str, pins: SchemaPins, version_id: uuid.UUID, clear: frozenset[str]
+) -> Value:
+    shown = _shown({"business_key": key}, {"business_key": field}, pins, version_id, clear)
+    value = shown["business_key"]
+    assert value is not None
+    return value  # type: ignore[no-any-return]
+
+
+@router.get(
+    "/credit-vocabularies",
+    response_model=CreditVocabularyList,
+    operation_id="listCreditVocabularies",
+)
+async def list_credit_vocabularies(
+    principal: DomainReader, session: SessionDep
+) -> CreditVocabularyList:
+    """The seeded PROVISIONAL credit vocabularies of the caller's tenant (D-37 §5): rating
+    grades (with rank and default flag), credit segments, facility types and collateral
+    types."""
+    entries = await DomainService(session, principal).credit_vocabulary()
+    return CreditVocabularyList(
+        items=[
+            CreditVocabularyEntryOut(
+                vocabulary=CreditVocabularyKind(e.vocabulary),
+                code=e.code,
+                name=e.name,
+                rank=e.rank,
+                is_default_grade=e.is_default_grade,
+                provisional=e.provisional,
+            )
+            for e in entries
+        ]
+    )
+
+
+# Output key -> the schema field it is projected from (masking, D-43 §1).
+_COUNTERPARTY_FIELDS = {
+    "counterparty_name": "counterparty_name",
+    "segment": "segment",
+    "country": "country",
+}
+
+
+def _counterparty_values(v: CounterpartyVersion) -> dict[str, Shown]:
+    return {"counterparty_name": v.counterparty_name, "segment": v.segment, "country": v.country}
+
+
+def _counterparty_summary(
+    row: CounterpartyRow, pins: SchemaPins, clear: frozenset[str], vocabulary: _VocabularyCodes
+) -> CounterpartySummary:
+    latest = row.versions[-1]
+    shown = _shown(
+        _counterparty_values(latest), _COUNTERPARTY_FIELDS, pins, latest.schema_version_id, clear
+    )
+    return CounterpartySummary(
+        counterparty_id=row.counterparty.id,
+        business_key=_business_key(
+            row.counterparty.business_key,
+            "counterparty_id",
+            pins,
+            latest.schema_version_id,
+            clear,
+        ),
+        source_id=row.counterparty.source_system_id,
+        source_code=row.source_code,
+        version_count=len(row.versions),
+        latest_version=latest.version,
+        latest_import_id=latest.import_job_id,
+        segment_known=_known(shown, "segment", CreditVocabularyKind.CREDIT_SEGMENT, vocabulary),
+        created_at=row.counterparty.created_at,
+        **shown,
+    )
+
+
+@router.get("/counterparties", response_model=CounterpartyPage, operation_id="listCounterparties")
+async def list_counterparties(
+    principal: DomainReader,
+    session: SessionDep,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    segment: Annotated[
+        str | None, Query(max_length=100, description="Counterparties with a version in it.")
+    ] = None,
+    country: Annotated[
+        str | None,
+        Query(pattern=r"^[A-Z]{2}$", description="Counterparties with a version in it."),
+    ] = None,
+    source_id: uuid.UUID | None = None,
+    import_id: Annotated[
+        uuid.UUID | None, Query(description="Counterparties with a version from this import.")
+    ] = None,
+) -> CounterpartyPage:
+    """The counterparties of the caller's tenant, by business key. A filter matches a
+    counterparty when any of its versions matches."""
+    page = await DomainService(session, principal).counterparties(
+        CounterpartyFilter(segment, country, source_id, import_id), limit, offset
+    )
+    clear = principal.clear_classifications
+    return CounterpartyPage(
+        items=[
+            _counterparty_summary(r, page.pins, clear, page.vocabulary) for r in page.counterparties
+        ],
+        total=page.total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+_EXPOSURE_FIELDS = {
+    "counterparty_key": "counterparty_id",
+    "instrument_key": "instrument_id",
+    "as_of_date": "as_of_date",
+    "currency": "currency",
+    "facility_type": "facility_type",
+    "drawn_amount": "drawn_amount",
+    "undrawn_amount": "undrawn_amount",
+    "days_past_due": "days_past_due",
+    "default_flag": "default_flag",
+    "origination_date": "origination_date",
+    "origination_grade": "origination_grade",
+    "maturity_date": "maturity_date",
+    "effective_interest_rate": "effective_interest_rate",
+    "collateral_type": "collateral_type",
+    "collateral_value": "collateral_value",
+}
+_EXPOSURE_SUMMARY = (
+    "counterparty_key",
+    "as_of_date",
+    "currency",
+    "facility_type",
+    "drawn_amount",
+    "days_past_due",
+    "default_flag",
+)
+
+
+def _exposure_values(v: CreditExposureVersion) -> dict[str, Shown]:
+    return {key: getattr(v, key) for key in _EXPOSURE_FIELDS}
+
+
+def _exposure_version(
+    v: CreditExposureVersion,
+    business_key: str,
+    pins: SchemaPins,
+    clear: frozenset[str],
+    vocabulary: _VocabularyCodes,
+) -> CreditExposureVersionOut:
+    shown = _shown(_exposure_values(v), _EXPOSURE_FIELDS, pins, v.schema_version_id, clear)
+    rate = pins.fields.get(v.schema_version_id, {}).get("effective_interest_rate")
+    return CreditExposureVersionOut(
+        version_id=v.id,
+        version=v.version,
+        credit_exposure_id=v.credit_exposure_id,
+        business_key=_business_key(business_key, "exposure_id", pins, v.schema_version_id, clear),
+        import_id=v.import_job_id,
+        projection_id=v.domain_projection_id,
+        canonical_record_id=v.canonical_record_id,
+        source_record_id=v.source_record_id,
+        source_ordinal=v.source_ordinal,
+        schema_version_id=v.schema_version_id,
+        schema_version=pins.versions.get(v.schema_version_id),
+        payload_sha256=_hash(v.payload_sha256, pins, v.schema_version_id, clear),
+        projected_at=v.created_at,
+        facility_type_known=_known(
+            shown, "facility_type", CreditVocabularyKind.FACILITY_TYPE, vocabulary
+        ),
+        origination_grade_known=_known(
+            shown, "origination_grade", CreditVocabularyKind.RATING_GRADE, vocabulary
+        ),
+        collateral_type_known=_known(
+            shown, "collateral_type", CreditVocabularyKind.COLLATERAL_TYPE, vocabulary
+        ),
+        effective_interest_rate_unit=rate.unit if rate else None,
+        **shown,
+    )
+
+
+def _counterparty_version(
+    v: CounterpartyVersion, pins: SchemaPins, clear: frozenset[str], vocabulary: _VocabularyCodes
+) -> CounterpartyVersionOut:
+    shown = _shown(_counterparty_values(v), _COUNTERPARTY_FIELDS, pins, v.schema_version_id, clear)
+    return CounterpartyVersionOut(
+        version_id=v.id,
+        version=v.version,
+        import_id=v.import_job_id,
+        projection_id=v.domain_projection_id,
+        canonical_record_id=v.canonical_record_id,
+        source_record_id=v.source_record_id,
+        source_ordinal=v.source_ordinal,
+        schema_version_id=v.schema_version_id,
+        schema_version=pins.versions.get(v.schema_version_id),
+        payload_sha256=_hash(v.payload_sha256, pins, v.schema_version_id, clear),
+        projected_at=v.created_at,
+        segment_known=_known(shown, "segment", CreditVocabularyKind.CREDIT_SEGMENT, vocabulary),
+        **shown,
+    )
+
+
+@router.get(
+    "/counterparties/{counterparty_id}",
+    response_model=CounterpartyDetail,
+    operation_id="getCounterparty",
+)
+async def get_counterparty(
+    counterparty_id: uuid.UUID, principal: DomainReader, session: SessionDep
+) -> CounterpartyDetail:
+    """One counterparty: every version (oldest first) with its import, source row ordinal and
+    canonical record, plus the credit-exposure versions naming its business key in the
+    tenant. 404 `not_found` alike for an absent and another tenant's id (D-04)."""
+    view = await DomainService(session, principal).counterparty(counterparty_id)
+    clear = principal.clear_classifications
+    row = view.row
+    latest = row.versions[-1]
+    return CounterpartyDetail(
+        counterparty_id=row.counterparty.id,
+        business_key=_business_key(
+            row.counterparty.business_key,
+            "counterparty_id",
+            view.pins,
+            latest.schema_version_id,
+            clear,
+        ),
+        source_id=row.counterparty.source_system_id,
+        source_code=row.source_code,
+        created_at=row.counterparty.created_at,
+        versions=[
+            _counterparty_version(v, view.pins, clear, view.vocabulary) for v in row.versions
+        ],
+        exposure_versions=[
+            _exposure_version(v, key, view.pins, clear, view.vocabulary)
+            for v, key in view.exposure_versions
+        ],
+    )
+
+
+def _exposure_summary(
+    row: ExposureRow, pins: SchemaPins, clear: frozenset[str]
+) -> CreditExposureSummary:
+    latest = row.versions[-1]
+    values = _exposure_values(latest)
+    shown = _shown(
+        {k: values[k] for k in _EXPOSURE_SUMMARY},
+        {k: _EXPOSURE_FIELDS[k] for k in _EXPOSURE_SUMMARY},
+        pins,
+        latest.schema_version_id,
+        clear,
+    )
+    return CreditExposureSummary(
+        credit_exposure_id=row.exposure.id,
+        business_key=_business_key(
+            row.exposure.business_key, "exposure_id", pins, latest.schema_version_id, clear
+        ),
+        source_id=row.exposure.source_system_id,
+        source_code=row.source_code,
+        version_count=len(row.versions),
+        latest_version=latest.version,
+        latest_import_id=latest.import_job_id,
+        created_at=row.exposure.created_at,
+        **shown,
+    )
+
+
+@router.get(
+    "/credit-exposures", response_model=CreditExposurePage, operation_id="listCreditExposures"
+)
+async def list_credit_exposures(
+    principal: DomainReader,
+    session: SessionDep,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    currency: Annotated[
+        str | None,
+        Query(pattern=r"^[A-Z]{3}$", description="Exposures with a version in this currency."),
+    ] = None,
+    facility_type: Annotated[
+        str | None, Query(max_length=100, description="Exposures with a version of this type.")
+    ] = None,
+    counterparty_key: Annotated[
+        str | None,
+        Query(max_length=200, description="Exposures with a version naming this counterparty."),
+    ] = None,
+    source_id: uuid.UUID | None = None,
+    import_id: Annotated[
+        uuid.UUID | None, Query(description="Exposures with a version from this import.")
+    ] = None,
+) -> CreditExposurePage:
+    """The credit exposures of the caller's tenant, by business key. A filter matches an
+    exposure when any of its versions matches."""
+    page = await DomainService(session, principal).exposures(
+        ExposureFilter(currency, facility_type, counterparty_key, source_id, import_id),
+        limit,
+        offset,
+    )
+    clear = principal.clear_classifications
+    return CreditExposurePage(
+        items=[_exposure_summary(r, page.pins, clear) for r in page.exposures],
+        total=page.total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get(
+    "/credit-exposures/{exposure_id}",
+    response_model=CreditExposureDetail,
+    operation_id="getCreditExposure",
+)
+async def get_credit_exposure(
+    exposure_id: uuid.UUID, principal: DomainReader, session: SessionDep
+) -> CreditExposureDetail:
+    """One credit exposure: every version (oldest first) with its import id, source row
+    ordinal and canonical record id. 404 `not_found` alike for an absent and another
+    tenant's id (D-04)."""
+    view = await DomainService(session, principal).exposure(exposure_id)
+    clear = principal.clear_classifications
+    row = view.row
+    latest = row.versions[-1]
+    return CreditExposureDetail(
+        credit_exposure_id=row.exposure.id,
+        business_key=_business_key(
+            row.exposure.business_key, "exposure_id", view.pins, latest.schema_version_id, clear
+        ),
+        source_id=row.exposure.source_system_id,
+        source_code=row.source_code,
+        created_at=row.exposure.created_at,
+        versions=[
+            _exposure_version(v, row.exposure.business_key, view.pins, clear, view.vocabulary)
             for v in row.versions
         ],
     )

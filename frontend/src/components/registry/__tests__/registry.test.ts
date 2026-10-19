@@ -219,15 +219,34 @@ describe('registry reversibility (FE-16.1, D-02)', () => {
   })
 
   it('lists the registry tabs and names the registry while NEXT_PUBLIC_RULES_UI is on', async () => {
+    // FE-19.1 adds a Counterparties tab behind NEXT_PUBLIC_CREDIT_DOMAIN_UI (on by default).
+    vi.resetModules()
+    const on = await import('@/config/navigation')
+    expect(on.domainSections.map((s) => s.href)).toEqual([
+      '/domain',
+      '/domain/counterparties',
+      '/domain/rules',
+      '/domain/modules',
+      '/domain/assumption-sets',
+    ])
+    expect(on.domainSections.find((s) => s.slug === 'counterparties')?.permission).toBe('domain:read')
+    // Off: the Phase 18 list exactly.
+    vi.stubEnv('NEXT_PUBLIC_CREDIT_DOMAIN_UI', 'off')
     vi.resetModules()
     const { domainSections, mainWorkspaces } = await import('@/config/navigation')
-    expect(domainSections.map((s) => s.href)).toEqual(['/domain', '/domain/rules', '/domain/modules', '/domain/assumption-sets'])
+    expect(domainSections).toEqual([
+      { slug: 'instruments', href: '/domain', label: 'Instruments', permission: 'domain:read' },
+      { slug: 'rules', href: '/domain/rules', label: 'Rules', permission: 'rule:read' },
+      { slug: 'modules', href: '/domain/modules', label: 'Modules', permission: 'rule:read' },
+      { slug: 'assumption-sets', href: '/domain/assumption-sets', label: 'Assumption sets', permission: 'rule:read' },
+    ])
     expect(domainSections.filter((s) => s.slug !== 'instruments').every((s) => s.permission === 'rule:read')).toBe(true)
     expect(mainWorkspaces.find((w) => w.slug === 'domain')?.description).toMatch(/registry/)
   })
 
   it('NEXT_PUBLIC_RULES_UI=off restores the Phase 15 domain entry exactly and drops the tabs', async () => {
     vi.stubEnv('NEXT_PUBLIC_RULES_UI', 'off')
+    vi.stubEnv('NEXT_PUBLIC_CREDIT_DOMAIN_UI', 'off')
     vi.resetModules()
     const { domainSections, mainWorkspaces } = await import('@/config/navigation')
     expect(domainSections).toEqual([])

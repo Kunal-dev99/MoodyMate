@@ -102,6 +102,11 @@ class Settings(BaseSettings):
     # refuses both (409 calculations_disabled, audited); existing snapshots and runs stay
     # readable.
     CALCULATIONS_ENABLED: bool = True
+    # Phase 19 (CR-01, D-37 §7, D-02): project the credit schemas (counterparty,
+    # credit_exposure). Off answers 409 projection_unsupported for them (audited), exactly the
+    # pre-Feature-04 behaviour; projected credit rows stay readable. Validated at startup
+    # (D-13): a value that is not a boolean stops the app from starting.
+    CREDIT_PROJECTION_ENABLED: bool = True
     # D-33 minimum aggregation (PROVISIONAL): a maturity-ladder figure built from fewer than
     # this many contributions (but at least one) takes its contributions' classification, so
     # a role not cleared for them sees it masked. 1 turns the rule off.

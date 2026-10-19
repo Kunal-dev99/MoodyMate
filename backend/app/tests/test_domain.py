@@ -237,7 +237,13 @@ def test_domain_projection_catalogue_and_guards(
     assert set(m0017.PERMISSIONS) == set().union(*in_code.values())
     assert m0017.TAG == DOMAIN_SEED_TAG
     assert m0017.INSTRUMENT_TYPES == SEEDED_INSTRUMENT_TYPES
-    assert m0017.SCHEMA_CODES == tuple(c.value for c in DomainSchemaCode)
+    # BE-19.1: the domain's schema codes are the union of the 0017 and 0022 (D-38) copies; the
+    # 0017 copy itself stays frozen.
+    m0022 = migration("0022_credit_domain")
+    assert (
+        m0017.SCHEMA_CODES == m0022.OLD_SCHEMA_CODES == ("instrument", "position", "cashflow_event")
+    )
+    assert m0017.SCHEMA_CODES + m0022.SCHEMA_CODES == tuple(c.value for c in DomainSchemaCode)
     assert m0017.CASHFLOW_TYPES == tuple(c.value for c in CashflowType)
     assert m0017.ORIGINS == tuple(c.value for c in CashflowOrigin)
     assert m0017.FIELD_TYPES == tuple(c.value for c in FieldType)

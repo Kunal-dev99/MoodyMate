@@ -77,7 +77,7 @@ describe('projection eligibility (FE-14.2, D-29 §1)', () => {
   it('supports exactly the API schema codes', () => {
     expect([...DOMAIN_SCHEMA_CODES].sort()).toEqual(enumOf('DomainSchemaCode'))
     expect(isDomainSchemaCode('instrument')).toBe(true)
-    expect(isDomainSchemaCode('counterparty')).toBe(false)
+    expect(isDomainSchemaCode('collateral_asset')).toBe(false)
     expect(isDomainSchemaCode(null)).toBe(false)
   })
 
@@ -88,7 +88,7 @@ describe('projection eligibility (FE-14.2, D-29 §1)', () => {
     }
     expect([...PROJECTABLE_STATUSES].sort()).toEqual(['COMPLETED', 'COMPLETED_WITH_WARNINGS', 'QUARANTINED'])
     expect(canProject({ status: 'COMPLETED', manifest: null, schema_code: 'instrument' })).toBe(false)
-    expect(canProject({ status: 'COMPLETED', manifest, schema_code: 'counterparty' })).toBe(false)
+    expect(canProject({ status: 'COMPLETED', manifest, schema_code: 'collateral_asset' })).toBe(false)
     expect(canProject({ status: 'COMPLETED', manifest, schema_code: null })).toBe(false)
     expect(canProject({ status: 'QUARANTINED', manifest, schema_code: 'cashflow_event' })).toBe(true)
   })

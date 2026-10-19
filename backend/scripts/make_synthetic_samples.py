@@ -15,6 +15,10 @@ bad date, an over-scale decimal, a duplicate business key, an unknown extra colu
 non-UTF-8 bytes (CSV/JSON only) and a bad currency code; `mixed_errors` combines the bad
 date, over-scale decimal, duplicate key and bad currency with an empty required value.
 
+Feature 04 (BE-19.2, D-37): `counterparty.csv` (8 rows, four segments) and
+`credit_exposure.csv` (14 rows, EUR and USD) are fixed, hand-written rows (no bad variants),
+each covering one case the credit pages and modules need (see CREDIT_EXPOSURES).
+
 Output is byte-for-byte reproducible: a fixed seed, no clock, and XLSX written with the
 standard library using fixed ZIP timestamps and no compression (zlib builds can differ).
 `SHA256SUMS` lists every file's hash.
@@ -29,7 +33,7 @@ import json
 import random
 import sys
 import zipfile
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
@@ -361,6 +365,100 @@ def _render(ds: Dataset, t: Table, variant: str | None) -> bytes:
     return text.encode("cp1252" if variant == "non_utf8" else "utf-8")
 
 
+# --- Feature 04: credit samples (BE-19.2, D-37 §1), fixed rows --------------------------------
+
+COUNTERPARTY_COLUMNS = ["counterparty_id", "counterparty_name", "segment", "country"]
+COUNTERPARTIES = [
+    ("CP-0001", "Alder Manufacturing (synthetic)", "CORPORATE", "DE"),
+    ("CP-0002", "Birch Logistics (synthetic)", "CORPORATE", "FR"),
+    ("CP-0003", "Cedar Tools (synthetic)", "SME", "NL"),
+    ("CP-0004", "Dogwood Bakery (synthetic)", "SME", "IE"),
+    ("CP-0005", "Elm Household (synthetic)", "RETAIL", "ES"),
+    ("CP-0006", "Fir Household (synthetic)", "RETAIL", "IT"),
+    ("CP-0007", "Examplia Treasury (synthetic)", "SOVEREIGN", "AT"),
+    ("CP-0008", "Ginkgo Partners (synthetic)", "CORPORATE", "US"),
+]
+EXPOSURE_COLUMNS = [
+    "exposure_id",
+    "counterparty_id",
+    "instrument_id",
+    "as_of_date",
+    "currency",
+    "facility_type",
+    "drawn_amount",
+    "undrawn_amount",
+    "days_past_due",
+    "default_flag",
+    "origination_date",
+    "origination_grade",
+    "maturity_date",
+    "effective_interest_rate",
+    "collateral_type",
+    "collateral_value",
+]
+AS_OF = "2026-09-30"
+# One row per case (D-37, D-42): id, counterparty, instrument, currency, facility, drawn,
+# undrawn, DPD, default flag, origination date and grade, maturity, EIR, collateral type and
+# value. Empty text is an absent optional value.
+CREDIT_EXPOSURES = [
+    # a secured term loan, Stage 1 (REAL_ESTATE collateral)
+    ("EXP-0001", "CP-0001", "INS-000001", "EUR", "TERM_LOAN", "1000000.00", "0.00", "0", "false",
+     "2022-03-15", "G03", "2030-03-15", "0.045000", "REAL_ESTATE", "600000.00"),
+    # a revolver with undrawn (CCF), no collateral
+    ("EXP-0002", "CP-0002", "", "EUR", "REVOLVER", "250000.00", "750000.00", "0", "false",
+     "2023-06-30", "G04", "2028-06-30", "0.052500", "", ""),
+    # DPD 35: the Stage 2 backstop; CASH collateral
+    ("EXP-0003", "CP-0003", "", "EUR", "TERM_LOAN", "400000.00", "0.00", "35", "false",
+     "2021-09-01", "G04", "2029-09-01", "0.061000", "CASH", "50000.00"),
+    # DPD 95: the Stage 3 backstop
+    ("EXP-0004", "CP-0004", "", "EUR", "TERM_LOAN", "120000.00", "0.00", "95", "false",
+     "2020-01-15", "G05", "2027-01-15", "0.072000", "", ""),
+    # the default flag set (Stage 3)
+    ("EXP-0005", "CP-0005", "", "EUR", "TERM_LOAN", "180000.00", "0.00", "0", "true",
+     "2019-05-20", "G06", "2044-05-20", "0.038000", "REAL_ESTATE", "150000.00"),
+    # a guarantee: nothing drawn, the whole amount undrawn
+    ("EXP-0006", "CP-0006", "", "EUR", "GUARANTEE", "0.00", "300000.00", "0", "false",
+     "2024-02-01", "G02", "2029-02-01", "0.000000", "", ""),
+    # a sovereign USD loan with SECURITIES collateral
+    ("EXP-0007", "CP-0007", "", "USD", "TERM_LOAN", "5000000.00", "0.00", "0", "false",
+     "2023-01-10", "G01", "2033-01-10", "0.031000", "SECURITIES", "1000000.00"),
+    # originated at G02: a G05 rating is the 3-notch downgrade against origination (SICR)
+    ("EXP-0008", "CP-0008", "", "USD", "REVOLVER", "800000.00", "200000.00", "0", "false",
+     "2022-11-30", "G02", "2027-11-30", "0.055000", "", ""),
+    # an unmapped collateral type (ignored, COLLATERAL_TYPE_UNMAPPED)
+    ("EXP-0009", "CP-0001", "INS-000002", "USD", "TERM_LOAN", "300000.00", "0.00", "0", "false",
+     "2024-04-01", "G03", "2031-04-01", "0.049000", "ARTWORK", "100000.00"),
+    # an unknown origination grade (Stage 2, ORIGINATION_GRADE_UNKNOWN)
+    ("EXP-0010", "CP-0002", "", "EUR", "TERM_LOAN", "150000.00", "0.00", "0", "false",
+     "2023-03-01", "X9", "2030-03-01", "0.058000", "", ""),
+    # a maturity already passed (MATURITY_PASSED)
+    ("EXP-0011", "CP-0003", "", "EUR", "TERM_LOAN", "60000.00", "0.00", "0", "false",
+     "2021-06-30", "G04", "2026-06-30", "0.060000", "", ""),
+    # a counterparty key missing from the counterparty file (an exclusion with a reason)
+    ("EXP-0012", "CP-0099", "", "EUR", "TERM_LOAN", "75000.00", "0.00", "0", "false",
+     "2024-08-15", "G05", "2029-08-15", "0.066000", "", ""),
+    # a second revolver with undrawn, DPD 10 (below the backstop)
+    ("EXP-0013", "CP-0004", "", "EUR", "REVOLVER", "40000.00", "60000.00", "10", "false",
+     "2025-01-31", "G05", "2028-01-31", "0.081000", "CASH", "20000.00"),
+    # a long USD term loan (the lifetime term structure)
+    ("EXP-0014", "CP-0008", "", "USD", "TERM_LOAN", "2000000.00", "0.00", "0", "false",
+     "2025-06-30", "G03", "2045-06-30", "0.047500", "SECURITIES", "500000.00"),
+]  # fmt: skip
+CREDIT_NOTE = f"Not client data. Fixed hand-written rows in {GENERATOR}."
+
+
+def _credit_csv(name: str, columns: list[str], rows: Sequence[tuple[str, ...]]) -> bytes:
+    lines = [f"# {SYNTHETIC_MARKER} sample: {name}. {CREDIT_NOTE}", ",".join(columns)]
+    for row in rows:
+        assert len(row) == len(columns) and not any(ch in v for v in row for ch in ',"\n'), row
+        lines.append(",".join(row))
+    return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+def _credit_rows() -> list[tuple[str, ...]]:
+    return [(e, cp, ins, AS_OF, *rest) for e, cp, ins, *rest in CREDIT_EXPOSURES]
+
+
 def build() -> dict[str, bytes]:
     """Every sample file name -> its bytes. Pure: the same output on every run."""
     files: dict[str, bytes] = {}
@@ -372,6 +470,8 @@ def build() -> dict[str, bytes]:
             if variant in TEXT_ONLY and ds.fmt == "xlsx":
                 continue
             files[f"{ds.name}__{variant}.{ds.fmt}"] = _render(ds, apply(ds, table), variant)
+    files["counterparty.csv"] = _credit_csv("counterparty", COUNTERPARTY_COLUMNS, COUNTERPARTIES)
+    files["credit_exposure.csv"] = _credit_csv("credit_exposure", EXPOSURE_COLUMNS, _credit_rows())
     sums = "".join(f"{hashlib.sha256(b).hexdigest()}  {n}\n" for n, b in sorted(files.items()))
     files["SHA256SUMS"] = sums.encode()
     return files

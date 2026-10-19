@@ -8,7 +8,9 @@ Projection (`POST /imports/{import_id}/projection`, `domain:project`, audited
 
 - Eligible: an import with a manifest, status COMPLETED, COMPLETED_WITH_WARNINGS or
   QUARANTINED, pinned to a schema version projector v1 was written for (`instrument`,
-  `position` or `cashflow_event`, version 1). Only its accepted rows (canonical records)
+  `position`, `cashflow_event` and, Feature 04, `counterparty` and `credit_exposure`, version
+  1). The credit codes are `projection_unsupported` while CREDIT_PROJECTION_ENABLED is off
+  (D-37 §7). Only its accepted rows (canonical records)
   are projected: exactly one version or event row each, so rows are conserved.
 - Idempotent: a second call returns the existing projection and writes nothing.
 - Refusals, each audited DENIED with its code: 404 `not_found` (absent and foreign alike,
@@ -21,7 +23,11 @@ Projection (`POST /imports/{import_id}/projection`, `domain:project`, audited
   other field stays in the canonical record, which every row names.
 - Decimal throughout, never float; amounts are stored exactly as the canonical text says.
 
-The catalogue reads are tenant-scoped; values are masked by the router from the
+Credit vocabulary fields (segment, facility type, origination grade, collateral type) are
+kept as given and counted UNKNOWN_VALUE outside the seeded `credit_vocabulary` (D-37 §3).
+
+The catalogue reads (instruments; Feature 04: credit vocabularies, counterparties and credit
+exposures, BE-19.5) are tenant-scoped; values are masked by the router from the
 classification of each value's schema field, in the schema version the row pins.
 """
 
@@ -41,28 +47,41 @@ from app.core.errors import ApiError
 from app.core.principal import Principal
 from app.db.base import Base
 from app.domain.constants import (
+    CREDIT_SCHEMA_CODES,
     INSTRUMENT_TYPE_FIELD,
     PROJECT_IMPORT,
     PROJECTABLE_STATUSES,
     PROJECTION_SPECS,
     PROJECTOR_VERSION,
     ColumnKind,
+    CreditVocabularyKind,
     DomainSchemaCode,
     ProjectionRefusal,
     ProjectionSpec,
 )
 from app.domain.models import (
     CashflowEvent,
+    Counterparty,
+    CounterpartyVersion,
+    CreditExposure,
+    CreditExposureVersion,
+    CreditVocabulary,
     DomainProjection,
     Instrument,
     InstrumentAttributeDefinition,
     InstrumentAttributeValue,
     InstrumentType,
     InstrumentVersion,
-    Position,
     PositionVersion,
 )
-from app.domain.repository import DomainRepository, IdentityRef, InstrumentFilter
+from app.domain.repository import (
+    VERSIONED,
+    CounterpartyFilter,
+    DomainRepository,
+    ExposureFilter,
+    IdentityRef,
+    InstrumentFilter,
+)
 from app.governance.constants import AuditOutcome, ClassificationCode
 from app.governance.models import SchemaField
 from app.governance.service import SchemaService, audit_by, record_denial
@@ -71,6 +90,9 @@ from app.ingestion.models import CanonicalRecord, ImportJob, ImportManifest
 from app.ingestion.service import ImportService
 
 _CURRENCY = re.compile(r"^[A-Z]{3}$")
+_COUNTRY = re.compile(r"^[A-Z]{2}$")  # ISO 3166-1 alpha-2 (counterparty v1 `country`)
+_INTEGER = re.compile(r"-?[0-9]+")  # the canonical INTEGER text (D-22)
+_BOOLEANS = {"true": True, "false": False}  # the canonical BOOLEAN text (D-22)
 _CLASS_RANK = {c.value: i for i, c in enumerate(ClassificationCode)}
 
 
@@ -125,6 +147,14 @@ def typed(kind: ColumnKind, text: str) -> Any:
             # date.fromisoformat's message repeats the text: never let a value reach a log
             # or a traceback (no cause kept either).
             raise ValueError("canonical ISO date text expected") from None
+    if kind is ColumnKind.INTEGER:
+        if not _INTEGER.fullmatch(text):
+            raise ValueError("canonical integer text expected")
+        return int(text)
+    if kind is ColumnKind.BOOLEAN:
+        if text not in _BOOLEANS:
+            raise ValueError("canonical boolean text expected")
+        return _BOOLEANS[text]
     return text
 
 
@@ -150,6 +180,8 @@ def project_record(
             elif column.vocabulary is not None and text not in column.vocabulary:
                 notes.unknown_values[column.field] += 1
             elif column.column == "currency" and not _CURRENCY.match(text):
+                notes.unknown_values[column.field] += 1
+            elif column.column == "country" and not _COUNTRY.match(text):
                 notes.unknown_values[column.field] += 1
             else:
                 value = typed(column.kind, text)
@@ -244,6 +276,46 @@ class InstrumentView:
     pins: SchemaPins
 
 
+@dataclass(frozen=True)
+class CounterpartyRow:
+    counterparty: Counterparty
+    versions: Sequence[CounterpartyVersion]  # oldest first
+    source_code: str
+
+
+@dataclass(frozen=True)
+class ExposureRow:
+    exposure: CreditExposure
+    versions: Sequence[CreditExposureVersion]  # oldest first
+    source_code: str
+
+
+@dataclass(frozen=True)
+class CreditPage:
+    """A page of counterparties or exposures, with the pins and vocabulary to show them."""
+
+    counterparties: list[CounterpartyRow]
+    exposures: list[ExposureRow]
+    total: int
+    pins: SchemaPins
+    vocabulary: Mapping[CreditVocabularyKind, frozenset[str]]
+
+
+@dataclass(frozen=True)
+class CounterpartyView:
+    row: CounterpartyRow
+    exposure_versions: list[tuple[CreditExposureVersion, str]]  # with the exposure's key
+    pins: SchemaPins
+    vocabulary: Mapping[CreditVocabularyKind, frozenset[str]]
+
+
+@dataclass(frozen=True)
+class ExposureView:
+    row: ExposureRow
+    pins: SchemaPins
+    vocabulary: Mapping[CreditVocabularyKind, frozenset[str]]
+
+
 def _pinned(field_row: SchemaField) -> PinnedField:
     return PinnedField(
         name=field_row.name,
@@ -282,9 +354,13 @@ class DomainService:
         )
         raise error
 
-    async def project(self, import_id: uuid.UUID, enabled: bool) -> tuple[ProjectionView, bool]:
+    async def project(
+        self, import_id: uuid.UUID, enabled: bool, credit_enabled: bool = True
+    ) -> tuple[ProjectionView, bool]:
         """Project the import once (D-29), in one transaction; the view and whether it was
-        projected now (False: the existing projection, nothing written)."""
+        projected now (False: the existing projection, nothing written). With
+        `credit_enabled` off (CREDIT_PROJECTION_ENABLED, D-37 §7) the credit codes are
+        `projection_unsupported`, the pre-Feature-04 behaviour."""
         if not enabled:
             await self._refuse(
                 ApiError(
@@ -301,30 +377,20 @@ class DomainService:
         pins = await self._pins()
         schema_code = pins.codes.get(job.schema_version_id)
         schema_version = pins.versions.get(job.schema_version_id, 0)
+        supported = {c.value: c for c in DomainSchemaCode}
+        code = supported.get(schema_code) if schema_code else None
+        if code in CREDIT_SCHEMA_CODES and not credit_enabled:
+            await self._refuse(self._unsupported(schema_code, schema_version), job.id)
         existing = await self.repo.projection_for(job.id)
         if existing is not None:
             manifest = await self.imports.manifest(job)
             assert manifest is not None  # a projection is written only with one (DB trigger)
             return ProjectionView(existing, job, manifest, schema_version), False
 
-        supported = {c.value: c for c in DomainSchemaCode}
-        spec = PROJECTION_SPECS[supported[schema_code]] if schema_code in supported else None
+        # A code without a projector v1 spec is projection_unsupported, never a KeyError.
+        spec = PROJECTION_SPECS.get(code) if code is not None else None
         if spec is None or schema_version not in spec.schema_versions:
-            await self._refuse(
-                ApiError(
-                    409,
-                    ProjectionRefusal.PROJECTION_UNSUPPORTED,
-                    "Projector version 1 projects instrument, position and cashflow_event "
-                    "imports of schema version 1 only; another schema or version needs a new "
-                    "projector version (D-29).",
-                    {
-                        "schema_code": schema_code,
-                        "schema_version": schema_version,
-                        "projector_version": PROJECTOR_VERSION,
-                    },
-                ),
-                job.id,
-            )
+            await self._refuse(self._unsupported(schema_code, schema_version), job.id)
         manifest = await self.imports.manifest(job)
         status = ImportStatus(job.status)
         if manifest is None or status not in PROJECTABLE_STATUSES:
@@ -341,6 +407,22 @@ class DomainService:
         projection = await self._write(job, manifest, spec, pins.fields[job.schema_version_id])
         await self.session.commit()
         return ProjectionView(projection, job, manifest, schema_version), True
+
+    @staticmethod
+    def _unsupported(schema_code: str | None, schema_version: int) -> ApiError:
+        return ApiError(
+            409,
+            ProjectionRefusal.PROJECTION_UNSUPPORTED,
+            "Projector version 1 projects instrument, position, cashflow_event, counterparty "
+            "and credit_exposure imports of schema version 1 only (the credit schemas while "
+            "CREDIT_PROJECTION_ENABLED is on); another schema or version needs a new "
+            "projector version (D-29, D-37).",
+            {
+                "schema_code": schema_code,
+                "schema_version": schema_version,
+                "projector_version": PROJECTOR_VERSION,
+            },
+        )
 
     async def _write(
         self,
@@ -360,15 +442,12 @@ class DomainService:
 
         new_identities = 0
         identities: dict[str, IdentityRef] = {}
-        kind: type[Instrument] | type[Position] | None = None
-        if spec.schema_code is DomainSchemaCode.INSTRUMENT:
-            kind = Instrument
-        elif spec.schema_code is DomainSchemaCode.POSITION:
-            kind = Position
+        versioned = VERSIONED.get(spec.schema_code)  # None: cash-flow events
+        kind = versioned.identity if versioned else None
         new_identity_rows: list[dict[str, Any]] = []
-        if kind is not None:
+        if versioned is not None:
             identities = await self.repo.identities(
-                kind, job.source_system_id, (p.business_key for p in projected)
+                versioned, job.source_system_id, (p.business_key for p in projected)
             )
             for p in projected:
                 if p.business_key not in identities:
@@ -391,6 +470,16 @@ class DomainService:
                 code = p.columns.get("instrument_type_code")
                 if code is not None and code not in types:
                     notes.unknown_values[INSTRUMENT_TYPE_FIELD] += 1
+        # Credit vocabulary fields are kept as given and counted when unknown (D-37 §3).
+        checked = [c for c in spec.columns if c.credit_vocabulary is not None]
+        if checked:
+            vocabulary = await self.credit_vocabulary_codes()
+            for p in projected:
+                for column in checked:
+                    value = p.columns.get(column.column)
+                    assert column.credit_vocabulary is not None
+                    if value is not None and value not in vocabulary[column.credit_vocabulary]:
+                        notes.unknown_values[column.field] += 1
 
         attribute_rows: list[dict[str, Any]] = []
         definitions = {d.code: d.id for d in await self.repo.attribute_definitions()}
@@ -453,16 +542,15 @@ class DomainService:
                 "created_by": actor,
                 **p.columns,
             }
-            if kind is not None:
+            if versioned is not None:
                 ref = identities[p.business_key]
                 version = ref.last_version + 1
                 identities[p.business_key] = IdentityRef(ref.id, version)
                 row["version"] = version
+                row[versioned.link] = ref.id
                 if kind is Instrument:
-                    row["instrument_id"] = ref.id
                     row["instrument_type_id"] = types.get(p.columns["instrument_type_code"] or "")
-                else:
-                    row["position_id"] = ref.id
+                if spec.instrument_key is not None:
                     row["instrument_key"] = p.instrument_key
             else:
                 row["source_system_id"] = job.source_system_id
@@ -480,11 +568,7 @@ class DomainService:
                         "created_by": actor,
                     }
                 )
-        target: type[Base] = CashflowEvent
-        if kind is Instrument:
-            target = InstrumentVersion
-        elif kind is Position:
-            target = PositionVersion
+        target: type[Base] = versioned.version if versioned else CashflowEvent
         await self.repo.insert_rows(target, rows)
         await self.repo.insert_rows(InstrumentAttributeValue, attribute_rows)
 
@@ -606,3 +690,78 @@ class DomainService:
             await self.repo.cashflows_for(instrument.business_key, instrument.source_system_id),
             await self._pins(),
         )
+
+    # --- Feature 04 credit reads (BE-19.5, D-37, D-43): tenant-scoped, masked by the router -
+
+    async def credit_vocabulary(self) -> list[CreditVocabulary]:
+        """The tenant's seeded PROVISIONAL credit vocabularies (D-37 §5)."""
+        return await self.repo.credit_vocabulary()
+
+    async def credit_vocabulary_codes(self) -> dict[CreditVocabularyKind, frozenset[str]]:
+        """Each credit vocabulary's codes (for `*_known` and UNKNOWN_VALUE counts)."""
+        codes: dict[CreditVocabularyKind, set[str]] = {k: set() for k in CreditVocabularyKind}
+        for entry in await self.repo.credit_vocabulary():
+            codes[CreditVocabularyKind(entry.vocabulary)].add(entry.code)
+        return {k: frozenset(v) for k, v in codes.items()}
+
+    async def _counterparty_rows(self, items: list[Counterparty]) -> list[CounterpartyRow]:
+        versions: dict[uuid.UUID, list[CounterpartyVersion]] = {}
+        for v in await self.repo.counterparty_versions([c.id for c in items]):
+            versions.setdefault(v.counterparty_id, []).append(v)
+        codes = await self.imports.source_codes({c.source_system_id for c in items})
+        return [
+            CounterpartyRow(c, versions.get(c.id, []), codes.get(c.source_system_id, ""))
+            for c in items
+        ]
+
+    async def _exposure_rows(self, items: list[CreditExposure]) -> list[ExposureRow]:
+        versions: dict[uuid.UUID, list[CreditExposureVersion]] = {}
+        for v, _ in await self.repo.exposure_versions([e.id for e in items]):
+            versions.setdefault(v.credit_exposure_id, []).append(v)
+        codes = await self.imports.source_codes({e.source_system_id for e in items})
+        return [
+            ExposureRow(e, versions.get(e.id, []), codes.get(e.source_system_id, "")) for e in items
+        ]
+
+    async def counterparties(self, f: CounterpartyFilter, limit: int, offset: int) -> CreditPage:
+        items, total = await self.repo.counterparty_page(f, limit, offset)
+        return CreditPage(
+            await self._counterparty_rows(items),
+            [],
+            total,
+            await self._pins(),
+            await self.credit_vocabulary_codes(),
+        )
+
+    async def counterparty(self, counterparty_id: uuid.UUID) -> CounterpartyView:
+        """One counterparty with its versions and the exposure versions naming its business
+        key in the tenant: 404 alike for an absent and a foreign id (D-04)."""
+        counterparty = await self.repo.counterparty(counterparty_id)
+        if counterparty is None:
+            raise ApiError(404, "not_found", "Counterparty not found.")
+        [row] = await self._counterparty_rows([counterparty])
+        return CounterpartyView(
+            row,
+            await self.repo.exposure_versions_naming(counterparty.business_key),
+            await self._pins(),
+            await self.credit_vocabulary_codes(),
+        )
+
+    async def exposures(self, f: ExposureFilter, limit: int, offset: int) -> CreditPage:
+        items, total = await self.repo.exposure_page(f, limit, offset)
+        return CreditPage(
+            [],
+            await self._exposure_rows(items),
+            total,
+            await self._pins(),
+            await self.credit_vocabulary_codes(),
+        )
+
+    async def exposure(self, exposure_id: uuid.UUID) -> ExposureView:
+        """One credit exposure with its versions: 404 alike for an absent and a foreign id
+        (D-04)."""
+        exposure = await self.repo.exposure(exposure_id)
+        if exposure is None:
+            raise ApiError(404, "not_found", "Credit exposure not found.")
+        [row] = await self._exposure_rows([exposure])
+        return ExposureView(row, await self._pins(), await self.credit_vocabulary_codes())

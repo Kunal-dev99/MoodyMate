@@ -15,8 +15,14 @@ from sqlalchemy import Select, exists, func, insert, select, text
 
 from app.db.base import Base
 from app.db.repository import ScopedRepository
+from app.domain.constants import DomainSchemaCode
 from app.domain.models import (
     CashflowEvent,
+    Counterparty,
+    CounterpartyVersion,
+    CreditExposure,
+    CreditExposureVersion,
+    CreditVocabulary,
     DomainProjection,
     Instrument,
     InstrumentAttributeDefinition,
@@ -25,6 +31,14 @@ from app.domain.models import (
     InstrumentVersion,
     Position,
     PositionVersion,
+)
+
+IdentityModel = type[Instrument] | type[Position] | type[Counterparty] | type[CreditExposure]
+VersionModel = (
+    type[InstrumentVersion]
+    | type[PositionVersion]
+    | type[CounterpartyVersion]
+    | type[CreditExposureVersion]
 )
 
 
@@ -40,6 +54,44 @@ class InstrumentFilter:
 class IdentityRef:
     id: uuid.UUID
     last_version: int
+
+
+@dataclass(frozen=True)
+class Versioned:
+    """A schema whose rows version a stable identity (D-29 §3): its identity and version
+    models and the version column naming the identity."""
+
+    identity: IdentityModel
+    version: VersionModel
+    link: str
+
+
+# Cash-flow events have no identity: each is one row of its own.
+VERSIONED: dict[DomainSchemaCode, Versioned] = {
+    DomainSchemaCode.INSTRUMENT: Versioned(Instrument, InstrumentVersion, "instrument_id"),
+    DomainSchemaCode.POSITION: Versioned(Position, PositionVersion, "position_id"),
+    DomainSchemaCode.COUNTERPARTY: Versioned(Counterparty, CounterpartyVersion, "counterparty_id"),
+    DomainSchemaCode.CREDIT_EXPOSURE: Versioned(
+        CreditExposure, CreditExposureVersion, "credit_exposure_id"
+    ),
+}
+
+
+@dataclass(frozen=True)
+class CounterpartyFilter:
+    segment: str | None = None
+    country: str | None = None
+    source_id: uuid.UUID | None = None
+    import_id: uuid.UUID | None = None
+
+
+@dataclass(frozen=True)
+class ExposureFilter:
+    currency: str | None = None
+    facility_type: str | None = None
+    counterparty_key: str | None = None
+    source_id: uuid.UUID | None = None
+    import_id: uuid.UUID | None = None
 
 
 class DomainRepository(ScopedRepository[DomainProjection]):
@@ -71,17 +123,14 @@ class DomainRepository(ScopedRepository[DomainProjection]):
         return result.scalar_one_or_none()
 
     async def identities(
-        self, kind: type[Instrument] | type[Position], source_id: uuid.UUID, keys: Iterable[str]
+        self, versioned: Versioned, source_id: uuid.UUID, keys: Iterable[str]
     ) -> dict[str, IdentityRef]:
         """Existing identities of these business keys in the source, with their last version."""
         keys = sorted(set(keys))
         if not keys:
             return {}
-        versions: type[InstrumentVersion] | type[PositionVersion]
-        if kind is Instrument:
-            versions, link = InstrumentVersion, InstrumentVersion.instrument_id
-        else:
-            versions, link = PositionVersion, PositionVersion.position_id
+        kind, versions = versioned.identity, versioned.version
+        link = getattr(versions, versioned.link)
         result = await self.session.execute(
             select(kind.id, kind.business_key, func.coalesce(func.max(versions.version), 0))
             .outerjoin(versions, link == kind.id)
@@ -214,31 +263,20 @@ class DomainRepository(ScopedRepository[DomainProjection]):
     async def ambiguous_keys(self, projection: DomainProjection) -> int:
         """Business keys with more than one version row in this projection's import (one
         key, two candidates inside a snapshot: D-30 §3)."""
-        rows: Any
-        if projection.schema_code == "instrument":
-            rows = (
-                select(Instrument.business_key)
-                .join(InstrumentVersion, InstrumentVersion.instrument_id == Instrument.id)
-                .where(
-                    InstrumentVersion.tenant_id == self.scope.tenant_id,
-                    InstrumentVersion.domain_projection_id == projection.id,
-                )
-                .group_by(Instrument.business_key)
-                .having(func.count() > 1)
-            )
-        elif projection.schema_code == "position":
-            rows = (
-                select(Position.business_key)
-                .join(PositionVersion, PositionVersion.position_id == Position.id)
-                .where(
-                    PositionVersion.tenant_id == self.scope.tenant_id,
-                    PositionVersion.domain_projection_id == projection.id,
-                )
-                .group_by(Position.business_key)
-                .having(func.count() > 1)
-            )
-        else:
+        versioned = VERSIONED.get(DomainSchemaCode(projection.schema_code))
+        if versioned is None:  # cash-flow events: each row is its own
             return 0
+        kind, versions = versioned.identity, versioned.version
+        rows = (
+            select(kind.business_key)
+            .join(versions, getattr(versions, versioned.link) == kind.id)
+            .where(
+                versions.tenant_id == self.scope.tenant_id,
+                versions.domain_projection_id == projection.id,
+            )
+            .group_by(kind.business_key)
+            .having(func.count() > 1)
+        )
         return int(
             await self.session.scalar(select(func.count()).select_from(rows.subquery())) or 0
         )
@@ -321,6 +359,148 @@ class DomainRepository(ScopedRepository[DomainProjection]):
                 InstrumentVersion.tenant_id == self.scope.tenant_id,
                 Instrument.tenant_id == self.scope.tenant_id,
                 InstrumentVersion.id.in_(ids),
+            )
+        )
+        return [(row[0], row[1]) for row in result]
+
+    # --- Feature 04 credit reads (BE-19.5, D-37): read only, in the caller's tenant ----------
+
+    async def credit_vocabulary(self) -> list[CreditVocabulary]:
+        result = await self.session.execute(
+            select(CreditVocabulary)
+            .where(CreditVocabulary.tenant_id == self.scope.tenant_id)
+            .order_by(
+                CreditVocabulary.vocabulary,
+                CreditVocabulary.rank.nulls_last(),
+                CreditVocabulary.code,
+            )
+        )
+        return list(result.scalars())
+
+    def _counterparties(self, f: CounterpartyFilter) -> Select[tuple[Counterparty]]:
+        """Counterparties of the tenant with at least one version matching every filter."""
+        query = select(Counterparty).where(Counterparty.tenant_id == self.scope.tenant_id)
+        if f.source_id is not None:
+            query = query.where(Counterparty.source_system_id == f.source_id)
+        conditions = [
+            CounterpartyVersion.counterparty_id == Counterparty.id,
+            CounterpartyVersion.tenant_id == self.scope.tenant_id,
+        ]
+        if f.segment is not None:
+            conditions.append(CounterpartyVersion.segment == f.segment)
+        if f.country is not None:
+            conditions.append(CounterpartyVersion.country == f.country)
+        if f.import_id is not None:
+            conditions.append(CounterpartyVersion.import_job_id == f.import_id)
+        return query.where(exists().where(*conditions))
+
+    async def counterparty_page(
+        self, f: CounterpartyFilter, limit: int, offset: int
+    ) -> tuple[list[Counterparty], int]:
+        query = self._counterparties(f)
+        total = await self.session.scalar(select(func.count()).select_from(query.subquery()))
+        result = await self.session.execute(
+            query.order_by(Counterparty.business_key, Counterparty.id).limit(limit).offset(offset)
+        )
+        return list(result.scalars()), int(total or 0)
+
+    async def counterparty(self, counterparty_id: uuid.UUID) -> Counterparty | None:
+        result = await self.session.execute(
+            select(Counterparty).where(
+                Counterparty.id == counterparty_id, Counterparty.tenant_id == self.scope.tenant_id
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def counterparty_versions(self, ids: Sequence[uuid.UUID]) -> list[CounterpartyVersion]:
+        """Every version of these counterparties, oldest first per counterparty."""
+        if not ids:
+            return []
+        result = await self.session.execute(
+            select(CounterpartyVersion)
+            .where(
+                CounterpartyVersion.tenant_id == self.scope.tenant_id,
+                CounterpartyVersion.counterparty_id.in_(ids),
+            )
+            .order_by(CounterpartyVersion.counterparty_id, CounterpartyVersion.version)
+        )
+        return list(result.scalars())
+
+    def _exposures(self, f: ExposureFilter) -> Select[tuple[CreditExposure]]:
+        """Credit exposures of the tenant with at least one version matching every filter."""
+        query = select(CreditExposure).where(CreditExposure.tenant_id == self.scope.tenant_id)
+        if f.source_id is not None:
+            query = query.where(CreditExposure.source_system_id == f.source_id)
+        conditions = [
+            CreditExposureVersion.credit_exposure_id == CreditExposure.id,
+            CreditExposureVersion.tenant_id == self.scope.tenant_id,
+        ]
+        if f.currency is not None:
+            conditions.append(CreditExposureVersion.currency == f.currency)
+        if f.facility_type is not None:
+            conditions.append(CreditExposureVersion.facility_type == f.facility_type)
+        if f.counterparty_key is not None:
+            conditions.append(CreditExposureVersion.counterparty_key == f.counterparty_key)
+        if f.import_id is not None:
+            conditions.append(CreditExposureVersion.import_job_id == f.import_id)
+        return query.where(exists().where(*conditions))
+
+    async def exposure_page(
+        self, f: ExposureFilter, limit: int, offset: int
+    ) -> tuple[list[CreditExposure], int]:
+        query = self._exposures(f)
+        total = await self.session.scalar(select(func.count()).select_from(query.subquery()))
+        result = await self.session.execute(
+            query.order_by(CreditExposure.business_key, CreditExposure.id)
+            .limit(limit)
+            .offset(offset)
+        )
+        return list(result.scalars()), int(total or 0)
+
+    async def exposure(self, exposure_id: uuid.UUID) -> CreditExposure | None:
+        result = await self.session.execute(
+            select(CreditExposure).where(
+                CreditExposure.id == exposure_id, CreditExposure.tenant_id == self.scope.tenant_id
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def exposure_versions(
+        self, ids: Sequence[uuid.UUID]
+    ) -> list[tuple[CreditExposureVersion, str]]:
+        """Every version of these exposures with its exposure's business key, oldest first
+        per exposure."""
+        if not ids:
+            return []
+        result = await self.session.execute(
+            select(CreditExposureVersion, CreditExposure.business_key)
+            .join(CreditExposure, CreditExposure.id == CreditExposureVersion.credit_exposure_id)
+            .where(
+                CreditExposureVersion.tenant_id == self.scope.tenant_id,
+                CreditExposure.tenant_id == self.scope.tenant_id,
+                CreditExposureVersion.credit_exposure_id.in_(ids),
+            )
+            .order_by(CreditExposureVersion.credit_exposure_id, CreditExposureVersion.version)
+        )
+        return [(row[0], row[1]) for row in result]
+
+    async def exposure_versions_naming(
+        self, counterparty_key: str
+    ) -> list[tuple[CreditExposureVersion, str]]:
+        """Credit-exposure versions naming this counterparty business key, in the tenant
+        (any source: the reference resolves within a snapshot and the tenant, D-37 §4)."""
+        result = await self.session.execute(
+            select(CreditExposureVersion, CreditExposure.business_key)
+            .join(CreditExposure, CreditExposure.id == CreditExposureVersion.credit_exposure_id)
+            .where(
+                CreditExposureVersion.tenant_id == self.scope.tenant_id,
+                CreditExposure.tenant_id == self.scope.tenant_id,
+                CreditExposureVersion.counterparty_key == counterparty_key,
+            )
+            .order_by(
+                CreditExposure.business_key,
+                CreditExposureVersion.version,
+                CreditExposureVersion.id,
             )
         )
         return [(row[0], row[1]) for row in result]

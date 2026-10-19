@@ -229,6 +229,114 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/counterparties": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Counterparties
+         * @description The counterparties of the caller's tenant, by business key. A filter matches a
+         *     counterparty when any of its versions matches.
+         */
+        get: operations["listCounterparties"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/counterparties/{counterparty_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Counterparty
+         * @description One counterparty: every version (oldest first) with its import, source row ordinal and
+         *     canonical record, plus the credit-exposure versions naming its business key in the
+         *     tenant. 404 `not_found` alike for an absent and another tenant's id (D-04).
+         */
+        get: operations["getCounterparty"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/credit-exposures": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Credit Exposures
+         * @description The credit exposures of the caller's tenant, by business key. A filter matches an
+         *     exposure when any of its versions matches.
+         */
+        get: operations["listCreditExposures"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/credit-exposures/{exposure_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Credit Exposure
+         * @description One credit exposure: every version (oldest first) with its import id, source row
+         *     ordinal and canonical record id. 404 `not_found` alike for an absent and another
+         *     tenant's id (D-04).
+         */
+        get: operations["getCreditExposure"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/credit-vocabularies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Credit Vocabularies
+         * @description The seeded PROVISIONAL credit vocabularies of the caller's tenant (D-37 §5): rating
+         *     grades (with rank and default flag), credit segments, facility types and collateral
+         *     types.
+         */
+        get: operations["listCreditVocabularies"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/dataset-snapshots": {
         parameters: {
             query?: never;
@@ -1798,6 +1906,451 @@ export interface components {
             code: "COPY";
             params?: components["schemas"]["NoParams"];
         };
+        /** CounterpartyDetail */
+        CounterpartyDetail: {
+            /** Business Key */
+            business_key: string | components["schemas"]["MaskedValue"];
+            /**
+             * Counterparty Id
+             * Format: uuid
+             */
+            counterparty_id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Exposure Versions
+             * @description Projected credit-exposure versions naming this counterparty's business key, in the caller's tenant.
+             */
+            exposure_versions: components["schemas"]["CreditExposureVersionOut"][];
+            /** Source Code */
+            source_code: string;
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+            /**
+             * Versions
+             * @description Oldest first.
+             */
+            versions: components["schemas"]["CounterpartyVersionOut"][];
+        };
+        /** CounterpartyPage */
+        CounterpartyPage: {
+            /** Items */
+            items: components["schemas"]["CounterpartySummary"][];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /** Total */
+            total: number;
+        };
+        /** CounterpartySummary */
+        CounterpartySummary: {
+            /**
+             * Business Key
+             * @description The source's identifier of the counterparty.
+             */
+            business_key: string | components["schemas"]["MaskedValue"];
+            /**
+             * Counterparty Id
+             * Format: uuid
+             */
+            counterparty_id: string;
+            /**
+             * Counterparty Name
+             * @description Confidential; in the latest version.
+             */
+            counterparty_name: string | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Country
+             * @description ISO 3166-1 alpha-2, in the latest version.
+             */
+            country: string | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Latest Import Id
+             * Format: uuid
+             */
+            latest_import_id: string;
+            /**
+             * Latest Version
+             * @description The highest version number. 'Current' is not defined: a calculation pins versions through a dataset snapshot (D-29 §3).
+             */
+            latest_version: number;
+            /**
+             * Segment
+             * @description As given, in the latest version.
+             */
+            segment: string | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Segment Known
+             * @description The segment is in the credit_segment vocabulary (else modules warn).
+             */
+            segment_known: boolean;
+            /** Source Code */
+            source_code: string;
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+            /** Version Count */
+            version_count: number;
+        };
+        /** CounterpartyVersionOut */
+        CounterpartyVersionOut: {
+            /**
+             * Canonical Record Id
+             * Format: uuid
+             * @description Lineage: canonical record -> source record -> import.
+             */
+            canonical_record_id: string;
+            /**
+             * Counterparty Name
+             * @description Confidential (D-43 §1).
+             */
+            counterparty_name: string | components["schemas"]["MaskedValue"] | null;
+            /** Country */
+            country: string | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Import Id
+             * Format: uuid
+             * @description The import this version was projected from.
+             */
+            import_id: string;
+            /**
+             * Payload Sha256
+             * @description The canonical payload's SHA-256, or the text 'masked' unless the caller is cleared for the most sensitive field of the pinned schema version.
+             */
+            payload_sha256: string;
+            /**
+             * Projected At
+             * Format: date-time
+             */
+            projected_at: string;
+            /**
+             * Projection Id
+             * Format: uuid
+             */
+            projection_id: string;
+            /** Schema Version */
+            schema_version: number | null;
+            /**
+             * Schema Version Id
+             * Format: uuid
+             */
+            schema_version_id: string;
+            /**
+             * Segment
+             * @description As given.
+             */
+            segment: string | components["schemas"]["MaskedValue"] | null;
+            /** Segment Known */
+            segment_known: boolean;
+            /**
+             * Source Ordinal
+             * @description The source row's ordinal within its import.
+             */
+            source_ordinal: number;
+            /**
+             * Source Record Id
+             * Format: uuid
+             */
+            source_record_id: string;
+            /** Version */
+            version: number;
+            /**
+             * Version Id
+             * Format: uuid
+             */
+            version_id: string;
+        };
+        /** CreditExposureDetail */
+        CreditExposureDetail: {
+            /** Business Key */
+            business_key: string | components["schemas"]["MaskedValue"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Credit Exposure Id
+             * Format: uuid
+             */
+            credit_exposure_id: string;
+            /** Source Code */
+            source_code: string;
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+            /**
+             * Versions
+             * @description Oldest first.
+             */
+            versions: components["schemas"]["CreditExposureVersionOut"][];
+        };
+        /** CreditExposurePage */
+        CreditExposurePage: {
+            /** Items */
+            items: components["schemas"]["CreditExposureSummary"][];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /** Total */
+            total: number;
+        };
+        /** CreditExposureSummary */
+        CreditExposureSummary: {
+            /** As Of Date */
+            as_of_date: string | components["schemas"]["MaskedValue"] | null;
+            /** Business Key */
+            business_key: string | components["schemas"]["MaskedValue"];
+            /**
+             * Counterparty Key
+             * @description In the latest version.
+             */
+            counterparty_key: string | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Credit Exposure Id
+             * Format: uuid
+             */
+            credit_exposure_id: string;
+            /** Currency */
+            currency: string | components["schemas"]["MaskedValue"] | null;
+            /** Days Past Due */
+            days_past_due: number | components["schemas"]["MaskedValue"] | null;
+            /** Default Flag */
+            default_flag: boolean | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Drawn Amount
+             * @description Exact decimal text, in `currency`.
+             */
+            drawn_amount: string | components["schemas"]["MaskedValue"] | null;
+            /** Facility Type */
+            facility_type: string | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Latest Import Id
+             * Format: uuid
+             */
+            latest_import_id: string;
+            /** Latest Version */
+            latest_version: number;
+            /** Source Code */
+            source_code: string;
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+            /** Version Count */
+            version_count: number;
+        };
+        /** CreditExposureVersionOut */
+        CreditExposureVersionOut: {
+            /**
+             * As Of Date
+             * @description ISO date.
+             */
+            as_of_date: string | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Business Key
+             * @description The source's exposure identifier.
+             */
+            business_key: string | components["schemas"]["MaskedValue"];
+            /**
+             * Canonical Record Id
+             * Format: uuid
+             * @description Lineage: canonical record -> source record -> import.
+             */
+            canonical_record_id: string;
+            /**
+             * Collateral Type
+             * @description As given.
+             */
+            collateral_type: string | components["schemas"]["MaskedValue"] | null;
+            /** Collateral Type Known */
+            collateral_type_known: boolean;
+            /**
+             * Collateral Value
+             * @description Exact decimal text, in `currency`.
+             */
+            collateral_value: string | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Counterparty Key
+             * @description The counterparty's business key as given. It is resolved within a snapshot and the tenant (D-37 §4), not here.
+             */
+            counterparty_key: string | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Credit Exposure Id
+             * Format: uuid
+             */
+            credit_exposure_id: string;
+            /**
+             * Currency
+             * @description ISO 4217; the currency of every amount.
+             */
+            currency: string | components["schemas"]["MaskedValue"] | null;
+            /** Days Past Due */
+            days_past_due: number | components["schemas"]["MaskedValue"] | null;
+            /** Default Flag */
+            default_flag: boolean | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Drawn Amount
+             * @description Exact decimal text, in `currency`.
+             */
+            drawn_amount: string | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Effective Interest Rate
+             * @description Exact decimal text, in `effective_interest_rate_unit`.
+             */
+            effective_interest_rate: string | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Effective Interest Rate Unit
+             * @description The pinned schema field's unit (a fraction in credit_exposure v1).
+             */
+            effective_interest_rate_unit: string | null;
+            /**
+             * Facility Type
+             * @description As given.
+             */
+            facility_type: string | components["schemas"]["MaskedValue"] | null;
+            /** Facility Type Known */
+            facility_type_known: boolean;
+            /**
+             * Import Id
+             * Format: uuid
+             * @description The import this version was projected from.
+             */
+            import_id: string;
+            /**
+             * Instrument Key
+             * @description Optional; not read by v1 modules.
+             */
+            instrument_key: string | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Maturity Date
+             * @description ISO date.
+             */
+            maturity_date: string | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Origination Date
+             * @description ISO date.
+             */
+            origination_date: string | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Origination Grade
+             * @description As given.
+             */
+            origination_grade: string | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Origination Grade Known
+             * @description The grade is in the rating_grade vocabulary (else modules warn).
+             */
+            origination_grade_known: boolean;
+            /**
+             * Payload Sha256
+             * @description The canonical payload's SHA-256, or the text 'masked' unless the caller is cleared for the most sensitive field of the pinned schema version.
+             */
+            payload_sha256: string;
+            /**
+             * Projected At
+             * Format: date-time
+             */
+            projected_at: string;
+            /**
+             * Projection Id
+             * Format: uuid
+             */
+            projection_id: string;
+            /** Schema Version */
+            schema_version: number | null;
+            /**
+             * Schema Version Id
+             * Format: uuid
+             */
+            schema_version_id: string;
+            /**
+             * Source Ordinal
+             * @description The source row's ordinal within its import.
+             */
+            source_ordinal: number;
+            /**
+             * Source Record Id
+             * Format: uuid
+             */
+            source_record_id: string;
+            /**
+             * Undrawn Amount
+             * @description Exact decimal text, in `currency`.
+             */
+            undrawn_amount: string | components["schemas"]["MaskedValue"] | null;
+            /** Version */
+            version: number;
+            /**
+             * Version Id
+             * Format: uuid
+             */
+            version_id: string;
+        };
+        /** CreditVocabularyEntryOut */
+        CreditVocabularyEntryOut: {
+            /**
+             * Code
+             * @description Neutral code (grades G01..G08 and D; no agency symbols).
+             */
+            code: string;
+            /**
+             * Is Default Grade
+             * @description rating_grade only: the grade denotes default; else null.
+             */
+            is_default_grade: boolean | null;
+            /** Name */
+            name: string;
+            /**
+             * Provisional
+             * @description A PROVISIONAL / illustrative seeded value (D-11).
+             */
+            provisional: boolean;
+            /**
+             * Rank
+             * @description rating_grade only: the order of the grade, 1 = best; else null.
+             */
+            rank: number | null;
+            vocabulary: components["schemas"]["CreditVocabularyKind"];
+        };
+        /**
+         * CreditVocabularyKind
+         * @description The seeded PROVISIONAL `credit_vocabulary` kinds (D-37 §5, migration 0022). Grade
+         *     codes are neutral (G01..G08, D): no rating-agency symbol is used.
+         * @enum {string}
+         */
+        CreditVocabularyKind: "rating_grade" | "credit_segment" | "facility_type" | "collateral_type";
+        /** CreditVocabularyList */
+        CreditVocabularyList: {
+            /**
+             * Items
+             * @description The caller's tenant's credit vocabularies, by vocabulary then rank/code.
+             */
+            items: components["schemas"]["CreditVocabularyEntryOut"][];
+        };
         /**
          * CsvDelimiter
          * @description D-16: the delimiters a CSV source profile may name.
@@ -1870,7 +2423,7 @@ export interface components {
          * @description The canonical schemas the projector supports (D-29 §1).
          * @enum {string}
          */
-        DomainSchemaCode: "instrument" | "position" | "cashflow_event";
+        DomainSchemaCode: "instrument" | "position" | "cashflow_event" | "counterparty" | "credit_exposure";
         /** DriftEventOut */
         DriftEventOut: {
             /**
@@ -6248,6 +6801,222 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ResultPage"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    listCounterparties: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                /** @description Counterparties with a version in it. */
+                segment?: string | null;
+                /** @description Counterparties with a version in it. */
+                country?: string | null;
+                source_id?: string | null;
+                /** @description Counterparties with a version from this import. */
+                import_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CounterpartyPage"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    getCounterparty: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                counterparty_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CounterpartyDetail"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    listCreditExposures: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                /** @description Exposures with a version in this currency. */
+                currency?: string | null;
+                /** @description Exposures with a version of this type. */
+                facility_type?: string | null;
+                /** @description Exposures with a version naming this counterparty. */
+                counterparty_key?: string | null;
+                source_id?: string | null;
+                /** @description Exposures with a version from this import. */
+                import_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditExposurePage"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    getCreditExposure: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                exposure_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditExposureDetail"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    listCreditVocabularies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditVocabularyList"];
                 };
             };
             /** @description Client error (standard envelope) */

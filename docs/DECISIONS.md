@@ -1079,6 +1079,16 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
   `rule_definition.category`. Credit exclusions and warnings live on the new result tables
   (D-41 §4), and rating pins live in a new table (D-39 §5).
 - **If declined:** Phase 19 builds option B. BE-19.1 and BE-19.4 name the fallback.
+- **Amendment (2026-10-19, Phase 19 build, auto-resolved):** how an approved D-01 exception
+  is recorded and checked.
+  - It is recorded in two places that must match: an entry in `D01_EXCEPTIONS` in
+    `backend/app/tests/test_committed_artifacts.py` (revision → decision ID and the one allowed
+    operation; for 0022, `("D-38", "drop_constraint")`), and the migration's own
+    `D01_EXCEPTION` constant (`0022_credit_domain.py:48`).
+  - The additive-only check scans the whole migration module minus its docstring and
+    `downgrade()` (not only `upgrade()`), so a destructive call in a helper is still caught.
+  - The resolver can never add a `D01_EXCEPTIONS` entry. Each new entry needs its own
+    user-approved decision (a hard stop under CLAUDE.md).
 
 ## D-39 Obligor rating workflow: versioned, maker-checker, effective-dated, pinned
 
