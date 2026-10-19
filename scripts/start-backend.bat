@@ -104,10 +104,12 @@ if /i "!WANT!"=="!HAVE!" (
   echo Up to date with pyproject.toml.
 ) else (
   echo Installing backend packages - the first run takes a few minutes ...
-  "%VPY%" -m pip install --upgrade pip
+  "%VPY%" -m pip install --upgrade pip "setuptools>=68" wheel
   if errorlevel 1 goto :pip_failed
   pushd "%BACKEND%"
-  "%VPY%" -m pip install -e ".[dev]"
+  rem --no-build-isolation: in pip's isolated build environment the editable build hangs
+  rem indefinitely inside this OneDrive folder; building with the venv's setuptools does not.
+  "%VPY%" -m pip install --no-build-isolation -e ".[dev]"
   set "PIPERR=!errorlevel!"
   popd
   if not "!PIPERR!"=="0" goto :pip_failed
