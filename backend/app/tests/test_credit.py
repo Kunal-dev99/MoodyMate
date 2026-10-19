@@ -17,12 +17,25 @@ data in the domain, in one essential test (D-26), in five parts:
 4. Reads (BE-19.5): vocabularies, the counterparty and exposure catalogues with filters,
    `counterparty_name` and `drawn_amount` masked for risk_analyst and clear for data_steward,
    and one exposure version -> canonical record -> source row.
-5. Guards (BE-19.1): UPDATE, DELETE and TRUNCATE are refused on the four tables and on
+5. Ratings (BE-20.2, BE-20.3, Phase 20, D-39, D-40): a proposal is IN_REVIEW and audited; an
+   unknown grade is a 422 `invalid_grade`, an absent counterparty a 404; a user holding both
+   roles cannot decide their own proposal (409 `self_approval`); approving makes the version
+   ACTIVE and the earlier one for the same counterparty and date SUPERSEDED, leaving exactly
+   one ACTIVE; `invalid_status` and `stale_version`; REJECT; RATING_CHANGE_ENABLED off is a 409
+   `rating_change_disabled` with nothing written; each refusal is audited DENIED; the reads
+   (list, filters, one, the counterparty's history) and "rating in effect at date" over
+   dates before, at, between and after two effective dates; and the rating in effect for
+   EXP-0008 is G05, 3 notches below its G02 origination.
+6. Guards (BE-19.1, BE-20.1): UPDATE, DELETE and TRUNCATE are refused on the four tables and on
    `credit_vocabulary`; the same-tenant and canonical-repeat insert checks hold; an unknown
-   sixth `schema_code` is refused by both widened CHECKs; the downgrade refuses while a credit
-   projection exists; and 0021 -> head -> 0021 -> head round-trips the tables and the seed.
+   sixth `schema_code` is refused by both widened CHECKs; on `obligor_rating` a content
+   UPDATE, an illegal move, DELETE and TRUNCATE are refused and a second ACTIVE for the same
+   counterparty and date is refused by the partial unique index; the downgrade refuses while
+   a rating, and then while a credit projection, exists; and 0021 -> head -> 0021 -> head
+   round-trips the tables and both seeds (0022 and the 0023 permission grants).
 """
 
+import asyncio
 import csv
 import hashlib
 import importlib.util
@@ -41,9 +54,27 @@ from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from fastapi.testclient import TestClient
+from httpx import Response
+from pydantic import ValidationError
 
 from app.core.config import Settings
-from app.domain.constants import CreditVocabularyKind
+from app.core.principal import Principal
+from app.db.session import Database
+from app.domain.constants import (
+    RATING_COMMENT_MAX,
+    RATING_RATIONALE_MAX,
+    RATING_TRANSITIONS,
+    CreditVocabularyKind,
+    ObligorRatingStatus,
+)
+from app.domain.service import DomainService
+from app.governance.constants import (
+    CREDIT_ROLE_PERMISSIONS,
+    DEFAULT_TENANT_ID,
+    ROLE_PERMISSIONS,
+    Permission,
+    Role,
+)
 from app.main import create_app
 from app.tests.conftest import alembic_config, clean, dev_token, insert_tenant, script, sql
 from app.tests.credit_kit import (
@@ -55,11 +86,13 @@ from app.tests.credit_kit import (
 )
 from app.tests.helpers import (
     SNAPSHOTS,
+    assert_denied,
     cid,
     events,
     make_snapshot,
     project,
     sample,
+    token_for,
 )
 
 pytestmark = [pytest.mark.db, pytest.mark.ws3]
@@ -80,6 +113,11 @@ CREDIT_TABLES = (
     "credit_exposure_version",
 )
 GUARDED_TABLES = (*CREDIT_TABLES, "credit_vocabulary")
+# Phase 20 (D-39, D-40).
+RATINGS = "/api/v1/obligor-ratings"
+RATING_TAG = "0023_credit_permissions"
+PLAN_CREDIT_GRANTS = {("risk_analyst", "rating:propose"), ("approver", "rating:approve")}
+RATING_CONTENT = ("rating_id", "counterparty_id", "grade", "effective_from", "proposed_at")
 DUP_COUNTRIES = ("DE", "US")
 # D-37 §1 types and D-43 §1 classifications, written out from the decisions.
 FIELD_TYPES = {
@@ -183,6 +221,79 @@ def check_refuses(db: str, table: str, where: str) -> None:
     )
 
 
+# --- Phase 20: the obligor rating workflow -----------------------------------------------------
+
+
+def propose(
+    client: TestClient, headers: dict[str, str], counterparty_id: str, grade: str, day: date
+) -> tuple[Response, str]:
+    """POST a rating proposal; returns the response and its correlation id."""
+    c = cid()
+    r = client.post(
+        f"{COUNTERPARTIES}/{counterparty_id}/ratings",
+        json={
+            "grade": grade,
+            "effective_from": day.isoformat(),
+            "rationale": f"Illustrative annual review: {grade} from {day.isoformat()}.",
+        },
+        headers={**headers, "X-Correlation-ID": c},
+    )
+    return r, c
+
+
+def decide(
+    client: TestClient,
+    headers: dict[str, str],
+    rating_id: str,
+    decision: str,
+    comment: str = "Reviewed (test).",
+) -> tuple[Response, str]:
+    c = cid()
+    r = client.post(
+        f"{RATINGS}/{rating_id}/approval",
+        json={"decision": decision, "comment": comment},
+        headers={**headers, "X-Correlation-ID": c},
+    )
+    return r, c
+
+
+def ratings_state(db: str) -> list[Any]:
+    return sql(db, "SELECT * FROM obligor_rating ORDER BY id")
+
+
+def outcomes(db: str, c: str) -> set[tuple[str, str]]:
+    return {(e["action"], e["outcome"]) for e in events(db, c)}
+
+
+def in_effect(db: str, counterparty_id: str, at: date) -> str | None:
+    """The D-39 §4 service function (Phase 21 uses it), called in-process as a reader of the
+    default tenant: the id of the rating in effect for the counterparty at `at`, or None."""
+
+    async def run() -> Any:
+        database = Database(db)
+        principal = Principal(
+            user_id=uuid.uuid4(),
+            tenant_id=DEFAULT_TENANT_ID,
+            issuer="test",
+            subject="rating-reader",
+            display_name="Rating reader (test)",
+            email=None,
+            roles=frozenset({Role.RISK_ANALYST.value}),
+            permissions=frozenset({Permission.DOMAIN_READ.value}),
+        )
+        try:
+            async with database.sessionmaker() as session:
+                service = DomainService(session, principal)
+                return await service.rating_in_effect(uuid.UUID(counterparty_id), at)
+        finally:
+            await database.dispose()
+
+    found = asyncio.run(run())
+    if found is None:
+        return None
+    return str(getattr(found, "rating_id", None) or found.id)
+
+
 @pytest.mark.ws3
 def test_credit_domain_projection_snapshots_reads_and_guards(
     api: TestClient, db: str, artifact_dir: Path
@@ -235,6 +346,40 @@ def test_credit_domain_projection_snapshots_reads_and_guards(
         *sorted(grades)[1:],
         "D",
     ]  # G01 best, D last
+    # BE-20.1 (D-40): migration 0023 follows 0022; its tagged seed grants rating:propose to
+    # risk_analyst and rating:approve to approver, nothing else; and the whole seeded
+    # role_permission join equals ROLE_PERMISSIONS (WS1 + WS2 + WS3 + credit).
+    [m0023_path] = sorted(MIGRATIONS.glob("0023_*.py"))
+    m0023 = migration(m0023_path.stem)
+    assert (m0023.revision, m0023.down_revision) == ("0023", "0022")
+    joined = sql(
+        db,
+        "SELECT r.code AS role, p.code AS permission, p.seeded_by AS p_tag, rp.seeded_by AS g_tag"
+        " FROM role_permission rp JOIN role r ON r.id = rp.role_id"
+        " JOIN permission p ON p.id = rp.permission_id",
+    )
+    seeded_matrix: dict[str, set[str]] = {role.value: set() for role in Role}
+    for g in joined:
+        seeded_matrix[g["role"]].add(g["permission"])
+    assert seeded_matrix == {r.value: {p.value for p in ps} for r, ps in ROLE_PERMISSIONS.items()}
+    credit_grants = {(g["role"], g["permission"]) for g in joined if g["p_tag"] == RATING_TAG}
+    assert credit_grants == PLAN_CREDIT_GRANTS
+    assert credit_grants == {
+        (r.value, p.value) for r, ps in CREDIT_ROLE_PERMISSIONS.items() for p in ps
+    }
+    assert all(g["g_tag"] == RATING_TAG for g in joined if g["p_tag"] == RATING_TAG)
+    assert {
+        p["code"] for p in sql(db, "SELECT code FROM permission WHERE seeded_by = $1", RATING_TAG)
+    } == {"rating:propose", "rating:approve"}
+    # Phase 20 ruling Q5: 0023's frozen copies equal the code's enums, limits and seed.
+    assert m0023.STATUSES == tuple(s.value for s in ObligorRatingStatus)
+    assert m0023.TRANSITIONS == {
+        a.value: tuple(b.value for b in bs) for a, bs in RATING_TRANSITIONS.items()
+    }
+    assert (m0023.RATIONALE_MAX, m0023.COMMENT_MAX) == (RATING_RATIONALE_MAX, RATING_COMMENT_MAX)
+    assert {r: set(ps) for r, ps in m0023.MATRIX.items()} == {
+        r.value: {p.value for p in ps} for r, ps in CREDIT_ROLE_PERMISSIONS.items() if ps
+    }
 
     # --- 2. Samples and projection (BE-19.2, BE-19.3) ------------------------------------------
     counterparties, exposures = (
@@ -498,7 +643,239 @@ def test_credit_domain_projection_snapshots_reads_and_guards(
         r = api.get(absent, headers=analyst)
         assert (r.status_code, r.json()["code"]) == (404, "not_found"), absent
 
-    # --- 5. Guards (BE-19.1) -------------------------------------------------------------------
+    # --- 5. Ratings (BE-20.2, BE-20.3) ---------------------------------------------------------
+    auditor = dev_token(api, "auditor")
+    cp_of = {i["business_key"]: i["counterparty_id"] for i in page["items"]}
+    cp8 = cp_of["CP-0008"]
+    first_day, second_day, reject_day = date(2025, 6, 30), date(2026, 1, 1), date(2026, 3, 31)
+    both = token_for(db, "rating-maker-checker", ("risk_analyst", "approver"))
+
+    # A proposal is written IN_REVIEW, audited obligor_rating.propose.
+    r, c = propose(api, analyst, cp8, "G04", second_day)
+    assert r.status_code == 201, r.text
+    first_rating = no_float(r.text)
+    assert (
+        first_rating["status"],
+        first_rating["grade"],
+        first_rating["effective_from"],
+        first_rating["counterparty_id"],
+        first_rating["grade_rank"],
+    ) == ("IN_REVIEW", "G04", second_day.isoformat(), cp8, grades["G04"]["rank"])
+    assert first_rating["decided_by"] is None and first_rating["decided_at"] is None
+    assert first_rating["superseded_by_rating_id"] is None
+    assert outcomes(db, c) == {("obligor_rating.propose", "SUCCESS")}
+    # D-43 §2: the rationale is confidential, masked for risk_analyst (their own included).
+    assert first_rating["rationale"] == MASKED
+    # Refused proposals, each audited DENIED, write nothing: an unknown grade (also a code of
+    # another vocabulary) is a 422 invalid_grade; an absent counterparty the 404.
+    other_code = next(v["code"] for v in vocabulary if v["vocabulary"] == "credit_segment")
+    unchanged = ratings_state(db)
+    for target, grade, refusal in (
+        (cp8, "G99", (422, "invalid_grade")),
+        (cp8, other_code, (422, "invalid_grade")),
+        (str(uuid.uuid4()), "G04", (404, "not_found")),
+    ):
+        r, c = propose(api, analyst, target, grade, second_day)
+        assert (r.status_code, r.json()["code"]) == refusal, r.text
+        if refusal[1] == "invalid_grade":
+            assert_denied(db, c, "invalid_grade", "obligor_rating.propose")
+        else:
+            [event] = events(db, c)
+            assert (event["action"], event["outcome"]) == ("obligor_rating.propose", "DENIED")
+    assert ratings_state(db) == unchanged
+
+    # Maker-checker: a user holding both roles cannot decide their own proposal.
+    r, c = propose(api, both, cp8, "G04", second_day)
+    assert r.status_code == 201, r.text
+    own = r.json()
+    unchanged = ratings_state(db)
+    for decision in ("APPROVE", "REJECT"):
+        r, c = decide(api, both, own["rating_id"], decision)
+        assert (r.status_code, r.json()["code"]) == (409, "self_approval"), r.text
+        assert_denied(db, c, "self_approval", f"obligor_rating.{decision.lower()}")
+    assert ratings_state(db) == unchanged
+
+    # Approval: ACTIVE, the decision recorded once, the content unchanged.
+    r, c = decide(api, approver, first_rating["rating_id"], "APPROVE", "Grade supported.")
+    assert r.status_code == 200, r.text
+    approved = no_float(r.text)
+    assert (approved["status"], approved["decision_comment"]) == ("ACTIVE", "Grade supported.")
+    assert approved["decided_by"] and approved["decided_at"]
+    assert approved["rationale"] == "Illustrative annual review: G04 from 2026-01-01."
+    assert {k: approved[k] for k in RATING_CONTENT} == {k: first_rating[k] for k in RATING_CONTENT}
+    assert ("obligor_rating.approve", "SUCCESS") in outcomes(db, c)
+    # Deciding a version that is not IN_REVIEW: 409 invalid_status. Approving one proposed
+    # before another activation for the same counterparty and date: 409 stale_version.
+    unchanged = ratings_state(db)
+    for decision in ("APPROVE", "REJECT"):
+        r, c = decide(api, approver, first_rating["rating_id"], decision)
+        assert (r.status_code, r.json()["code"]) == (409, "invalid_status"), r.text
+        assert_denied(db, c, "invalid_status", f"obligor_rating.{decision.lower()}")
+    r, c = decide(api, approver, own["rating_id"], "APPROVE")
+    assert (r.status_code, r.json()["code"]) == (409, "stale_version"), r.text
+    assert_denied(db, c, "stale_version", "obligor_rating.approve")
+    assert ratings_state(db) == unchanged
+
+    # A later proposal for the same date, approved: it is ACTIVE, the earlier one SUPERSEDED
+    # in the same transaction (audited .supersede), and exactly one ACTIVE per date remains.
+    r, _ = propose(api, analyst, cp8, "G05", second_day)
+    assert r.status_code == 201, r.text
+    later_id = r.json()["rating_id"]
+    r, _ = propose(api, analyst, cp8, "G05", second_day)  # stale once later_id is approved
+    assert r.status_code == 201, r.text
+    stale_id = r.json()["rating_id"]
+    r, c = decide(api, approver, later_id, "APPROVE")
+    assert r.status_code == 200 and r.json()["status"] == "ACTIVE", r.text
+    second_rating = r.json()
+    assert {("obligor_rating.approve", "SUCCESS"), ("obligor_rating.supersede", "SUCCESS")} <= (
+        outcomes(db, c)
+    )
+    old = api.get(f"{RATINGS}/{first_rating['rating_id']}", headers=analyst)
+    assert old.status_code == 200, old.text
+    assert old.json()["status"] == "SUPERSEDED" and old.json()["superseded_at"]
+    assert old.json()["superseded_by_rating_id"] == second_rating["rating_id"]
+    # Phase 20 ruling Q9 (D-39 §3): a stale version can be rejected; only approval is refused.
+    r, c = decide(api, approver, stale_id, "REJECT", "Superseded by a later decision.")
+    assert (r.status_code, r.json()["status"]) == (200, "REJECTED"), r.text
+    assert ("obligor_rating.reject", "SUCCESS") in outcomes(db, c)
+    # An earlier effective date, approved: no supersede (another date).
+    r, _ = propose(api, analyst, cp8, "G03", first_day)
+    assert r.status_code == 201, r.text
+    r, c = decide(api, approver, r.json()["rating_id"], "APPROVE")
+    assert r.status_code == 200 and r.json()["status"] == "ACTIVE", r.text
+    earlier_rating = r.json()
+    assert ("obligor_rating.supersede", "SUCCESS") not in outcomes(db, c)
+    # REJECT ends a version; it never governs and cannot be approved after.
+    r, _ = propose(api, analyst, cp8, "G06", reject_day)
+    assert r.status_code == 201, r.text
+    r, c = decide(api, approver, r.json()["rating_id"], "REJECT", "Not supported by the file.")
+    assert r.status_code == 200, r.text
+    rejected = r.json()
+    assert (rejected["status"], rejected["decision_comment"]) == (
+        "REJECTED",
+        "Not supported by the file.",
+    )
+    assert ("obligor_rating.reject", "SUCCESS") in outcomes(db, c)
+    r, c = decide(api, approver, rejected["rating_id"], "APPROVE")
+    assert (r.status_code, r.json()["code"]) == (409, "invalid_status"), r.text
+    assert_denied(db, c, "invalid_status", "obligor_rating.approve")
+
+    # Reads: the list (filters, newest proposal first), one version, the counterparty history.
+    statuses = {
+        first_rating["rating_id"]: "SUPERSEDED",
+        own["rating_id"]: "IN_REVIEW",
+        second_rating["rating_id"]: "ACTIVE",
+        earlier_rating["rating_id"]: "ACTIVE",
+        rejected["rating_id"]: "REJECTED",
+        stale_id: "REJECTED",
+    }
+    listed_ratings = no_float(
+        api.get(RATINGS, params={"counterparty_id": cp8, "limit": 200}, headers=steward).text
+    )
+    assert listed_ratings["total"] == len(statuses) == len(listed_ratings["items"])
+    assert {i["rating_id"]: i["status"] for i in listed_ratings["items"]} == statuses
+    proposed_order = [i["proposed_at"] for i in listed_ratings["items"]]
+    assert proposed_order == sorted(proposed_order, reverse=True)
+    actives: dict[str, int] = {}
+    for i in listed_ratings["items"]:
+        if i["status"] == "ACTIVE":
+            actives[i["effective_from"]] = actives.get(i["effective_from"], 0) + 1
+    assert actives == {first_day.isoformat(): 1, second_day.isoformat(): 1}
+    queue = api.get(RATINGS, params={"status": "IN_REVIEW"}, headers=approver).json()
+    assert [i["rating_id"] for i in queue["items"]] == [own["rating_id"]] and queue["total"] == 1
+    other_cp = next(v for k, v in cp_of.items() if k != "CP-0008")
+    none_listed = api.get(RATINGS, params={"counterparty_id": other_cp}, headers=analyst)
+    assert none_listed.json()["total"] == 0
+    for item in listed_ratings["items"]:
+        one = api.get(f"{RATINGS}/{item['rating_id']}", headers=steward)
+        assert one.status_code == 200 and one.json() == item, one.text
+    r = api.get(f"{RATINGS}/{uuid.uuid4()}", headers=analyst)
+    assert (r.status_code, r.json()["code"]) == (404, "not_found")
+    assert all(isinstance(i["rationale"], str) for i in listed_ratings["items"])
+    for headers in (auditor, approver):  # every role reads ratings (domain:read)
+        seen = api.get(RATINGS, params={"counterparty_id": cp8}, headers=headers)
+        assert seen.status_code == 200 and seen.json()["total"] == len(statuses), seen.text
+    history = no_float(api.get(f"{COUNTERPARTIES}/{cp8}", headers=analyst).text)["ratings"]
+    assert {h["rating_id"]: h["status"] for h in history} == statuses
+    assert all(h["rationale"] == MASKED for h in history)  # D-43 §2
+    assert all(h["decision_comment"] in (MASKED, None) for h in history)
+    assert {h["grade"] for h in history} == {"G03", "G04", "G05", "G06"}  # internal: clear
+    by_date = [(h["effective_from"], h["proposed_at"]) for h in history]
+    assert by_date == sorted(by_date, reverse=True)
+    assert api.get(f"{COUNTERPARTIES}/{other_cp}", headers=analyst).json()["ratings"] == []
+
+    # In effect at a date (D-39 §4): none before the first effective date; after it, the
+    # ACTIVE version with the greatest effective_from <= the date; a rejection changes nothing.
+    for day, expected_rating in (
+        (date(2025, 6, 29), None),
+        (first_day, earlier_rating),
+        (date(2025, 9, 30), earlier_rating),
+        (date(2025, 12, 31), earlier_rating),
+        (second_day, second_rating),
+        (reject_day, second_rating),
+        (date(2026, 9, 30), second_rating),
+    ):
+        want = None if expected_rating is None else expected_rating["rating_id"]
+        assert in_effect(db, cp8, day) == want, day
+    # Phase 19 ruling: EXP-0008 (CP-0008, origination G02) is rated G05 at its as-of date,
+    # 3 notches below origination by rating_grade rank.
+    [exp8] = [r for r in exposures if r["exposure_id"] == "EXP-0008"]
+    assert (exp8["counterparty_id"], exp8["origination_grade"]) == ("CP-0008", "G02")
+    in_force = in_effect(db, cp8, date.fromisoformat(exp8["as_of_date"]))
+    assert in_force == second_rating["rating_id"]
+    by_rank = sorted(grades, key=lambda g: grades[g]["rank"])
+    in_force_grade = api.get(f"{RATINGS}/{in_force}", headers=analyst).json()["grade"]
+    assert in_force_grade == "G05"
+    assert by_rank.index(in_force_grade) - by_rank.index(exp8["origination_grade"]) == 3
+
+    # The switch (D-39 §6): validated at startup; off, proposing and deciding are 409
+    # rating_change_disabled, audited DENIED, nothing written; reads keep working.
+    with pytest.raises(ValidationError):
+        Settings(ENV="test", DATABASE_URL=db, RATING_CHANGE_ENABLED="sometimes")
+    frozen_settings = Settings(
+        ENV="test", DATABASE_URL=db, ARTIFACT_STORE_DIR=artifact_dir, RATING_CHANGE_ENABLED=False
+    )
+    unchanged = ratings_state(db)
+    with TestClient(create_app(frozen_settings)) as frozen:
+        r, c = propose(frozen, analyst, cp8, "G05", date(2026, 6, 30))
+        assert (r.status_code, r.json()["code"]) == (409, "rating_change_disabled"), r.text
+        assert_denied(db, c, "rating_change_disabled", "obligor_rating.propose")
+        for decision in ("APPROVE", "REJECT"):
+            r, c = decide(frozen, approver, own["rating_id"], decision)
+            assert (r.status_code, r.json()["code"]) == (409, "rating_change_disabled"), r.text
+            assert_denied(db, c, "rating_change_disabled", f"obligor_rating.{decision.lower()}")
+        shown = frozen.get(RATINGS, params={"counterparty_id": cp8}, headers=analyst)
+        assert shown.status_code == 200 and shown.json()["total"] == len(statuses)
+    assert ratings_state(db) == unchanged
+
+    # --- 6. Guards (BE-19.1, BE-20.1) ----------------------------------------------------------
+    # obligor_rating: content frozen, only the D-39 §2 moves (once each), DELETE and TRUNCATE
+    # refused; nothing changes.
+    rows_before = ratings_state(db)
+    for statement, target in (
+        ("UPDATE obligor_rating SET grade = 'G01' WHERE id = $1", earlier_rating),
+        ("UPDATE obligor_rating SET effective_from = DATE '2020-01-01' WHERE id = $1", own),
+        ("UPDATE obligor_rating SET rationale = 'tampered' WHERE id = $1", second_rating),
+        ("UPDATE obligor_rating SET tenant_id = gen_random_uuid() WHERE id = $1", own),
+        ("UPDATE obligor_rating SET decision_comment = 'rewritten' WHERE id = $1", second_rating),
+        ("UPDATE obligor_rating SET status = 'ACTIVE' WHERE id = $1", rejected),
+        ("UPDATE obligor_rating SET status = 'IN_REVIEW' WHERE id = $1", second_rating),
+        ("UPDATE obligor_rating SET status = 'ACTIVE' WHERE id = $1", first_rating),
+        ("UPDATE obligor_rating SET status = 'RETIRED' WHERE id = $1", own),
+        ("DELETE FROM obligor_rating WHERE id = $1", rejected),
+    ):
+        with pytest.raises(IMMUTABLE):
+            sql(db, statement, uuid.UUID(target["rating_id"]))
+    with pytest.raises(IMMUTABLE):
+        sql(db, "TRUNCATE obligor_rating CASCADE")
+    # A second ACTIVE for the same counterparty and date is refused by the partial unique
+    # index itself (the row's user triggers lifted in one transaction never committed).
+    with pytest.raises(asyncpg.UniqueViolationError):
+        insert = copy(
+            "obligor_rating", "'status', 'ACTIVE'", f"id = '{second_rating['rating_id']}'"
+        )
+        script(db, f"BEGIN; ALTER TABLE obligor_rating DISABLE TRIGGER USER; {insert}; ROLLBACK;")
+    assert ratings_state(db) == rows_before
     for table in GUARDED_TABLES:
         [row] = sql(db, f"SELECT * FROM {table} ORDER BY id LIMIT 1")
         for statement in (
@@ -528,14 +905,28 @@ def test_credit_domain_projection_snapshots_reads_and_guards(
     check_refuses(db, "domain_projection", "schema_code = 'counterparty'")
     check_refuses(db, "dataset_snapshot_member", "schema_code = 'credit_exposure'")
 
-    # The downgrade refuses while a credit projection exists: nothing changes.
+    # The downgrade refuses while a rating exists (BE-20.1), then, without ratings, while a
+    # credit projection exists (BE-19.1): nothing changes.
     head = str(ScriptDirectory.from_config(Config("alembic.ini")).get_current_head())
     assert revision(db) == head
     before = credit_counts(db)
     try:
+        with pytest.raises(Exception, match="(?i)refus"):
+            command.downgrade(alembic_config(db), "0022")
+        assert revision(db) == head and credit_counts(db) == before
+        assert ratings_state(db) == rows_before
+        script(
+            db,
+            "BEGIN; ALTER TABLE obligor_rating DISABLE TRIGGER USER; DELETE FROM obligor_rating;"
+            " ALTER TABLE obligor_rating ENABLE TRIGGER USER; COMMIT;",
+        )
+        command.downgrade(alembic_config(db), "0022")
+        assert revision(db) == "0022"
         with pytest.raises(Exception, match="refused"):
             command.downgrade(alembic_config(db), "0021")
-        assert revision(db) == head and credit_counts(db) == before
+        assert revision(db) == "0022" and credit_counts(db) == before
+        command.upgrade(alembic_config(db), "head")
+        assert revision(db) == head
         # Without credit rows: 0021 -> head -> 0021 -> head.
         clean(db)
         for _ in range(2):
@@ -545,9 +936,12 @@ def test_credit_domain_projection_snapshots_reads_and_guards(
                 db,
                 "SELECT to_regclass('counterparty_version') AS a,"
                 " to_regclass('credit_exposure_version') AS b, to_regclass('counterparty') AS c,"
-                " to_regclass('credit_exposure') AS d, to_regclass('credit_vocabulary') AS e",
+                " to_regclass('credit_exposure') AS d, to_regclass('credit_vocabulary') AS e,"
+                " to_regclass('obligor_rating') AS f",
             )[0]
             assert set(dict(gone).values()) == {None}
+            assert not sql(db, "SELECT 1 FROM permission WHERE code LIKE 'rating:%'")
+            assert not sql(db, "SELECT 1 FROM role_permission WHERE seeded_by = $1", RATING_TAG)
             assert not sql(
                 db,
                 "SELECT 1 FROM schema_definition WHERE code IN ('counterparty', 'credit_exposure')",
@@ -574,6 +968,14 @@ def test_credit_domain_projection_snapshots_reads_and_guards(
                 )[0]["n"]
                 == 2
             )
+            regranted = sql(
+                db,
+                "SELECT r.code AS role, p.code AS permission FROM role_permission rp"
+                " JOIN role r ON r.id = rp.role_id JOIN permission p ON p.id = rp.permission_id"
+                " WHERE rp.seeded_by = $1",
+                RATING_TAG,
+            )
+            assert {(g["role"], g["permission"]) for g in regranted} == PLAN_CREDIT_GRANTS
     finally:
         if revision(db) != head:
             command.upgrade(alembic_config(db), "head")

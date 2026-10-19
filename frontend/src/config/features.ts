@@ -83,3 +83,12 @@ export const LIQUIDITY_UI_ENABLED = process.env.NEXT_PUBLIC_LIQUIDITY_UI !== 'of
  * credit_exposure imports, as in Phase 18.
  */
 export const CREDIT_DOMAIN_UI_ENABLED = process.env.NEXT_PUBLIC_CREDIT_DOMAIN_UI !== 'off'
+
+/**
+ * NEXT_PUBLIC_RATINGS_UI=off (FE-20.1/20.2): the counterparty detail loses its Ratings panel and
+ * "Propose rating" dialog, the Financial Domain loses its Ratings tab and /domain/ratings is a 404
+ * again, restoring the Phase 19 UI exactly. Only meaningful while NEXT_PUBLIC_CREDIT_DOMAIN_UI is
+ * on (ratings belong to counterparties). The backend's own switch is RATING_CHANGE_ENABLED, which
+ * freezes ratings (writes 409 `rating_change_disabled`, audited); reads and runs keep working.
+ */
+export const RATINGS_UI_ENABLED = process.env.NEXT_PUBLIC_RATINGS_UI !== 'off'

@@ -1592,6 +1592,14 @@
             "title": "Exposure Versions",
             "type": "array"
           },
+          "ratings": {
+            "description": "The rating history (D-39 \u00a74): every version in every status, by effective_from descending, then proposed_at descending. Superseded and rejected versions are kept, never deleted.",
+            "items": {
+              "$ref": "#/components/schemas/ObligorRatingOut"
+            },
+            "title": "Ratings",
+            "type": "array"
+          },
           "source_code": {
             "title": "Source Code",
             "type": "string"
@@ -1617,7 +1625,8 @@
           "source_code",
           "created_at",
           "versions",
-          "exposure_versions"
+          "exposure_versions",
+          "ratings"
         ],
         "title": "CounterpartyDetail",
         "type": "object"
@@ -7008,6 +7017,274 @@
         "title": "NullPolicy",
         "type": "string"
       },
+      "ObligorRatingCreate": {
+        "additionalProperties": false,
+        "description": "A proposal (D-39 \u00a71): written IN_REVIEW. A correction is a new proposal.",
+        "properties": {
+          "effective_from": {
+            "description": "The first date the grade governs (ISO date).",
+            "format": "date",
+            "title": "Effective From",
+            "type": "string"
+          },
+          "grade": {
+            "description": "A `rating_grade` code of the caller's tenant's credit vocabulary (GET /credit-vocabularies). Unknown: 422 invalid_grade.",
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Grade",
+            "type": "string"
+          },
+          "rationale": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Rationale",
+            "type": "string"
+          }
+        },
+        "required": [
+          "grade",
+          "effective_from",
+          "rationale"
+        ],
+        "title": "ObligorRatingCreate",
+        "type": "object"
+      },
+      "ObligorRatingDecision": {
+        "additionalProperties": false,
+        "properties": {
+          "comment": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Comment",
+            "type": "string"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/ProposalDecision",
+            "description": "APPROVE makes the version ACTIVE and any ACTIVE version for the same counterparty and `effective_from` SUPERSEDED, in one transaction; REJECT ends it."
+          }
+        },
+        "required": [
+          "decision",
+          "comment"
+        ],
+        "title": "ObligorRatingDecision",
+        "type": "object"
+      },
+      "ObligorRatingOut": {
+        "description": "One immutable rating version (D-39 \u00a71-2). Content never changes; the decision fields\nare set once.",
+        "properties": {
+          "counterparty_id": {
+            "format": "uuid",
+            "title": "Counterparty Id",
+            "type": "string"
+          },
+          "counterparty_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "description": "The counterparty's business key, masked like the counterparty's own.",
+            "title": "Counterparty Key"
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "decided_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who approved or rejected it.",
+            "title": "Decided By"
+          },
+          "decision_comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Confidential (D-43 \u00a72): masked for a caller not cleared for it (masked even while undecided, so its absence is not revealed).",
+            "title": "Decision Comment"
+          },
+          "effective_from": {
+            "format": "date",
+            "title": "Effective From",
+            "type": "string"
+          },
+          "grade": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "description": "A `rating_grade` vocabulary code (internal, D-43 \u00a72).",
+            "title": "Grade"
+          },
+          "grade_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The grade's `rating_grade` rank (higher is worse); null if the code has no vocabulary entry or the grade is masked.",
+            "title": "Grade Rank"
+          },
+          "proposed_at": {
+            "format": "date-time",
+            "title": "Proposed At",
+            "type": "string"
+          },
+          "proposed_by": {
+            "description": "The proposer's actor id.",
+            "title": "Proposed By",
+            "type": "string"
+          },
+          "proposer_user_id": {
+            "description": "The proposer never decides their own proposal (409 self_approval).",
+            "format": "uuid",
+            "title": "Proposer User Id",
+            "type": "string"
+          },
+          "rating_id": {
+            "format": "uuid",
+            "title": "Rating Id",
+            "type": "string"
+          },
+          "rationale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "description": "Confidential (D-43 \u00a72): masked for a caller not cleared for it, the proposer included.",
+            "title": "Rationale"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ObligorRatingStatus"
+          },
+          "superseded_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When a later approval for the same counterparty and date replaced it.",
+            "title": "Superseded At"
+          },
+          "superseded_by_rating_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Superseded By Rating Id"
+          }
+        },
+        "required": [
+          "rating_id",
+          "counterparty_id",
+          "counterparty_key",
+          "grade",
+          "grade_rank",
+          "effective_from",
+          "rationale",
+          "status",
+          "proposed_by",
+          "proposer_user_id",
+          "proposed_at",
+          "decided_by",
+          "decided_at",
+          "decision_comment",
+          "superseded_at",
+          "superseded_by_rating_id"
+        ],
+        "title": "ObligorRatingOut",
+        "type": "object"
+      },
+      "ObligorRatingPage": {
+        "properties": {
+          "items": {
+            "description": "Newest proposal first (proposed_at descending, then rating_id).",
+            "items": {
+              "$ref": "#/components/schemas/ObligorRatingOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "ObligorRatingPage",
+        "type": "object"
+      },
+      "ObligorRatingStatus": {
+        "description": "The obligor rating lifecycle (D-39 \u00a72, a D-06 subset). A proposal is written IN_REVIEW\n(no DRAFT: a correction is a new proposal); IN_REVIEW -> ACTIVE or REJECTED; ACTIVE ->\nSUPERSEDED when another version for the same counterparty and `effective_from` is\napproved. RETIRED is reserved (withdrawal is deferred).",
+        "enum": [
+          "IN_REVIEW",
+          "ACTIVE",
+          "REJECTED",
+          "SUPERSEDED",
+          "RETIRED"
+        ],
+        "title": "ObligorRatingStatus",
+        "type": "string"
+      },
       "OidcClientConfig": {
         "properties": {
           "client_id": {
@@ -7191,7 +7468,9 @@
           "rule:propose",
           "rule:approve",
           "calc:read",
-          "calc:run"
+          "calc:run",
+          "rating:propose",
+          "rating:approve"
         ],
         "title": "Permission",
         "type": "string"
@@ -12656,6 +12935,75 @@
         ]
       }
     },
+    "/api/v1/counterparties/{counterparty_id}/ratings": {
+      "post": {
+        "description": "Propose a rating for one counterparty (D-39 \u00a71, \u00a73): an immutable version written\nIN_REVIEW, audited `obligor_rating.propose`. Refusals, each audited DENIED: 404\n`not_found` alike for an absent and another tenant's counterparty (D-04), 409\n`rating_change_disabled` while RATING_CHANGE_ENABLED is off, 422 `invalid_grade` (not a\n`rating_grade` code of the tenant).",
+        "operationId": "proposeObligorRating",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "counterparty_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Counterparty Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ObligorRatingCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObligorRatingOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Propose Obligor Rating",
+        "tags": [
+          "domain"
+        ]
+      }
+    },
     "/api/v1/credit-exposures": {
       "get": {
         "description": "The credit exposures of the caller's tenant, by business key. A filter matches an\nexposure when any of its versions matches.",
@@ -14953,6 +15301,243 @@
         "summary": "My Permissions",
         "tags": [
           "identity"
+        ]
+      }
+    },
+    "/api/v1/obligor-ratings": {
+      "get": {
+        "description": "The obligor rating versions of the caller's tenant (every status unless filtered),\nnewest proposal first.",
+        "operationId": "listObligorRatings",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Only versions in this status (IN_REVIEW for the review queue).",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ObligorRatingStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only versions in this status (IN_REVIEW for the review queue).",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "Only this counterparty's versions.",
+            "in": "query",
+            "name": "counterparty_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only this counterparty's versions.",
+              "title": "Counterparty Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObligorRatingPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Obligor Ratings",
+        "tags": [
+          "domain"
+        ]
+      }
+    },
+    "/api/v1/obligor-ratings/{rating_id}": {
+      "get": {
+        "description": "One rating version. 404 `not_found` alike for an absent and another tenant's id\n(D-04).",
+        "operationId": "getObligorRating",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rating_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Rating Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObligorRatingOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Obligor Rating",
+        "tags": [
+          "domain"
+        ]
+      }
+    },
+    "/api/v1/obligor-ratings/{rating_id}/approval": {
+      "post": {
+        "description": "Maker-checker (D-39 \u00a73). APPROVE makes an IN_REVIEW version ACTIVE and any ACTIVE\nversion for the same counterparty and `effective_from` SUPERSEDED, in one transaction;\nREJECT ends it REJECTED. Audited `obligor_rating.approve` / `.reject` / `.supersede`.\nRefusals, each audited DENIED: 404 `not_found` (absent or another tenant's), 409\n`rating_change_disabled`, 409 `invalid_status` (not IN_REVIEW), 409 `self_approval` (the\nproposer), 409 `stale_version` (another version for the same counterparty and date was\nactivated after this one was proposed: propose again).",
+        "operationId": "decideObligorRating",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rating_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Rating Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ObligorRatingDecision"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObligorRatingOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Decide Obligor Rating",
+        "tags": [
+          "domain"
         ]
       }
     },

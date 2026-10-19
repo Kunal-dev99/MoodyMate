@@ -7,13 +7,20 @@ row pins (BE-3.5), so a caller not cleared for it gets `MaskedValue`.
 """
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.classification import MaskedValue
-from app.domain.constants import CreditVocabularyKind, DomainSchemaCode
-from app.governance.constants import FieldType
+from app.core.text import SafeMultilineText
+from app.domain.constants import (
+    RATING_COMMENT_MAX,
+    RATING_RATIONALE_MAX,
+    CreditVocabularyKind,
+    DomainSchemaCode,
+    ObligorRatingStatus,
+)
+from app.governance.constants import FieldType, ProposalDecision
 from app.ingestion.constants import ImportStatus
 
 Value = str | MaskedValue
@@ -288,6 +295,80 @@ class CreditExposureVersionOut(BaseModel):
     collateral_value: Value | None = Field(description="Exact decimal text, in `currency`.")
 
 
+# --- Phase 20: the obligor rating workflow (BE-20.2, BE-20.3, D-39) -------------------------
+
+
+class ObligorRatingCreate(BaseModel):
+    """A proposal (D-39 §1): written IN_REVIEW. A correction is a new proposal."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    grade: str = Field(
+        min_length=1,
+        max_length=50,
+        description="A `rating_grade` code of the caller's tenant's credit vocabulary (GET "
+        "/credit-vocabularies). Unknown: 422 invalid_grade.",
+    )
+    effective_from: date = Field(description="The first date the grade governs (ISO date).")
+    rationale: SafeMultilineText = Field(min_length=1, max_length=RATING_RATIONALE_MAX)
+
+
+class ObligorRatingDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decision: ProposalDecision = Field(
+        description="APPROVE makes the version ACTIVE and any ACTIVE version for the same "
+        "counterparty and `effective_from` SUPERSEDED, in one transaction; REJECT ends it."
+    )
+    comment: SafeMultilineText = Field(min_length=1, max_length=RATING_COMMENT_MAX)
+
+
+class ObligorRatingOut(BaseModel):
+    """One immutable rating version (D-39 §1-2). Content never changes; the decision fields
+    are set once."""
+
+    rating_id: uuid.UUID
+    counterparty_id: uuid.UUID
+    counterparty_key: Value = Field(
+        description="The counterparty's business key, masked like the counterparty's own."
+    )
+    grade: Value = Field(description="A `rating_grade` vocabulary code (internal, D-43 §2).")
+    grade_rank: int | None = Field(
+        description="The grade's `rating_grade` rank (higher is worse); null if the code has "
+        "no vocabulary entry or the grade is masked."
+    )
+    effective_from: date
+    rationale: Value = Field(
+        description="Confidential (D-43 §2): masked for a caller not cleared for it, the "
+        "proposer included."
+    )
+    status: ObligorRatingStatus
+    proposed_by: str = Field(description="The proposer's actor id.")
+    proposer_user_id: uuid.UUID = Field(
+        description="The proposer never decides their own proposal (409 self_approval)."
+    )
+    proposed_at: datetime
+    decided_by: str | None = Field(description="Who approved or rejected it.")
+    decided_at: datetime | None
+    decision_comment: Value | None = Field(
+        description="Confidential (D-43 §2): masked for a caller not cleared for it (masked "
+        "even while undecided, so its absence is not revealed)."
+    )
+    superseded_at: datetime | None = Field(
+        description="When a later approval for the same counterparty and date replaced it."
+    )
+    superseded_by_rating_id: uuid.UUID | None
+
+
+class ObligorRatingPage(BaseModel):
+    items: list[ObligorRatingOut] = Field(
+        description="Newest proposal first (proposed_at descending, then rating_id)."
+    )
+    total: int
+    limit: int
+    offset: int
+
+
 class CounterpartyDetail(BaseModel):
     counterparty_id: uuid.UUID
     business_key: Value
@@ -298,6 +379,11 @@ class CounterpartyDetail(BaseModel):
     exposure_versions: list[CreditExposureVersionOut] = Field(
         description="Projected credit-exposure versions naming this counterparty's business "
         "key, in the caller's tenant."
+    )
+    ratings: list[ObligorRatingOut] = Field(
+        description="The rating history (D-39 §4): every version in every status, by "
+        "effective_from descending, then proposed_at descending. Superseded and rejected "
+        "versions are kept, never deleted."
     )
 
 

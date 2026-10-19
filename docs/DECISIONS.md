@@ -1144,6 +1144,20 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
   - A rating as a rule version. Rejected: ratings are per-obligor data, not methodology.
   - Source-supplied current ratings only. Rejected: the requirement asks for an in-app
     workflow. The source `origination_grade` stays as data for the SICR test.
+- **Amendment (2026-10-19, Phase 20 build, auto-resolved):** §3 made precise.
+  - **Stale.** A version is stale when the ACTIVE version for the same counterparty and
+    `effective_from` has `decided_at` > this version's `proposed_at` (strict). Both times come
+    from the DB clock (`clock_timestamp()`), read after the per-counterparty transaction
+    lock. A proposal for another `effective_from` is never stale (each date governs its own
+    period, §4).
+  - **Stale versions can be rejected.** Only approval is refused with `stale_version`;
+    REJECT of a stale version succeeds (otherwise it would sit IN_REVIEW for ever, as
+    withdrawal is deferred). Asserted in `test_credit.py:737-740`.
+  - **Audit resources.** A refused proposal (no rating id yet) is audited on
+    `resource_type = 'counterparty'`. Every other rating event, successes and decide
+    refusals, is on `obligor_rating` with the rating id. Audit details never carry the
+    rationale; the grade is tagged internal and the decision comment confidential in
+    `details_classification` (D-43 §2).
 
 ## D-40 Credit permissions and role grants
 

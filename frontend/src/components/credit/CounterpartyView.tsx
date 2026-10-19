@@ -13,7 +13,9 @@ import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
 import { createLoader, type Loaded } from '@/components/common/load'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { RATINGS_UI_ENABLED } from '@/config/features'
 import { CreditValueCell } from './CreditValueCell'
+import { RatingsPanel } from './ratings/RatingsPanel'
 import { CREDIT_CRUMBS, Field, ImportRowLink, Lineage, Mono, NotInVocabulary } from './CreditParts'
 import { exposureHref, keyText, latestExposures, type CounterpartyDetail, type CounterpartyVersion } from './credit'
 
@@ -180,6 +182,8 @@ export function CounterpartyView({ counterpartyId }: { counterpartyId: string })
             </Field>
           </dl>
         </PageSection>
+        {/* FE-20.1: the Ratings panel, only while NEXT_PUBLIC_RATINGS_UI is on; off, the Phase 19 page exactly (D-02). */}
+        {RATINGS_UI_ENABLED && <RatingsPanel counterpartyId={detail.counterparty_id} counterpartyLabel={label} ratings={detail.ratings} />}
         {detail.versions.map((v) => (
           <Version key={v.version_id} v={v} />
         ))}
