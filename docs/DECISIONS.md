@@ -1486,6 +1486,14 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
     (maker-checker in the DB as well as the service's 409 `self_approval`), and `scenario` rows
     are fully append-only (no UPDATE). Renaming a scenario later needs an additive change
     (e.g. a name on the version).
+- **Amendment (2026-10-19, Phase 25 build, auto-resolved):** §8 labels on stressed runs (Q21).
+  The FE-25.1 badges on the run list and run detail ("Exploration, not approved" or "Approved
+  scenario (illustrative)", plus the applied shocks, the baseline link and the scenario link)
+  are **not** behind `NEXT_PUBLIC_STRESS_COMPARE_UI`. This is a narrow exception to D-02's
+  "new behaviour sits behind a setting". Stressed runs can exist through the API while the UI
+  switch is off, and showing them without their §8 label would be the unsafe option. Runs that
+  are not stressed render exactly as in Phase 24, so for all earlier data the switch still
+  restores the previous UI. When the explorer switch is off, the scenario link is plain text.
 
 ## D-45 Deterministic scenario engine: split-aware overlay, own contribution table, conservation
 
@@ -1581,6 +1589,46 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
   - A separate stress module. Rejected: it duplicates the methodology.
   - Whole-flow moves only (the earlier draft). Rejected: the user's design needs partial
     delays.
+- **Amendment (2026-10-19, Phase 25 build, auto-resolved):** §2, §6 and §10 made precise.
+  - **§6 the two post-checks (Q8).** `SCENARIO_OVERLAY` recomputes the overlay through the
+    `scenario_overlay.run_overlay` seam and compares the result with the stored parts and
+    applications. It checks that storage and the part-id mapping are faithful.
+    `SCENARIO_CONSERVATION` checks the overlay's arithmetic. In production `run_overlay` is
+    `apply()` under `exact_context()`, so both checks call the same function. The seam is the
+    only production path, and no flag bypasses it. A test double that tampers with a part
+    therefore fails `SCENARIO_CONSERVATION`, as the BE-25.3 Done-when requires.
+  - **§2 part shape and ids (Q9).** A flow no shock touches keeps its own event id and part
+    path `"0"` (`UNCHANGED`). Every part of a shocked flow, its `STAYED` part included, gets a
+    `uuid5` id of the event id and the part path, under a fixed namespace constant. Part paths
+    are deterministic. `DEPOSIT_WITHDRAWAL` is stored as a `STAYED` part of the original
+    amount plus an `ADDED` part of exactly x × amount on the same day: conservation is exact
+    (the parts sum to amount × (1 + x)) and the drill-down has its "added" row. The `ADDED`
+    part counts toward the 32-part cap. Nothing is rounded.
+  - **§2 and §9 per-shock counts (Q10).** The counts are each shock applied alone to the
+    baseline inputs, which matches the single-shock member runs and the "refused while any
+    shock matches nothing" rule (D-44 §4, §10). Flows due on day 0 are never shocked: the
+    ladder excludes them as `OUTSIDE_BUCKETS`, so moving one into a bucket would break the
+    per-currency total in `SCENARIO_CONSERVATION`. The key `skipped_past_due` keeps its name,
+    so the contract does not change, but it is defined as "due on or before the reporting
+    date (days <= 0)" wherever it is described.
+  - **§10 refusal order and replay (Q13).** A re-run of a stressed run is a new stressed run,
+    so it gets 409 `scenarios_disabled` while `SCENARIOS_ENABLED` is off. `RunRefusal` is an
+    application enum, not a DB CHECK, so this is not a D-01 matter. The order on
+    `POST scenarios/{scenario_id}/run`, as built (`orchestration/router.py:320-328`), is:
+    1. the permission (403, the route dependency);
+    2. the global switches, `scenarios_disabled` then `calculations_disabled` (they reveal
+       nothing);
+    3. the scoped 404 for the scenario or version;
+    4. the Idempotency-Key (409 `idempotency_conflict` for a different request), so a replay
+       returns the same `scenario_run` even after the version has closed;
+    5. for a new key only: `scenario_not_runnable`, the baseline's 404, `invalid_baseline` or
+       `baseline_not_reproducible`, and `no_matching_cashflows`.
+
+    This fits the Phase 24 amendment to D-44 §4 (permission, then the scoped 404, then the
+    state checks). A replay may complete member runs that a crash left missing. Each completed member pins
+    the `scenario_run`'s recorded version, `shocks_sha256`, subset and baseline pins without
+    resolving them again (§8), and each is audited `calculation_run.create`. The route
+    description states this order.
 
 ## D-46 Baseline-versus-stress comparison, per-shock and combined, and its masking (extends D-33)
 
@@ -1626,6 +1674,30 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
        cites.
   5. **Residual risk:** as D-33. Differencing scenarios and the baseline can narrow down
      amounts. This is an open item for the client before production.
+- **Amendment (2026-10-19, Phase 25 build, auto-resolved):** §2 and §3 made precise.
+  - **§3 counting and zeros (Q11).** Inflow and outflow deltas count the distinct, non-zero
+    changed flows of their own direction. The net delta counts the union of the two. A
+    cumulative delta carries the classification of every earlier net delta in its currency and
+    member run, and **stays masked even at zero**: here "stays masked" takes precedence over
+    "zeros stay clear", because a clear zero cumulative after a masked one would give the
+    masked net delta away by differencing. Zero net, inflow and outflow deltas stay clear. A
+    few-flows delta takes its changed flows' classification (D-33, Phase 15 amendment), and
+    is then masked by the caller's clearance: clear for data_steward, masked for
+    risk_analyst.
+  - **§3 "the cumulative deltas after it" (Q17).** Changed flows are counted per bucket, not
+    cumulatively. Once a bucket's net delta is masked, the cumulative delta of **that** bucket
+    and every later bucket in the currency is masked, separately for each member run.
+  - **§2 comparison scope (Q12).**
+    - (a) "Succeeded" members means SUCCEEDED and SUCCEEDED_WITH_WARNINGS. FAILED and BLOCKED
+      members are listed with their status only and never compared.
+    - (b) `breaks_only_combined` is `null` (not assessable) when there is no compared
+      combined run, or when fewer single-shock members were compared than the version has
+      shocks. It is therefore always `null` for k = 1. It is never computed from the singles
+      that remain. So a `null` flag now means either "reads a masked figure" or "not
+      assessable".
+    - (c) The largest changes are ranked across every member's cells, but within each
+      currency: the rank restarts at 1 for each currency. There is no FX and no
+      cross-currency figure (D-35 §1). Only clear deltas are ranked.
 
 ## D-47 Scenario and AI permissions, and the exploration/approval model
 

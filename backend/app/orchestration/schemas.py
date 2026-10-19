@@ -15,11 +15,12 @@ Every response carries `labels.statement` (D-44 §8).
 """
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, WithJsonSchema
 
+from app.calculations.constants import CalculationRunStatus
 from app.core.classification import MaskedValue
 from app.core.text import SafeMultilineText, SafeText
 from app.governance.constants import ProposalDecision
@@ -28,15 +29,18 @@ from app.orchestration.constants import (
     MAX_DECISION_COMMENT,
     MAX_DELAY_DAYS,
     MAX_INSTRUMENT_KEYS,
+    MAX_PARTS_PER_FLOW,
     MAX_SHOCKS,
     MAX_UNAVAILABLE_DAYS,
     MIN_SHOCKS,
     ApprovalLabel,
+    ApprovalState,
     DelayCalendar,
     FlowDirection,
     FlowOrigin,
     ParameterKind,
     ParameterSource,
+    PartChange,
     ScenarioOrigin,
     ScenarioTemplate,
     ScenarioVersionStatus,
@@ -402,4 +406,280 @@ class ScenarioDetail(BaseModel):
         description="Every version, by version number (CLOSED and REJECTED included)."
     )
     scenarios_enabled: bool = Field(description="SCENARIOS_ENABLED: false means 409 on writes.")
+    labels: ScenarioLabels
+
+
+# --- Phase 25: run against a baseline, compare (BE-25.3, BE-25.4; D-45, D-46) ---------------
+
+Value = str | MaskedValue
+
+
+class ScenarioRunCreate(BaseModel):
+    """POST scenarios/{scenario_id}/run (D-45 §10). With k > 1 shocks the engine creates k + 1
+    stressed runs (each shock alone, then all combined), grouped by one `scenario_run`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    version: int = Field(
+        ge=1,
+        le=1_000_000,
+        description="A CONFIRMED_FOR_EXPLORATION or APPROVED_FOR_TEST version.",
+    )
+    baseline_run_id: uuid.UUID = Field(
+        description="A SUCCEEDED (or SUCCEEDED_WITH_WARNINGS), non-stressed maturity_ladder run "
+        "of the caller's tenant. Its pins are reused exactly."
+    )
+
+
+class ShockMatchCount(BaseModel):
+    """Value-free counts of what one shock matches on the baseline's inputs (D-45 §9)."""
+
+    shock_index: int = Field(description="1-based, in declared order.")
+    template: ScenarioTemplate
+    matched_flows: int = Field(description="Distinct cash flows the shock changes.")
+    parts: int = Field(description="Parts the shock produces (a split flow counts each part).")
+    direction_mismatches: int = Field(
+        description="Flows the selector names whose pinned direction is not the template's: "
+        "matched nothing, counted (D-45 §2)."
+    )
+    skipped_past_due: int = Field(
+        description="Matching flows due on or before the reporting date (days <= 0): never "
+        "shocked."
+    )
+    skipped_incomplete: int = Field(description="Matching incomplete flows: never shocked.")
+
+
+class ScenarioValidationOut(BaseModel):
+    """GET .../versions/{version}/validation?baseline_run_id= : a dry run of the overlay on the
+    baseline's pinned inputs. Nothing is written. Counts are public (D-46 §3)."""
+
+    scenario_id: uuid.UUID
+    scenario_version_id: uuid.UUID
+    version: int
+    status: ScenarioVersionStatus
+    baseline_run_id: uuid.UUID
+    shocks: list[ShockMatchCount] = Field(description="One per shock, in declared order.")
+    runnable: bool = Field(
+        description="The version is runnable, the baseline is valid and every shock matches at "
+        "least one flow. The UI disables Run while false."
+    )
+    blocking_reasons: list[str] = Field(
+        description="The run refusal codes a POST would answer now (e.g. scenario_not_runnable, "
+        "invalid_baseline, no_matching_cashflows, scenarios_disabled, "
+        "calculations_disabled); empty when runnable."
+    )
+    run_count: int = Field(description="Runs a POST would create: 1, or k + 1 for k > 1 shocks.")
+    approval_state: ApprovalState | None = Field(
+        description="What the runs would be labelled; None when the version cannot run."
+    )
+    approval_label: ApprovalLabel | None
+    labels: ScenarioLabels
+
+
+class ScenarioRunMember(BaseModel):
+    calculation_run_id: uuid.UUID
+    shock_subset: list[int] = Field(description="1-based shock indexes the run applied.")
+    combined: bool = Field(description="True for the run with every shock (also when k = 1).")
+    status: CalculationRunStatus
+    manifest_sha256: str
+    result_sha256: str | None
+
+
+class ScenarioRunOut(BaseModel):
+    """One `scenario_run` (D-45 §9, append-only): the baseline, the version, the approval state
+    and the member runs, with value-free counts per shock."""
+
+    scenario_run_id: uuid.UUID
+    scenario_id: uuid.UUID
+    scenario_code: str
+    scenario_name: str
+    scenario_version_id: uuid.UUID
+    version: int
+    shocks_sha256: str
+    approval_state: ApprovalState
+    approval_label: ApprovalLabel
+    baseline_run_id: uuid.UUID
+    reporting_date: date
+    members: list[ScenarioRunMember] = Field(
+        description="Single-shock runs by shock index, then the combined run."
+    )
+    shock_counts: list[ShockMatchCount]
+    created_by: str
+    created_at: datetime
+    correlation_id: str | None
+    labels: ScenarioLabels
+
+
+class ScenarioRunPage(BaseModel):
+    items: list[ScenarioRunOut] = Field(description="Newest first.")
+    total: int
+    limit: int
+    offset: int
+    labels: ScenarioLabels
+
+
+class ComparisonBucket(BaseModel):
+    bucket_definition_id: uuid.UUID
+    sequence: int
+    code: str
+    label: str
+    lower_exclusive_days: int
+    upper_inclusive_days: int | None = Field(description="None: the open last bucket.")
+
+
+class ComparisonFigure(BaseModel):
+    """Exact decimal text, or masked (D-46 §3). `delta` = stressed - baseline, exactly."""
+
+    baseline: Value
+    stressed: Value
+    delta: Value
+
+
+class ComparisonCell(BaseModel):
+    """One bucket of one currency under one member run (a shock alone, or combined)."""
+
+    calculation_run_id: uuid.UUID
+    shock_subset: list[int]
+    combined: bool
+    inflows: ComparisonFigure
+    outflows: ComparisonFigure
+    net_gap: ComparisonFigure
+    cumulative_gap: ComparisonFigure
+    changed_flow_count: int = Field(
+        description="Distinct non-zero cash flows the shocks changed in this bucket (parts of "
+        "one flow count once). Public (D-46 §3)."
+    )
+    turns_negative_net: bool | None = Field(
+        description="Baseline net >= 0 and stressed net < 0; null when it reads a masked figure."
+    )
+    turns_negative_cumulative: bool | None = Field(
+        description="Baseline cumulative >= 0 and stressed < 0; null when masked."
+    )
+
+
+class ComparisonRow(BaseModel):
+    bucket_code: str
+    bucket_sequence: int
+    bucket_label: str
+    cells: list[ComparisonCell] = Field(
+        description="Single-shock runs by shock index, then the combined run."
+    )
+    breaks_only_combined: bool | None = Field(
+        description="The combined net gap is negative while the baseline and every single-shock "
+        "net gap are not; null when it reads a masked figure, or when fewer single-shock runs "
+        "were compared than the version has shocks (always null for one shock)."
+    )
+
+
+class FirstNegativeCumulative(BaseModel):
+    """The first bucket whose cumulative gap is negative (illustrative, D-46 §2)."""
+
+    shock_subset: list[int]
+    combined: bool
+    baseline_bucket_code: str | MaskedValue | None = Field(
+        description="None: never negative; masked when the deciding figure is masked."
+    )
+    stressed_bucket_code: str | MaskedValue | None
+
+
+class ComparisonCurrency(BaseModel):
+    currency: str
+    rows: list[ComparisonRow] = Field(description="Every bucket, in bucket order.")
+    first_negative_cumulative: list[FirstNegativeCumulative] = Field(
+        description="One per member run."
+    )
+
+
+class LargestChange(BaseModel):
+    """Ranked by absolute net delta among clear deltas only; masked deltas are never ranked.
+    Ranked per currency (no FX): the rank restarts at 1 in each currency, at most 10 each."""
+
+    rank: int = Field(description="1-based, within its currency.")
+    currency: str
+    bucket_code: str
+    bucket_sequence: int
+    calculation_run_id: uuid.UUID
+    shock_subset: list[int]
+    combined: bool
+    net_gap_delta: str = Field(description="Exact decimal text; always clear.")
+
+
+class ComparisonSummary(BaseModel):
+    """D-46 §2: a deterministic, templated (non-AI) summary citing only clear figures. The
+    fallback for AI explanations (D-51)."""
+
+    template_version: str
+    sentences: list[str]
+
+
+class ScenarioComparisonOut(BaseModel):
+    """GET scenarios/{scenario_id}/comparison?scenario_run_id= (D-46): computed on read from the
+    immutable ladder rows of the baseline and of every member run. Per currency, no FX and no
+    cross-currency total."""
+
+    scenario_run_id: uuid.UUID
+    scenario_id: uuid.UUID
+    scenario_version_id: uuid.UUID
+    version: int
+    approval_state: ApprovalState
+    approval_label: ApprovalLabel
+    baseline_run_id: uuid.UUID
+    reporting_date: date
+    members: list[ScenarioRunMember]
+    buckets: list[ComparisonBucket]
+    currencies: list[ComparisonCurrency]
+    largest_changes: list[LargestChange]
+    summary: ComparisonSummary
+    min_aggregate_count: int = Field(
+        description="CALC_MIN_AGGREGATE_COUNT (D-33, PROVISIONAL): a delta changed by fewer "
+        "distinct non-zero flows is masked for a role not cleared for the amounts."
+    )
+    illustrative: bool
+    labels: ScenarioLabels
+
+
+class ContributionSourceLineage(BaseModel):
+    """cash-flow event -> canonical record -> source row -> import (D-31 §6)."""
+
+    cashflow_event_id: uuid.UUID
+    canonical_record_id: uuid.UUID
+    import_id: uuid.UUID
+    source_record_id: uuid.UUID
+    source_ordinal: int
+
+
+class ScenarioContributionOut(BaseModel):
+    """One changed part (D-46 §4). Amounts are confidential (masked for risk_analyst); days,
+    buckets and templates are internal."""
+
+    scenario_contribution_id: uuid.UUID
+    calculation_run_id: uuid.UUID
+    shock_subset: list[int]
+    cashflow_event_id: uuid.UUID
+    part_path: str = Field(
+        description=f"Deterministic part path (at most {MAX_PARTS_PER_FLOW} parts per flow)."
+    )
+    part_id: uuid.UUID = Field(description="uuid5 of the event id and the part path.")
+    instrument_business_key: Value | None
+    shock_sequences: list[int] = Field(description="The shocks that touched this part, in order.")
+    templates: list[ScenarioTemplate]
+    change: PartChange
+    direction: FlowDirection
+    origin: FlowOrigin
+    currency: str
+    days_before: int
+    days_after: int
+    bucket_code_before: str
+    bucket_code_after: str
+    amount: Value = Field(description="Exact decimal text in `currency`, or masked (D-33).")
+    classification: str
+    lineage: ContributionSourceLineage
+
+
+class ScenarioContributionPage(BaseModel):
+    scenario_run_id: uuid.UUID
+    items: list[ScenarioContributionOut]
+    total: int
+    limit: int
+    offset: int
     labels: ScenarioLabels

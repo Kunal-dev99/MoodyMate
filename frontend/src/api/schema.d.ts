@@ -127,7 +127,9 @@ export interface paths {
          *     `module_not_available` (absent, PLANNED, not implemented, or a rule without an ACTIVE
          *     version), 409 `calculations_disabled`, 409 `idempotency_conflict`; each audited DENIED. A
          *     replay whose run is still RUNNING after CALC_RUN_STALE_SECONDS ends it FAILED
-         *     (ENGINE_ERROR) and returns it.
+         *     (ENGINE_ERROR) and returns it. A re-run of a stressed run (Phase 25, D-45 §8) re-pins its
+         *     scenario version and shock subset, even once the version is CLOSED; while
+         *     SCENARIOS_ENABLED is off it is refused 409 `scenarios_disabled`.
          */
         post: operations["createCalculationRun"];
         delete?: never;
@@ -146,7 +148,10 @@ export interface paths {
         /**
          * Get Calculation Run
          * @description One run: its manifest with every pinned id and version, its input refs, warnings and
-         *     outcome counts. 404 alike for an absent and a foreign id (D-04).
+         *     outcome counts. A stressed run's manifest.scenario.shocks mask each picked instrument key
+         *     the caller is not cleared for as a MaskedValue (D-33, as the scenario detail does);
+         *     shocks_sha256 is the pin over the stored keys. 404 alike for an absent and a foreign id
+         *     (D-04).
          */
         get: operations["getCalculationRun"];
         put?: never;
@@ -1098,6 +1103,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/scenario-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Scenario Runs
+         * @description The caller's tenant's scenario runs, newest first, with their member runs (D-45 §9).
+         */
+        get: operations["listScenarioRuns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/scenario-templates": {
         parameters: {
             query?: never;
@@ -1161,6 +1186,83 @@ export interface paths {
         get: operations["getScenario"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/scenarios/{scenario_id}/comparison": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Scenario Comparison
+         * @description Baseline versus stress per currency and bucket (D-46), for each shock alone and
+         *     combined: exact deltas, turns-negative flags, combined-only breaks, the largest changes and
+         *     a templated (non-AI) summary. Masked per D-33 and D-46 §3. 404 `not_found` alike for an
+         *     absent or foreign scenario or scenario run, or a run of another scenario.
+         */
+        get: operations["getScenarioComparison"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/scenarios/{scenario_id}/comparison/contributions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Scenario Comparison Contributions
+         * @description Drill-down (D-46 §4): the changed parts (moved, stayed, added) of one member run, with
+         *     days and buckets before and after and source-row lineage. Amounts masked per D-33.
+         */
+        get: operations["listScenarioComparisonContributions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/scenarios/{scenario_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Scenario
+         * @description Run a version against a baseline maturity_ladder run, synchronously (D-45). Each
+         *     stressed run copies the baseline's pins exactly, applies the shocks to a scenario-specific
+         *     copy of the inputs, runs the unchanged module and the SCENARIO_OVERLAY and
+         *     SCENARIO_CONSERVATION post-checks. k > 1 shocks give k + 1 runs (each alone, then
+         *     combined). No AI is involved. Audited `scenario.run`, and `calculation_run.create` per run.
+         *     Refusals, audited DENIED with nothing written, checked in this order (the first that
+         *     applies answers): 409 `scenarios_disabled`; 409 `calculations_disabled`; 404 `not_found`
+         *     (scenario or version); 409 `idempotency_conflict` (the key was used for a different
+         *     version, shocks or baseline); then, for a new key only: 409 `scenario_not_runnable`; 404
+         *     `not_found` (baseline); 409 `invalid_baseline` or `baseline_not_reproducible`; 409
+         *     `no_matching_cashflows`. A replay of the key returns the original scenario_run without
+         *     re-checking the version's status (it may be CLOSED since) and completes any member run a
+         *     crash left out, on the run's recorded pins (version, shocks_sha256, approval state,
+         *     baseline), each created member audited `calculation_run.create`.
+         */
+        post: operations["runScenario"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1298,6 +1400,28 @@ export interface paths {
          *     `invalid_status`; 422 `ai_review_required`, `unacknowledged_defaults`.
          */
         post: operations["submitScenarioVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/scenarios/{scenario_id}/versions/{version}/validation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Validate Scenario Run
+         * @description Dry run (D-45 §2, §10): the overlay on the baseline's pinned inputs, with value-free
+         *     match counts per shock and the refusal codes a run would answer now. Nothing is written.
+         *     404 `not_found` alike for an absent or foreign scenario, version or baseline run (D-04).
+         */
+        get: operations["validateScenarioRun"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1563,6 +1687,13 @@ export interface components {
          * @enum {string}
          */
         ApprovalLabel: "Exploration, not approved" | "Approved scenario (illustrative)";
+        /**
+         * ApprovalState
+         * @description D-45 §4: the approval state a stressed run pins (from its version's status at run
+         *     time). EXPLORATION runs are never authoritative (D-47 §3).
+         * @enum {string}
+         */
+        ApprovalState: "EXPLORATION" | "APPROVED";
         /** ArtifactOut */
         ArtifactOut: {
             /**
@@ -2065,6 +2196,118 @@ export interface components {
              */
             value_count: number;
         };
+        /** ComparisonBucket */
+        ComparisonBucket: {
+            /**
+             * Bucket Definition Id
+             * Format: uuid
+             */
+            bucket_definition_id: string;
+            /** Code */
+            code: string;
+            /** Label */
+            label: string;
+            /** Lower Exclusive Days */
+            lower_exclusive_days: number;
+            /** Sequence */
+            sequence: number;
+            /**
+             * Upper Inclusive Days
+             * @description None: the open last bucket.
+             */
+            upper_inclusive_days: number | null;
+        };
+        /**
+         * ComparisonCell
+         * @description One bucket of one currency under one member run (a shock alone, or combined).
+         */
+        ComparisonCell: {
+            /**
+             * Calculation Run Id
+             * Format: uuid
+             */
+            calculation_run_id: string;
+            /**
+             * Changed Flow Count
+             * @description Distinct non-zero cash flows the shocks changed in this bucket (parts of one flow count once). Public (D-46 §3).
+             */
+            changed_flow_count: number;
+            /** Combined */
+            combined: boolean;
+            cumulative_gap: components["schemas"]["ComparisonFigure"];
+            inflows: components["schemas"]["ComparisonFigure"];
+            net_gap: components["schemas"]["ComparisonFigure"];
+            outflows: components["schemas"]["ComparisonFigure"];
+            /** Shock Subset */
+            shock_subset: number[];
+            /**
+             * Turns Negative Cumulative
+             * @description Baseline cumulative >= 0 and stressed < 0; null when masked.
+             */
+            turns_negative_cumulative: boolean | null;
+            /**
+             * Turns Negative Net
+             * @description Baseline net >= 0 and stressed net < 0; null when it reads a masked figure.
+             */
+            turns_negative_net: boolean | null;
+        };
+        /** ComparisonCurrency */
+        ComparisonCurrency: {
+            /** Currency */
+            currency: string;
+            /**
+             * First Negative Cumulative
+             * @description One per member run.
+             */
+            first_negative_cumulative: components["schemas"]["FirstNegativeCumulative"][];
+            /**
+             * Rows
+             * @description Every bucket, in bucket order.
+             */
+            rows: components["schemas"]["ComparisonRow"][];
+        };
+        /**
+         * ComparisonFigure
+         * @description Exact decimal text, or masked (D-46 §3). `delta` = stressed - baseline, exactly.
+         */
+        ComparisonFigure: {
+            /** Baseline */
+            baseline: string | components["schemas"]["MaskedValue"];
+            /** Delta */
+            delta: string | components["schemas"]["MaskedValue"];
+            /** Stressed */
+            stressed: string | components["schemas"]["MaskedValue"];
+        };
+        /** ComparisonRow */
+        ComparisonRow: {
+            /**
+             * Breaks Only Combined
+             * @description The combined net gap is negative while the baseline and every single-shock net gap are not; null when it reads a masked figure, or when fewer single-shock runs were compared than the version has shocks (always null for one shock).
+             */
+            breaks_only_combined: boolean | null;
+            /** Bucket Code */
+            bucket_code: string;
+            /** Bucket Label */
+            bucket_label: string;
+            /** Bucket Sequence */
+            bucket_sequence: number;
+            /**
+             * Cells
+             * @description Single-shock runs by shock index, then the combined run.
+             */
+            cells: components["schemas"]["ComparisonCell"][];
+        };
+        /**
+         * ComparisonSummary
+         * @description D-46 §2: a deterministic, templated (non-AI) summary citing only clear figures. The
+         *     fallback for AI explanations (D-51).
+         */
+        ComparisonSummary: {
+            /** Sentences */
+            sentences: string[];
+            /** Template Version */
+            template_version: string;
+        };
         /**
          * Compatibility
          * @description How a version change affects consumers, least to most severe.
@@ -2193,6 +2436,34 @@ export interface components {
             instrument_id: string | null;
             /** Instrument Version Id */
             instrument_version_id: string | null;
+            /** Source Ordinal */
+            source_ordinal: number;
+            /**
+             * Source Record Id
+             * Format: uuid
+             */
+            source_record_id: string;
+        };
+        /**
+         * ContributionSourceLineage
+         * @description cash-flow event -> canonical record -> source row -> import (D-31 §6).
+         */
+        ContributionSourceLineage: {
+            /**
+             * Canonical Record Id
+             * Format: uuid
+             */
+            canonical_record_id: string;
+            /**
+             * Cashflow Event Id
+             * Format: uuid
+             */
+            cashflow_event_id: string;
+            /**
+             * Import Id
+             * Format: uuid
+             */
+            import_id: string;
             /** Source Ordinal */
             source_ordinal: number;
             /**
@@ -2978,6 +3249,23 @@ export interface components {
          * @enum {string}
          */
         FieldType: "STRING" | "INTEGER" | "DECIMAL" | "BOOLEAN" | "DATE" | "TIMESTAMP";
+        /**
+         * FirstNegativeCumulative
+         * @description The first bucket whose cumulative gap is negative (illustrative, D-46 §2).
+         */
+        FirstNegativeCumulative: {
+            /**
+             * Baseline Bucket Code
+             * @description None: never negative; masked when the deciding figure is masked.
+             */
+            baseline_bucket_code: string | components["schemas"]["MaskedValue"] | null;
+            /** Combined */
+            combined: boolean;
+            /** Shock Subset */
+            shock_subset: number[];
+            /** Stressed Bucket Code */
+            stressed_bucket_code: string | components["schemas"]["MaskedValue"] | null;
+        };
         /**
          * FlowDirection
          * @enum {string}
@@ -3937,6 +4225,38 @@ export interface components {
             outflows_contractual: string | components["schemas"]["MaskedValue"];
         };
         /**
+         * LargestChange
+         * @description Ranked by absolute net delta among clear deltas only; masked deltas are never ranked.
+         *     Ranked per currency (no FX): the rank restarts at 1 in each currency, at most 10 each.
+         */
+        LargestChange: {
+            /** Bucket Code */
+            bucket_code: string;
+            /** Bucket Sequence */
+            bucket_sequence: number;
+            /**
+             * Calculation Run Id
+             * Format: uuid
+             */
+            calculation_run_id: string;
+            /** Combined */
+            combined: boolean;
+            /** Currency */
+            currency: string;
+            /**
+             * Net Gap Delta
+             * @description Exact decimal text; always clear.
+             */
+            net_gap_delta: string;
+            /**
+             * Rank
+             * @description 1-based, within its currency.
+             */
+            rank: number;
+            /** Shock Subset */
+            shock_subset: number[];
+        };
+        /**
          * LcrWarningCode
          * @description `lcr_result.warning_codes` (BE-17.2): value-free warnings about one currency's LCR.
          *     Kept on the LCR row (a closed list, CHECK-constrained by migration 0020) because
@@ -4264,6 +4584,47 @@ export interface components {
              * Format: uuid
              */
             rule_version_id: string;
+            /** Version */
+            version: number;
+        };
+        /**
+         * ManifestScenario
+         * @description D-45 §4: the `scenario` section of a stressed run's manifest. Non-stressed manifests
+         *     have no such key (their stored manifest keeps exactly the Feature 03 key set).
+         */
+        ManifestScenario: {
+            /**
+             * Approval State
+             * @enum {string}
+             */
+            approval_state: "EXPLORATION" | "APPROVED";
+            /**
+             * Baseline Run Id
+             * Format: uuid
+             */
+            baseline_run_id: string;
+            /**
+             * Scenario Id
+             * Format: uuid
+             */
+            scenario_id: string;
+            /**
+             * Scenario Version Id
+             * Format: uuid
+             */
+            scenario_version_id: string;
+            /**
+             * Shock Subset
+             * @description 1-based shock indexes this run applied.
+             */
+            shock_subset: number[];
+            /**
+             * Shocks
+             * @description The version's shocks as pinned. Each picked selector.instrument_keys entry the caller is not cleared for (the instrument_id field's classification, D-33) reads as a MaskedValue, as on the scenario detail; shocks_sha256 is the pin over the stored keys.
+             */
+            shocks: (components["schemas"]["DelayedInflowsShock"] | components["schemas"]["DepositWithdrawalShock"] | components["schemas"]["FundingUnavailableShock"])[];
+            /** Shocks Sha256 */
+            shocks_sha256: string;
             /** Version */
             version: number;
         };
@@ -5003,6 +5364,12 @@ export interface components {
             params?: components["schemas"]["ParseDecimalParams"];
         };
         /**
+         * PartChange
+         * @description D-46 §4: what a shock did to one part of a cash flow (the drill-down).
+         * @enum {string}
+         */
+        PartChange: "MOVED" | "STAYED" | "ADDED" | "UNCHANGED";
+        /**
          * Permission
          * @enum {string}
          */
@@ -5036,7 +5403,7 @@ export interface components {
          * @description The engine's post-run checks (D-31 §3, Arch §6.2 step 5).
          * @enum {string}
          */
-        PostCheck: "COVERAGE" | "BUCKET_DEFINED" | "BUCKET_TOTALS" | "CUMULATIVE_GAP" | "HQLA_TOTALS" | "LCR_FIGURES" | "RERUN_REPRODUCED";
+        PostCheck: "COVERAGE" | "BUCKET_DEFINED" | "BUCKET_TOTALS" | "CUMULATIVE_GAP" | "HQLA_TOTALS" | "LCR_FIGURES" | "RERUN_REPRODUCED" | "SCENARIO_OVERLAY" | "SCENARIO_CONSERVATION";
         /** PostCheckOut */
         PostCheckOut: {
             check: components["schemas"]["PostCheck"];
@@ -6089,6 +6456,8 @@ export interface components {
              * Format: uuid
              */
             run_id: string;
+            /** @description Stressed runs only (Phase 25); null otherwise. */
+            scenario?: components["schemas"]["RunScenarioRef"] | null;
             /**
              * Started At
              * Format: date-time
@@ -6125,6 +6494,8 @@ export interface components {
              */
             reporting_date: string;
             rule_set: components["schemas"]["ManifestRuleSet"];
+            /** @description Stressed runs only (Phase 25, D-45 §4); absent from non-stressed manifests (stored and returned), which keep exactly their Feature 03 key set. */
+            scenario?: components["schemas"]["ManifestScenario"] | null;
         };
         /** RunModuleRef */
         RunModuleRef: {
@@ -6216,6 +6587,55 @@ export interface components {
              */
             rerun_of: string;
         };
+        /**
+         * RunScenarioRef
+         * @description Phase 25 (D-45 §4, Feature 05 endpoint table): set on stressed runs only; null on every
+         *     other run. An additive field; existing permissions are unchanged.
+         */
+        RunScenarioRef: {
+            /**
+             * Approval Label
+             * @description 'Exploration, not approved' or 'Approved scenario (illustrative)'.
+             */
+            approval_label: string;
+            /**
+             * Approval State
+             * @enum {string}
+             */
+            approval_state: "EXPLORATION" | "APPROVED";
+            /**
+             * Baseline Run Id
+             * Format: uuid
+             */
+            baseline_run_id: string;
+            /**
+             * Combined
+             * @description True for the run with every shock of the version.
+             */
+            combined: boolean;
+            /**
+             * Scenario Id
+             * Format: uuid
+             */
+            scenario_id: string;
+            /**
+             * Scenario Run Id
+             * Format: uuid
+             */
+            scenario_run_id: string;
+            /**
+             * Scenario Version Id
+             * Format: uuid
+             */
+            scenario_version_id: string;
+            /**
+             * Shock Subset
+             * @description 1-based shock indexes this run applied.
+             */
+            shock_subset: number[];
+            /** Version */
+            version: number;
+        };
         /** RunSummary */
         RunSummary: {
             /**
@@ -6270,6 +6690,8 @@ export interface components {
              * Format: uuid
              */
             run_id: string;
+            /** @description Stressed runs only (Phase 25); null otherwise. */
+            scenario?: components["schemas"]["RunScenarioRef"] | null;
             /**
              * Started At
              * Format: date-time
@@ -6306,6 +6728,142 @@ export interface components {
             /** Shock Index */
             shock_index: number;
             template: components["schemas"]["ScenarioTemplate"];
+        };
+        /**
+         * ScenarioComparisonOut
+         * @description GET scenarios/{scenario_id}/comparison?scenario_run_id= (D-46): computed on read from the
+         *     immutable ladder rows of the baseline and of every member run. Per currency, no FX and no
+         *     cross-currency total.
+         */
+        ScenarioComparisonOut: {
+            approval_label: components["schemas"]["ApprovalLabel"];
+            approval_state: components["schemas"]["ApprovalState"];
+            /**
+             * Baseline Run Id
+             * Format: uuid
+             */
+            baseline_run_id: string;
+            /** Buckets */
+            buckets: components["schemas"]["ComparisonBucket"][];
+            /** Currencies */
+            currencies: components["schemas"]["ComparisonCurrency"][];
+            /** Illustrative */
+            illustrative: boolean;
+            labels: components["schemas"]["ScenarioLabels"];
+            /** Largest Changes */
+            largest_changes: components["schemas"]["LargestChange"][];
+            /** Members */
+            members: components["schemas"]["ScenarioRunMember"][];
+            /**
+             * Min Aggregate Count
+             * @description CALC_MIN_AGGREGATE_COUNT (D-33, PROVISIONAL): a delta changed by fewer distinct non-zero flows is masked for a role not cleared for the amounts.
+             */
+            min_aggregate_count: number;
+            /**
+             * Reporting Date
+             * Format: date
+             */
+            reporting_date: string;
+            /**
+             * Scenario Id
+             * Format: uuid
+             */
+            scenario_id: string;
+            /**
+             * Scenario Run Id
+             * Format: uuid
+             */
+            scenario_run_id: string;
+            /**
+             * Scenario Version Id
+             * Format: uuid
+             */
+            scenario_version_id: string;
+            summary: components["schemas"]["ComparisonSummary"];
+            /** Version */
+            version: number;
+        };
+        /**
+         * ScenarioContributionOut
+         * @description One changed part (D-46 §4). Amounts are confidential (masked for risk_analyst); days,
+         *     buckets and templates are internal.
+         */
+        ScenarioContributionOut: {
+            /**
+             * Amount
+             * @description Exact decimal text in `currency`, or masked (D-33).
+             */
+            amount: string | components["schemas"]["MaskedValue"];
+            /** Bucket Code After */
+            bucket_code_after: string;
+            /** Bucket Code Before */
+            bucket_code_before: string;
+            /**
+             * Calculation Run Id
+             * Format: uuid
+             */
+            calculation_run_id: string;
+            /**
+             * Cashflow Event Id
+             * Format: uuid
+             */
+            cashflow_event_id: string;
+            change: components["schemas"]["PartChange"];
+            /** Classification */
+            classification: string;
+            /** Currency */
+            currency: string;
+            /** Days After */
+            days_after: number;
+            /** Days Before */
+            days_before: number;
+            direction: components["schemas"]["FlowDirection"];
+            /** Instrument Business Key */
+            instrument_business_key: string | components["schemas"]["MaskedValue"] | null;
+            lineage: components["schemas"]["ContributionSourceLineage"];
+            origin: components["schemas"]["FlowOrigin"];
+            /**
+             * Part Id
+             * Format: uuid
+             * @description uuid5 of the event id and the part path.
+             */
+            part_id: string;
+            /**
+             * Part Path
+             * @description Deterministic part path (at most 32 parts per flow).
+             */
+            part_path: string;
+            /**
+             * Scenario Contribution Id
+             * Format: uuid
+             */
+            scenario_contribution_id: string;
+            /**
+             * Shock Sequences
+             * @description The shocks that touched this part, in order.
+             */
+            shock_sequences: number[];
+            /** Shock Subset */
+            shock_subset: number[];
+            /** Templates */
+            templates: components["schemas"]["ScenarioTemplate"][];
+        };
+        /** ScenarioContributionPage */
+        ScenarioContributionPage: {
+            /** Items */
+            items: components["schemas"]["ScenarioContributionOut"][];
+            labels: components["schemas"]["ScenarioLabels"];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /**
+             * Scenario Run Id
+             * Format: uuid
+             */
+            scenario_run_id: string;
+            /** Total */
+            total: number;
         };
         /**
          * ScenarioCreate
@@ -6389,6 +6947,121 @@ export interface components {
             /** Total */
             total: number;
         };
+        /**
+         * ScenarioRunCreate
+         * @description POST scenarios/{scenario_id}/run (D-45 §10). With k > 1 shocks the engine creates k + 1
+         *     stressed runs (each shock alone, then all combined), grouped by one `scenario_run`.
+         */
+        ScenarioRunCreate: {
+            /**
+             * Baseline Run Id
+             * Format: uuid
+             * @description A SUCCEEDED (or SUCCEEDED_WITH_WARNINGS), non-stressed maturity_ladder run of the caller's tenant. Its pins are reused exactly.
+             */
+            baseline_run_id: string;
+            /**
+             * Version
+             * @description A CONFIRMED_FOR_EXPLORATION or APPROVED_FOR_TEST version.
+             */
+            version: number;
+        };
+        /** ScenarioRunMember */
+        ScenarioRunMember: {
+            /**
+             * Calculation Run Id
+             * Format: uuid
+             */
+            calculation_run_id: string;
+            /**
+             * Combined
+             * @description True for the run with every shock (also when k = 1).
+             */
+            combined: boolean;
+            /** Manifest Sha256 */
+            manifest_sha256: string;
+            /** Result Sha256 */
+            result_sha256: string | null;
+            /**
+             * Shock Subset
+             * @description 1-based shock indexes the run applied.
+             */
+            shock_subset: number[];
+            status: components["schemas"]["CalculationRunStatus"];
+        };
+        /**
+         * ScenarioRunOut
+         * @description One `scenario_run` (D-45 §9, append-only): the baseline, the version, the approval state
+         *     and the member runs, with value-free counts per shock.
+         */
+        ScenarioRunOut: {
+            approval_label: components["schemas"]["ApprovalLabel"];
+            approval_state: components["schemas"]["ApprovalState"];
+            /**
+             * Baseline Run Id
+             * Format: uuid
+             */
+            baseline_run_id: string;
+            /** Correlation Id */
+            correlation_id: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by: string;
+            labels: components["schemas"]["ScenarioLabels"];
+            /**
+             * Members
+             * @description Single-shock runs by shock index, then the combined run.
+             */
+            members: components["schemas"]["ScenarioRunMember"][];
+            /**
+             * Reporting Date
+             * Format: date
+             */
+            reporting_date: string;
+            /** Scenario Code */
+            scenario_code: string;
+            /**
+             * Scenario Id
+             * Format: uuid
+             */
+            scenario_id: string;
+            /** Scenario Name */
+            scenario_name: string;
+            /**
+             * Scenario Run Id
+             * Format: uuid
+             */
+            scenario_run_id: string;
+            /**
+             * Scenario Version Id
+             * Format: uuid
+             */
+            scenario_version_id: string;
+            /** Shock Counts */
+            shock_counts: components["schemas"]["ShockMatchCount"][];
+            /** Shocks Sha256 */
+            shocks_sha256: string;
+            /** Version */
+            version: number;
+        };
+        /** ScenarioRunPage */
+        ScenarioRunPage: {
+            /**
+             * Items
+             * @description Newest first.
+             */
+            items: components["schemas"]["ScenarioRunOut"][];
+            labels: components["schemas"]["ScenarioLabels"];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /** Total */
+            total: number;
+        };
         /** ScenarioSummary */
         ScenarioSummary: {
             /**
@@ -6430,6 +7103,55 @@ export interface components {
          * @enum {string}
          */
         ScenarioTemplate: "DELAYED_INFLOWS" | "DEPOSIT_WITHDRAWAL" | "FUNDING_UNAVAILABLE";
+        /**
+         * ScenarioValidationOut
+         * @description GET .../versions/{version}/validation?baseline_run_id= : a dry run of the overlay on the
+         *     baseline's pinned inputs. Nothing is written. Counts are public (D-46 §3).
+         */
+        ScenarioValidationOut: {
+            approval_label: components["schemas"]["ApprovalLabel"] | null;
+            /** @description What the runs would be labelled; None when the version cannot run. */
+            approval_state: components["schemas"]["ApprovalState"] | null;
+            /**
+             * Baseline Run Id
+             * Format: uuid
+             */
+            baseline_run_id: string;
+            /**
+             * Blocking Reasons
+             * @description The run refusal codes a POST would answer now (e.g. scenario_not_runnable, invalid_baseline, no_matching_cashflows, scenarios_disabled, calculations_disabled); empty when runnable.
+             */
+            blocking_reasons: string[];
+            labels: components["schemas"]["ScenarioLabels"];
+            /**
+             * Run Count
+             * @description Runs a POST would create: 1, or k + 1 for k > 1 shocks.
+             */
+            run_count: number;
+            /**
+             * Runnable
+             * @description The version is runnable, the baseline is valid and every shock matches at least one flow. The UI disables Run while false.
+             */
+            runnable: boolean;
+            /**
+             * Scenario Id
+             * Format: uuid
+             */
+            scenario_id: string;
+            /**
+             * Scenario Version Id
+             * Format: uuid
+             */
+            scenario_version_id: string;
+            /**
+             * Shocks
+             * @description One per shock, in declared order.
+             */
+            shocks: components["schemas"]["ShockMatchCount"][];
+            status: components["schemas"]["ScenarioVersionStatus"];
+            /** Version */
+            version: number;
+        };
         /**
          * ScenarioVersionClose
          * @description Any status but DRAFT -> CLOSED: the author (scenario:propose) for a non-approved
@@ -6812,6 +7534,43 @@ export interface components {
          * @enum {string}
          */
         SchemaVersionStatus: "DRAFT" | "IN_REVIEW" | "APPROVED" | "ACTIVE" | "DEPRECATED" | "RETIRED" | "REJECTED";
+        /**
+         * ShockMatchCount
+         * @description Value-free counts of what one shock matches on the baseline's inputs (D-45 §9).
+         */
+        ShockMatchCount: {
+            /**
+             * Direction Mismatches
+             * @description Flows the selector names whose pinned direction is not the template's: matched nothing, counted (D-45 §2).
+             */
+            direction_mismatches: number;
+            /**
+             * Matched Flows
+             * @description Distinct cash flows the shock changes.
+             */
+            matched_flows: number;
+            /**
+             * Parts
+             * @description Parts the shock produces (a split flow counts each part).
+             */
+            parts: number;
+            /**
+             * Shock Index
+             * @description 1-based, in declared order.
+             */
+            shock_index: number;
+            /**
+             * Skipped Incomplete
+             * @description Matching incomplete flows: never shocked.
+             */
+            skipped_incomplete: number;
+            /**
+             * Skipped Past Due
+             * @description Matching flows due on or before the reporting date (days <= 0): never shocked.
+             */
+            skipped_past_due: number;
+            template: components["schemas"]["ScenarioTemplate"];
+        };
         /**
          * ShockSelector
          * @description The common optional selector fields (D-44 §3).
@@ -7554,6 +8313,8 @@ export interface operations {
                 /** @description Runs of this module (any version). */
                 module_code?: string | null;
                 status?: components["schemas"]["CalculationRunStatus"] | null;
+                /** @description true: stressed runs only (Phase 25, D-45 §4); false: non-stressed runs only (e.g. a baseline picker); omitted: every run. */
+                stressed?: boolean | null;
             };
             header?: never;
             path?: never;
@@ -9718,6 +10479,50 @@ export interface operations {
             };
         };
     };
+    listScenarioRuns: {
+        parameters: {
+            query?: {
+                scenario_id?: string | null;
+                baseline_run_id?: string | null;
+                approval_state?: components["schemas"]["ApprovalState"] | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScenarioRunPage"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     listScenarioTemplates: {
         parameters: {
             query?: never;
@@ -9862,6 +10667,152 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ScenarioDetail"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    getScenarioComparison: {
+        parameters: {
+            query: {
+                scenario_run_id: string;
+            };
+            header?: never;
+            path: {
+                scenario_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScenarioComparisonOut"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    listScenarioComparisonContributions: {
+        parameters: {
+            query: {
+                scenario_run_id: string;
+                currency?: string | null;
+                bucket_code?: string | null;
+                /** @description 1-based shock indexes of the member run; default the combined run. */
+                shock_subset?: number[] | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                scenario_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScenarioContributionPage"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    runScenario: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Unique per run request (per user). A retry with the same key and the same body returns the original scenario_run; with a different body, 409 idempotency_conflict. */
+                "Idempotency-Key": string;
+            };
+            path: {
+                scenario_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScenarioRunCreate"];
+            };
+        };
+        responses: {
+            /** @description Idempotent replay: this key was used for the same request; the original scenario_run is returned (header Idempotent-Replayed: true). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScenarioRunOut"];
+                };
+            };
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScenarioRunOut"];
                 };
             };
             /** @description Client error (standard envelope) */
@@ -10131,6 +11082,50 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ScenarioVersionOut"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    validateScenarioRun: {
+        parameters: {
+            query: {
+                /** @description The baseline maturity_ladder run. */
+                baseline_run_id: string;
+            };
+            header?: never;
+            path: {
+                scenario_id: string;
+                version: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScenarioValidationOut"];
                 };
             };
             /** @description Client error (standard envelope) */

@@ -3,7 +3,8 @@
 The only code that touches the DB session for this module. Every query applies the
 principal's scope (D-04): every scenario table carries `tenant_id`, and every query here
 filters on the caller's tenant. Nothing here deletes; the only updates are a DRAFT's edit and
-a version's status moves (D-44 §5), which the 0026 trigger guards as well.
+a version's status moves (D-44 §5), which the 0026 trigger guards as well. Scenario runs
+(Phase 25) are inserted once and never changed (the 0027 trigger).
 """
 
 import uuid
@@ -15,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.repository import DataScope
 from app.orchestration.constants import ScenarioOrigin, ScenarioVersionStatus
-from app.orchestration.models import Scenario, ScenarioChange, ScenarioVersion
+from app.orchestration.models import Scenario, ScenarioChange, ScenarioRun, ScenarioVersion
 
 
 class ScenarioRepository:
@@ -151,5 +152,69 @@ class ScenarioRepository:
                 ScenarioChange.scenario_version_id.in_(version_ids),
             )
             .order_by(ScenarioChange.scenario_version_id, ScenarioChange.shock_index)
+        )
+        return list(result.scalars())
+
+    # --- scenario runs (Phase 25, D-45 §9) ------------------------------------------------
+
+    async def scenario_run(self, scenario_run_id: uuid.UUID) -> ScenarioRun | None:
+        result = await self.session.execute(
+            select(ScenarioRun).where(
+                ScenarioRun.id == scenario_run_id, ScenarioRun.tenant_id == self.scope.tenant_id
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def scenario_run_by_key(self, actor: str, key: str) -> ScenarioRun | None:
+        result = await self.session.execute(
+            select(ScenarioRun).where(
+                ScenarioRun.tenant_id == self.scope.tenant_id,
+                ScenarioRun.created_by == actor,
+                ScenarioRun.idempotency_key == key,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def scenario_run_page(
+        self,
+        scenario_id: uuid.UUID | None,
+        baseline_run_id: uuid.UUID | None,
+        approval_state: str | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[ScenarioRun], int]:
+        query = select(ScenarioRun).where(ScenarioRun.tenant_id == self.scope.tenant_id)
+        if scenario_id is not None:
+            query = query.where(ScenarioRun.scenario_id == scenario_id)
+        if baseline_run_id is not None:
+            query = query.where(ScenarioRun.baseline_run_id == baseline_run_id)
+        if approval_state is not None:
+            query = query.where(ScenarioRun.approval_state == approval_state)
+        total = await self.session.scalar(select(func.count()).select_from(query.subquery()))
+        result = await self.session.execute(
+            query.order_by(ScenarioRun.created_at.desc(), ScenarioRun.id)
+            .limit(limit)
+            .offset(offset)
+        )
+        return list(result.scalars()), int(total or 0)
+
+    async def scenarios(self, scenario_ids: Sequence[uuid.UUID]) -> list[Scenario]:
+        if not scenario_ids:
+            return []
+        result = await self.session.execute(
+            select(Scenario).where(
+                Scenario.tenant_id == self.scope.tenant_id, Scenario.id.in_(scenario_ids)
+            )
+        )
+        return list(result.scalars())
+
+    async def versions_by_id(self, version_ids: Sequence[uuid.UUID]) -> list[ScenarioVersion]:
+        if not version_ids:
+            return []
+        result = await self.session.execute(
+            select(ScenarioVersion).where(
+                ScenarioVersion.tenant_id == self.scope.tenant_id,
+                ScenarioVersion.id.in_(version_ids),
+            )
         )
         return list(result.scalars())

@@ -10,12 +10,13 @@ import uuid
 from collections.abc import Sequence
 from typing import Any
 
-from sqlalchemy import Integer, cast, func, insert, select, text, update
+from sqlalchemy import Integer, cast, func, insert, or_, select, text, update
 
 from app.calculations.constants import CalculationRunStatus
 from app.calculations.models import (
     CalculationInputRef,
     CalculationRun,
+    CalculationScenarioPin,
     CalculationWarning,
     DatasetSnapshot,
     DatasetSnapshotMember,
@@ -23,6 +24,8 @@ from app.calculations.models import (
     IntermediateValue,
     LcrResult,
     LiquidityGapResult,
+    ScenarioContribution,
+    ScenarioShockApplication,
 )
 from app.db.base import Base
 from app.db.repository import M, ScopedRepository
@@ -111,12 +114,16 @@ class CalculationRepository(_Writes[CalculationRun]):
         offset: int,
         module_version_ids: Sequence[uuid.UUID] | None,
         status: CalculationRunStatus | None,
+        stressed: bool | None = None,
     ) -> tuple[list[CalculationRun], int]:
         query = self.scoped()
         if module_version_ids is not None:
             query = query.where(CalculationRun.module_version_id.in_(module_version_ids))
         if status is not None:
             query = query.where(CalculationRun.status == status.value)
+        if stressed is not None:  # a stressed run's manifest has a `scenario` key (D-45 §4)
+            has_scenario = CalculationRun.manifest.has_key("scenario")
+            query = query.where(has_scenario if stressed else ~has_scenario)
         total = await self.session.scalar(select(func.count()).select_from(query.subquery()))
         result = await self.session.execute(
             query.order_by(CalculationRun.started_at.desc(), CalculationRun.id)
@@ -244,3 +251,118 @@ class CalculationRepository(_Writes[CalculationRun]):
             query.order_by(CalculationRun.started_at.desc(), CalculationRun.id).limit(limit)
         )
         return int(total or 0), list(result.scalars())
+
+    # --- Phase 25: stressed runs (D-45, D-46) ---------------------------------------------
+
+    async def scenario_pins(self, run_ids: Sequence[uuid.UUID]) -> list[CalculationScenarioPin]:
+        """The scenario pins of these runs (stressed runs only have one)."""
+        if not run_ids:
+            return []
+        result = await self.session.execute(
+            select(CalculationScenarioPin).where(
+                CalculationScenarioPin.tenant_id == self.scope.tenant_id,
+                CalculationScenarioPin.calculation_run_id.in_(run_ids),
+            )
+        )
+        return list(result.scalars())
+
+    async def scenario_members(
+        self, scenario_run_ids: Sequence[uuid.UUID]
+    ) -> list[tuple[CalculationScenarioPin, CalculationRun]]:
+        """The member runs of these scenario runs: their pins and runs, re-runs excluded."""
+        if not scenario_run_ids:
+            return []
+        pin, run = CalculationScenarioPin, CalculationRun
+        result = await self.session.execute(
+            select(pin, run)
+            .join(run, run.id == pin.calculation_run_id)
+            .where(
+                pin.tenant_id == self.scope.tenant_id,
+                run.tenant_id == self.scope.tenant_id,
+                pin.scenario_run_id.in_(scenario_run_ids),
+                run.rerun_of_run_id.is_(None),
+            )
+            .order_by(pin.scenario_run_id, run.started_at, run.id)
+            .execution_options(populate_existing=True)
+        )
+        return [(p, r) for p, r in result.tuples()]
+
+    async def scenario_part_counts(
+        self, run_id: uuid.UUID
+    ) -> list[tuple[uuid.UUID, str, str, str, int]]:
+        """As `part_counts`, for a stressed run: per ladder row, direction, origin and
+        classification, the DISTINCT cash flows with a non-zero part (D-46 §3: two parts of
+        one flow are one amount)."""
+        sc = ScenarioContribution
+        result = await self.session.execute(
+            select(
+                sc.liquidity_gap_result_id,
+                sc.direction,
+                sc.origin,
+                sc.classification,
+                func.count(sc.cashflow_event_id.distinct()).filter(sc.value != 0),
+            )
+            .where(sc.tenant_id == self.scope.tenant_id, sc.calculation_run_id == run_id)
+            .group_by(sc.liquidity_gap_result_id, sc.direction, sc.origin, sc.classification)
+        )
+        return [(r[0], r[1], r[2], r[3], int(r[4])) for r in result]
+
+    async def scenario_changed(
+        self, run_id: uuid.UUID
+    ) -> list[tuple[str, str, str, uuid.UUID, str]]:
+        """(currency, bucket code, direction, cash-flow event, classification) of every changed
+        non-zero part, under its bucket before and after (D-46 §3: the deltas' distinct changed
+        flows)."""
+        sc = ScenarioContribution
+        result = await self.session.execute(
+            select(
+                sc.unit,
+                sc.bucket_code,
+                sc.original_bucket_code,
+                sc.direction,
+                sc.cashflow_event_id,
+                sc.classification,
+            ).where(  # fmt: skip
+                sc.tenant_id == self.scope.tenant_id,
+                sc.calculation_run_id == run_id,
+                sc.change != "UNCHANGED",
+                sc.value != 0,
+            )
+        )
+        found: set[tuple[str, str, str, uuid.UUID, str]] = set()
+        for unit, after, before, direction, event_id, code in result.tuples():
+            found.add((unit, after, direction, event_id, code))
+            found.add((unit, before, direction, event_id, code))
+        return sorted(found, key=lambda r: (r[0], r[1], r[2], str(r[3]), r[4]))
+
+    async def scenario_contributions(
+        self,
+        run_id: uuid.UUID,
+        currency: str | None,
+        bucket_code: str | None,
+        limit: int,
+        offset: int,
+        changed_only: bool = False,
+    ) -> tuple[list[ScenarioContribution], int]:
+        """A stressed run's parts (all, or the changed ones), by sequence. With `bucket_code`,
+        the changed-parts drill-down (`changed_only`) matches the bucket before or after."""
+        sc = ScenarioContribution
+        query = select(sc).where(
+            sc.tenant_id == self.scope.tenant_id, sc.calculation_run_id == run_id
+        )
+        if changed_only:
+            query = query.where(sc.change != "UNCHANGED")
+        if currency is not None:
+            query = query.where(sc.unit == currency)
+        if bucket_code is not None:
+            query = query.where(
+                or_(sc.bucket_code == bucket_code, sc.original_bucket_code == bucket_code)
+                if changed_only
+                else sc.bucket_code == bucket_code
+            )
+        total = await self.session.scalar(select(func.count()).select_from(query.subquery()))
+        result = await self.session.execute(query.order_by(sc.sequence).limit(limit).offset(offset))
+        return list(result.scalars()), int(total or 0)
+
+    async def shock_applications(self, run_id: uuid.UUID) -> list[ScenarioShockApplication]:
+        return await self._of_run(ScenarioShockApplication, run_id)

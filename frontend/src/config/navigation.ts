@@ -20,6 +20,7 @@ import {
   DOMAIN_UI_ENABLED,
   RATINGS_UI_ENABLED,
   RULES_UI_ENABLED,
+  STRESS_COMPARE_UI_ENABLED,
   STRESS_EXPLORER_UI_ENABLED,
 } from '@/config/features'
 
@@ -151,8 +152,10 @@ export const advancedWorkspaces: Workspace[] = STRESS_EXPLORER_UI_ENABLED
         href: '/advanced/stress-explorer',
         label: 'Agentic Stress-Test Explorer',
         icon: FlaskConical,
-        description:
-          'Author scenarios from the approved shock templates, confirm them for exploration and promote them through maker-checker approval. Illustrative, not a regulatory stress test.',
+        // FE-25.1: running against a baseline is named only while it is live (NEXT_PUBLIC_STRESS_COMPARE_UI); off, the Phase 24 text.
+        description: STRESS_COMPARE_UI_ENABLED
+          ? 'Author scenarios from the approved shock templates, confirm them for exploration, promote them through maker-checker approval, run them against a baseline maturity ladder and compare baseline with stress. Illustrative, not a regulatory stress test.'
+          : 'Author scenarios from the approved shock templates, confirm them for exploration and promote them through maker-checker approval. Illustrative, not a regulatory stress test.',
         permission: 'calc:read',
       },
     ]

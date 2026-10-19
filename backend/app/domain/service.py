@@ -58,7 +58,7 @@ from typing import Any, NoReturn
 from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.classification import UNCLASSIFIED
+from app.core.classification import UNCLASSIFIED, MaskedValue
 from app.core.errors import ApiError
 from app.core.principal import Principal
 from app.db.base import Base
@@ -748,6 +748,45 @@ class DomainService:
             if seen is None or _CLASS_RANK.get(code, rank) > _CLASS_RANK.get(seen, rank):
                 out[instrument.business_key] = code
         return out
+
+    async def mask_instrument_keys(
+        self, shocks: list[list[dict[str, Any]]]
+    ) -> list[list[dict[str, Any]]]:
+        """Copies of the shock lists with each picked instrument key the caller is not cleared
+        for (the instrument_id field's classification, as GET /instruments and run results mask
+        it, D-33) replaced by a MaskedValue; a key that no longer matches an instrument is
+        masked as unclassified (fail closed). The one masking of shock selectors: the scenario
+        detail (Phase 24) and a stressed run's manifest (Phase 25) both read through it."""
+        keys = {
+            k
+            for group in shocks
+            for shock in group
+            for k in ((shock.get("selector") or {}).get("instrument_keys") or [])
+        }
+        if not keys:
+            return shocks
+        classes = await self.instrument_key_classes(sorted(keys))
+        clear = self.principal.clear_classifications
+
+        def shown(key: str) -> str | dict[str, Any]:
+            code = classes.get(key, UNCLASSIFIED)
+            if code in clear:
+                return key
+            return MaskedValue(classification=code).model_dump()
+
+        def one(shock: dict[str, Any]) -> dict[str, Any]:
+            selector = shock.get("selector") or {}
+            if not selector.get("instrument_keys"):
+                return shock
+            return {
+                **shock,
+                "selector": {
+                    **selector,
+                    "instrument_keys": [shown(k) for k in selector["instrument_keys"]],
+                },
+            }
+
+        return [[one(shock) for shock in group] for group in shocks]
 
     async def instrument(self, instrument_id: uuid.UUID) -> InstrumentView:
         """One instrument with its versions, attributes and cash flows: 404 alike for an

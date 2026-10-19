@@ -40,7 +40,12 @@ def cid() -> str:
 
 
 def events(db: str, correlation_id: str) -> list[Any]:
-    return sql(db, "SELECT * FROM audit_event WHERE correlation_id = $1", correlation_id)
+    """In the order written: heap order is not insertion order once cleanup frees pages."""
+    return sql(
+        db,
+        "SELECT * FROM audit_event WHERE correlation_id = $1 ORDER BY occurred_at, ctid",
+        correlation_id,
+    )
 
 
 def token_for(

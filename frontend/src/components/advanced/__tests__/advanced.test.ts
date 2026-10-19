@@ -458,11 +458,19 @@ describe('explorer code hygiene (FE-24.2 Done-when)', () => {
     for (const file of files.filter((f) => f !== 'components/advanced/scenarios.ts')) expect(read(file), file).not.toMatch(/api\.[A-Z]+\(/)
   })
 
-  it('shows no run action before Phase 25, and no free-text formula field', () => {
+  // FE-25.1: the Phase 24 files still carry no run action of their own; the one run action is
+  // ScenarioRunPanel (behind NEXT_PUBLIC_STRESS_COMPARE_UI), which ScenarioView only mounts.
+  it('has no run action outside ScenarioRunPanel, and no free-text formula field', () => {
     for (const file of files) {
       expect(read(file), file).not.toMatch(/calc:run|\/runs\b|Run scenario|Run exploration/)
       expect(read(file), file).not.toMatch(/formula\s*[:=]|name="formula"|<textarea[^>]*shock/i)
     }
+    expect(read('components/advanced/ScenarioView.tsx')).toMatch(/<ScenarioRunPanel scenarioId=\{scenarioId\} version=\{v\} enabled=\{enabled\} \/>/)
+    expect(read('components/advanced/ScenarioRunPanel.tsx')).toMatch(/if \(!STRESS_COMPARE_UI_ENABLED \|\| !canRunVersion\(version, has\)\) return null/)
+    // Q27: the runs list is mounted after Versions, only while the switch is on; Q25: the stale comment points at the panel.
+    expect(read('components/advanced/ScenarioView.tsx')).toMatch(/\{STRESS_COMPARE_UI_ENABLED && <ScenarioRunsSection scenarioId=\{s\.scenario_id\} \/>\}/)
+    expect(read('components/advanced/VersionActions.tsx')).not.toMatch(/until Phase 25/)
+    expect(read('components/advanced/VersionActions.tsx')).toMatch(/Run actions live in ScenarioRunPanel/)
   })
 
   it('the greps would catch a violation', () => {

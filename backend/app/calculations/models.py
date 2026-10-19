@@ -450,3 +450,155 @@ class HqlaAssetResult(_RunOutput, ScopedModel, Base):
     import_job_id: Mapped[uuid.UUID] = _fk("import_job")
     source_record_id: Mapped[uuid.UUID] = _fk("source_record")
     source_ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+# --- stressed runs (Phase 25, BE-25.1, migration 0027; D-45 §4-5) ----------------------------
+
+SHOCK_SUBSET = (
+    "jsonb_typeof(shock_subset) = 'array' AND jsonb_array_length(shock_subset) BETWEEN 1 AND 5"
+)
+APPROVAL_STATES = ("EXPLORATION", "APPROVED")
+PART_CHANGES = ("MOVED", "STAYED", "ADDED", "UNCHANGED")
+SCENARIO_TEMPLATES = ("DELAYED_INFLOWS", "DEPOSIT_WITHDRAWAL", "FUNDING_UNAVAILABLE")
+PART_PATH = "~ '^0(/[1-5][MSA])*$'"
+
+
+def _in_text(column: str, values: tuple[str, ...]) -> str:
+    return f"{column} IN ({', '.join(repr(v) for v in values)})"
+
+
+class CalculationScenarioPin(ScopedModel, Base):
+    """A stressed run's scenario pin (D-45 §4): the scenario version and shock subset it
+    applied, the approval state at run time and the baseline whose pins it copied. Its own
+    table because the `calculation_input_ref.ref_type` CHECK is closed (D-01). Written while
+    the run is RUNNING, then append-only (0018's run-output guard)."""
+
+    __tablename__ = "calculation_scenario_pin"
+    __table_args__ = (
+        UniqueConstraint("calculation_run_id", name="uq_calculation_scenario_pin_run"),
+        CheckConstraint(f"shocks_sha256 {SHA256}", name="shocks_sha256"),
+        CheckConstraint(SHOCK_SUBSET, name="shock_subset"),
+        CheckConstraint(_in_text("approval_state", APPROVAL_STATES), name="approval_state"),
+        CheckConstraint("version >= 1", name="version"),
+        CheckConstraint("baseline_run_id <> calculation_run_id", name="baseline"),
+    )
+
+    tenant_id: Mapped[uuid.UUID] = _tenant()
+    calculation_run_id: Mapped[uuid.UUID] = _fk("calculation_run")
+    scenario_run_id: Mapped[uuid.UUID] = _fk("scenario_run", index=True)
+    scenario_id: Mapped[uuid.UUID] = _fk("scenario")
+    scenario_version_id: Mapped[uuid.UUID] = _fk("scenario_version")
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    shocks_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    # 1-based declared positions of the shocks this run applied, ascending.
+    shock_subset: Mapped[list[int]] = mapped_column(JSONB, nullable=False)
+    combined: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    approval_state: Mapped[str] = mapped_column(String(20), nullable=False)
+    baseline_run_id: Mapped[uuid.UUID] = _fk("calculation_run", index=True)
+
+
+class ScenarioContribution(_RunOutput, ScopedModel, Base):
+    """One part of one cash flow in a stressed run (D-45 §5): its amount counted in one
+    bucket, the shocks that touched it, its days and bucket before and after, and the same
+    lineage columns as `intermediate_value` (checked on insert). Stressed runs write these
+    instead of `intermediate_value` rows (whose one-per-flow uniqueness stays, D-01)."""
+
+    __tablename__ = "scenario_contribution"
+    __table_args__ = (
+        UniqueConstraint("calculation_run_id", "sequence"),
+        UniqueConstraint(
+            "calculation_run_id",
+            "cashflow_event_id",
+            "part_path",
+            name="uq_scenario_contribution_part",
+        ),
+        CheckConstraint("sequence >= 1", name="sequence"),
+        CheckConstraint(f"part_path {PART_PATH}", name="part_path"),
+        CheckConstraint(_in_text("change", PART_CHANGES), name="change"),
+        CheckConstraint("(change = 'UNCHANGED') = (part_path = '0')", name="unchanged"),
+        CheckConstraint("jsonb_typeof(shock_sequences) = 'array'", name="shock_sequences"),
+        CheckConstraint(f"unit {CURRENCY}", name="unit"),
+        CheckConstraint(_in("direction", CashflowDirection), name="direction"),
+        CheckConstraint(_in("origin", CashflowOrigin), name="origin"),
+        CheckConstraint("value >= 0", name="value"),
+        CheckConstraint("jsonb_typeof(rule_version_ids) = 'array'", name="rule_version_ids"),
+        CheckConstraint("source_ordinal >= 1", name="source_ordinal"),
+    )
+
+    cashflow_event_id: Mapped[uuid.UUID] = _fk("cashflow_event")
+    part_path: Mapped[str] = mapped_column(String(40), nullable=False)
+    part_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    shock_sequences: Mapped[list[int]] = mapped_column(JSONB, nullable=False)
+    change: Mapped[str] = mapped_column(String(10), nullable=False)
+    value: Mapped[Decimal] = mapped_column(Numeric(asdecimal=True), nullable=False)
+    unit: Mapped[str] = mapped_column(String(3), nullable=False)
+    classification: Mapped[str] = mapped_column(
+        String(50), ForeignKey("data_classification.code"), nullable=False
+    )
+    liquidity_gap_result_id: Mapped[uuid.UUID] = _fk("liquidity_gap_result", index=True)
+    bucket_code: Mapped[str] = mapped_column(String(20), nullable=False)
+    original_bucket_code: Mapped[str] = mapped_column(String(20), nullable=False)
+    direction: Mapped[str] = mapped_column(String(10), nullable=False)
+    origin: Mapped[str] = mapped_column(String(20), nullable=False)
+    days_after_reporting_date: Mapped[int] = mapped_column(Integer, nullable=False)
+    original_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    rule_version_ids: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    instrument_version_id: Mapped[uuid.UUID | None] = _fk("instrument_version", nullable=True)
+    canonical_record_id: Mapped[uuid.UUID] = _fk("canonical_record")
+    import_job_id: Mapped[uuid.UUID] = _fk("import_job")
+    source_record_id: Mapped[uuid.UUID] = _fk("source_record")
+    source_ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    @property
+    def code(self) -> str:
+        """Read as an intermediate (GET .../results serves stressed runs from here)."""
+        return IntermediateCode.CASHFLOW_CONTRIBUTION.value
+
+
+class ScenarioShockApplication(_RunOutput, ScopedModel, Base):
+    """What one shock did to one cash flow in a stressed run (D-45 §5): parts matched and
+    after, the amount moved later (timing templates) or added (DEPOSIT_WITHDRAWAL), and the
+    delay or the day moved to."""
+
+    __tablename__ = "scenario_shock_application"
+    __table_args__ = (
+        UniqueConstraint("calculation_run_id", "sequence"),
+        UniqueConstraint(
+            "calculation_run_id",
+            "cashflow_event_id",
+            "shock_sequence",
+            name="uq_scenario_shock_application_flow",
+        ),
+        CheckConstraint("sequence >= 1", name="sequence"),
+        CheckConstraint("shock_sequence BETWEEN 1 AND 5", name="shock_sequence"),
+        CheckConstraint(_in_text("template", SCENARIO_TEMPLATES), name="template"),
+        CheckConstraint(f"unit {CURRENCY}", name="unit"),
+        CheckConstraint(
+            "parts_matched >= 1 AND parts_after >= parts_matched AND parts_after <= 32",
+            name="parts",
+        ),
+        CheckConstraint("moved_amount >= 0 AND added_amount >= 0", name="amounts"),
+        CheckConstraint(
+            "CASE template"
+            " WHEN 'DEPOSIT_WITHDRAWAL' THEN moved_amount = 0 AND delay_days IS NULL"
+            " AND moved_to_day IS NULL"
+            " WHEN 'DELAYED_INFLOWS' THEN added_amount = 0 AND delay_days >= 1"
+            " AND moved_to_day IS NULL"
+            " ELSE added_amount = 0 AND delay_days IS NULL AND moved_to_day >= 2 END",
+            name="template_fields",
+        ),
+    )
+
+    cashflow_event_id: Mapped[uuid.UUID] = _fk("cashflow_event")
+    shock_sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    template: Mapped[str] = mapped_column(String(30), nullable=False)
+    unit: Mapped[str] = mapped_column(String(3), nullable=False)
+    parts_matched: Mapped[int] = mapped_column(Integer, nullable=False)
+    parts_after: Mapped[int] = mapped_column(Integer, nullable=False)
+    moved_amount: Mapped[Decimal] = mapped_column(Numeric(asdecimal=True), nullable=False)
+    added_amount: Mapped[Decimal] = mapped_column(Numeric(asdecimal=True), nullable=False)
+    delay_days: Mapped[int | None] = mapped_column(Integer)
+    moved_to_day: Mapped[int | None] = mapped_column(Integer)
+    classification: Mapped[str] = mapped_column(
+        String(50), ForeignKey("data_classification.code"), nullable=False
+    )

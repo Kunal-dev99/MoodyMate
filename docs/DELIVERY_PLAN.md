@@ -3200,7 +3200,7 @@ This is the engine the agent will drive, and it works without AI.
 
 **Start after Phase 21 merges** (see Dependencies).
 
-- [ ] **BE-25.1** Migration 0027:
+- [x] **BE-25.1** Migration 0027:
   - `scenario_run` (append-only);
   - `calculation_scenario_pin`, `scenario_contribution` and `scenario_shock_application`
     (D-45 §4–5), under 0018's run-output guards (inserted only while the run is RUNNING, then
@@ -3215,7 +3215,15 @@ This is the engine the agent will drive, and it works without AI.
     - `intermediate_value` and its constraints are byte-for-byte unchanged (the frozen-copy
       check);
     - the downgrade refuses while any of the four tables has a row.
-- [ ] **BE-25.2** The pure, split-aware overlay, `app/calculations/scenario_overlay.py` (D-45 §2).
+  - *Evidence (2026-10-19, architect-verified):* `0027_scenario_runs.py` (revision 0027,
+    down_revision 0026; downgrade guard :449-456). CLI round trip on scratch
+    `moodymate_scratch_p25` (`Running downgrade 0027 -> 0026` / `Running upgrade 0026 -> 0027` /
+    `0027 (head)`, dropped). `test_calculations.py:1580-1598` (guard loop incl.
+    `SCENARIO_OUTPUT_TABLES`), :1603 (`check_scenario_append_only`, `scenario_run_kit.py:1037-1048`),
+    :1613-1626 (refusal "this downgrade is refused", then 0027 -> 0026 -> head with
+    `intermediate_value_shape` equal on both sides). Run: `test_registry_snapshot_run_and_maturity_ladder`
+    `1 passed`; targeted rules + WS1 + calculations `6 passed` (`moodymate_test_p25fix`).
+- [x] **BE-25.2** The pure, split-aware overlay, `app/calculations/scenario_overlay.py` (D-45 §2).
   - *Done-when:*
     - the `test_calculations.py` golden loop reads
       `backend/app/calculations/golden/scenario_overlay_v1_engineering_cases.json` (status
@@ -3246,7 +3254,14 @@ This is the engine the agent will drive, and it works without AI.
     - the existing no-float grep covers the file;
     - a grep in the same test asserts that nothing under `app/calculations/` or
       `app/orchestration/` imports `app.ai`.
-- [ ] **BE-25.3** Engine, validation dry run and run route (D-45 §1, §4–10):
+  - *Evidence (2026-10-19, architect-verified):* the pack file has status `ENGINEERING — awaiting
+    domain-expert approval` and nine cases named for the plan's list (:18-1587).
+    `scenario_run_kit.py:242-370` (`check_overlay_pure`: case 1 by hand :254-295, part ids
+    stable :296-305, golden loop over all three templates and `>= 9` cases :307-370, `app.ai`
+    import grep over calculations and orchestration :248-252), called at
+    `test_calculations.py:573`; the existing no-float / `app.ai` grep covers the file
+    (`test_calculations.py:565-570`). Same passing runs as BE-25.1.
+- [x] **BE-25.3** Engine, validation dry run and run route (D-45 §1, §4–10):
   - `ScenarioRunSpec` (its fingerprint covers the version, the baseline and the subset);
   - the baseline pin copy;
   - the `scenario` manifest section, with `approval_state`;
@@ -3276,14 +3291,31 @@ This is the engine the agent will drive, and it works without AI.
       `scenarios_disabled` and `calculations_disabled` gives 409, audited DENIED, with no run
       written;
     - an Idempotency-Key replay returns the same `scenario_run`;
-    - the WS1 matrix lists both routes: the run is 201 for risk_analyst and 403 for the
-      others, and validation is 200 for every role.
+    - the WS1 matrix lists both routes: the run is ~~201 for risk_analyst~~ not refused for
+      risk_analyst (422 on the matrix's empty body) and 403 for the others, and validation is
+      ~~200~~ never refused for every role; the real 201 for risk_analyst and the 200 for
+      every role on real ids are asserted in `test_calculations.py` part 5c (amended
+      2026-10-19, Phase 25 report Q16, auto-resolved).
+  - *Evidence (2026-10-19, architect-verified):* `scenario_run_kit.py` (`check_scenario_runs`,
+    called at `test_calculations.py:1161`): Feature 03 key sets and no `scenario_*` rows
+    :557-571; `ENGINE_VERSION`/`MANIFEST_VERSION` :534; validation 200 for all five roles
+    :577-579; run 403 for the other four :590-594, 201 :596-597; audit :600-601; replay
+    :609-612; manifest equal except `scenario` :613-622; §5 figures end to end :626-638;
+    served from `scenario_contribution`, no `intermediate_value` rows :639-650; k + 1 runs and
+    post-checks :652-674; labels :602-605, :658-661; run-detail masking of picked keys (review
+    MAJOR fix) :690-718; tampered part :877-908; refusals :910-938 and LCR baseline
+    `check_lcr_baseline` (:958-974, called at `test_calculations.py:1404`); re-runs after
+    CLOSED :940-950. WS1: `test_ws1_verification.py:351-371` (matrix), :743 and :963-969
+    (AUDITED). Same passing runs as BE-25.1; WS1 `4 passed`.
 - [ ] **BE-25.4** Comparison reads (D-46): `GET scenario-runs`, `GET scenarios/{scenario_id}/comparison`
   and `…/comparison/contributions`. They return exact decimal text, columns per shock and
   combined, `breaks_only_combined`, the largest changes, the templated summary and the D-44 §8
   statement with the approval label.
   - *Done-when:*
-    - the WS1 matrix and isolation tests list the three routes, with 200 for every role;
+    - the WS1 matrix and isolation tests list the three routes, ~~with 200 for every role~~
+      never refused for any role (the list is 200 for every role); the 200 for every role on
+      real ids is asserted in `test_calculations.py` part 5c (amended 2026-10-19, Phase 25
+      report Q16, auto-resolved);
     - the `test_calculations.py` fold asserts:
       - every delta equals stressed minus baseline exactly;
       - the turns-negative flags match the hand-computed buckets;
@@ -3297,6 +3329,12 @@ This is the engine the agent will drive, and it works without AI.
         clear;
       - each drill-down row resolves to its `scenario_contribution` and its source row;
       - the templated summary cites only clear figures.
+  - *Not ticked (2026-10-19):* each listed assertion exists and passes
+    (`scenario_run_kit.py:720-875`; `test_ws1_verification.py:361-371`, :430, :496-510). But
+    the open review MEDIUM (a few-flows delta is masked while its own baseline and stressed
+    figures are clear in the same cell, so it can be recovered by differencing) may change the
+    masking this task asserts. Tick once the decision-resolver has ruled and any fix has been
+    re-run.
 - *Note (Phase 24 report, Q16):* the scenario Close action UI (a hide, with the D-47 §1
   permission split shown cosmetically) is not in Phase 24 or 25 FE scope; it is an
   unscheduled follow-up. The route exists and is tested (BE-24.3).
@@ -3308,13 +3346,21 @@ This is the engine the agent will drive, and it works without AI.
   - the pins that will be reused;
   - submission with an Idempotency-Key.
 
-  The run list and run detail show "Exploration, not approved" or "Approved scenario" badges,
-  with links to the baseline and the scenario.
+  The run list and run detail show "Exploration, not approved" or "Approved scenario
+  (illustrative)" badges (the D-44 §8 text; amended 2026-10-19, Phase 25 report Q26,
+  auto-resolved), with links to the baseline and the scenario.
   - *Done-when:*
     - a Playwright test: risk_analyst runs the FE-24.2 exploration scenario on a baseline;
-      three runs (two single-shock and one combined) reach SUCCEEDED, and the run list shows
-      the exploration badge;
+      exactly three runs (two single-shock and one combined) reach SUCCEEDED or
+      SUCCEEDED_WITH_WARNINGS (never FAILED or BLOCKED; amended 2026-10-19, Phase 25 report
+      Q22, auto-resolved), and the run list shows the exploration badge;
     - a vitest covers the picker's filter and the zero-match state.
+  - *Not ticked (2026-10-19):* both Done-when checks pass (`e2e/scenario-run.spec.ts:94` and
+    :184, `5 passed (12.6s)` on `moodymate_e2e_p25fefix`; `scenario-run.test.ts:148-247`). Still
+    missing is the Q23 ruling's frontend half: the picker still calls `GET /calculation-runs`
+    without `stressed=false` (`scenario-runs.ts:76`), so a client-side-only filter can push
+    real baselines out of the 200-run page. Fix: pass `stressed: false`, keep the client filter
+    as a defence, then re-run the vitest and both Phase 25 specs.
 - [ ] **FE-25.2** The comparison view (`NEXT_PUBLIC_STRESS_COMPARE_UI`):
   - a currency × bucket table and heat map of net and cumulative deltas, with inflows and
     outflows on expand;
@@ -3331,6 +3377,15 @@ This is the engine the agent will drive, and it works without AI.
       two runs' ladder rows, and a drill-down row leads to its source row;
     - a vitest covers masked deltas, `null` flags and the combined-only highlight;
     - with the switch off, the Phase 24 UI is restored.
+  - *Not ticked (2026-10-19):* both Done-when checks pass (`e2e/scenario-compare.spec.ts:98`,
+    `5 passed`; `comparison.test.ts:145-389`). But the Q12 backend fix changed what a `null`
+    `breaks_only_combined` means: it can now also mean "not assessable" (k = 1, or a single-shock
+    member not compared). `ComparisonView.tsx:254-256` still shows every `null` as
+    "combined-only: masked", and `comparison.ts:213` and the test at
+    `comparison.test.ts:252` say the same. So every single-shock scenario is shown as masked.
+    Fix: show "not assessable" when no masked figure is involved, or a neutral "unknown" with
+    both reasons. Update the comment and the vitest, then re-run `scenario-compare.spec.ts`
+    against the fixed backend.
 
 *Test budget:* 49 → 49 (folded).
 *Reversibility:* additive tables. The downgrade refuses while stressed runs exist.

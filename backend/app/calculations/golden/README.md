@@ -54,6 +54,7 @@ One JSON object per case, UTF-8. All amounts are decimal strings, never JSON fra
 | --- | --- | --- |
 | `maturity_ladder_v1_boundary_cases.json` | `maturity_ladder` v1 | Bucket edges, on the date, past due, unmapped type, missing instrument, zero amount, open last bucket, two currencies, both origins, D-33 minimum-aggregation masking (non-zero contributions only). |
 | `lcr_hqla_v1_engineering_cases.json` | `lcr_hqla` v1 | An ineligible asset, the inflow cap binding, a zero denominator, mixed currencies, the horizon edge, a ratio tie only ROUND_HALF_EVEN rounds down, D-33 masking. |
+| `scenario_overlay_v1_engineering_cases.json` | the scenario overlay (Phase 25, D-45 §2) feeding `maturity_ladder` v1 | Nine cases: the user's design §5 worked example; `affected_fraction` 1 (no split); the due window; the currency and origin selectors; DEPOSIT_WITHDRAWAL +15%; FUNDING_UNAVAILABLE on two picked instrument keys; the three shocks combined with a part split twice; past-due and incomplete flows untouched; a direction mismatch under the pinned rule. |
 
 ### Expected-output shape per module
 
@@ -66,6 +67,14 @@ One JSON object per case, UTF-8. All amounts are decimal strings, never JSON fra
   `lcr_result` `warnings`), `outcome` (input counts), `included_assets` and
   `excluded_assets` (position keys) and `masked_for_internal` (currency, masked figures).
   `inputs` has `instruments`, `positions` and `cash_flows`.
+
+- `scenario_overlay` v1 (BE-25.2): one file with a `cases` list. Each case carries its
+  fixture rules (`buckets`, `directions`), `instruments`, `cash_flows` (a missing day or
+  amount is `null`) and the D-44 `shocks`; `expected` has `parts` (every stressed input row:
+  cash-flow key, day, amount and the shock sequences that touched it; an unchanged flow is one
+  part with none), `counts` (per shock, in declared order), `ladder` (the stressed rows of the
+  unchanged module) and `totals` (per currency, over all buckets). It is a pure-function
+  pack: `scenario_run_kit.check_overlay_pure` runs it, outside the end-to-end loops.
 
 The test runs each file under its own module: ladder files in the ladder loop, `lcr_hqla`
 files in the LCR part, each over its own snapshot.

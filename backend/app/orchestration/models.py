@@ -11,6 +11,9 @@ Stress scenarios (Phase 24, BE-24.1; D-44 §5-7), migration 0026:
   each move sets only its own fields.
 - `scenario_change`: one row per shock, written when the version leaves DRAFT. Append-only;
   each row repeats its version's shock at that index.
+- `scenario_run` (Phase 25, migration 0027, D-45 §9): one run of a version against a
+  baseline maturity_ladder run. Append-only. Its member runs are the calculation runs whose
+  `calculation_scenario_pin` names it (re-runs excluded).
 
 DELETE and TRUNCATE are refused on all three (DB triggers). Every enum column has a CHECK
 (D-06). Every table carries `tenant_id` and is read through the tenant scope (D-04).
@@ -18,13 +21,14 @@ DELETE and TRUNCATE are refused on all three (DB triggers). Every enum column ha
 
 import uuid
 from collections.abc import Iterable
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 from typing import Any
 
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     Integer,
@@ -44,6 +48,7 @@ from app.orchestration.constants import (
     MAX_NAME,
     MAX_SHOCKS,
     MIN_SHOCKS,
+    ApprovalState,
     ScenarioOrigin,
     ScenarioTemplate,
     ScenarioVersionStatus,
@@ -184,3 +189,55 @@ class ScenarioChange(ScopedModel, Base):
     shock_index: Mapped[int] = mapped_column(Integer, nullable=False)
     template: Mapped[str] = mapped_column(String(30), nullable=False)
     shock: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+
+
+class ScenarioRun(ScopedModel, Base):
+    """One run of a scenario version against a baseline maturity_ladder run (D-45 §9, Data
+    Model §6). Append-only: UPDATE, DELETE and TRUNCATE are refused. It holds the version, its
+    shocks' sha256, the approval state pinned at run time, the baseline and value-free counts
+    per shock (matched flows, parts, direction mismatches, skipped flows). The member runs
+    (k + 1 for k > 1 shocks) name it in their `calculation_scenario_pin`."""
+
+    __tablename__ = "scenario_run"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "created_by", "idempotency_key", name="uq_scenario_run_idempotency"
+        ),
+        CheckConstraint(_in("approval_state", ApprovalState), name="approval_state"),
+        CheckConstraint("shocks_sha256 ~ '^[0-9a-f]{64}$'", name="shocks_sha256"),
+        CheckConstraint("request_sha256 ~ '^[0-9a-f]{64}$'", name="request_sha256"),
+        CheckConstraint(f"shock_count BETWEEN {MIN_SHOCKS} AND {MAX_SHOCKS}", name="shock_count"),
+        CheckConstraint(
+            "run_count = CASE WHEN shock_count = 1 THEN 1 ELSE shock_count + 1 END",
+            name="run_count",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(shock_counts) = 'array' AND jsonb_array_length(shock_counts) ="
+            " shock_count",
+            name="shock_counts",
+        ),
+        CheckConstraint("version >= 1", name="version"),
+    )
+
+    tenant_id: Mapped[uuid.UUID] = _tenant()
+    scenario_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("scenario.id"), index=True, nullable=False
+    )
+    scenario_version_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("scenario_version.id"), nullable=False
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    shocks_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    approval_state: Mapped[str] = mapped_column(String(20), nullable=False)
+    baseline_run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("calculation_run.id"), index=True, nullable=False
+    )
+    reporting_date: Mapped[date] = mapped_column(Date, nullable=False)
+    shock_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    run_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Per shock, in declared order: {shock_index (1-based), template, matched_flows, parts,
+    # direction_mismatches, skipped_past_due, skipped_incomplete}. Counts only (public).
+    shock_counts: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    request_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    correlation_id: Mapped[str | None] = mapped_column(String(128))

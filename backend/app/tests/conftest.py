@@ -344,6 +344,23 @@ COMMIT;
 # Lifecycle-guarded (DELETE and TRUNCATE refused), so the user triggers are lifted for this
 # one transaction.
 _SCENARIO_TABLES = ("scenario_change", "scenario_version", "scenario")
+# Phase 25 (0027): the scenario runs and their run outputs reference calculation runs and
+# scenario versions, so they go first; append-only, so their user triggers are lifted.
+_SCENARIO_RUN_TABLES = (
+    "scenario_contribution",
+    "scenario_shock_application",
+    "calculation_scenario_pin",
+    "scenario_run",
+)
+_SCENARIO_RUN_CLEANUP = "\n".join(
+    [
+        "BEGIN;",
+        *(f"ALTER TABLE {t} DISABLE TRIGGER USER;" for t in _SCENARIO_RUN_TABLES),
+        *(f"DELETE FROM {t};" for t in _SCENARIO_RUN_TABLES),
+        *(f"ALTER TABLE {t} ENABLE TRIGGER USER;" for t in _SCENARIO_RUN_TABLES),
+        "COMMIT;",
+    ]
+)
 _SCENARIO_CLEANUP = "\n".join(
     [
         "BEGIN;",
@@ -356,6 +373,7 @@ _SCENARIO_CLEANUP = "\n".join(
 
 # Deletes everything that is not seed data (D-11), children first.
 _CLEANUP = [
+    _SCENARIO_RUN_CLEANUP,
     _SCENARIO_CLEANUP,
     _RATING_CLEANUP,
     "DELETE FROM user_role",
@@ -415,6 +433,7 @@ def script(url: str, statements: str) -> None:
 def clean(url: str) -> None:
     for statement in _CLEANUP:
         if statement in (
+            _SCENARIO_RUN_CLEANUP,
             _SCENARIO_CLEANUP,
             _RATING_CLEANUP,
             _CALC_CLEANUP,

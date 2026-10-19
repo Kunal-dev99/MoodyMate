@@ -26,7 +26,7 @@ one. Every run is labelled with the D-35 statement.
 """
 
 import uuid
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -61,6 +61,7 @@ from app.calculations.schemas import (
     RunOutcome,
     RunPage,
     RunRerun,
+    RunScenarioRef,
     RunSummary,
     SnapshotCreate,
     SnapshotMemberOut,
@@ -86,6 +87,7 @@ from app.core.principal import Principal
 from app.db.session import get_session
 from app.domain.constants import CashflowOrigin, DomainSchemaCode
 from app.governance.constants import Permission
+from app.orchestration.constants import APPROVAL_LABELS, ApprovalState
 from app.reconciliation.constants import ReconciliationOutcome
 from app.rules.constants import ILLUSTRATIVE_STATEMENT, CashflowDirection, HqlaLevel
 
@@ -203,6 +205,25 @@ def _module(row: RunRow) -> RunModuleRef:
     )
 
 
+def _scenario(row: RunRow) -> RunScenarioRef | None:
+    """Phase 25 (D-45 §4): a stressed run's scenario summary; None for every other run."""
+    pin = row.scenario
+    if pin is None:
+        return None
+    state = ApprovalState(pin.approval_state)
+    return RunScenarioRef(
+        scenario_run_id=pin.scenario_run_id,
+        scenario_id=pin.scenario_id,
+        scenario_version_id=pin.scenario_version_id,
+        version=pin.version,
+        shock_subset=list(pin.shock_subset),
+        combined=pin.combined,
+        approval_state=state.value,
+        approval_label=APPROVAL_LABELS[state].value,
+        baseline_run_id=pin.baseline_run_id,
+    )
+
+
 def _summary(row: RunRow) -> RunSummary:
     r = row.run
     return RunSummary(
@@ -222,14 +243,17 @@ def _summary(row: RunRow) -> RunSummary:
         ended_at=r.ended_at,
         created_by=r.created_by,
         illustrative=True,
+        scenario=_scenario(row),
     )
 
 
-def _detail(row: RunRow) -> RunDetail:
+def _detail(row: RunRow, manifest: dict[str, Any]) -> RunDetail:
+    """`manifest` is the run's manifest as the caller may read it
+    (CalculationService.shown_manifest: picked instrument keys masked, D-33)."""
     r = row.run
     return RunDetail(
         **_summary(row).model_dump(),
-        manifest=RunManifest.model_validate(r.manifest),
+        manifest=RunManifest.model_validate(manifest),
         input_refs=[
             InputRefOut(
                 sequence=i.sequence,
@@ -301,20 +325,27 @@ async def create_calculation_run(
     `module_not_available` (absent, PLANNED, not implemented, or a rule without an ACTIVE
     version), 409 `calculations_disabled`, 409 `idempotency_conflict`; each audited DENIED. A
     replay whose run is still RUNNING after CALC_RUN_STALE_SECONDS ends it FAILED
-    (ENGINE_ERROR) and returns it."""
+    (ENGINE_ERROR) and returns it. A re-run of a stressed run (Phase 25, D-45 §8) re-pins its
+    scenario version and shock subset, even once the version is CLOSED; while
+    SCENARIOS_ENABLED is off it is refused 409 `scenarios_disabled`."""
     settings = request.app.state.settings
     spec: RunSpec | RerunSpec = (
         RerunSpec(body.rerun_of)
         if isinstance(body, RunRerun)
         else RunSpec(body.dataset_snapshot_id, body.module_version_id, body.reporting_date)
     )
-    row, created = await CalculationService(session, principal).create(
-        spec, idempotency_key, settings.CALCULATIONS_ENABLED, settings.CALC_RUN_STALE_SECONDS
+    service = CalculationService(session, principal)
+    row, created = await service.create(
+        spec,
+        idempotency_key,
+        settings.CALCULATIONS_ENABLED,
+        settings.CALC_RUN_STALE_SECONDS,
+        settings.SCENARIOS_ENABLED,
     )
     if not created:
         response.status_code = 200
         response.headers[REPLAYED] = "true"
-    return _detail(row)
+    return _detail(row, await service.shown_manifest(row.run))
 
 
 @router.get("/calculation-runs", response_model=RunPage, operation_id="listCalculationRuns")
@@ -327,10 +358,17 @@ async def list_calculation_runs(
         str | None, Query(max_length=100, description="Runs of this module (any version).")
     ] = None,
     status: CalculationRunStatus | None = None,
+    stressed: Annotated[
+        bool | None,
+        Query(
+            description="true: stressed runs only (Phase 25, D-45 §4); false: non-stressed runs "
+            "only (e.g. a baseline picker); omitted: every run."
+        ),
+    ] = None,
 ) -> RunPage:
     """The caller's tenant's runs, newest first."""
     rows, total = await CalculationService(session, principal).page(
-        limit, offset, module_code, status
+        limit, offset, module_code, status, stressed
     )
     return RunPage(items=[_summary(r) for r in rows], total=total, limit=limit, offset=offset)
 
@@ -342,8 +380,13 @@ async def get_calculation_run(
     run_id: uuid.UUID, principal: CalcReader, session: SessionDep
 ) -> RunDetail:
     """One run: its manifest with every pinned id and version, its input refs, warnings and
-    outcome counts. 404 alike for an absent and a foreign id (D-04)."""
-    return _detail(await CalculationService(session, principal).get(run_id))
+    outcome counts. A stressed run's manifest.scenario.shocks mask each picked instrument key
+    the caller is not cleared for as a MaskedValue (D-33, as the scenario detail does);
+    shocks_sha256 is the pin over the stored keys. 404 alike for an absent and a foreign id
+    (D-04)."""
+    service = CalculationService(session, principal)
+    row = await service.get(run_id)
+    return _detail(row, await service.shown_manifest(row.run))
 
 
 def _contribution(c: ContributionRow, clear: frozenset[str]) -> ResultItem:

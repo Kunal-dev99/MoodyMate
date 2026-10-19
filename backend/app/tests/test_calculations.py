@@ -44,6 +44,16 @@ hand-computed LCR golden case (the lcr_hqla pack file, BE-18.2) and reads GET �
 another module); part 6
 loops the output guards over hqla_asset_result and lcr_result, and 0020 refuses its downgrade
 while LCR results exist.
+
+Phase 25 (BE-25.1 - BE-25.4; D-45, D-46), folded in (+0, scenario_run_kit): part 2 runs the
+scenario overlay golden loop (the §5 worked example and the other engineering cases, stable
+part ids, the no-float and no-`app.ai` greps); part 5c runs scenarios against a baseline
+through the API (Feature 03 key sets for non-stressed runs, the §5 figures end to end, k + 1
+runs, conservation and a tampered part, approval labels, refusals, Idempotency-Key replay,
+re-runs after CLOSED) and reads the comparison and drill-down (exact deltas, turns-negative,
+breaks only combined, largest changes, distinct-flow masking, the summary, lineage); part 5b
+refuses an LCR baseline; part 6 loops the output guards over the three new run-output tables,
+proves scenario_run append-only, intermediate_value unchanged and the 0027 downgrade refusal.
 """
 
 import dataclasses
@@ -151,6 +161,16 @@ from app.tests.lcr_kit import (
     LCR_OUTPUT_TABLES,
     POSITION_COLUMNS,
     position_csv,
+)
+from app.tests.scenario_run_kit import (
+    OVERLAY_GOLDEN,
+    SCENARIO_OUTPUT_TABLES,
+    check_lcr_baseline,
+    check_overlay_pure,
+    check_scenario_append_only,
+    check_scenario_runs,
+    clear_scenario_runs,
+    intermediate_value_shape,
 )
 
 pytestmark = pytest.mark.db
@@ -291,7 +311,8 @@ def golden_case(path: Path) -> dict[str, Any]:
     }
 
 
-PACK = [golden_case(path) for path in sorted(GOLDEN_DIR.glob("*.json"))]
+# Phase 25: the scenario overlay pack file has its own loop (scenario_run_kit, part 2).
+PACK = [golden_case(path) for path in sorted(GOLDEN_DIR.glob("*.json")) if path != OVERLAY_GOLDEN]
 # Each file runs under its own module: the ladder loop (part 4) and the LCR part (5b).
 GOLDEN = [g for g in PACK if g["module"]["code"] == MATURITY_LADDER]
 LCR_GOLDEN_CASES = [g for g in PACK if g["module"]["code"] == LCR_HQLA]
@@ -549,6 +570,7 @@ def test_registry_snapshot_run_and_maturity_ladder(
         assert "app.ai" not in text, path  # no AI on the calculation path
     with localcontext(exact_context()), pytest.raises((Inexact, Rounded)):
         _ = Decimal(1) / Decimal(3)
+    check_overlay_pure()  # Phase 25 (BE-25.2): the overlay golden loop, §5 case, greps
     reporting = GOLDEN[0]["reporting_date"]
     flow_id, version_id = uuid.uuid4(), uuid.uuid4()
     pure_inputs = ModuleInputs(
@@ -1134,6 +1156,23 @@ def test_registry_snapshot_run_and_maturity_ladder(
     assert [classes[r.id]["cumulative_gap"] for r in rows] == ["confidential"] * 3
     assert classes[rows[2].id]["net_gap"] == classes[rows[2].id]["inflows"] == "internal"
 
+    # --- 5c. Phase 25 (BE-25.3, BE-25.4): stressed runs and the comparison, on the seeded
+    # buckets (before Phase 16 below changes them) ------------------------------------------------
+    stressed_ids = check_scenario_runs(
+        api,
+        db,
+        artifact_dir,
+        monkeypatch,
+        load=load,
+        instrument_source=instrument_source,
+        cash_source=cash_source,
+        instrument_csv=instrument_csv,
+        cashflow_csv=cashflow_csv,
+        module_id=module_id,
+        calc_counts=calc_counts,
+        feature03_run_id=run_id,
+    )
+
     # --- Phase 16 (BE-16.3): pinning across a rule change, and re-runs --------------------------
     def run_rows(run: str) -> str:
         """A hash of a run's row and every output row (to prove they never change)."""
@@ -1362,6 +1401,7 @@ def test_registry_snapshot_run_and_maturity_ladder(
     for key in ("manifest_sha256", "result_sha256", "rule_set_id", "status"):
         assert lcr_again[key] == lcr_run[key], key
     assert listed(module_code=LCR_HQLA) == {lcr_id, lcr_again["run_id"]}
+    check_lcr_baseline(api, db, stressed_ids["scenario_id"], lcr_id, calc_counts)  # BE-25.3
     # Each read answers 404 for a run of the other module, and for no run at all.
     for url, refusal in (
         (f"{RUNS}/{run_id}/liquidity", "liquidity_not_found"),
@@ -1536,15 +1576,19 @@ def test_registry_snapshot_run_and_maturity_ladder(
         sql(db, copy("calculation_run", "'idempotency_key', 'copy'", "id = $1"), run_uuid)
     assert sql(db, "SELECT * FROM calculation_run WHERE id = $1", run_uuid) == before_run
     lcr_uuid = uuid.UUID(lcr_id)
+    stressed_uuid = uuid.UUID(stressed_ids["stressed_run_id"])
     for table, owner in (
         *((t, run_uuid) for t in OUTPUT_TABLES),
         *((t, lcr_uuid) for t in LCR_OUTPUT_TABLES),  # BE-17.1: the LCR outputs, alike
+        *((t, stressed_uuid) for t in SCENARIO_OUTPUT_TABLES),  # BE-25.1: the stressed outputs
     ):
         with pytest.raises(IMMUTABLE, match="only while their run is RUNNING"):
             sql(db, copy(table, "'sequence', 9999", "calculation_run_id = $1"), owner)
         [row] = sql(db, f"SELECT * FROM {table} WHERE calculation_run_id = $1 LIMIT 1", owner)
         for statement in (
-            f"UPDATE {table} SET created_by = 'tampered' WHERE id = $1",
+            f"UPDATE {table} SET calculation_run_id = calculation_run_id WHERE id = $1"
+            if table in SCENARIO_OUTPUT_TABLES
+            else f"UPDATE {table} SET created_by = 'tampered' WHERE id = $1",
             f"DELETE FROM {table} WHERE id = $1",
         ):
             with pytest.raises(IMMUTABLE, match="append-only"):
@@ -1556,8 +1600,30 @@ def test_registry_snapshot_run_and_maturity_ladder(
     # The downgrade refuses while a run (or a non-seed registry row) exists, in one
     # transaction: nothing changes; 0020 alone refuses while LCR results exist (BE-17.1).
     # Without them, head -> 0017 -> head.
+    check_scenario_append_only(db)  # BE-25.1: scenario_run refuses UPDATE, DELETE, TRUNCATE
     head = str(ScriptDirectory.from_config(Config("alembic.ini")).get_current_head())
-    assert sql(db, "SELECT version_num FROM alembic_version")[0]["version_num"] == head == "0026"
+    assert sql(db, "SELECT version_num FROM alembic_version")[0]["version_num"] == head == "0027"
+    # BE-25.1: 0027 refuses its downgrade while any of its four tables has a row (nothing
+    # changes); without them 0027 -> 0026 -> 0027 round-trips, and intermediate_value (its
+    # columns, constraints and triggers) is byte-for-byte the same on both sides (frozen copy).
+    m27 = (
+        migration("0027_scenario_runs") if (MIGRATIONS / "0027_scenario_runs.py").exists() else None
+    )
+    assert m27 is None or m27.down_revision == "0026"
+    frozen = intermediate_value_shape(db)
+    before = calc_counts(db)
+    with pytest.raises(Exception, match="this downgrade is refused"):
+        command.downgrade(alembic_config(db), "0026")
+    assert sql(db, "SELECT version_num FROM alembic_version")[0]["version_num"] == head
+    assert calc_counts(db) == before
+    clear_scenario_runs(db)
+    try:
+        command.downgrade(alembic_config(db), "0026")
+        assert intermediate_value_shape(db) == frozen
+        assert sql(db, "SELECT to_regclass('scenario_run') AS t")[0]["t"] is None
+    finally:
+        command.upgrade(alembic_config(db), "head")
+    assert intermediate_value_shape(db) == frozen
     before = calc_counts(db)
     try:
         for target in (m20.down_revision, "0017"):
