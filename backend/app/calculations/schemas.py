@@ -14,9 +14,9 @@ D-30, D-31, D-33).
 
 import uuid
 from datetime import date, datetime
-from typing import Any
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, WithJsonSchema, field_validator
 
 from app.calculations.constants import (
     CalculationRunStatus,
@@ -130,6 +130,26 @@ class RunModuleRef(BaseModel):
     version: int
 
 
+ApprovalStateText = Literal["EXPLORATION", "APPROVED"]
+
+
+class RunScenarioRef(BaseModel):
+    """Phase 25 (D-45 §4, Feature 05 endpoint table): set on stressed runs only; null on every
+    other run. An additive field; existing permissions are unchanged."""
+
+    scenario_run_id: uuid.UUID
+    scenario_id: uuid.UUID
+    scenario_version_id: uuid.UUID
+    version: int
+    shock_subset: list[int] = Field(description="1-based shock indexes this run applied.")
+    combined: bool = Field(description="True for the run with every shock of the version.")
+    approval_state: ApprovalStateText
+    approval_label: str = Field(
+        description="'Exploration, not approved' or 'Approved scenario (illustrative)'."
+    )
+    baseline_run_id: uuid.UUID
+
+
 class RunSummary(BaseModel):
     run_id: uuid.UUID
     status: CalculationRunStatus
@@ -155,6 +175,9 @@ class RunSummary(BaseModel):
     ended_at: datetime | None
     created_by: str
     illustrative: bool = Field(description="Always true in Feature 03 (D-35).")
+    scenario: RunScenarioRef | None = Field(
+        default=None, description="Stressed runs only (Phase 25); null otherwise."
+    )
 
 
 class RunPage(BaseModel):
@@ -222,6 +245,48 @@ class ManifestLabels(BaseModel):
     statement: str
 
 
+# The Phase 24 shock components (orchestration's contract), referenced by name so the module
+# imports no other module's schemas. Raw at runtime: the manifest is stored content.
+_SHOCK_COMPONENTS = ("DelayedInflowsShock", "DepositWithdrawalShock", "FundingUnavailableShock")
+_SHOCK_TEMPLATES = ("DELAYED_INFLOWS", "DEPOSIT_WITHDRAWAL", "FUNDING_UNAVAILABLE")
+ManifestShocks = Annotated[
+    list[dict[str, Any]],
+    WithJsonSchema(
+        {
+            "type": "array",
+            "items": {
+                "oneOf": [{"$ref": f"#/components/schemas/{c}"} for c in _SHOCK_COMPONENTS],
+                "discriminator": {
+                    "propertyName": "template",
+                    "mapping": {
+                        t: f"#/components/schemas/{c}"
+                        for t, c in zip(_SHOCK_TEMPLATES, _SHOCK_COMPONENTS, strict=True)
+                    },
+                },
+            },
+            "description": "The version's shocks as pinned. Each picked selector.instrument_keys "
+            "entry the caller is not cleared for (the instrument_id field's classification, "
+            "D-33) reads as a MaskedValue, as on the scenario detail; shocks_sha256 is the pin "
+            "over the stored keys.",
+        }
+    ),
+]
+
+
+class ManifestScenario(BaseModel):
+    """D-45 §4: the `scenario` section of a stressed run's manifest. Non-stressed manifests
+    have no such key (their stored manifest keeps exactly the Feature 03 key set)."""
+
+    scenario_id: uuid.UUID
+    scenario_version_id: uuid.UUID
+    version: int
+    shocks_sha256: str
+    shocks: ManifestShocks
+    shock_subset: list[int] = Field(description="1-based shock indexes this run applied.")
+    approval_state: ApprovalStateText
+    baseline_run_id: uuid.UUID
+
+
 class RunManifest(BaseModel):
     """Every version a run pinned (D-31 §4), written once with the run. Statuses, times and
     the actor are not part of it (they are on the run)."""
@@ -234,6 +299,12 @@ class RunManifest(BaseModel):
     rule_set: ManifestRuleSet
     assumption_set: ManifestAssumptionSet
     labels: ManifestLabels
+    scenario: ManifestScenario | None = Field(
+        default=None,
+        exclude_if=lambda v: v is None,
+        description="Stressed runs only (Phase 25, D-45 §4); absent from non-stressed manifests "
+        "(stored and returned), which keep exactly their Feature 03 key set.",
+    )
 
 
 class InputRefOut(BaseModel):

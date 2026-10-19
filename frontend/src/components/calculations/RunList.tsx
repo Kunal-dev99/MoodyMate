@@ -15,6 +15,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { RunStatusPill } from './RunStatusPill'
+import { StressedRunBadge } from './StressedRunBadge'
 import { NO_RUN_FILTERS, RUN_STATUSES, RUN_STATUS_STYLE, fetchModules, runHref, runQuery, type RunFilters, type RunPage } from './calculations'
 import { formatTimestamp } from '@/lib/format'
 import { ActorLabel } from '@/components/common/ActorLabel'
@@ -197,6 +198,8 @@ export function RunList() {
                         </Badge>
                       </div>
                     )}
+                    {/* FE-25.1: a stressed run's approval label and its baseline and scenario; nothing for other runs. */}
+                    <StressedRunBadge scenario={r.scenario} compact className="mt-1" />
                   </TableCell>
                   <TableCell>
                     <RunStatusPill status={r.status} />

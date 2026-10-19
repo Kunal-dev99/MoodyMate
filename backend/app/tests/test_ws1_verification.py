@@ -348,6 +348,27 @@ def test_route_by_role_authorization_matrix(api: TestClient, db: str) -> None:
         assert {role: row[role] for role in ROLES} == {
             role: 422 if role in writers else 403 for role in ROLES
         }, row
+    # Phase 25 (BE-25.3, BE-25.4, D-47 §2): the run is calc:run (risk_analyst; its empty body a
+    # 422, everyone else 403); the validation and the three comparison reads are calc:read and
+    # never refused (their required query parameter is absent here: 422, or 200 for the list).
+    # The 201 run and the 200 reads on real ids, for every role, are in
+    # test_calculations.py part 5c (scenario_run_kit.check_scenario_runs).
+    [run_row] = [r for r in WS1_MATRIX if r["route"] == "POST /api/v1/scenarios/{scenario_id}/run"]
+    assert run_row["permission"] == "calc:run"
+    assert {role: run_row[role] for role in ROLES} == {
+        role: 422 if role == "risk_analyst" else 403 for role in ROLES
+    }, run_row
+    for route in (
+        f"GET {version_route}/validation",
+        "GET /api/v1/scenario-runs",
+        "GET /api/v1/scenarios/{scenario_id}/comparison",
+        "GET /api/v1/scenarios/{scenario_id}/comparison/contributions",
+    ):
+        [row] = [r for r in WS1_MATRIX if r["route"] == route]
+        assert row["permission"] == "calc:read", route
+        assert all(row[role] in (200, 404, 422) for role in ROLES), row
+    [runs_row] = [r for r in WS1_MATRIX if r["route"] == "GET /api/v1/scenario-runs"]
+    assert all(runs_row[role] == 200 for role in ROLES), runs_row
     assert len(WS1_MATRIX) >= 12
 
 
@@ -406,6 +427,7 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
         "/api/v1/assumption-sets",  # BE-16.4
         SCENARIOS,  # Phase 24: the shared library, and this tenant's DRAFT by status
         f"{SCENARIOS}?status=DRAFT",
+        "/api/v1/scenario-runs",  # Phase 25
     ):
         assert api.get(path, headers=outsider).json()["total"] == 0, path
     # Phase 19: the credit vocabularies are seeded for this tenant only.
@@ -471,6 +493,21 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
         ),
         # Phase 24: this tenant's scenario.
         (f"{SCENARIOS}/{here_scenario}", f"{SCENARIOS}/{uuid.uuid4()}"),
+        # Phase 25: the comparison and its drill-down are scoped through the scenario.
+        (
+            f"{SCENARIOS}/{here_scenario}/comparison?scenario_run_id={uuid.uuid4()}",
+            f"{SCENARIOS}/{uuid.uuid4()}/comparison?scenario_run_id={uuid.uuid4()}",
+        ),
+        (
+            f"{SCENARIOS}/{here_scenario}/comparison/contributions?scenario_run_id={uuid.uuid4()}",
+            f"{SCENARIOS}/{uuid.uuid4()}/comparison/contributions?scenario_run_id={uuid.uuid4()}",
+        ),
+        (
+            f"{SCENARIOS}/{here_scenario}/versions/1/validation?baseline_run_id="
+            f"{here_calculated['run_id']}",
+            f"{SCENARIOS}/{uuid.uuid4()}/versions/1/validation?baseline_run_id="
+            f"{here_calculated['run_id']}",
+        ),
     ):
         mine, absent = api.get(real, headers=outsider), api.get(random_id, headers=outsider)
         assert mine.status_code == absent.status_code == 404, real
@@ -702,6 +739,8 @@ AUDITED = {
     "POST /api/v1/scenarios/{scenario_id}/versions/{version}/submit": "scenario.submit",
     "POST /api/v1/scenarios/{scenario_id}/versions/{version}/approval": "scenario.approve",
     "POST /api/v1/scenarios/{scenario_id}/versions/{version}/close": "scenario.close",
+    # Phase 25 (BE-25.3): runs and their refusals share the action (D-24 §4).
+    "POST /api/v1/scenarios/{scenario_id}/run": "scenario.run",
 }
 
 
@@ -921,6 +960,16 @@ def test_every_mutating_route_is_listed_and_emits_an_audit_event(api: TestClient
         f"POST {versions_route}/{{version}}/close", approver, f"{scenario_path}/1/close", {}
     )
     assert closed["status"] == "CLOSED", closed
+    # Phase 25: the run route on the CLOSED v1 is refused 409 scenario_not_runnable before
+    # anything is written, audited scenario.run DENIED (its SUCCESS is in test_calculations).
+    run_route, correlation = "POST /api/v1/scenarios/{scenario_id}/run", cid()
+    refused_run = api.post(
+        f"{SCENARIOS}/{scenario['scenario_id']}/run",
+        json={"version": 1, "baseline_run_id": str(uuid.uuid4())},
+        headers={**analyst, "Idempotency-Key": cid(), "X-Correlation-ID": correlation},
+    )
+    assert (refused_run.status_code, refused_run.json()["code"]) == (409, "scenario_not_runnable")
+    check(run_route, correlation)
     wider = upload(
         api,
         steward,

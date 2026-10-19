@@ -273,7 +273,7 @@ function DecisionDialog({ scenarioId, version, decision, onDone }: { scenarioId:
 /**
  * FE-24.2: the lifecycle actions of one version. Edit, "Confirm for exploration" and "Submit for
  * approval" show to the author only; Approve and Reject to an approver who is not the author.
- * Run actions stay hidden until Phase 25. Every gate is cosmetic: the server checks each step
+ * Run actions live in ScenarioRunPanel (FE-25.1), not here. Every gate is cosmetic: the server checks each step
  * (403, 409 `not_author` / `self_approval` / `invalid_status` / `scenarios_disabled`, D-04).
  */
 export function VersionActions({

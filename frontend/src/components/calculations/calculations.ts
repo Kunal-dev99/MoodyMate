@@ -134,6 +134,10 @@ export const POST_CHECK_TEXT: Record<PostCheck, string> = {
   HQLA_TOTALS: 'Every HQLA level total equals the sum of its included asset rows (lcr_hqla).',
   LCR_FIGURES: 'Every per-currency LCR figure is recomputed from its contributions (lcr_hqla).',
   RERUN_REPRODUCED: 'A re-run reproduces the original run\'s result hash on the original pins.',
+  // Phase 25 (D-45 §6): stressed runs only.
+  SCENARIO_OVERLAY: 'The overlay recomputed from the unstressed inputs equals the stored parts and shock applications (stressed runs).',
+  SCENARIO_CONSERVATION:
+    'Per cash flow the parts sum to the original amount (times 1 + f for a deposit withdrawal), and per currency and direction the stressed total equals the baseline total plus the declared deltas (stressed runs).',
 }
 
 export const INPUT_REF_TEXT: Record<InputRefType, string> = {

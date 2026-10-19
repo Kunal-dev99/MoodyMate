@@ -20,6 +20,7 @@ import { ManifestPanel } from './ManifestPanel'
 import { MaturityLadderView } from './MaturityLadderView'
 import { RunIdentity } from './RunIdentity'
 import { RunStatusPill } from './RunStatusPill'
+import { StressedRunBadge } from './StressedRunBadge'
 import { POST_CHECK_TEXT, RUN_STATUS_STYLE, SEVERITY_VARIANT, WARNING_TEXT, hasResults, showsLiquidity, type RunDetail, type RunWarning } from './calculations'
 import { formatTimestamp } from '@/lib/format'
 import { useActorText } from '@/components/common/ActorLabel'
@@ -263,6 +264,22 @@ export function RunView({ runId }: { runId: string }) {
               <Field label="Re-run of">
                 <Mono>{run.rerun_of_run_id}</Mono>
               </Field>
+            )}
+            {/* FE-25.1: stressed runs only (Phase 25); a Feature 03 run shows no such rows. */}
+            {run.scenario && (
+              <>
+                <Field label="Stress scenario" testId="run-scenario">
+                  <StressedRunBadge scenario={run.scenario} />
+                </Field>
+                <Field label="Baseline run" testId="run-baseline">
+                  <Mono>{run.scenario.baseline_run_id}</Mono>
+                </Field>
+                <Field label="Scenario run" testId="run-scenario-run">
+                  <Mono>
+                    {run.scenario.scenario_run_id} · version {run.scenario.version} ({run.scenario.scenario_version_id})
+                  </Mono>
+                </Field>
+              </>
             )}
           </dl>
         </PageSection>

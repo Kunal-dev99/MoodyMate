@@ -30,30 +30,56 @@ Phase 24 (BE-24.2 - BE-24.4): stress scenarios (D-44 §1-9, D-47 §3).
 
 import uuid
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any, NoReturn
 
 from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.calculations import scenario_overlay
+from app.calculations.constants import AGGREGATE_CLASSIFICATION, CalculationRunStatus
+from app.calculations.service import (
+    SUCCEEDED as RUN_SUCCEEDED,
+)
+from app.calculations.service import (
+    CalculationService,
+    LadderView,
+    ScenarioMember,
+    ScenarioRunSpec,
+    most_sensitive,
+)
 from app.core.classification import UNCLASSIFIED, MaskedValue
+from app.core.correlation import get_correlation_id
+from app.core.decimals import decimal_text
 from app.core.errors import ApiError
 from app.core.principal import Principal
 from app.domain.service import DomainService
 from app.governance.constants import ClassificationCode, Permission, ProposalDecision
 from app.governance.service import audit_by, record_denial
 from app.orchestration.constants import (
+    APPROVAL_LABELS,
+    AUDIT_RUN_RESOURCE,
     DIRECTION_RULE,
+    MAX_LARGEST_CHANGES,
     MAX_SHOCKS,
     SCENARIO_STATEMENT,
     ApprovalLabel,
+    ApprovalState,
+    FlowDirection,
+    FlowOrigin,
     ParameterKind,
+    PartChange,
     ScenarioAction,
     ScenarioOrigin,
     ScenarioRefusal,
+    ScenarioRunAction,
+    ScenarioRunRefusal,
+    ScenarioTemplate,
     ScenarioVersionStatus,
     ShockProblem,
 )
-from app.orchestration.models import Scenario, ScenarioChange, ScenarioVersion
+from app.orchestration.models import Scenario, ScenarioChange, ScenarioRun, ScenarioVersion
 from app.orchestration.repository import ScenarioRepository
 from app.orchestration.scenario_templates import (
     TEMPLATES,
@@ -66,11 +92,28 @@ from app.orchestration.scenario_templates import (
 )
 from app.orchestration.schemas import (
     AiAcknowledgement,
+    ComparisonBucket,
+    ComparisonCell,
+    ComparisonCurrency,
+    ComparisonFigure,
+    ComparisonRow,
+    ComparisonSummary,
+    ContributionSourceLineage,
+    FirstNegativeCumulative,
+    LargestChange,
+    ScenarioComparisonOut,
+    ScenarioContributionOut,
+    ScenarioContributionPage,
     ScenarioCreate,
     ScenarioDetail,
     ScenarioLabels,
     ScenarioPage,
+    ScenarioRunCreate,
+    ScenarioRunMember,
+    ScenarioRunOut,
+    ScenarioRunPage,
     ScenarioSummary,
+    ScenarioValidationOut,
     ScenarioVersionClose,
     ScenarioVersionConfirm,
     ScenarioVersionCreate,
@@ -78,17 +121,20 @@ from app.orchestration.schemas import (
     ScenarioVersionOut,
     ScenarioVersionSubmit,
     ScenarioVersionUpdate,
+    ShockMatchCount,
     TemplateField,
     TemplateOut,
     TemplatePage,
 )
-from app.rules.service import RulesService
+from app.rules.service import RulesService, canonical_sha256
 
 S = ScenarioVersionStatus
 R = ScenarioRefusal
+RR = ScenarioRunRefusal
 SCENARIO = "scenario"
 VERSION = "scenario_version"
 NOT_FOUND = "Scenario not found."
+RUN_NOT_FOUND = "Scenario run not found."
 # Only these may leave for CLOSED (D-44 §5: any status other than DRAFT; RUNNING and TESTED
 # are reserved).
 CLOSABLE = frozenset({S.CONFIRMED_FOR_EXPLORATION, S.IN_REVIEW, S.APPROVED_FOR_TEST, S.REJECTED})
@@ -202,42 +248,9 @@ class ScenarioService:
         return problems
 
     async def _masked(self, shocks: list[list[dict[str, Any]]]) -> list[list[dict[str, Any]]]:
-        """Copies of the shock lists with each instrument key the caller is not cleared for
-        (the instrument_id field's classification, as GET /instruments and run results mask
-        it, D-33) replaced by a MaskedValue; a key that no longer matches an instrument is
-        masked as unclassified (fail closed)."""
-        keys = {
-            k
-            for group in shocks
-            for shock in group
-            for k in ((shock.get("selector") or {}).get("instrument_keys") or [])
-        }
-        if not keys:
-            return shocks
-        classes = await DomainService(self.session, self.principal).instrument_key_classes(
-            sorted(keys)
-        )
-        clear = self.principal.clear_classifications
-
-        def shown(key: str) -> str | dict[str, Any]:
-            code = classes.get(key, UNCLASSIFIED)
-            if code in clear:
-                return key
-            return MaskedValue(classification=code).model_dump()
-
-        def one(shock: dict[str, Any]) -> dict[str, Any]:
-            selector = shock.get("selector") or {}
-            if not selector.get("instrument_keys"):
-                return shock
-            return {
-                **shock,
-                "selector": {
-                    **selector,
-                    "instrument_keys": [shown(k) for k in selector["instrument_keys"]],
-                },
-            }
-
-        return [[one(shock) for shock in group] for group in shocks]
+        """D-33: the shock lists with each picked instrument key the caller is not cleared for
+        masked (DomainService.mask_instrument_keys, shared with the run-detail manifest)."""
+        return await DomainService(self.session, self.principal).mask_instrument_keys(shocks)
 
     # --- refusals, audit and guards ------------------------------------------------------
 
@@ -761,3 +774,841 @@ class ScenarioService:
             scenarios_enabled=enabled,
             labels=LABELS,
         )
+
+
+class ScenarioRunService:
+    """Phase 25 (BE-25.3, BE-25.4; D-45, D-46): run a version against a baseline
+    maturity_ladder run through the calculations service, and compare baseline and stress.
+
+    - `validation`: the dry run. Each shock alone on the baseline's pinned inputs, with
+      value-free match counts, and the refusal codes a run would answer now. Nothing is
+      written. 404 alike for an absent or foreign scenario, version or baseline (D-04).
+    - `run` (`scenario.run`, and `calculation_run.create` per member run): refused 409,
+      audited DENIED with nothing written: `scenarios_disabled`, `calculations_disabled`,
+      `idempotency_conflict`, `scenario_not_runnable`, `invalid_baseline`,
+      `baseline_not_reproducible`, `no_matching_cashflows` (404 `not_found` first for the
+      scenario, version or baseline). Otherwise one append-only `scenario_run` and k + 1 member
+      runs for k > 1 shocks (one for k = 1), each a synchronous stressed run. A replay of the
+      key returns the same `scenario_run` (and completes any member run a crash left out).
+    - `page`, `comparison`, `contributions`: reads (D-46), computed from the immutable ladder
+      rows and parts; masked for the caller (D-33, D-46 §3).
+    No AI is involved (D-45 §11).
+    """
+
+    def __init__(self, session: AsyncSession, principal: Principal) -> None:
+        self.session = session
+        self.principal = principal
+        self.repo = ScenarioRepository(session, principal.scope)
+        self.calc = CalculationService(session, principal)
+
+    # --- refusals -------------------------------------------------------------------------
+
+    async def _refuse(self, error: ApiError, resource: tuple[str, uuid.UUID | None]) -> NoReturn:
+        kind, resource_id = resource
+        await record_denial(
+            self.session,
+            self.principal,
+            ScenarioRunAction.RUN.value,
+            kind,
+            str(resource_id) if resource_id else None,
+            error.code,
+        )
+        raise error
+
+    @staticmethod
+    def _error(code: RR, message: str, details: dict[str, Any] | None = None) -> ApiError:
+        return ApiError(404 if code == RR.NOT_FOUND else 409, code, message, details)
+
+    @staticmethod
+    def _approval(status: str) -> ApprovalState | None:
+        if status == S.CONFIRMED_FOR_EXPLORATION:
+            return ApprovalState.EXPLORATION
+        if status == S.APPROVED_FOR_TEST:
+            return ApprovalState.APPROVED
+        return None
+
+    @staticmethod
+    def _counts(
+        version: ScenarioVersion, found: Sequence[scenario_overlay.ShockCount] | None
+    ) -> list[ShockMatchCount]:
+        """One count per shock in declared order (zeros when the dry run could not run)."""
+        by_index = {c.shock_sequence: c for c in found or []}
+        counts = []
+        for index, shock in enumerate(version.shocks, start=1):
+            c = by_index.get(index)
+            counts.append(
+                ShockMatchCount(
+                    shock_index=index,
+                    template=ScenarioTemplate(shock["template"]),
+                    matched_flows=c.matched_flows if c else 0,
+                    parts=c.parts if c else 0,
+                    direction_mismatches=c.direction_mismatches if c else 0,
+                    skipped_past_due=c.skipped_past_due if c else 0,
+                    skipped_incomplete=c.skipped_incomplete if c else 0,
+                )
+            )
+        return counts
+
+    # --- validation (BE-25.3) -------------------------------------------------------------
+
+    async def validation(
+        self,
+        scenario_id: uuid.UUID,
+        version: int,
+        baseline_run_id: uuid.UUID,
+        scenarios_enabled: bool,
+        calculations_enabled: bool,
+    ) -> ScenarioValidationOut:
+        row = await self.repo.version(scenario_id, version)
+        if row is None:
+            raise ApiError(404, RR.NOT_FOUND, NOT_FOUND)
+        check = await self.calc.baseline_check(baseline_run_id)
+        if check.refusal == RR.NOT_FOUND or check.run is None:
+            raise ApiError(404, RR.NOT_FOUND, "Baseline run not found.")
+        blocking: list[str] = []
+        if not scenarios_enabled:
+            blocking.append(RR.SCENARIOS_DISABLED.value)
+        if not calculations_enabled:
+            blocking.append(RR.CALCULATIONS_DISABLED.value)
+        approval = self._approval(row.status)
+        if approval is None:
+            blocking.append(RR.SCENARIO_NOT_RUNNABLE.value)
+        found = None
+        if check.refusal is not None:
+            blocking.append(check.refusal)
+        elif check.pinned is not None:
+            found = await self.calc.scenario_counts(check.pinned, row.shocks)
+        counts = self._counts(row, found)
+        if check.refusal is None and any(c.matched_flows == 0 for c in counts):
+            blocking.append(RR.NO_MATCHING_CASHFLOWS.value)
+        return ScenarioValidationOut(
+            scenario_id=row.scenario_id,
+            scenario_version_id=row.id,
+            version=row.version,
+            status=S(row.status),
+            baseline_run_id=baseline_run_id,
+            shocks=counts,
+            runnable=not blocking,
+            blocking_reasons=blocking,
+            run_count=len(scenario_overlay.subsets(len(row.shocks))),
+            approval_state=approval,
+            approval_label=APPROVAL_LABELS[approval] if approval else None,
+            labels=LABELS,
+        )
+
+    # --- run (BE-25.3) --------------------------------------------------------------------
+
+    @staticmethod
+    def _fingerprint(version: ScenarioVersion, baseline_run_id: uuid.UUID) -> str:
+        """What a replay of the Idempotency-Key must repeat: the version (and its shocks) and
+        the baseline."""
+        return canonical_sha256(
+            {
+                "scenario_version_id": str(version.id),
+                "shocks_sha256": version.shocks_sha256,
+                "baseline_run_id": str(baseline_run_id),
+            }
+        )
+
+    async def run(
+        self,
+        scenario_id: uuid.UUID,
+        body: ScenarioRunCreate,
+        idempotency_key: str,
+        scenarios_enabled: bool,
+        calculations_enabled: bool,
+    ) -> tuple[ScenarioRunOut, bool]:
+        resource: tuple[str, uuid.UUID | None] = (SCENARIO, scenario_id)
+        if not scenarios_enabled:
+            await self._refuse(
+                self._error(
+                    RR.SCENARIOS_DISABLED,
+                    "Stressed runs are switched off in this environment; existing runs stay "
+                    "readable.",
+                ),
+                resource,
+            )
+        if not calculations_enabled:
+            await self._refuse(
+                self._error(
+                    RR.CALCULATIONS_DISABLED,
+                    "Calculations are switched off in this environment; existing runs stay "
+                    "readable.",
+                ),
+                resource,
+            )
+        version = await self.repo.version(scenario_id, body.version)
+        if version is None:
+            await self._refuse(self._error(RR.NOT_FOUND, NOT_FOUND), resource)
+        actor = self.principal.actor
+        fingerprint = self._fingerprint(version, body.baseline_run_id)
+        await self.repo.lock(f"scenario_run:{actor}:{idempotency_key}")
+        existing = await self.repo.scenario_run_by_key(actor, idempotency_key)
+        if existing is not None:
+            if existing.request_sha256 != fingerprint:
+                await self._refuse(
+                    self._error(
+                        RR.IDEMPOTENCY_CONFLICT,
+                        "This Idempotency-Key was already used for a different run request.",
+                        {"scenario_run_id": str(existing.id)},
+                    ),
+                    (AUDIT_RUN_RESOURCE, existing.id),
+                )
+            await self._members(existing, version, calculations_enabled, scenarios_enabled)
+            return await self._view(existing.id), False
+        version_resource: tuple[str, uuid.UUID | None] = (VERSION, version.id)
+        approval = self._approval(version.status)
+        if approval is None:
+            await self._refuse(
+                self._error(
+                    RR.SCENARIO_NOT_RUNNABLE,
+                    f"The version is {version.status}; only a CONFIRMED_FOR_EXPLORATION or "
+                    "APPROVED_FOR_TEST version runs.",
+                    {"status": version.status},
+                ),
+                version_resource,
+            )
+        check = await self.calc.baseline_check(body.baseline_run_id)
+        if check.refusal == RR.NOT_FOUND or check.run is None:
+            await self._refuse(
+                self._error(RR.NOT_FOUND, "Baseline run not found."),
+                ("calculation_run", body.baseline_run_id),
+            )
+        if check.refusal is not None or check.pinned is None:
+            await self._refuse(
+                self._error(
+                    RR(check.refusal or RR.BASELINE_NOT_REPRODUCIBLE),
+                    "The baseline must be a SUCCEEDED, non-stressed maturity_ladder run whose "
+                    "pins still resolve (D-45 §10).",
+                    {"baseline_run_id": str(body.baseline_run_id)},
+                ),
+                ("calculation_run", body.baseline_run_id),
+            )
+        found = await self.calc.scenario_counts(check.pinned, version.shocks)
+        counts = self._counts(version, found)
+        empty = [c.shock_index for c in counts if c.matched_flows == 0]
+        if found is None or empty:
+            await self._refuse(
+                self._error(
+                    RR.NO_MATCHING_CASHFLOWS,
+                    "A shock matches no cash flow of the baseline; see the validation dry run.",
+                    {"shock_indexes": empty},
+                ),
+                version_resource,
+            )
+        baseline = check.run
+        scenario_run = ScenarioRun(
+            id=uuid.uuid4(),
+            tenant_id=self.principal.tenant_id,
+            scenario_id=version.scenario_id,
+            scenario_version_id=version.id,
+            version=version.version,
+            shocks_sha256=version.shocks_sha256,
+            approval_state=approval.value,
+            baseline_run_id=baseline.id,
+            reporting_date=baseline.reporting_date,
+            shock_count=len(version.shocks),
+            run_count=len(scenario_overlay.subsets(len(version.shocks))),
+            shock_counts=[c.model_dump(mode="json") for c in counts],
+            idempotency_key=idempotency_key,
+            request_sha256=fingerprint,
+            correlation_id=get_correlation_id(),
+            created_by=actor,
+        )
+        self.repo.add(scenario_run)
+        await self.repo.flush()
+        details: dict[str, Any] = {
+            "scenario_run_id": str(scenario_run.id),
+            "scenario_id": str(version.scenario_id),
+            "scenario_version_id": str(version.id),
+            "version": version.version,
+            "shocks_sha256": version.shocks_sha256,
+            "shock_count": scenario_run.shock_count,
+            "run_count": scenario_run.run_count,
+            "approval_state": approval.value,
+            "baseline_run_id": str(baseline.id),
+        }
+        audit_by(
+            self.session,
+            self.principal,
+            ScenarioRunAction.RUN.value,
+            AUDIT_RUN_RESOURCE,
+            resource_id=str(scenario_run.id),
+            details=details,
+            details_classification=dict.fromkeys(details, ClassificationCode.PUBLIC.value),
+        )
+        await self.session.commit()
+        await self._members(scenario_run, version, calculations_enabled, scenarios_enabled)
+        return await self._view(scenario_run.id), True
+
+    async def _members(
+        self,
+        scenario_run: ScenarioRun,
+        version: ScenarioVersion,
+        calculations_enabled: bool,
+        scenarios_enabled: bool,
+    ) -> None:
+        """Every member run (D-45 §7), each a synchronous stressed run with its own derived
+        key: a replay finds the runs that exist and creates only those that do not. The spec is
+        built from the scenario_run's recorded pins (baseline, version, shocks_sha256,
+        approval state); the version's shocks are the ones those pins name (the key's
+        fingerprint covers version id and shocks_sha256), checked again here. Each member the
+        call creates is audited `calculation_run.create` by CalculationService.create."""
+        if (version.id, version.shocks_sha256) != (
+            scenario_run.scenario_version_id,
+            scenario_run.shocks_sha256,
+        ):  # unreachable through run(): the fingerprint already matched; fail closed
+            raise ApiError(
+                409,
+                RR.IDEMPOTENCY_CONFLICT,
+                "This Idempotency-Key was already used for a different run request.",
+                {"scenario_run_id": str(scenario_run.id)},
+            )
+        ids = (
+            scenario_run.id, scenario_run.baseline_run_id, scenario_run.scenario_id,
+            scenario_run.scenario_version_id, scenario_run.version,
+        )  # fmt: skip
+        for subset in scenario_overlay.subsets(scenario_run.shock_count):
+            spec = ScenarioRunSpec(
+                baseline_run_id=ids[1],
+                scenario_run_id=ids[0],
+                scenario_id=ids[2],
+                scenario_version_id=ids[3],
+                version=ids[4],
+                shocks=tuple(version.shocks),
+                shocks_sha256=scenario_run.shocks_sha256,
+                shock_subset=subset,
+                approval_state=scenario_run.approval_state,
+            )
+            key = f"scenario_run:{ids[0]}:{'-'.join(str(n) for n in subset)}"
+            await self.calc.create(
+                spec, key, calculations_enabled, scenarios_enabled=scenarios_enabled
+            )
+
+    # --- reads (BE-25.4) ------------------------------------------------------------------
+
+    @staticmethod
+    def _member(m: ScenarioMember) -> ScenarioRunMember:
+        return ScenarioRunMember(
+            calculation_run_id=m.run.id,
+            shock_subset=list(m.pin.shock_subset),
+            combined=m.pin.combined,
+            status=CalculationRunStatus(m.run.status),
+            manifest_sha256=m.run.manifest_sha256,
+            result_sha256=m.run.result_sha256,
+        )
+
+    async def _outs(self, runs: Sequence[ScenarioRun]) -> list[ScenarioRunOut]:
+        scenarios = {s.id: s for s in await self.repo.scenarios([r.scenario_id for r in runs])}
+        members = await self.calc.scenario_members([r.id for r in runs])
+        outs = []
+        for r in runs:
+            state = ApprovalState(r.approval_state)
+            outs.append(
+                ScenarioRunOut(
+                    scenario_run_id=r.id,
+                    scenario_id=r.scenario_id,
+                    scenario_code=scenarios[r.scenario_id].code,
+                    scenario_name=scenarios[r.scenario_id].name,
+                    scenario_version_id=r.scenario_version_id,
+                    version=r.version,
+                    shocks_sha256=r.shocks_sha256,
+                    approval_state=state,
+                    approval_label=APPROVAL_LABELS[state],
+                    baseline_run_id=r.baseline_run_id,
+                    reporting_date=r.reporting_date,
+                    members=[self._member(m) for m in members.get(r.id, [])],
+                    shock_counts=[ShockMatchCount.model_validate(c) for c in r.shock_counts],
+                    created_by=r.created_by,
+                    created_at=r.created_at,
+                    correlation_id=r.correlation_id,
+                    labels=LABELS,
+                )
+            )
+        return outs
+
+    async def _view(self, scenario_run_id: uuid.UUID) -> ScenarioRunOut:
+        found = await self.repo.scenario_run(scenario_run_id)
+        if found is None:
+            raise ApiError(404, RR.NOT_FOUND, RUN_NOT_FOUND)
+        [out] = await self._outs([found])
+        return out
+
+    async def page(
+        self,
+        scenario_id: uuid.UUID | None,
+        baseline_run_id: uuid.UUID | None,
+        approval_state: ApprovalState | None,
+        limit: int,
+        offset: int,
+    ) -> ScenarioRunPage:
+        runs, total = await self.repo.scenario_run_page(
+            scenario_id,
+            baseline_run_id,
+            approval_state.value if approval_state else None,
+            limit,
+            offset,
+        )
+        return ScenarioRunPage(
+            items=await self._outs(runs), total=total, limit=limit, offset=offset, labels=LABELS
+        )
+
+    async def _scoped_run(self, scenario_id: uuid.UUID, scenario_run_id: uuid.UUID) -> ScenarioRun:
+        """The scenario run, of this scenario, in the caller's tenant: 404 alike otherwise."""
+        found = await self.repo.scenario_run(scenario_run_id)
+        if found is None or found.scenario_id != scenario_id:
+            raise ApiError(404, RR.NOT_FOUND, RUN_NOT_FOUND)
+        return found
+
+    async def comparison(
+        self, scenario_id: uuid.UUID, scenario_run_id: uuid.UUID, min_aggregate_count: int = 3
+    ) -> ScenarioComparisonOut:
+        """Baseline versus stress (D-46), from the immutable ladder rows of the baseline and of
+        every SUCCEEDED member run (a FAILED or BLOCKED member has no rows to compare; it is
+        listed in `members` with its status)."""
+        sr = await self._scoped_run(scenario_id, scenario_run_id)
+        members = (await self.calc.scenario_members([sr.id])).get(sr.id, [])
+        baseline = await self.calc.ladder(sr.baseline_run_id, min_aggregate_count)
+        compared = []
+        for m in members:
+            if m.run.status not in RUN_SUCCEEDED:
+                continue
+            compared.append(
+                _Compared(
+                    m,
+                    await self.calc.ladder(m.run.id, min_aggregate_count),
+                    await self.calc.scenario_changed(m.run.id),
+                )
+            )
+        table = _comparison(
+            baseline,
+            compared,
+            self.principal.clear_classifications,
+            min_aggregate_count,
+            sr.shock_count,
+        )
+        state = ApprovalState(sr.approval_state)
+        scenario = await self.repo.scenario(sr.scenario_id)
+        summary = _summary(sr, scenario.code if scenario else "", state, compared, table)
+        return ScenarioComparisonOut(
+            scenario_run_id=sr.id,
+            scenario_id=sr.scenario_id,
+            scenario_version_id=sr.scenario_version_id,
+            version=sr.version,
+            approval_state=state,
+            approval_label=APPROVAL_LABELS[state],
+            baseline_run_id=sr.baseline_run_id,
+            reporting_date=sr.reporting_date,
+            members=[self._member(m) for m in members],
+            buckets=[
+                ComparisonBucket(
+                    bucket_definition_id=b.id,
+                    sequence=b.sequence,
+                    code=b.code,
+                    label=b.label,
+                    lower_exclusive_days=b.lower_exclusive_days,
+                    upper_inclusive_days=b.upper_inclusive_days,
+                )
+                for b in baseline.buckets
+            ],
+            currencies=table.currencies,
+            largest_changes=table.largest,
+            summary=summary,
+            min_aggregate_count=min_aggregate_count,
+            illustrative=True,
+            labels=LABELS,
+        )
+
+    async def contributions(
+        self,
+        scenario_id: uuid.UUID,
+        scenario_run_id: uuid.UUID,
+        currency: str | None,
+        bucket_code: str | None,
+        shock_subset: list[int] | None,
+        limit: int,
+        offset: int,
+    ) -> ScenarioContributionPage:
+        """The drill-down (D-46 §4): one member run's changed parts (default the combined
+        run), in a bucket before or after. Amounts are masked by their classification for a
+        role not cleared for them (D-33); days, buckets and templates are internal."""
+        sr = await self._scoped_run(scenario_id, scenario_run_id)
+        members = (await self.calc.scenario_members([sr.id])).get(sr.id, [])
+        wanted = sorted(set(shock_subset)) if shock_subset else None
+        chosen = [
+            m
+            for m in members
+            if (m.pin.combined if wanted is None else list(m.pin.shock_subset) == wanted)
+        ]
+        if not chosen:
+            raise ApiError(404, RR.NOT_FOUND, "Member run not found.")
+        member = chosen[0]
+        rows, total = await self.calc.scenario_parts(
+            member.run.id, currency, bucket_code, limit, offset
+        )
+        templates = [
+            ScenarioTemplate(s["template"]) for s in member.run.manifest["scenario"]["shocks"]
+        ]
+        clear = self.principal.clear_classifications
+        items = []
+        for row in rows:
+            v = row.value
+            key: str | MaskedValue | None = None
+            if row.instrument is not None:
+                code = row.instrument_classes.get("instrument_id", UNCLASSIFIED)
+                key = (
+                    row.instrument.business_key
+                    if code in clear
+                    else MaskedValue(classification=code)
+                )
+            amount: str | MaskedValue = (
+                decimal_text(v.value)
+                if v.classification in clear
+                else MaskedValue(classification=v.classification)
+            )
+            items.append(
+                ScenarioContributionOut(
+                    scenario_contribution_id=v.id,
+                    calculation_run_id=v.calculation_run_id,
+                    shock_subset=list(member.pin.shock_subset),
+                    cashflow_event_id=v.cashflow_event_id,
+                    part_path=v.part_path,
+                    part_id=v.part_id,
+                    instrument_business_key=key,
+                    shock_sequences=list(v.shock_sequences),
+                    templates=[templates[n - 1] for n in v.shock_sequences],
+                    change=PartChange(v.change),
+                    direction=FlowDirection(v.direction),
+                    origin=FlowOrigin(v.origin),
+                    currency=v.unit,
+                    days_before=v.original_days,
+                    days_after=v.days_after_reporting_date,
+                    bucket_code_before=v.original_bucket_code,
+                    bucket_code_after=v.bucket_code,
+                    amount=amount,
+                    classification=v.classification,
+                    lineage=ContributionSourceLineage(
+                        cashflow_event_id=v.cashflow_event_id,
+                        canonical_record_id=v.canonical_record_id,
+                        import_id=v.import_job_id,
+                        source_record_id=v.source_record_id,
+                        source_ordinal=v.source_ordinal,
+                    ),
+                )
+            )
+        return ScenarioContributionPage(
+            scenario_run_id=sr.id,
+            items=items,
+            total=total,
+            limit=limit,
+            offset=offset,
+            labels=LABELS,
+        )
+
+
+# --- the comparison, computed on read (D-46 §1-3) ----------------------------------------------
+
+FIGURES = ("inflows", "outflows", "net_gap", "cumulative_gap")
+SUMMARY_TEMPLATE_VERSION = "1"
+
+
+@dataclass(frozen=True)
+class _Compared:
+    member: ScenarioMember
+    ladder: LadderView
+    changed: list[tuple[str, str, str, uuid.UUID, str]]
+
+
+@dataclass
+class _Table:
+    currencies: list[ComparisonCurrency]
+    largest: list[LargestChange]
+    # (currency, bucket code) -> member run id -> (turns negative net, breaks only combined)
+    flags: dict[tuple[str, str], dict[uuid.UUID, bool | None]]
+    breaks: dict[str, list[str]]
+    unknown: dict[str, bool]
+    first_negative: dict[str, tuple[str | MaskedValue | None, str | MaskedValue | None]]
+
+
+def _shown(value: Decimal, code: str, clear: frozenset[str]) -> str | MaskedValue:
+    return decimal_text(value) if code in clear else MaskedValue(classification=code)
+
+
+def _first_negative(
+    rows: Sequence[tuple[str, Decimal, str]], clear: frozenset[str]
+) -> str | MaskedValue | None:
+    """The first bucket whose cumulative gap is negative; masked when the deciding figure is
+    masked; None when never negative."""
+    for code, value, cls in rows:
+        if cls not in clear:
+            return MaskedValue(classification=cls)
+        if value < 0:
+            return code
+    return None
+
+
+def _comparison(
+    baseline: LadderView,
+    compared: Sequence[_Compared],
+    clear: frozenset[str],
+    minimum: int,
+    shock_count: int,
+) -> _Table:
+    """Per currency and bucket, for each member: baseline, stressed and delta (exact Decimal
+    subtraction), masked per D-46 §3; turns-negative flags; combined-only breaks; the
+    largest clear changes, ranked per currency (no FX: rank restarts at 1 in each currency);
+    the first negative cumulative bucket."""
+    zero = Decimal(0)
+    agg = AGGREGATE_CLASSIFICATION
+    base_rows = {(r.currency, r.bucket_code): r for r in baseline.rows}
+    member_rows = [{(r.currency, r.bucket_code): r for r in c.ladder.rows} for c in compared]
+    currencies = sorted(
+        {r.currency for r in baseline.rows} | {k[0] for rows in member_rows for k in rows}
+    )
+    buckets = baseline.buckets
+    largest: list[tuple[Any, ...]] = []
+    out_currencies: list[ComparisonCurrency] = []
+    flags: dict[tuple[str, str], dict[uuid.UUID, bool | None]] = {}
+    breaks: dict[str, list[str]] = {}
+    unknown: dict[str, bool] = {}
+    first_negative: dict[str, tuple[str | MaskedValue | None, str | MaskedValue | None]] = {}
+    for currency in currencies:
+        rows_out: list[ComparisonRow] = []
+        # The classification each member's cumulative deltas carry so far (D-46 §3).
+        carried: list[str | None] = [None] * len(compared)
+        base_cum: list[tuple[str, Decimal, str]] = []
+        member_cum: list[list[tuple[str, Decimal, str]]] = [[] for _ in compared]
+        breaks[currency] = []
+        unknown[currency] = False
+        for bucket in buckets:
+            key = (currency, bucket.code)
+            b_row = base_rows.get(key)
+            b_cls = baseline.classes.get(b_row.id, {}) if b_row else {}
+            b_val = {f: getattr(b_row, f) if b_row else zero for f in FIGURES}
+            b_code = {f: b_cls.get(f, agg) for f in FIGURES}
+            base_cum.append((bucket.code, b_val["cumulative_gap"], b_code["cumulative_gap"]))
+            cells: list[ComparisonCell] = []
+            nets: list[tuple[bool, Decimal | None]] = []  # (combined, stressed net or masked)
+            for i, c in enumerate(compared):
+                s_row = member_rows[i].get(key)
+                s_cls = c.ladder.classes.get(s_row.id, {}) if s_row else {}
+                s_val = {f: getattr(s_row, f) if s_row else zero for f in FIGURES}
+                s_code = {f: s_cls.get(f, agg) for f in FIGURES}
+                changed = [ch for ch in c.changed if ch[0] == currency and ch[1] == bucket.code]
+                by_direction = {
+                    "inflows": {ch[3] for ch in changed if ch[2] == "INFLOW"},
+                    "outflows": {ch[3] for ch in changed if ch[2] == "OUTFLOW"},
+                }
+                by_direction["net_gap"] = by_direction["inflows"] | by_direction["outflows"]
+                changed_code = most_sensitive([ch[4] for ch in changed]) if changed else agg
+                figures: dict[str, ComparisonFigure] = {}
+                net_class = agg
+                for f in FIGURES:
+                    # D-46 §3: a delta's classification, whoever reads it: the most sensitive
+                    # of its two sides and, when fewer than `minimum` distinct non-zero flows
+                    # changed it, of those flows. A cumulative delta also carries every
+                    # earlier net delta's, so once masked it stays masked in its currency.
+                    # The viewer's clearance then masks it; a zero net, inflow or outflow
+                    # delta stays clear. No differencing: the stressed side's ladder classes
+                    # (`ladder_classes`, from the same changed-flow counts per part) already
+                    # mask a stressed figure changed by too few flows, even at zero, and
+                    # a delta is masked when either side is.
+                    delta = s_val[f] - b_val[f]
+                    if f == "cumulative_gap":
+                        code = most_sensitive([b_code[f], s_code[f], net_class, carried[i] or agg])
+                        carried[i] = code
+                        masked = code not in clear
+                    else:
+                        few = 0 < len(by_direction[f]) < minimum
+                        code = most_sensitive(
+                            [b_code[f], s_code[f], *([changed_code] if few else [])]
+                        )
+                        if f == "net_gap":
+                            net_class = code
+                        masked = delta != zero and code not in clear
+                    figures[f] = ComparisonFigure(
+                        baseline=_shown(b_val[f], b_code[f], clear),
+                        stressed=_shown(s_val[f], s_code[f], clear),
+                        delta=MaskedValue(classification=code) if masked else decimal_text(delta),
+                    )
+                    if f == "net_gap" and not masked and delta != zero:
+                        largest.append(
+                            (-abs(delta), currency, bucket.sequence, not c.member.pin.combined,
+                             list(c.member.pin.shock_subset), bucket.code, c, delta)
+                        )  # fmt: skip
+                net_known = b_code["net_gap"] in clear and s_code["net_gap"] in clear
+                cum_known = b_code["cumulative_gap"] in clear and s_code["cumulative_gap"] in clear
+                turns_net = (
+                    b_val["net_gap"] >= zero and s_val["net_gap"] < zero if net_known else None
+                )
+                turns_cum = (
+                    b_val["cumulative_gap"] >= zero and s_val["cumulative_gap"] < zero
+                    if cum_known
+                    else None
+                )
+                flags.setdefault(key, {})[c.member.run.id] = turns_net
+                nets.append((c.member.pin.combined, s_val["net_gap"] if net_known else None))
+                member_cum[i].append(
+                    (bucket.code, s_val["cumulative_gap"], s_code["cumulative_gap"])
+                )
+                cells.append(
+                    ComparisonCell(
+                        calculation_run_id=c.member.run.id,
+                        shock_subset=list(c.member.pin.shock_subset),
+                        combined=c.member.pin.combined,
+                        changed_flow_count=len(by_direction["net_gap"]),
+                        turns_negative_net=turns_net,
+                        turns_negative_cumulative=turns_cum,
+                        **figures,
+                    )
+                )
+            singles = [net for combined, net in nets if not combined]
+            combined_nets = [net for combined, net in nets if combined]
+            only: bool | None
+            if not combined_nets or len(singles) < shock_count:
+                # Not assessable: no combined run compared, or fewer single-shock runs compared
+                # than the version has shocks (k = 1 has none; a FAILED member is not compared).
+                only = None
+            elif b_code["net_gap"] not in clear or any(
+                n is None for n in [*singles, *combined_nets]
+            ):
+                only = None
+            else:
+                only = (
+                    combined_nets[0] is not None
+                    and combined_nets[0] < zero
+                    and b_val["net_gap"] >= zero
+                    and all(n is not None and n >= zero for n in singles)
+                )
+            if only:
+                breaks[currency].append(bucket.code)
+            unknown[currency] = unknown[currency] or only is None
+            rows_out.append(
+                ComparisonRow(
+                    bucket_code=bucket.code,
+                    bucket_sequence=bucket.sequence,
+                    bucket_label=bucket.label,
+                    cells=cells,
+                    breaks_only_combined=only,
+                )
+            )
+        firsts = []
+        base_first = _first_negative(base_cum, clear)
+        for i, c in enumerate(compared):
+            stressed_first = _first_negative(member_cum[i], clear)
+            firsts.append(
+                FirstNegativeCumulative(
+                    shock_subset=list(c.member.pin.shock_subset),
+                    combined=c.member.pin.combined,
+                    baseline_bucket_code=base_first,
+                    stressed_bucket_code=stressed_first,
+                )
+            )
+            if c.member.pin.combined:
+                first_negative[currency] = (base_first, stressed_first)
+        out_currencies.append(
+            ComparisonCurrency(currency=currency, rows=rows_out, first_negative_cumulative=firsts)
+        )
+    ranked = [
+        (rank, t)
+        for currency in currencies
+        for rank, t in enumerate(
+            sorted((t for t in largest if t[1] == currency), key=lambda t: t[:5])[
+                :MAX_LARGEST_CHANGES
+            ],
+            start=1,
+        )
+    ]
+    return _Table(
+        out_currencies,
+        [
+            LargestChange(
+                rank=rank,
+                currency=t[1],
+                bucket_code=t[5],
+                bucket_sequence=t[2],
+                calculation_run_id=t[6].member.run.id,
+                shock_subset=list(t[6].member.pin.shock_subset),
+                combined=t[6].member.pin.combined,
+                net_gap_delta=decimal_text(t[7]),
+            )
+            for rank, t in ranked
+        ],
+        flags,
+        breaks,
+        unknown,
+        first_negative,
+    )
+
+
+def _which(subset: Sequence[int], combined: bool) -> str:
+    if combined:
+        return "the combined run"
+    return (
+        f"shock {subset[0]} alone" if len(subset) == 1 else "shocks " + ", ".join(map(str, subset))
+    )
+
+
+def _summary(
+    sr: ScenarioRun,
+    code: str,
+    state: ApprovalState,
+    compared: Sequence[_Compared],
+    table: _Table,
+) -> ComparisonSummary:
+    """D-46 §2: a deterministic, templated (non-AI) summary of the comparison's facts. It
+    cites only clear figures and flags, never a masked one (the D-51 fallback)."""
+    runs = len(compared)
+    sentences = [
+        f"{APPROVAL_LABELS[state].value}: scenario {code} version {sr.version} against "
+        f"baseline run {sr.baseline_run_id} (reporting date {sr.reporting_date.isoformat()}), "
+        f"{sr.shock_count} shock(s) in {sr.run_count} run(s), {runs} compared."
+    ]
+    combined = [c for c in compared if c.member.pin.combined]
+    for currency in sorted(table.breaks):
+        if combined:
+            run_id = combined[0].member.run.id
+            turned = [
+                bucket
+                for (cur, bucket), by_run in table.flags.items()
+                if cur == currency and by_run.get(run_id) is True
+            ]
+            unknown = any(
+                by_run.get(run_id) is None
+                for (cur, _), by_run in table.flags.items()
+                if cur == currency
+            )
+            if turned:
+                sentences.append(
+                    f"{currency}: the combined run turns the net gap negative in bucket(s) "
+                    f"{', '.join(turned)}."
+                )
+            elif not unknown:
+                sentences.append(
+                    f"{currency}: no bucket's net gap turns negative in the combined run."
+                )
+            if unknown:
+                sentences.append(
+                    f"{currency}: some figures are masked for your role and are not cited."
+                )
+        if table.breaks[currency]:
+            sentences.append(
+                f"{currency}: bucket(s) {', '.join(table.breaks[currency])} break only when the "
+                "shocks are combined."
+            )
+        first = table.first_negative.get(currency)
+        if first is not None and not any(isinstance(x, MaskedValue) for x in first):
+            base, stressed = first
+            if stressed is not None:
+                sentences.append(
+                    f"{currency}: under the combined run the cumulative gap first turns negative "
+                    f"in bucket {stressed} (baseline: {base or 'never'})."
+                )
+    for top in (x for x in table.largest if x.rank == 1):  # one per currency, no FX
+        sentences.append(
+            f"{top.currency}: the largest clear change is a net gap delta of "
+            f"{top.net_gap_delta} in bucket {top.bucket_code} "
+            f"({_which(top.shock_subset, top.combined)})."
+        )
+    sentences.append(SCENARIO_STATEMENT)
+    return ComparisonSummary(template_version=SUMMARY_TEMPLATE_VERSION, sentences=sentences)

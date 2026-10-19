@@ -36,6 +36,15 @@
         "title": "ApprovalLabel",
         "type": "string"
       },
+      "ApprovalState": {
+        "description": "D-45 \u00a74: the approval state a stressed run pins (from its version's status at run\ntime). EXPLORATION runs are never authoritative (D-47 \u00a73).",
+        "enum": [
+          "EXPLORATION",
+          "APPROVED"
+        ],
+        "title": "ApprovalState",
+        "type": "string"
+      },
       "ArtifactOut": {
         "properties": {
           "classification": {
@@ -1227,6 +1236,272 @@
         "title": "ColumnProfile",
         "type": "object"
       },
+      "ComparisonBucket": {
+        "properties": {
+          "bucket_definition_id": {
+            "format": "uuid",
+            "title": "Bucket Definition Id",
+            "type": "string"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "lower_exclusive_days": {
+            "title": "Lower Exclusive Days",
+            "type": "integer"
+          },
+          "sequence": {
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "upper_inclusive_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "None: the open last bucket.",
+            "title": "Upper Inclusive Days"
+          }
+        },
+        "required": [
+          "bucket_definition_id",
+          "sequence",
+          "code",
+          "label",
+          "lower_exclusive_days",
+          "upper_inclusive_days"
+        ],
+        "title": "ComparisonBucket",
+        "type": "object"
+      },
+      "ComparisonCell": {
+        "description": "One bucket of one currency under one member run (a shock alone, or combined).",
+        "properties": {
+          "calculation_run_id": {
+            "format": "uuid",
+            "title": "Calculation Run Id",
+            "type": "string"
+          },
+          "changed_flow_count": {
+            "description": "Distinct non-zero cash flows the shocks changed in this bucket (parts of one flow count once). Public (D-46 \u00a73).",
+            "title": "Changed Flow Count",
+            "type": "integer"
+          },
+          "combined": {
+            "title": "Combined",
+            "type": "boolean"
+          },
+          "cumulative_gap": {
+            "$ref": "#/components/schemas/ComparisonFigure"
+          },
+          "inflows": {
+            "$ref": "#/components/schemas/ComparisonFigure"
+          },
+          "net_gap": {
+            "$ref": "#/components/schemas/ComparisonFigure"
+          },
+          "outflows": {
+            "$ref": "#/components/schemas/ComparisonFigure"
+          },
+          "shock_subset": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Shock Subset",
+            "type": "array"
+          },
+          "turns_negative_cumulative": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Baseline cumulative >= 0 and stressed < 0; null when masked.",
+            "title": "Turns Negative Cumulative"
+          },
+          "turns_negative_net": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Baseline net >= 0 and stressed net < 0; null when it reads a masked figure.",
+            "title": "Turns Negative Net"
+          }
+        },
+        "required": [
+          "calculation_run_id",
+          "shock_subset",
+          "combined",
+          "inflows",
+          "outflows",
+          "net_gap",
+          "cumulative_gap",
+          "changed_flow_count",
+          "turns_negative_net",
+          "turns_negative_cumulative"
+        ],
+        "title": "ComparisonCell",
+        "type": "object"
+      },
+      "ComparisonCurrency": {
+        "properties": {
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "first_negative_cumulative": {
+            "description": "One per member run.",
+            "items": {
+              "$ref": "#/components/schemas/FirstNegativeCumulative"
+            },
+            "title": "First Negative Cumulative",
+            "type": "array"
+          },
+          "rows": {
+            "description": "Every bucket, in bucket order.",
+            "items": {
+              "$ref": "#/components/schemas/ComparisonRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "currency",
+          "rows",
+          "first_negative_cumulative"
+        ],
+        "title": "ComparisonCurrency",
+        "type": "object"
+      },
+      "ComparisonFigure": {
+        "description": "Exact decimal text, or masked (D-46 \u00a73). `delta` = stressed - baseline, exactly.",
+        "properties": {
+          "baseline": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "title": "Baseline"
+          },
+          "delta": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "title": "Delta"
+          },
+          "stressed": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "title": "Stressed"
+          }
+        },
+        "required": [
+          "baseline",
+          "stressed",
+          "delta"
+        ],
+        "title": "ComparisonFigure",
+        "type": "object"
+      },
+      "ComparisonRow": {
+        "properties": {
+          "breaks_only_combined": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The combined net gap is negative while the baseline and every single-shock net gap are not; null when it reads a masked figure, or when fewer single-shock runs were compared than the version has shocks (always null for one shock).",
+            "title": "Breaks Only Combined"
+          },
+          "bucket_code": {
+            "title": "Bucket Code",
+            "type": "string"
+          },
+          "bucket_label": {
+            "title": "Bucket Label",
+            "type": "string"
+          },
+          "bucket_sequence": {
+            "title": "Bucket Sequence",
+            "type": "integer"
+          },
+          "cells": {
+            "description": "Single-shock runs by shock index, then the combined run.",
+            "items": {
+              "$ref": "#/components/schemas/ComparisonCell"
+            },
+            "title": "Cells",
+            "type": "array"
+          }
+        },
+        "required": [
+          "bucket_code",
+          "bucket_sequence",
+          "bucket_label",
+          "cells",
+          "breaks_only_combined"
+        ],
+        "title": "ComparisonRow",
+        "type": "object"
+      },
+      "ComparisonSummary": {
+        "description": "D-46 \u00a72: a deterministic, templated (non-AI) summary citing only clear figures. The\nfallback for AI explanations (D-51).",
+        "properties": {
+          "sentences": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sentences",
+            "type": "array"
+          },
+          "template_version": {
+            "title": "Template Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "template_version",
+          "sentences"
+        ],
+        "title": "ComparisonSummary",
+        "type": "object"
+      },
       "Compatibility": {
         "description": "How a version change affects consumers, least to most severe.",
         "enum": [
@@ -1551,6 +1826,44 @@
           "source_ordinal"
         ],
         "title": "ContributionLineage",
+        "type": "object"
+      },
+      "ContributionSourceLineage": {
+        "description": "cash-flow event -> canonical record -> source row -> import (D-31 \u00a76).",
+        "properties": {
+          "canonical_record_id": {
+            "format": "uuid",
+            "title": "Canonical Record Id",
+            "type": "string"
+          },
+          "cashflow_event_id": {
+            "format": "uuid",
+            "title": "Cashflow Event Id",
+            "type": "string"
+          },
+          "import_id": {
+            "format": "uuid",
+            "title": "Import Id",
+            "type": "string"
+          },
+          "source_ordinal": {
+            "title": "Source Ordinal",
+            "type": "integer"
+          },
+          "source_record_id": {
+            "format": "uuid",
+            "title": "Source Record Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cashflow_event_id",
+          "canonical_record_id",
+          "import_id",
+          "source_record_id",
+          "source_ordinal"
+        ],
+        "title": "ContributionSourceLineage",
         "type": "object"
       },
       "CopyTransform": {
@@ -3371,6 +3684,59 @@
         ],
         "title": "FieldType",
         "type": "string"
+      },
+      "FirstNegativeCumulative": {
+        "description": "The first bucket whose cumulative gap is negative (illustrative, D-46 \u00a72).",
+        "properties": {
+          "baseline_bucket_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "None: never negative; masked when the deciding figure is masked.",
+            "title": "Baseline Bucket Code"
+          },
+          "combined": {
+            "title": "Combined",
+            "type": "boolean"
+          },
+          "shock_subset": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Shock Subset",
+            "type": "array"
+          },
+          "stressed_bucket_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stressed Bucket Code"
+          }
+        },
+        "required": [
+          "shock_subset",
+          "combined",
+          "baseline_bucket_code",
+          "stressed_bucket_code"
+        ],
+        "title": "FirstNegativeCumulative",
+        "type": "object"
       },
       "FlowDirection": {
         "enum": [
@@ -5515,6 +5881,61 @@
         "title": "LadderRow",
         "type": "object"
       },
+      "LargestChange": {
+        "description": "Ranked by absolute net delta among clear deltas only; masked deltas are never ranked.\nRanked per currency (no FX): the rank restarts at 1 in each currency, at most 10 each.",
+        "properties": {
+          "bucket_code": {
+            "title": "Bucket Code",
+            "type": "string"
+          },
+          "bucket_sequence": {
+            "title": "Bucket Sequence",
+            "type": "integer"
+          },
+          "calculation_run_id": {
+            "format": "uuid",
+            "title": "Calculation Run Id",
+            "type": "string"
+          },
+          "combined": {
+            "title": "Combined",
+            "type": "boolean"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "net_gap_delta": {
+            "description": "Exact decimal text; always clear.",
+            "title": "Net Gap Delta",
+            "type": "string"
+          },
+          "rank": {
+            "description": "1-based, within its currency.",
+            "title": "Rank",
+            "type": "integer"
+          },
+          "shock_subset": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Shock Subset",
+            "type": "array"
+          }
+        },
+        "required": [
+          "rank",
+          "currency",
+          "bucket_code",
+          "bucket_sequence",
+          "calculation_run_id",
+          "shock_subset",
+          "combined",
+          "net_gap_delta"
+        ],
+        "title": "LargestChange",
+        "type": "object"
+      },
       "LcrWarningCode": {
         "description": "`lcr_result.warning_codes` (BE-17.2): value-free warnings about one currency's LCR.\nKept on the LCR row (a closed list, CHECK-constrained by migration 0020) because\n`calculation_warning.code` is a closed CHECK of migration 0018, which D-01 does not let a\nforward migration widen. A run with any of them ends SUCCEEDED_WITH_WARNINGS.",
         "enum": [
@@ -6160,6 +6581,88 @@
           "parameters"
         ],
         "title": "ManifestRuleVersion",
+        "type": "object"
+      },
+      "ManifestScenario": {
+        "description": "D-45 \u00a74: the `scenario` section of a stressed run's manifest. Non-stressed manifests\nhave no such key (their stored manifest keeps exactly the Feature 03 key set).",
+        "properties": {
+          "approval_state": {
+            "enum": [
+              "EXPLORATION",
+              "APPROVED"
+            ],
+            "title": "Approval State",
+            "type": "string"
+          },
+          "baseline_run_id": {
+            "format": "uuid",
+            "title": "Baseline Run Id",
+            "type": "string"
+          },
+          "scenario_id": {
+            "format": "uuid",
+            "title": "Scenario Id",
+            "type": "string"
+          },
+          "scenario_version_id": {
+            "format": "uuid",
+            "title": "Scenario Version Id",
+            "type": "string"
+          },
+          "shock_subset": {
+            "description": "1-based shock indexes this run applied.",
+            "items": {
+              "type": "integer"
+            },
+            "title": "Shock Subset",
+            "type": "array"
+          },
+          "shocks": {
+            "description": "The version's shocks as pinned. Each picked selector.instrument_keys entry the caller is not cleared for (the instrument_id field's classification, D-33) reads as a MaskedValue, as on the scenario detail; shocks_sha256 is the pin over the stored keys.",
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "DELAYED_INFLOWS": "#/components/schemas/DelayedInflowsShock",
+                  "DEPOSIT_WITHDRAWAL": "#/components/schemas/DepositWithdrawalShock",
+                  "FUNDING_UNAVAILABLE": "#/components/schemas/FundingUnavailableShock"
+                },
+                "propertyName": "template"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/DelayedInflowsShock"
+                },
+                {
+                  "$ref": "#/components/schemas/DepositWithdrawalShock"
+                },
+                {
+                  "$ref": "#/components/schemas/FundingUnavailableShock"
+                }
+              ]
+            },
+            "title": "Shocks",
+            "type": "array"
+          },
+          "shocks_sha256": {
+            "title": "Shocks Sha256",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "scenario_id",
+          "scenario_version_id",
+          "version",
+          "shocks_sha256",
+          "shocks",
+          "shock_subset",
+          "approval_state",
+          "baseline_run_id"
+        ],
+        "title": "ManifestScenario",
         "type": "object"
       },
       "ManifestSnapshot": {
@@ -7763,6 +8266,17 @@
         "title": "ParseDecimalTransform",
         "type": "object"
       },
+      "PartChange": {
+        "description": "D-46 \u00a74: what a shock did to one part of a cash flow (the drill-down).",
+        "enum": [
+          "MOVED",
+          "STAYED",
+          "ADDED",
+          "UNCHANGED"
+        ],
+        "title": "PartChange",
+        "type": "string"
+      },
       "Permission": {
         "enum": [
           "schema:read",
@@ -7847,7 +8361,9 @@
           "CUMULATIVE_GAP",
           "HQLA_TOTALS",
           "LCR_FIGURES",
-          "RERUN_REPRODUCED"
+          "RERUN_REPRODUCED",
+          "SCENARIO_OVERLAY",
+          "SCENARIO_CONSERVATION"
         ],
         "title": "PostCheck",
         "type": "string"
@@ -10201,6 +10717,17 @@
             "title": "Run Id",
             "type": "string"
           },
+          "scenario": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunScenarioRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Stressed runs only (Phase 25); null otherwise."
+          },
           "started_at": {
             "format": "date-time",
             "title": "Started At",
@@ -10283,6 +10810,17 @@
           },
           "rule_set": {
             "$ref": "#/components/schemas/ManifestRuleSet"
+          },
+          "scenario": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ManifestScenario"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Stressed runs only (Phase 25, D-45 \u00a74); absent from non-stressed manifests (stored and returned), which keep exactly their Feature 03 key set."
           }
         },
         "required": [
@@ -10448,6 +10986,74 @@
         "title": "RunRerun",
         "type": "object"
       },
+      "RunScenarioRef": {
+        "description": "Phase 25 (D-45 \u00a74, Feature 05 endpoint table): set on stressed runs only; null on every\nother run. An additive field; existing permissions are unchanged.",
+        "properties": {
+          "approval_label": {
+            "description": "'Exploration, not approved' or 'Approved scenario (illustrative)'.",
+            "title": "Approval Label",
+            "type": "string"
+          },
+          "approval_state": {
+            "enum": [
+              "EXPLORATION",
+              "APPROVED"
+            ],
+            "title": "Approval State",
+            "type": "string"
+          },
+          "baseline_run_id": {
+            "format": "uuid",
+            "title": "Baseline Run Id",
+            "type": "string"
+          },
+          "combined": {
+            "description": "True for the run with every shock of the version.",
+            "title": "Combined",
+            "type": "boolean"
+          },
+          "scenario_id": {
+            "format": "uuid",
+            "title": "Scenario Id",
+            "type": "string"
+          },
+          "scenario_run_id": {
+            "format": "uuid",
+            "title": "Scenario Run Id",
+            "type": "string"
+          },
+          "scenario_version_id": {
+            "format": "uuid",
+            "title": "Scenario Version Id",
+            "type": "string"
+          },
+          "shock_subset": {
+            "description": "1-based shock indexes this run applied.",
+            "items": {
+              "type": "integer"
+            },
+            "title": "Shock Subset",
+            "type": "array"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "scenario_run_id",
+          "scenario_id",
+          "scenario_version_id",
+          "version",
+          "shock_subset",
+          "combined",
+          "approval_state",
+          "approval_label",
+          "baseline_run_id"
+        ],
+        "title": "RunScenarioRef",
+        "type": "object"
+      },
       "RunSummary": {
         "properties": {
           "assumption_set_id": {
@@ -10532,6 +11138,17 @@
             "format": "uuid",
             "title": "Run Id",
             "type": "string"
+          },
+          "scenario": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunScenarioRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Stressed runs only (Phase 25); null otherwise."
           },
           "started_at": {
             "format": "date-time",
@@ -10641,6 +11258,289 @@
           "shock"
         ],
         "title": "ScenarioChangeOut",
+        "type": "object"
+      },
+      "ScenarioComparisonOut": {
+        "description": "GET scenarios/{scenario_id}/comparison?scenario_run_id= (D-46): computed on read from the\nimmutable ladder rows of the baseline and of every member run. Per currency, no FX and no\ncross-currency total.",
+        "properties": {
+          "approval_label": {
+            "$ref": "#/components/schemas/ApprovalLabel"
+          },
+          "approval_state": {
+            "$ref": "#/components/schemas/ApprovalState"
+          },
+          "baseline_run_id": {
+            "format": "uuid",
+            "title": "Baseline Run Id",
+            "type": "string"
+          },
+          "buckets": {
+            "items": {
+              "$ref": "#/components/schemas/ComparisonBucket"
+            },
+            "title": "Buckets",
+            "type": "array"
+          },
+          "currencies": {
+            "items": {
+              "$ref": "#/components/schemas/ComparisonCurrency"
+            },
+            "title": "Currencies",
+            "type": "array"
+          },
+          "illustrative": {
+            "title": "Illustrative",
+            "type": "boolean"
+          },
+          "labels": {
+            "$ref": "#/components/schemas/ScenarioLabels"
+          },
+          "largest_changes": {
+            "items": {
+              "$ref": "#/components/schemas/LargestChange"
+            },
+            "title": "Largest Changes",
+            "type": "array"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/ScenarioRunMember"
+            },
+            "title": "Members",
+            "type": "array"
+          },
+          "min_aggregate_count": {
+            "description": "CALC_MIN_AGGREGATE_COUNT (D-33, PROVISIONAL): a delta changed by fewer distinct non-zero flows is masked for a role not cleared for the amounts.",
+            "title": "Min Aggregate Count",
+            "type": "integer"
+          },
+          "reporting_date": {
+            "format": "date",
+            "title": "Reporting Date",
+            "type": "string"
+          },
+          "scenario_id": {
+            "format": "uuid",
+            "title": "Scenario Id",
+            "type": "string"
+          },
+          "scenario_run_id": {
+            "format": "uuid",
+            "title": "Scenario Run Id",
+            "type": "string"
+          },
+          "scenario_version_id": {
+            "format": "uuid",
+            "title": "Scenario Version Id",
+            "type": "string"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/ComparisonSummary"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "scenario_run_id",
+          "scenario_id",
+          "scenario_version_id",
+          "version",
+          "approval_state",
+          "approval_label",
+          "baseline_run_id",
+          "reporting_date",
+          "members",
+          "buckets",
+          "currencies",
+          "largest_changes",
+          "summary",
+          "min_aggregate_count",
+          "illustrative",
+          "labels"
+        ],
+        "title": "ScenarioComparisonOut",
+        "type": "object"
+      },
+      "ScenarioContributionOut": {
+        "description": "One changed part (D-46 \u00a74). Amounts are confidential (masked for risk_analyst); days,\nbuckets and templates are internal.",
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "description": "Exact decimal text in `currency`, or masked (D-33).",
+            "title": "Amount"
+          },
+          "bucket_code_after": {
+            "title": "Bucket Code After",
+            "type": "string"
+          },
+          "bucket_code_before": {
+            "title": "Bucket Code Before",
+            "type": "string"
+          },
+          "calculation_run_id": {
+            "format": "uuid",
+            "title": "Calculation Run Id",
+            "type": "string"
+          },
+          "cashflow_event_id": {
+            "format": "uuid",
+            "title": "Cashflow Event Id",
+            "type": "string"
+          },
+          "change": {
+            "$ref": "#/components/schemas/PartChange"
+          },
+          "classification": {
+            "title": "Classification",
+            "type": "string"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "days_after": {
+            "title": "Days After",
+            "type": "integer"
+          },
+          "days_before": {
+            "title": "Days Before",
+            "type": "integer"
+          },
+          "direction": {
+            "$ref": "#/components/schemas/FlowDirection"
+          },
+          "instrument_business_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Business Key"
+          },
+          "lineage": {
+            "$ref": "#/components/schemas/ContributionSourceLineage"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/FlowOrigin"
+          },
+          "part_id": {
+            "description": "uuid5 of the event id and the part path.",
+            "format": "uuid",
+            "title": "Part Id",
+            "type": "string"
+          },
+          "part_path": {
+            "description": "Deterministic part path (at most 32 parts per flow).",
+            "title": "Part Path",
+            "type": "string"
+          },
+          "scenario_contribution_id": {
+            "format": "uuid",
+            "title": "Scenario Contribution Id",
+            "type": "string"
+          },
+          "shock_sequences": {
+            "description": "The shocks that touched this part, in order.",
+            "items": {
+              "type": "integer"
+            },
+            "title": "Shock Sequences",
+            "type": "array"
+          },
+          "shock_subset": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Shock Subset",
+            "type": "array"
+          },
+          "templates": {
+            "items": {
+              "$ref": "#/components/schemas/ScenarioTemplate"
+            },
+            "title": "Templates",
+            "type": "array"
+          }
+        },
+        "required": [
+          "scenario_contribution_id",
+          "calculation_run_id",
+          "shock_subset",
+          "cashflow_event_id",
+          "part_path",
+          "part_id",
+          "instrument_business_key",
+          "shock_sequences",
+          "templates",
+          "change",
+          "direction",
+          "origin",
+          "currency",
+          "days_before",
+          "days_after",
+          "bucket_code_before",
+          "bucket_code_after",
+          "amount",
+          "classification",
+          "lineage"
+        ],
+        "title": "ScenarioContributionOut",
+        "type": "object"
+      },
+      "ScenarioContributionPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ScenarioContributionOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "labels": {
+            "$ref": "#/components/schemas/ScenarioLabels"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "scenario_run_id": {
+            "format": "uuid",
+            "title": "Scenario Run Id",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "scenario_run_id",
+          "items",
+          "total",
+          "limit",
+          "offset",
+          "labels"
+        ],
+        "title": "ScenarioContributionPage",
         "type": "object"
       },
       "ScenarioCreate": {
@@ -10852,6 +11752,228 @@
         "title": "ScenarioPage",
         "type": "object"
       },
+      "ScenarioRunCreate": {
+        "additionalProperties": false,
+        "description": "POST scenarios/{scenario_id}/run (D-45 \u00a710). With k > 1 shocks the engine creates k + 1\nstressed runs (each shock alone, then all combined), grouped by one `scenario_run`.",
+        "properties": {
+          "baseline_run_id": {
+            "description": "A SUCCEEDED (or SUCCEEDED_WITH_WARNINGS), non-stressed maturity_ladder run of the caller's tenant. Its pins are reused exactly.",
+            "format": "uuid",
+            "title": "Baseline Run Id",
+            "type": "string"
+          },
+          "version": {
+            "description": "A CONFIRMED_FOR_EXPLORATION or APPROVED_FOR_TEST version.",
+            "maximum": 1000000.0,
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "baseline_run_id"
+        ],
+        "title": "ScenarioRunCreate",
+        "type": "object"
+      },
+      "ScenarioRunMember": {
+        "properties": {
+          "calculation_run_id": {
+            "format": "uuid",
+            "title": "Calculation Run Id",
+            "type": "string"
+          },
+          "combined": {
+            "description": "True for the run with every shock (also when k = 1).",
+            "title": "Combined",
+            "type": "boolean"
+          },
+          "manifest_sha256": {
+            "title": "Manifest Sha256",
+            "type": "string"
+          },
+          "result_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Sha256"
+          },
+          "shock_subset": {
+            "description": "1-based shock indexes the run applied.",
+            "items": {
+              "type": "integer"
+            },
+            "title": "Shock Subset",
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CalculationRunStatus"
+          }
+        },
+        "required": [
+          "calculation_run_id",
+          "shock_subset",
+          "combined",
+          "status",
+          "manifest_sha256",
+          "result_sha256"
+        ],
+        "title": "ScenarioRunMember",
+        "type": "object"
+      },
+      "ScenarioRunOut": {
+        "description": "One `scenario_run` (D-45 \u00a79, append-only): the baseline, the version, the approval state\nand the member runs, with value-free counts per shock.",
+        "properties": {
+          "approval_label": {
+            "$ref": "#/components/schemas/ApprovalLabel"
+          },
+          "approval_state": {
+            "$ref": "#/components/schemas/ApprovalState"
+          },
+          "baseline_run_id": {
+            "format": "uuid",
+            "title": "Baseline Run Id",
+            "type": "string"
+          },
+          "correlation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Correlation Id"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "labels": {
+            "$ref": "#/components/schemas/ScenarioLabels"
+          },
+          "members": {
+            "description": "Single-shock runs by shock index, then the combined run.",
+            "items": {
+              "$ref": "#/components/schemas/ScenarioRunMember"
+            },
+            "title": "Members",
+            "type": "array"
+          },
+          "reporting_date": {
+            "format": "date",
+            "title": "Reporting Date",
+            "type": "string"
+          },
+          "scenario_code": {
+            "title": "Scenario Code",
+            "type": "string"
+          },
+          "scenario_id": {
+            "format": "uuid",
+            "title": "Scenario Id",
+            "type": "string"
+          },
+          "scenario_name": {
+            "title": "Scenario Name",
+            "type": "string"
+          },
+          "scenario_run_id": {
+            "format": "uuid",
+            "title": "Scenario Run Id",
+            "type": "string"
+          },
+          "scenario_version_id": {
+            "format": "uuid",
+            "title": "Scenario Version Id",
+            "type": "string"
+          },
+          "shock_counts": {
+            "items": {
+              "$ref": "#/components/schemas/ShockMatchCount"
+            },
+            "title": "Shock Counts",
+            "type": "array"
+          },
+          "shocks_sha256": {
+            "title": "Shocks Sha256",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "scenario_run_id",
+          "scenario_id",
+          "scenario_code",
+          "scenario_name",
+          "scenario_version_id",
+          "version",
+          "shocks_sha256",
+          "approval_state",
+          "approval_label",
+          "baseline_run_id",
+          "reporting_date",
+          "members",
+          "shock_counts",
+          "created_by",
+          "created_at",
+          "correlation_id",
+          "labels"
+        ],
+        "title": "ScenarioRunOut",
+        "type": "object"
+      },
+      "ScenarioRunPage": {
+        "properties": {
+          "items": {
+            "description": "Newest first.",
+            "items": {
+              "$ref": "#/components/schemas/ScenarioRunOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "labels": {
+            "$ref": "#/components/schemas/ScenarioLabels"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset",
+          "labels"
+        ],
+        "title": "ScenarioRunPage",
+        "type": "object"
+      },
       "ScenarioSummary": {
         "properties": {
           "approved_version": {
@@ -10939,6 +12061,99 @@
         ],
         "title": "ScenarioTemplate",
         "type": "string"
+      },
+      "ScenarioValidationOut": {
+        "description": "GET .../versions/{version}/validation?baseline_run_id= : a dry run of the overlay on the\nbaseline's pinned inputs. Nothing is written. Counts are public (D-46 \u00a73).",
+        "properties": {
+          "approval_label": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApprovalLabel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "approval_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApprovalState"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the runs would be labelled; None when the version cannot run."
+          },
+          "baseline_run_id": {
+            "format": "uuid",
+            "title": "Baseline Run Id",
+            "type": "string"
+          },
+          "blocking_reasons": {
+            "description": "The run refusal codes a POST would answer now (e.g. scenario_not_runnable, invalid_baseline, no_matching_cashflows, scenarios_disabled, calculations_disabled); empty when runnable.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Blocking Reasons",
+            "type": "array"
+          },
+          "labels": {
+            "$ref": "#/components/schemas/ScenarioLabels"
+          },
+          "run_count": {
+            "description": "Runs a POST would create: 1, or k + 1 for k > 1 shocks.",
+            "title": "Run Count",
+            "type": "integer"
+          },
+          "runnable": {
+            "description": "The version is runnable, the baseline is valid and every shock matches at least one flow. The UI disables Run while false.",
+            "title": "Runnable",
+            "type": "boolean"
+          },
+          "scenario_id": {
+            "format": "uuid",
+            "title": "Scenario Id",
+            "type": "string"
+          },
+          "scenario_version_id": {
+            "format": "uuid",
+            "title": "Scenario Version Id",
+            "type": "string"
+          },
+          "shocks": {
+            "description": "One per shock, in declared order.",
+            "items": {
+              "$ref": "#/components/schemas/ShockMatchCount"
+            },
+            "title": "Shocks",
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ScenarioVersionStatus"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "scenario_id",
+          "scenario_version_id",
+          "version",
+          "status",
+          "baseline_run_id",
+          "shocks",
+          "runnable",
+          "blocking_reasons",
+          "run_count",
+          "approval_state",
+          "approval_label",
+          "labels"
+        ],
+        "title": "ScenarioValidationOut",
+        "type": "object"
       },
       "ScenarioVersionClose": {
         "additionalProperties": false,
@@ -12077,6 +13292,55 @@
         ],
         "title": "SchemaVersionStatus",
         "type": "string"
+      },
+      "ShockMatchCount": {
+        "description": "Value-free counts of what one shock matches on the baseline's inputs (D-45 \u00a79).",
+        "properties": {
+          "direction_mismatches": {
+            "description": "Flows the selector names whose pinned direction is not the template's: matched nothing, counted (D-45 \u00a72).",
+            "title": "Direction Mismatches",
+            "type": "integer"
+          },
+          "matched_flows": {
+            "description": "Distinct cash flows the shock changes.",
+            "title": "Matched Flows",
+            "type": "integer"
+          },
+          "parts": {
+            "description": "Parts the shock produces (a split flow counts each part).",
+            "title": "Parts",
+            "type": "integer"
+          },
+          "shock_index": {
+            "description": "1-based, in declared order.",
+            "title": "Shock Index",
+            "type": "integer"
+          },
+          "skipped_incomplete": {
+            "description": "Matching incomplete flows: never shocked.",
+            "title": "Skipped Incomplete",
+            "type": "integer"
+          },
+          "skipped_past_due": {
+            "description": "Matching flows due on or before the reporting date (days <= 0): never shocked.",
+            "title": "Skipped Past Due",
+            "type": "integer"
+          },
+          "template": {
+            "$ref": "#/components/schemas/ScenarioTemplate"
+          }
+        },
+        "required": [
+          "shock_index",
+          "template",
+          "matched_flows",
+          "parts",
+          "direction_mismatches",
+          "skipped_past_due",
+          "skipped_incomplete"
+        ],
+        "title": "ShockMatchCount",
+        "type": "object"
       },
       "ShockSelector": {
         "additionalProperties": false,
@@ -13744,6 +15008,24 @@
               ],
               "title": "Status"
             }
+          },
+          {
+            "description": "true: stressed runs only (Phase 25, D-45 \u00a74); false: non-stressed runs only (e.g. a baseline picker); omitted: every run.",
+            "in": "query",
+            "name": "stressed",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "true: stressed runs only (Phase 25, D-45 \u00a74); false: non-stressed runs only (e.g. a baseline picker); omitted: every run.",
+              "title": "Stressed"
+            }
           }
         ],
         "responses": {
@@ -13789,7 +15071,7 @@
         ]
       },
       "post": {
-        "description": "Run a module on a dataset snapshot for a reporting date, synchronously (D-31). The\nengine pins the ACTIVE rule versions (as a content-addressed rule set), the baseline\nassumption set, the module and engine versions and the snapshot's members, writes the\nrun RUNNING with its manifest, runs the module and the post-checks, and ends it\nSUCCEEDED, SUCCEEDED_WITH_WARNINGS, FAILED (a post-check failed) or BLOCKED (the input\ncontract was not met). No AI is involved. A body of `rerun_of` alone re-runs that run on\nits exact original pins (BE-16.3), recording `rerun_of_run_id`. Refusals: 404 `not_found`\n(snapshot, or the run to re-run), 409 `rerun_not_reproducible`, 409\n`module_not_available` (absent, PLANNED, not implemented, or a rule without an ACTIVE\nversion), 409 `calculations_disabled`, 409 `idempotency_conflict`; each audited DENIED. A\nreplay whose run is still RUNNING after CALC_RUN_STALE_SECONDS ends it FAILED\n(ENGINE_ERROR) and returns it.",
+        "description": "Run a module on a dataset snapshot for a reporting date, synchronously (D-31). The\nengine pins the ACTIVE rule versions (as a content-addressed rule set), the baseline\nassumption set, the module and engine versions and the snapshot's members, writes the\nrun RUNNING with its manifest, runs the module and the post-checks, and ends it\nSUCCEEDED, SUCCEEDED_WITH_WARNINGS, FAILED (a post-check failed) or BLOCKED (the input\ncontract was not met). No AI is involved. A body of `rerun_of` alone re-runs that run on\nits exact original pins (BE-16.3), recording `rerun_of_run_id`. Refusals: 404 `not_found`\n(snapshot, or the run to re-run), 409 `rerun_not_reproducible`, 409\n`module_not_available` (absent, PLANNED, not implemented, or a rule without an ACTIVE\nversion), 409 `calculations_disabled`, 409 `idempotency_conflict`; each audited DENIED. A\nreplay whose run is still RUNNING after CALC_RUN_STALE_SECONDS ends it FAILED\n(ENGINE_ERROR) and returns it. A re-run of a stressed run (Phase 25, D-45 \u00a78) re-pins its\nscenario version and shock subset, even once the version is CLOSED; while\nSCENARIOS_ENABLED is off it is refused 409 `scenarios_disabled`.",
         "operationId": "createCalculationRun",
         "parameters": [
           {
@@ -13880,7 +15162,7 @@
     },
     "/api/v1/calculation-runs/{run_id}": {
       "get": {
-        "description": "One run: its manifest with every pinned id and version, its input refs, warnings and\noutcome counts. 404 alike for an absent and a foreign id (D-04).",
+        "description": "One run: its manifest with every pinned id and version, its input refs, warnings and\noutcome counts. A stressed run's manifest.scenario.shocks mask each picked instrument key\nthe caller is not cleared for as a MaskedValue (D-33, as the scenario detail does);\nshocks_sha256 is the pin over the stored keys. 404 alike for an absent and a foreign id\n(D-04).",
         "operationId": "getCalculationRun",
         "parameters": [
           {
@@ -17494,6 +18776,128 @@
         ]
       }
     },
+    "/api/v1/scenario-runs": {
+      "get": {
+        "description": "The caller's tenant's scenario runs, newest first, with their member runs (D-45 \u00a79).",
+        "operationId": "listScenarioRuns",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "scenario_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scenario Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "baseline_run_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Baseline Run Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "approval_state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ApprovalState"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Approval State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScenarioRunPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Scenario Runs",
+        "tags": [
+          "scenarios"
+        ]
+      }
+    },
     "/api/v1/scenario-templates": {
       "get": {
         "description": "The three v1 templates (D-44 \u00a72): parameters with kinds and bounds, the selector\nfields, and the instrument types of the ACTIVE cashflow_direction rule each accepts.",
@@ -17771,6 +19175,317 @@
           }
         ],
         "summary": "Get Scenario",
+        "tags": [
+          "scenarios"
+        ]
+      }
+    },
+    "/api/v1/scenarios/{scenario_id}/comparison": {
+      "get": {
+        "description": "Baseline versus stress per currency and bucket (D-46), for each shock alone and\ncombined: exact deltas, turns-negative flags, combined-only breaks, the largest changes and\na templated (non-AI) summary. Masked per D-33 and D-46 \u00a73. 404 `not_found` alike for an\nabsent or foreign scenario or scenario run, or a run of another scenario.",
+        "operationId": "getScenarioComparison",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Scenario Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scenario_run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Scenario Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScenarioComparisonOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Scenario Comparison",
+        "tags": [
+          "scenarios"
+        ]
+      }
+    },
+    "/api/v1/scenarios/{scenario_id}/comparison/contributions": {
+      "get": {
+        "description": "Drill-down (D-46 \u00a74): the changed parts (moved, stayed, added) of one member run, with\ndays and buckets before and after and source-row lineage. Amounts masked per D-33.",
+        "operationId": "listScenarioComparisonContributions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Scenario Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scenario_run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Scenario Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "currency",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^[A-Z]{3}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Currency"
+            }
+          },
+          {
+            "in": "query",
+            "name": "bucket_code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 50,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Bucket Code"
+            }
+          },
+          {
+            "description": "1-based shock indexes of the member run; default the combined run.",
+            "in": "query",
+            "name": "shock_subset",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "integer"
+                  },
+                  "maxItems": 5,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "1-based shock indexes of the member run; default the combined run.",
+              "title": "Shock Subset"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScenarioContributionPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Scenario Comparison Contributions",
+        "tags": [
+          "scenarios"
+        ]
+      }
+    },
+    "/api/v1/scenarios/{scenario_id}/run": {
+      "post": {
+        "description": "Run a version against a baseline maturity_ladder run, synchronously (D-45). Each\nstressed run copies the baseline's pins exactly, applies the shocks to a scenario-specific\ncopy of the inputs, runs the unchanged module and the SCENARIO_OVERLAY and\nSCENARIO_CONSERVATION post-checks. k > 1 shocks give k + 1 runs (each alone, then\ncombined). No AI is involved. Audited `scenario.run`, and `calculation_run.create` per run.\nRefusals, audited DENIED with nothing written, checked in this order (the first that\napplies answers): 409 `scenarios_disabled`; 409 `calculations_disabled`; 404 `not_found`\n(scenario or version); 409 `idempotency_conflict` (the key was used for a different\nversion, shocks or baseline); then, for a new key only: 409 `scenario_not_runnable`; 404\n`not_found` (baseline); 409 `invalid_baseline` or `baseline_not_reproducible`; 409\n`no_matching_cashflows`. A replay of the key returns the original scenario_run without\nre-checking the version's status (it may be CLOSED since) and completes any member run a\ncrash left out, on the run's recorded pins (version, shocks_sha256, approval state,\nbaseline), each created member audited `calculation_run.create`.",
+        "operationId": "runScenario",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Scenario Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Unique per run request (per user). A retry with the same key and the same body returns the original scenario_run; with a different body, 409 idempotency_conflict.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Unique per run request (per user). A retry with the same key and the same body returns the original scenario_run; with a different body, 409 idempotency_conflict.",
+              "maxLength": 255,
+              "minLength": 1,
+              "pattern": "^[!-~]+$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScenarioRunCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScenarioRunOut"
+                }
+              }
+            },
+            "description": "Idempotent replay: this key was used for the same request; the original scenario_run is returned (header Idempotent-Replayed: true)."
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScenarioRunOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Run Scenario",
         "tags": [
           "scenarios"
         ]
@@ -18240,6 +19955,88 @@
           }
         ],
         "summary": "Submit Scenario Version",
+        "tags": [
+          "scenarios"
+        ]
+      }
+    },
+    "/api/v1/scenarios/{scenario_id}/versions/{version}/validation": {
+      "get": {
+        "description": "Dry run (D-45 \u00a72, \u00a710): the overlay on the baseline's pinned inputs, with value-free\nmatch counts per shock and the refusal codes a run would answer now. Nothing is written.\n404 `not_found` alike for an absent or foreign scenario, version or baseline run (D-04).",
+        "operationId": "validateScenarioRun",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scenario_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Scenario Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "maximum": 1000000,
+              "minimum": 1,
+              "title": "Version",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The baseline maturity_ladder run.",
+            "in": "query",
+            "name": "baseline_run_id",
+            "required": true,
+            "schema": {
+              "description": "The baseline maturity_ladder run.",
+              "format": "uuid",
+              "title": "Baseline Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScenarioValidationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Validate Scenario Run",
         "tags": [
           "scenarios"
         ]

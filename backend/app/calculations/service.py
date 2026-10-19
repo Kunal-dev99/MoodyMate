@@ -34,6 +34,16 @@ and `calculation_run.finish`). Refused before any run is written (409, audited D
    moves again (DB triggers).
 
 Decimal only; every hash is over canonical JSON (sorted keys, exact decimal text).
+
+Stressed runs (Phase 25, BE-25.3; D-45): `ScenarioRunSpec` runs `maturity_ladder` on a
+baseline run's exact pins (reusing the re-run pin resolution) with a `scenario` manifest
+section. The pure overlay (`scenario_overlay`) splits the matching cash flows into parts, the
+unchanged module runs on them, and the SCENARIO_OVERLAY and SCENARIO_CONSERVATION
+post-checks run besides the existing ones. Parts are stored in `scenario_contribution` and
+the per-flow applications in `scenario_shock_application` (never `intermediate_value`), and
+`result_sha256` covers both for stressed runs only. A re-run of a stressed run re-pins the
+same version and subset, even once the version is CLOSED. Non-stressed manifests and result
+documents keep exactly their Feature 03 key sets.
 """
 
 import contextlib
@@ -41,7 +51,7 @@ import logging
 import uuid
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from decimal import Decimal, localcontext
 from types import MappingProxyType
@@ -49,6 +59,7 @@ from typing import Any, NoReturn
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.calculations import scenario_overlay
 from app.calculations.constants import (
     AGGREGATE_CLASSIFICATION,
     CREATE_RUN,
@@ -69,6 +80,7 @@ from app.calculations.constants import (
 from app.calculations.models import (
     CalculationInputRef,
     CalculationRun,
+    CalculationScenarioPin,
     CalculationWarning,
     DatasetSnapshot,
     DatasetSnapshotMember,
@@ -76,6 +88,8 @@ from app.calculations.models import (
     IntermediateValue,
     LcrResult,
     LiquidityGapResult,
+    ScenarioContribution,
+    ScenarioShockApplication,
 )
 from app.calculations.modules import registered
 from app.calculations.modules.base import (
@@ -93,6 +107,7 @@ from app.calculations.modules.base import (
     RegisteredModule,
     divide,
 )
+from app.calculations.modules.maturity_ladder import ParameterError, parse_buckets, parse_directions
 from app.calculations.repository import CalculationRepository, SnapshotRepository
 from app.core.correlation import get_correlation_id
 from app.core.decimals import DeclaredRounding, decimal_text, exact_context
@@ -104,10 +119,12 @@ from app.governance.constants import AuditOutcome, ClassificationCode
 from app.governance.service import audit_by, record_denial
 from app.ingestion.models import ImportJob, ImportManifest
 from app.ingestion.service import ImportService
+from app.orchestration.constants import PartChange
 from app.reconciliation.constants import ReconciliationOutcome
 from app.reconciliation.models import ReconciliationRun
 from app.reconciliation.service import ReconciliationService
 from app.rules.constants import (
+    CASHFLOW_DIRECTION,
     ILLUSTRATIVE_STATEMENT,
     LCR_HQLA,
     LCR_INFLOW_HORIZON_DAYS,
@@ -403,6 +420,43 @@ def _contribution_document(c: Contribution) -> dict[str, Any]:
     }
 
 
+def _part_document(p: scenario_overlay.Part) -> dict[str, Any]:
+    return {
+        "part_id": str(p.part_id),
+        "cashflow_event_id": str(p.cashflow_event_id),
+        "part_path": p.path,
+        "shock_sequences": list(p.shock_sequences),
+        "change": p.change.value,
+        "days_before": p.days_before,
+        "days_after": p.days_after,
+        "value": decimal_text(p.amount),
+    }
+
+
+def _application_document(a: scenario_overlay.Application) -> dict[str, Any]:
+    return {
+        "cashflow_event_id": str(a.cashflow_event_id),
+        "shock_sequence": a.shock_sequence,
+        "template": a.template.value,
+        "currency": a.currency,
+        "parts_matched": a.parts_matched,
+        "parts_after": a.parts_after,
+        "moved_amount": decimal_text(a.moved_amount),
+        "added_amount": decimal_text(a.added_amount),
+        "delay_days": a.delay_days,
+        "moved_to_day": a.moved_to_day,
+    }
+
+
+@dataclass(frozen=True)
+class ScenarioOutputs:
+    """A stressed run's parts (those the module placed in a bucket) and applications, as
+    stored and hashed (D-45 §5)."""
+
+    parts: tuple[scenario_overlay.Part, ...] = ()
+    applications: tuple[scenario_overlay.Application, ...] = ()
+
+
 def _warning_document(w: ModuleWarning) -> dict[str, Any]:
     return {
         "code": w.code.value,
@@ -432,6 +486,7 @@ def reproduce(
     *,
     lcr: Sequence[LcrRow] = (),
     assets: Sequence[HqlaAsset] = (),
+    scenario: ScenarioOutputs | None = None,
 ) -> tuple[
     CalculationRunStatus,
     list[GapRow],
@@ -444,13 +499,19 @@ def reproduce(
     SUCCEEDED). A re-run (`expected`: its original's result_sha256, D-31 §5) that does not
     reproduce it ends FAILED with a POST_CHECK_FAILED warning and no result: never a
     silent, different success. The lcr_hqla outputs (`lcr`, `assets`) are hashed too; the
-    caller stores `kept_lcr(status, ...)` of the returned status."""
+    caller stores `kept_lcr(status, ...)` of the returned status. A stressed run (`scenario`
+    not None) hashes its parts and applications as well, only when it SUCCEEDED."""
     keep = status in SUCCEEDED
     kept_gap = sorted(gap, key=lambda g: (g.currency, g.bucket.sequence)) if keep else []
     kept = list(contributions) if keep else []
     found = list(warnings)
+    stressed = None
+    if scenario is not None:
+        stressed = scenario if keep else ScenarioOutputs()
     sha = canonical_sha256(
-        result_document(status, kept_gap, kept, found, *kept_lcr(status, lcr, assets))
+        result_document(
+            status, kept_gap, kept, found, *kept_lcr(status, lcr, assets), scenario=stressed
+        )
     )
     if expected is None:
         return status, kept_gap, kept, found, dict(checks), sha
@@ -466,7 +527,8 @@ def reproduce(
             details={"check": PostCheck.RERUN_REPRODUCED.value},
         )
     )
-    sha = canonical_sha256(result_document(failed, [], [], found))
+    empty = ScenarioOutputs() if scenario is not None else None
+    sha = canonical_sha256(result_document(failed, [], [], found, scenario=empty))
     return failed, [], [], found, {**checks, PostCheck.RERUN_REPRODUCED: False}, sha
 
 
@@ -477,11 +539,15 @@ def result_document(
     warnings: Sequence[ModuleWarning],
     lcr: Sequence[LcrRow] = (),
     assets: Sequence[HqlaAsset] = (),
+    *,
+    scenario: ScenarioOutputs | None = None,
 ) -> dict[str, Any]:
     """The canonical serialisation of every stored output (D-31 §4): what `result_sha256`
     hashes. Ids are domain and rule ids (stable across runs), never row ids or times;
     warning messages are presentation and are left out. The lcr_hqla outputs are added
-    only when there are some, so a maturity-ladder result hashes as it always did."""
+    only when there are some, so a maturity-ladder result hashes as it always did. A
+    stressed run (D-45 §5) adds its parts and applications under `scenario`; no other run
+    has that key."""
     document: dict[str, Any] = {
         "status": status.value,
         "liquidity_gap": [_gap_document(g) for g in gap],
@@ -491,6 +557,11 @@ def result_document(
     if lcr or assets:
         document["lcr"] = [_lcr_document(r) for r in lcr]
         document["hqla_assets"] = [_asset_document(a) for a in assets]
+    if scenario is not None:
+        document["scenario"] = {
+            "parts": [_part_document(p) for p in scenario.parts],
+            "applications": [_application_document(a) for a in scenario.applications],
+        }
     return document
 
 
@@ -507,6 +578,7 @@ def ladder_classes(
     rows: Sequence[LiquidityGapResult],
     parts: Iterable[tuple[uuid.UUID, str, str, str, int]],
     minimum: int,
+    changed: Iterable[tuple[uuid.UUID, str, str, str, int]] = (),
 ) -> dict[uuid.UUID, dict[str, str]]:
     """D-33 minimum aggregation (CALC_MIN_AGGREGATE_COUNT, PROVISIONAL): the classification
     of every figure of every ladder row, for masking on read.
@@ -521,6 +593,12 @@ def ladder_classes(
       are derived from;
     - the cumulative gap carries the most sensitive classification so far in its currency,
       since it is derived from every earlier net gap.
+
+    A stressed run also passes `changed` (D-46 §3): per row, direction and origin, the
+    distinct changed non-zero flows (counted under their bucket before and after) and their
+    most sensitive classification. On top of the rule above, a part changed by 0 < count <
+    minimum flows takes that classification too, whatever its value (zero included), so
+    stressed - baseline cannot give back a delta the comparison masks.
     """
     counts: dict[tuple[uuid.UUID, str, str], tuple[int, str]] = {}
     for row_id, direction, origin, code, n in parts:
@@ -528,6 +606,11 @@ def ladder_classes(
         if known is not None:
             n, code = n + known[0], most_sensitive([code, known[1]])
         counts[(row_id, direction, origin)] = (n, code)
+    few = {
+        (row_id, direction, origin): code
+        for row_id, direction, origin, code, n in changed
+        if 0 < n < minimum
+    }
     classes: dict[uuid.UUID, dict[str, str]] = {}
     carried: dict[str, str] = {}
     for row in sorted(rows, key=lambda r: (r.currency, r.bucket_sequence)):
@@ -535,6 +618,8 @@ def ladder_classes(
         for name, (direction, origin) in LADDER_PARTS.items():
             n, code = counts.get((row.id, direction, origin), (0, row.classification))
             mine[name] = code if 0 < n < minimum else row.classification
+            if (row.id, direction, origin) in few:
+                mine[name] = most_sensitive([mine[name], few[(row.id, direction, origin)]])
         mine["inflows"] = most_sensitive([mine["inflows_contractual"], mine["inflows_behavioural"]])
         mine["outflows"] = most_sensitive(
             [mine["outflows_contractual"], mine["outflows_behavioural"]]
@@ -650,6 +735,72 @@ class RerunSpec:
 
 
 @dataclass(frozen=True)
+class ScenarioRunSpec:
+    """A stressed run (BE-25.3, D-45 §1, §4, §7): the baseline whose pins it copies, the
+    scenario version and the shock subset it applies (1-based declared positions), and the
+    approval state at run time. Its fingerprint covers the version, the baseline and the
+    subset."""
+
+    baseline_run_id: uuid.UUID
+    scenario_run_id: uuid.UUID
+    scenario_id: uuid.UUID
+    scenario_version_id: uuid.UUID
+    version: int
+    shocks: tuple[Mapping[str, Any], ...]
+    shocks_sha256: str
+    shock_subset: tuple[int, ...]
+    approval_state: str
+
+    @property
+    def combined(self) -> bool:
+        return len(self.shock_subset) == len(self.shocks)
+
+    def sha256(self) -> str:
+        return canonical_sha256(
+            {
+                "baseline_run_id": str(self.baseline_run_id),
+                "scenario_version_id": str(self.scenario_version_id),
+                "shocks_sha256": self.shocks_sha256,
+                "shock_subset": list(self.shock_subset),
+            }
+        )
+
+    def manifest_section(self) -> dict[str, Any]:
+        """The manifest's `scenario` section (D-45 §4): pinned content only."""
+        return {
+            "scenario_id": str(self.scenario_id),
+            "scenario_version_id": str(self.scenario_version_id),
+            "version": self.version,
+            "shocks_sha256": self.shocks_sha256,
+            "shocks": [dict(s) for s in self.shocks],
+            "shock_subset": list(self.shock_subset),
+            "approval_state": self.approval_state,
+            "baseline_run_id": str(self.baseline_run_id),
+        }
+
+    @classmethod
+    def of(cls, run: CalculationRun, pin: CalculationScenarioPin) -> "ScenarioRunSpec":
+        """The spec a stressed run pinned (for its re-runs, D-45 §8)."""
+        section = run.manifest["scenario"]
+        return cls(
+            baseline_run_id=uuid.UUID(section["baseline_run_id"]),
+            scenario_run_id=pin.scenario_run_id,
+            scenario_id=uuid.UUID(section["scenario_id"]),
+            scenario_version_id=uuid.UUID(section["scenario_version_id"]),
+            version=int(section["version"]),
+            shocks=tuple(section["shocks"]),
+            shocks_sha256=section["shocks_sha256"],
+            shock_subset=tuple(int(n) for n in section["shock_subset"]),
+            approval_state=section["approval_state"],
+        )
+
+
+def is_stressed(run: CalculationRun) -> bool:
+    """A stressed run's manifest has a `scenario` section; no other run's does (D-45 §4)."""
+    return "scenario" in run.manifest
+
+
+@dataclass(frozen=True)
 class RunModule:
     module_id: uuid.UUID
     module_version_id: uuid.UUID
@@ -664,6 +815,7 @@ class RunRow:
     module: RunModule
     input_refs: Sequence[CalculationInputRef] = ()
     warnings: Sequence[CalculationWarning] = ()
+    scenario: CalculationScenarioPin | None = None  # stressed runs only (Phase 25)
 
 
 @dataclass(frozen=True)
@@ -674,7 +826,7 @@ class InstrumentRef:
 
 @dataclass(frozen=True)
 class ContributionRow:
-    value: IntermediateValue
+    value: IntermediateValue | ScenarioContribution  # stressed runs: their parts
     bucket_sequence: int
     event: CashflowEvent
     instrument: InstrumentRef | None
@@ -733,6 +885,37 @@ class _Pinned:
     assumption_set: AssumptionSet
     reporting_date: date
     rerun_of: CalculationRun | None = None
+    # Stressed runs (D-45): what they apply, and (new ones) the baseline whose pins they copy.
+    scenario: ScenarioRunSpec | None = None
+    baseline: CalculationRun | None = None
+
+
+@dataclass(frozen=True)
+class BaselineCheck:
+    """Whether a run can be a scenario baseline (D-45 §10): `refusal` is None, `not_found`,
+    `invalid_baseline` or `baseline_not_reproducible`."""
+
+    run: CalculationRun | None
+    refusal: str | None
+    pinned: "_Pinned | None" = None
+
+
+@dataclass(frozen=True)
+class ScenarioMember:
+    """One member run of a scenario run (re-runs excluded)."""
+
+    pin: CalculationScenarioPin
+    run: CalculationRun
+
+
+@dataclass(frozen=True)
+class ScenarioPartRow:
+    """One changed part for the comparison drill-down (D-46 §4), with its source lineage."""
+
+    value: ScenarioContribution
+    event: CashflowEvent
+    instrument: InstrumentRef | None
+    instrument_classes: Mapping[str, str]
 
 
 @dataclass
@@ -752,6 +935,18 @@ class _Run:
     counts: dict[str, int] = field(default_factory=dict)
     events: dict[uuid.UUID, CashflowEvent] = field(default_factory=dict)
     positions: dict[uuid.UUID, PositionVersion] = field(default_factory=dict)
+    scenario: ScenarioRunSpec | None = None  # a stressed run (D-45)
+
+
+@dataclass(frozen=True)
+class _Stress:
+    """A stressed run's overlay and what it was computed from (for the post-checks)."""
+
+    overlay: scenario_overlay.Overlay
+    directions: Mapping[str, Any]
+    buckets: tuple[Any, ...]
+    shocks: tuple[scenario_overlay.Shock, ...]
+    source_system_code: str | None
 
 
 # --- dataset snapshots (BE-15.3) ------------------------------------------------------------
@@ -1030,18 +1225,15 @@ class CalculationService:
             {"run_id": str(run_id), "reason": reason},
         )
 
-    async def _rerun_pins(self, spec: RerunSpec) -> _Pinned:
-        """A re-run pins exactly what its original pinned (BE-16.3): the same snapshot,
-        reporting date, module version, rule set (even SUPERSEDED versions) and assumption
-        set, on the same engine version."""
-        original = await self.repo.fresh(spec.rerun_of)
-        if original is None:
-            await self._refuse(ApiError(404, "not_found", RUN_NOT_FOUND), spec.rerun_of)
+    async def _pins_of(self, original: CalculationRun) -> tuple[_Pinned | None, ApiError | None]:
+        """What `original` pinned, resolved again (BE-16.3): the same snapshot, reporting date,
+        module version, rule set (even SUPERSEDED versions) and assumption set, on the same
+        engine version; or why that is not possible (no refusal is audited here)."""
         if (
             original.engine_version != ENGINE_VERSION
             or original.manifest.get("manifest_version") != MANIFEST_VERSION
         ):
-            await self._refuse(self._not_reproducible(original.id, "engine_changed"), original.id)
+            return None, self._not_reproducible(original.id, "engine_changed")
         snapshot = await self.snapshots.found(original.dataset_snapshot_id)
         view = await self.rules.module_view(original.module_version_id)
         implementation = (
@@ -1052,33 +1244,119 @@ class CalculationService:
             or implementation is None
             or view.version.implementation_status != ImplementationStatus.AVAILABLE.value
         ):
-            await self._refuse(self._unavailable(original.module_version_id, "not_implemented"))
+            return None, self._unavailable(original.module_version_id, "not_implemented")
         pinned = await self.rules.pinned(original.rule_set_id)
         assumption_set = await self.rules.assumption_set_by_id(original.assumption_set_id)
         if snapshot is None or assumption_set is None or not pinned:
-            await self._refuse(self._not_reproducible(original.id, "pins_changed"), original.id)
-        return _Pinned(
-            snapshot,
-            view,
-            implementation,
-            {d.code: d for d, _ in pinned},
-            {d.code: v for d, v in pinned},
-            assumption_set,
-            original.reporting_date,
-            original,
+            return None, self._not_reproducible(original.id, "pins_changed")
+        return (
+            _Pinned(
+                snapshot,
+                view,
+                implementation,
+                {d.code: d for d, _ in pinned},
+                {d.code: v for d, v in pinned},
+                assumption_set,
+                original.reporting_date,
+            ),
+            None,
+        )
+
+    async def _rerun_pins(self, spec: RerunSpec) -> _Pinned:
+        """A re-run pins exactly what its original pinned (BE-16.3); a re-run of a stressed
+        run also re-pins its scenario version and subset, even once the version is CLOSED
+        (D-45 §8)."""
+        original = await self.repo.fresh(spec.rerun_of)
+        if original is None:
+            await self._refuse(ApiError(404, "not_found", RUN_NOT_FOUND), spec.rerun_of)
+        pinned, error = await self._pins_of(original)
+        if error is not None or pinned is None:
+            error = error or self._not_reproducible(original.id, "pins_changed")
+            unavailable = error.code == RunRefusal.MODULE_NOT_AVAILABLE
+            await self._refuse(error, None if unavailable else original.id)
+        scenario = None
+        if is_stressed(original):
+            found = await self.repo.scenario_pins([original.id])
+            if len(found) != 1:
+                await self._refuse(self._not_reproducible(original.id, "pins_changed"), original.id)
+            scenario = ScenarioRunSpec.of(original, found[0])
+        return replace(pinned, rerun_of=original, scenario=scenario)
+
+    async def baseline_check(self, baseline_run_id: uuid.UUID) -> BaselineCheck:
+        """Whether this run can be a scenario baseline (D-45 §1, §10): a SUCCEEDED (or
+        SUCCEEDED_WITH_WARNINGS), non-stressed maturity_ladder run of the caller's tenant
+        (else `not_found` or `invalid_baseline`) whose pins still resolve to the same content
+        (else `baseline_not_reproducible`). Nothing is audited here."""
+        run = await self.repo.fresh(baseline_run_id)
+        if run is None:
+            return BaselineCheck(None, "not_found")
+        module = self._module_of(run, await self._modules())
+        if (
+            module.code != MATURITY_LADDER
+            or run.status not in SUCCEEDED
+            or is_stressed(run)
+            or await self.repo.scenario_pins([run.id])
+        ):
+            return BaselineCheck(run, "invalid_baseline")
+        pinned, error = await self._pins_of(run)
+        if error is not None or pinned is None:
+            return BaselineCheck(run, "baseline_not_reproducible")
+        rule_set = await self.rules.rule_set_for(list(pinned.versions.values()))
+        manifest = self._manifest(
+            pinned.reporting_date,
+            pinned.view,
+            pinned.snapshot,
+            {m.schema_code: m for m in await self.snapshots.members(pinned.snapshot.id)},
+            rule_set.id,
+            rule_set.content_sha256,
+            pinned.definitions,
+            pinned.versions,
+            pinned.assumption_set,
+            await self.domain.schema_pins(),
+        )
+        if canonical_sha256(manifest) != run.manifest_sha256 or rule_set.id != run.rule_set_id:
+            return BaselineCheck(run, "baseline_not_reproducible")
+        return BaselineCheck(run, None, pinned)
+
+    async def _scenario_pins(self, spec: ScenarioRunSpec) -> _Pinned:
+        """A stressed run copies its baseline's pins exactly (D-45 §1)."""
+        check = await self.baseline_check(spec.baseline_run_id)
+        if check.refusal == "not_found" or check.run is None:
+            await self._refuse(ApiError(404, "not_found", RUN_NOT_FOUND), spec.baseline_run_id)
+        if check.refusal is not None or check.pinned is None:
+            await self._refuse(
+                ApiError(
+                    409,
+                    check.refusal or "baseline_not_reproducible",
+                    "The baseline cannot carry a stressed run (D-45 §10).",
+                    {"baseline_run_id": str(spec.baseline_run_id)},
+                ),
+                spec.baseline_run_id,
+            )
+        return replace(check.pinned, scenario=spec, baseline=check.run)
+
+    def _scenarios_disabled(self) -> ApiError:
+        return ApiError(
+            409,
+            RunRefusal.SCENARIOS_DISABLED,
+            "Stressed runs are switched off in this environment (SCENARIOS_ENABLED); existing "
+            "runs stay readable.",
         )
 
     async def create(
         self,
-        spec: RunSpec | RerunSpec,
+        spec: RunSpec | RerunSpec | ScenarioRunSpec,
         idempotency_key: str,
         enabled: bool,
         stale_seconds: int = 900,
+        scenarios_enabled: bool = True,
     ) -> tuple[RunRow, bool]:
         """Pin, run and post-check the module; the finished run and whether it ran now
         (False: a replay of the key, the original run returned). A replay that finds its run
         still RUNNING after `stale_seconds` (CALC_RUN_STALE_SECONDS) ends it FAILED with
-        ENGINE_ERROR first: its engine is presumed gone, and nothing else would end it."""
+        ENGINE_ERROR first: its engine is presumed gone, and nothing else would end it.
+        A `ScenarioRunSpec`, or a re-run of a stressed run, is a stressed run (D-45): refused
+        409 `scenarios_disabled` while SCENARIOS_ENABLED is off."""
         if not enabled:
             await self._refuse(
                 ApiError(
@@ -1088,6 +1366,8 @@ class CalculationService:
                     "and runs stay readable.",
                 )
             )
+        if isinstance(spec, ScenarioRunSpec) and not scenarios_enabled:
+            await self._refuse(self._scenarios_disabled())
         actor = self.principal.actor
         fingerprint = spec.sha256()
         await self.repo.lock(f"calculation_run:{actor}:{idempotency_key}")
@@ -1109,11 +1389,14 @@ class CalculationService:
                 await self._fail(existing.id, {}, "stale_run")
             return await self.get(existing.id), False
 
-        pinned = (
-            await self._rerun_pins(spec)
-            if isinstance(spec, RerunSpec)
-            else await self._new_pins(spec)
-        )
+        if isinstance(spec, RerunSpec):
+            pinned = await self._rerun_pins(spec)
+        elif isinstance(spec, ScenarioRunSpec):
+            pinned = await self._scenario_pins(spec)
+        else:
+            pinned = await self._new_pins(spec)
+        if pinned.scenario is not None and not scenarios_enabled:
+            await self._refuse(self._scenarios_disabled())
         snapshot, view, assumption_set = pinned.snapshot, pinned.view, pinned.assumption_set
         members = {m.schema_code: m for m in await self.snapshots.members(snapshot.id)}
         versions = pinned.versions
@@ -1131,6 +1414,22 @@ class CalculationService:
             assumption_set,
             pins,
         )
+        baseline = pinned.baseline
+        if baseline is not None and (
+            canonical_sha256(manifest) != baseline.manifest_sha256
+            or rule_set.id != baseline.rule_set_id
+        ):  # the stressed run's manifest equals its baseline's but for `scenario` (D-45 §4)
+            await self._refuse(
+                ApiError(
+                    409,
+                    "baseline_not_reproducible",
+                    "The baseline's pins no longer resolve to the same content (D-45 §10).",
+                    {"baseline_run_id": str(baseline.id)},
+                ),
+                baseline.id,
+            )
+        if pinned.scenario is not None:
+            manifest["scenario"] = pinned.scenario.manifest_section()
         manifest_sha256 = canonical_sha256(manifest)
         original = pinned.rerun_of
         if original is not None and (
@@ -1185,6 +1484,28 @@ class CalculationService:
                 for position, (ref_type, ref_id, label, sha) in enumerate(refs, start=1)
             ],
         )
+        scenario = pinned.scenario
+        if scenario is not None:  # D-45 §4: the scenario pin (its own table, D-01)
+            await self.repo.insert_rows(
+                CalculationScenarioPin,
+                [
+                    {
+                        "id": uuid.uuid4(),
+                        "tenant_id": self.principal.tenant_id,
+                        "calculation_run_id": run.id,
+                        "scenario_run_id": scenario.scenario_run_id,
+                        "scenario_id": scenario.scenario_id,
+                        "scenario_version_id": scenario.scenario_version_id,
+                        "version": scenario.version,
+                        "shocks_sha256": scenario.shocks_sha256,
+                        "shock_subset": list(scenario.shock_subset),
+                        "combined": scenario.combined,
+                        "approval_state": scenario.approval_state,
+                        "baseline_run_id": scenario.baseline_run_id,
+                        "created_by": actor,
+                    }
+                ],
+            )
         details: dict[str, Any] = {
             "run_id": str(run.id),
             "module_code": view.module.code,
@@ -1196,6 +1517,14 @@ class CalculationService:
             "manifest_sha256": manifest_sha256,
             "rerun_of_run_id": str(original.id) if original is not None else None,
         }
+        if scenario is not None:  # value-free: ids, the subset and the shocks' sha256
+            details |= {
+                "scenario_run_id": str(scenario.scenario_run_id),
+                "scenario_version_id": str(scenario.scenario_version_id),
+                "shock_subset": ",".join(str(n) for n in scenario.shock_subset),
+                "shocks_sha256": scenario.shocks_sha256,
+                "baseline_run_id": str(scenario.baseline_run_id),
+            }
         audit_by(
             self.session,
             self.principal,
@@ -1217,6 +1546,7 @@ class CalculationService:
             versions,
             pins,
             original.result_sha256 if original is not None else None,
+            scenario=scenario,
         )
         try:
             await self._execute(state)
@@ -1457,8 +1787,16 @@ class CalculationService:
             code: PinnedRule(v.id, MappingProxyType(dict(v.parameters)))
             for code, v in state.versions.items()
         }
+        stress: _Stress | None = None
+        run_inputs = inputs
+        if state.scenario is not None:  # D-45 §2: the module runs on the stressed copy
+            staged = await self._stress(state, inputs)
+            if isinstance(staged, ModuleWarning):
+                await self._end(state, CalculationRunStatus.BLOCKED, ModuleResult(), [staged], {})
+                return
+            stress, run_inputs = staged, staged.overlay.inputs
         with localcontext(state.implementation.context()):
-            result = state.implementation.run(inputs, parameters)
+            result = state.implementation.run(run_inputs, parameters)
         if result.blocked:
             await self._end(state, CalculationRunStatus.BLOCKED, result, list(result.warnings), {})
             return
@@ -1480,7 +1818,31 @@ class CalculationService:
             if "lcr_result" in spec.output_contract["results"]:
                 checks = lcr_post_checks(inputs, result, state.implementation.rounding)
             else:
-                checks = post_checks(inputs, result, buckets)
+                checks = post_checks(run_inputs, result, buckets)
+            if stress is not None:  # D-45 §6
+                # SCENARIO_OVERLAY checks the stored rows against a recomputation: the overlay
+                # recomputed from the unstressed inputs (through scenario_overlay.run_overlay,
+                # the same seam the run used) equals the parts and applications the run stores.
+                # SCENARIO_CONSERVATION checks the arithmetic: it recomputes the amounts from
+                # the declared parameters, never from the overlay's own sums. So a tampered
+                # run_overlay fails SCENARIO_CONSERVATION only (both sides of SCENARIO_OVERLAY
+                # come from it).
+                assert state.scenario is not None
+                expected = scenario_overlay.run_overlay(
+                    inputs,
+                    stress.directions,
+                    stress.buckets,
+                    state.scenario.shocks,
+                    state.scenario.shock_subset,
+                    stress.source_system_code,
+                )
+                unstressed = state.implementation.run(inputs, parameters)
+                checks[PostCheck.SCENARIO_OVERLAY] = scenario_overlay.overlay_matches(
+                    expected, stress.overlay
+                )
+                checks[PostCheck.SCENARIO_CONSERVATION] = scenario_overlay.conserved(
+                    inputs, stress.shocks, stress.overlay, unstressed, result
+                )
         warnings = list(result.warnings)
         if not all(checks.values()):
             warnings += [
@@ -1500,7 +1862,60 @@ class CalculationService:
             status = CalculationRunStatus.SUCCEEDED_WITH_WARNINGS
         else:
             status = CalculationRunStatus.SUCCEEDED
-        await self._end(state, status, result, warnings, checks, buckets)
+        await self._end(state, status, result, warnings, checks, buckets, stress)
+
+    async def _stress(self, state: _Run, inputs: ModuleInputs) -> _Stress | ModuleWarning:
+        """The overlay of a stressed run on its pinned inputs (D-45 §2), or the value-free
+        PARAMETERS_INVALID warning that BLOCKS it (no CHECK is widened)."""
+        assert state.scenario is not None
+        scenario = state.scenario
+
+        def blocked(rule: str | None = None) -> ModuleWarning:
+            details = (
+                {"rule": rule}
+                if rule
+                else {"scenario_version_id": str(scenario.scenario_version_id)}
+            )
+            return ModuleWarning(
+                W.PARAMETERS_INVALID,
+                WarningSeverity.ERROR,
+                "The scenario overlay cannot be applied to the pinned inputs (D-45 §2).",
+                details=details,
+            )
+
+        directions_version = state.versions.get(CASHFLOW_DIRECTION)
+        bucket_version = state.versions.get(MATURITY_BUCKETS)
+        if directions_version is None or bucket_version is None:
+            return blocked()
+        try:
+            directions = parse_directions(directions_version.parameters)
+        except ParameterError:
+            return blocked(CASHFLOW_DIRECTION)
+        try:
+            buckets = parse_buckets(bucket_version.parameters)
+        except ParameterError:
+            return blocked(MATURITY_BUCKETS)
+        code = await self._cash_flow_source_code(state.members)
+        try:
+            shocks = scenario_overlay.parse_shocks(scenario.shocks, scenario.shock_subset)
+            # Through the module attribute: the BE-25.3 tampered-part test double replaces it.
+            overlay = scenario_overlay.run_overlay(
+                inputs, directions, buckets, scenario.shocks, scenario.shock_subset, code
+            )
+        except (scenario_overlay.OverlayError, ArithmeticError):
+            return blocked()
+        return _Stress(overlay, directions, buckets, shocks, code)
+
+    async def _cash_flow_source_code(
+        self, members: Mapping[str, DatasetSnapshotMember]
+    ) -> str | None:
+        """The source system code of the snapshot's cash-flow import (D-44 §3: a source
+        selector matches all of a snapshot's cash flows or none in v1)."""
+        member = members.get("cashflow_event")
+        if member is None:
+            return None
+        codes = await self.snapshots.imports.source_codes({member.source_system_id})
+        return codes.get(member.source_system_id)
 
     async def _end(
         self,
@@ -1510,9 +1925,17 @@ class CalculationService:
         warnings: Sequence[ModuleWarning],
         checks: Mapping[PostCheck, bool],
         buckets: Sequence[MaturityBucketDefinition] = (),
+        stress: _Stress | None = None,
     ) -> None:
+        scenario = None
+        if state.scenario is not None:  # a stressed run hashes its parts (none if blocked)
+            scenario = ScenarioOutputs()
+            if stress is not None:
+                parts = stress.overlay.part_of()
+                placed = [parts[c.cashflow_event_id] for c in result.contributions]
+                scenario = ScenarioOutputs(tuple(placed), stress.overlay.applications)
         await self._finish(
-            state.run_id, state.counts, status, result, warnings, checks, buckets, state
+            state.run_id, state.counts, status, result, warnings, checks, buckets, state, scenario
         )
 
     async def _fail(self, run_id: uuid.UUID, counts: Mapping[str, int], error: str) -> None:
@@ -1537,9 +1960,14 @@ class CalculationService:
         checks: Mapping[PostCheck, bool],
         buckets: Sequence[MaturityBucketDefinition] = (),
         state: _Run | None = None,
+        scenario: ScenarioOutputs | None = None,
     ) -> None:
         """Store the outputs (results only for a successful run, which needs its pinned
-        `state`), end the run with its result hash and outcome, audit it and commit."""
+        `state`), end the run with its result hash and outcome, audit it and commit. A
+        stressed run (`scenario`) stores its parts and applications instead of
+        `intermediate_value` rows (D-45 §5)."""
+        if scenario is None and state is not None and state.scenario is not None:
+            scenario = ScenarioOutputs()
         status, gap, contributions, warnings, checks, result_sha256 = reproduce(
             state.expected_result_sha256 if state is not None else None,
             status,
@@ -1549,6 +1977,7 @@ class CalculationService:
             checks,
             lcr=result.lcr,
             assets=result.hqla_assets,
+            scenario=scenario,
         )
         keep = status in SUCCEEDED
         lcr, assets = kept_lcr(status, result.lcr, result.hqla_assets)
@@ -1591,8 +2020,16 @@ class CalculationService:
             if state is not None and (contributions or assets or lcr)
             else ""
         )
+        placed = len(contributions)
+        if scenario is not None:  # stressed runs write no intermediate_value rows (D-45 §5)
+            if contributions:
+                assert state is not None
+                await self._store_scenario(
+                    run_id, contributions, scenario, classification, state, gap_ids
+                )
+            placed = len({p.cashflow_event_id for p in scenario.parts}) if contributions else 0
         intermediates = []
-        for position, c in enumerate(contributions, start=1):
+        for position, c in enumerate(contributions if scenario is None else [], start=1):
             assert state is not None
             event = state.events[c.cashflow_event_id]
             intermediates.append(
@@ -1644,7 +2081,7 @@ class CalculationService:
         excluded = sum(
             1 for w in warnings if w.code in result.exclusion_codes and w.entity_id is not None
         )
-        in_scope, used, out_of_scope = counts.get("cashflow_event", 0), len(contributions), 0
+        in_scope, used, out_of_scope = counts.get("cashflow_event", 0), placed, 0
         if "position" in counts:  # lcr_hqla: positions and cash flows
             in_scope += counts["position"]
             if keep:
@@ -1681,6 +2118,84 @@ class CalculationService:
             details_classification=_public(details),
         )
         await self.session.commit()
+
+    async def _store_scenario(
+        self,
+        run_id: uuid.UUID,
+        contributions: Sequence[Contribution],
+        scenario: ScenarioOutputs,
+        classification: str,
+        state: _Run,
+        gap_ids: Mapping[tuple[str, str], uuid.UUID],
+    ) -> None:
+        """A stressed run's parts (one `scenario_contribution` per placed part, with its
+        cash-flow event's lineage) and its applications (D-45 §5)."""
+        tenant, actor = self.principal.tenant_id, self.principal.actor
+        bucket_version = state.versions[MATURITY_BUCKETS]
+        buckets = parse_buckets(bucket_version.parameters)
+        rows = []
+        for position, (c, part) in enumerate(zip(contributions, scenario.parts, strict=True), 1):
+            event = state.events[part.cashflow_event_id]
+            before = c.bucket.code
+            if part.change != PartChange.UNCHANGED:
+                before = next(b.code for b in buckets if b.holds(part.days_before))
+            rows.append(
+                {
+                    "id": uuid.uuid4(),
+                    "tenant_id": tenant,
+                    "calculation_run_id": run_id,
+                    "sequence": position,
+                    "cashflow_event_id": part.cashflow_event_id,
+                    "part_path": part.path,
+                    "part_id": part.part_id,
+                    "shock_sequences": list(part.shock_sequences),
+                    "change": part.change.value,
+                    "value": c.amount,
+                    "unit": c.currency,
+                    "classification": classification,
+                    "liquidity_gap_result_id": gap_ids[(c.currency, c.bucket.code)],
+                    "bucket_code": c.bucket.code,
+                    "original_bucket_code": before,
+                    "direction": c.direction.value,
+                    "origin": c.origin.value,
+                    "days_after_reporting_date": c.days_after_reporting_date,
+                    "original_days": part.days_before
+                    if part.change != PartChange.UNCHANGED
+                    else c.days_after_reporting_date,
+                    "rule_version_ids": [str(r) for r in c.rule_version_ids],
+                    "instrument_version_id": c.instrument_version_id,
+                    "canonical_record_id": event.canonical_record_id,
+                    "import_job_id": event.import_job_id,
+                    "source_record_id": event.source_record_id,
+                    "source_ordinal": event.source_ordinal,
+                    "created_by": actor,
+                }
+            )
+        await self.repo.insert_rows(ScenarioContribution, rows)
+        await self.repo.insert_rows(
+            ScenarioShockApplication,
+            [
+                {
+                    "id": uuid.uuid4(),
+                    "tenant_id": tenant,
+                    "calculation_run_id": run_id,
+                    "sequence": position,
+                    "cashflow_event_id": a.cashflow_event_id,
+                    "shock_sequence": a.shock_sequence,
+                    "template": a.template.value,
+                    "unit": a.currency,
+                    "parts_matched": a.parts_matched,
+                    "parts_after": a.parts_after,
+                    "moved_amount": a.moved_amount,
+                    "added_amount": a.added_amount,
+                    "delay_days": a.delay_days,
+                    "moved_to_day": a.moved_to_day,
+                    "classification": classification,
+                    "created_by": actor,
+                }
+                for position, a in enumerate(scenario.applications, start=1)
+            ],
+        )
 
     async def _store_lcr(
         self,
@@ -1814,12 +2329,25 @@ class CalculationService:
         """One run with its input refs and warnings: 404 alike for an absent and a foreign
         run (D-04)."""
         run = await self._run(run_id)
+        pins = await self.repo.scenario_pins([run.id]) if is_stressed(run) else []
         return RunRow(
             run,
             self._module_of(run, await self._modules()),
             await self.repo.input_refs(run.id),
             await self.repo.warnings(run.id),
+            pins[0] if pins else None,
         )
+
+    async def shown_manifest(self, run: CalculationRun) -> dict[str, Any]:
+        """The run's manifest as the caller may read it (D-33). A stressed run's pinned shocks
+        keep shocks_sha256 (the pin, over the stored keys) but each picked instrument key the
+        caller is not cleared for reads as a MaskedValue, exactly as the scenario detail masks
+        it. Non-stressed manifests are returned as stored."""
+        section = run.manifest.get("scenario")
+        if section is None:
+            return run.manifest
+        [shocks] = await self.domain.mask_instrument_keys([list(section["shocks"])])
+        return {**run.manifest, "scenario": {**section, "shocks": shocks}}
 
     async def page(
         self,
@@ -1827,13 +2355,20 @@ class CalculationService:
         offset: int,
         module_code: str | None,
         status: CalculationRunStatus | None,
+        stressed: bool | None = None,
     ) -> tuple[list[RunRow], int]:
         modules = await self._modules()
         ids = None
         if module_code is not None:
             ids = [i for i, m in modules.items() if m.code == module_code]
-        runs, total = await self.repo.newest(limit, offset, ids, status)
-        return [RunRow(r, self._module_of(r, modules)) for r in runs], total
+        runs, total = await self.repo.newest(limit, offset, ids, status, stressed)
+        pins = {
+            p.calculation_run_id: p
+            for p in await self.repo.scenario_pins([r.id for r in runs if is_stressed(r)])
+        }
+        return [
+            RunRow(r, self._module_of(r, modules), scenario=pins.get(r.id)) for r in runs
+        ], total
 
     async def results(
         self,
@@ -1844,7 +2379,15 @@ class CalculationService:
         offset: int,
     ) -> ResultsView:
         run = await self._run(run_id)
-        values, total = await self.repo.intermediates(run.id, currency, bucket_code, limit, offset)
+        values: Sequence[IntermediateValue | ScenarioContribution]
+        if is_stressed(run):  # D-45 §5: a stressed run's parts are its contributions
+            values, total = await self.repo.scenario_contributions(
+                run.id, currency, bucket_code, limit, offset
+            )
+        else:
+            values, total = await self.repo.intermediates(
+                run.id, currency, bucket_code, limit, offset
+            )
         sequences = {g.id: g.bucket_sequence for g in await self.repo.gap_rows(run.id)}
         events = {
             e.id: e
@@ -1887,13 +2430,25 @@ class CalculationService:
             )
         version_id = uuid.UUID(pinned[0]["rule_version_id"])
         rows = await self.repo.gap_rows(run.id)
-        parts = await self.repo.part_counts(run.id)
+        changed: list[tuple[uuid.UUID, str, str, str, int]] = []
+        if is_stressed(run):  # D-46 §3: a stressed run counts distinct flows, not parts
+            parts = await self.repo.scenario_part_counts(run.id)
+            # ... and masks a part changed by too few flows, so that stressed - baseline does
+            # not give back the delta the comparison masks (whoever reads the stressed run).
+            row_ids = {(r.currency, r.bucket_code): r.id for r in rows}
+            found = await self.repo.scenario_changed_counts(run.id)
+            for unit, bucket, direction, origin, n, codes in found:
+                row_id = row_ids.get((unit, bucket))
+                if row_id is not None:
+                    changed.append((row_id, direction, origin, most_sensitive(codes), n))
+        else:
+            parts = await self.repo.part_counts(run.id)
         return LadderView(
             row,
             version_id,
             await self.rules.bucket_definitions(version_id),
             rows,
-            ladder_classes(rows, parts, min_aggregate_count),
+            ladder_classes(rows, parts, min_aggregate_count, changed),
             min_aggregate_count,
         )
 
@@ -1945,6 +2500,95 @@ class CalculationService:
             {r.id: liquidity_classes(r, min_aggregate_count) for r in rows},
             min_aggregate_count,
         )
+
+    # --- for the scenario engine and comparison (Phase 25, D-45, D-46) -----------------------
+
+    async def scenario_counts(
+        self, pinned: _Pinned, shocks: Sequence[Mapping[str, Any]]
+    ) -> list[scenario_overlay.ShockCount] | None:
+        """The validation dry run (D-45 §10): the overlay of each shock ALONE on the
+        baseline's pinned inputs, with its value-free counts. Nothing is written. None when
+        the pinned rules cannot carry the overlay (a run would be BLOCKED)."""
+        members = {m.schema_code: m for m in await self.snapshots.members(pinned.snapshot.id)}
+        state = _Run(
+            uuid.uuid4(),
+            pinned.reporting_date,
+            pinned.view,
+            pinned.implementation,
+            members,
+            pinned.versions,
+            await self.domain.schema_pins(),
+        )
+        inputs = await self._inputs(state)
+        found: list[scenario_overlay.ShockCount] = []
+        for n in range(1, len(shocks) + 1):
+            state.scenario = ScenarioRunSpec(
+                uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), 1,
+                tuple(shocks), "0" * 64, (n,), "EXPLORATION",
+            )  # fmt: skip
+            staged = await self._stress(state, inputs)
+            if isinstance(staged, ModuleWarning):
+                return None
+            found += staged.overlay.counts
+        return found
+
+    async def scenario_members(
+        self, scenario_run_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, list[ScenarioMember]]:
+        """Each scenario run's member runs (re-runs excluded): single-shock runs by shock,
+        then the combined run."""
+        found: dict[uuid.UUID, list[ScenarioMember]] = {}
+        for pin, run in await self.repo.scenario_members(scenario_run_ids):
+            found.setdefault(pin.scenario_run_id, []).append(ScenarioMember(pin, run))
+        for members in found.values():
+            members.sort(key=lambda m: (m.pin.combined, list(m.pin.shock_subset)))
+        return found
+
+    async def scenario_changed(
+        self, run_id: uuid.UUID
+    ) -> list[tuple[str, str, str, uuid.UUID, str]]:
+        """(currency, bucket code, direction, cash-flow event, classification) per changed
+        non-zero part, under its bucket before and after (D-46 §3)."""
+        return await self.repo.scenario_changed(run_id)
+
+    async def scenario_parts(
+        self,
+        run_id: uuid.UUID,
+        currency: str | None,
+        bucket_code: str | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[ScenarioPartRow], int]:
+        """The drill-down (D-46 §4): a stressed run's changed parts (moved, stayed, added) in
+        a bucket before or after, with each part's cash-flow event and instrument."""
+        values, total = await self.repo.scenario_contributions(
+            run_id, currency, bucket_code, limit, offset, changed_only=True
+        )
+        events = {
+            e.id: e
+            for e in await self.domain.cash_flows_by_id([v.cashflow_event_id for v in values])
+        }
+        versions = {
+            v.id: (v, key)
+            for v, key in await self.domain.instrument_versions_by_id(
+                [v.instrument_version_id for v in values if v.instrument_version_id]
+            )
+        }
+        pins = await self.domain.schema_pins()
+        rows = []
+        for v in values:
+            instrument = versions.get(v.instrument_version_id) if v.instrument_version_id else None
+            rows.append(
+                ScenarioPartRow(
+                    v,
+                    events[v.cashflow_event_id],
+                    InstrumentRef(instrument[0].instrument_id, instrument[1])
+                    if instrument
+                    else None,
+                    pins.classes(instrument[0].schema_version_id) if instrument else {},
+                )
+            )
+        return rows, total
 
     # --- for the rule registry reads (BE-16.2) ----------------------------------------------
 

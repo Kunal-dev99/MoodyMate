@@ -13,6 +13,9 @@ import { Badge } from '@/components/ui/badge'
 import { DisabledNotice } from './ScenarioEditor'
 import { ScenarioStatusPill } from './ScenarioStatusPill'
 import { VersionActions, type StepVerb } from './VersionActions'
+import { ScenarioRunPanel } from './ScenarioRunPanel'
+import { ScenarioRunsSection } from './ScenarioRunsList'
+import { STRESS_COMPARE_UI_ENABLED } from '@/config/features'
 import { MaskedValue, isMasked } from '@/components/common/MaskedValue'
 import { describeSelector, describeShock, explorerHref, fetchScenario, type ScenarioDetail, type ScenarioVersion } from './scenarios'
 import { formatTimestamp } from '@/lib/format'
@@ -81,13 +84,24 @@ export function ScenarioView({ scenarioId }: { scenarioId: string }) {
             The server {STEP_TEXT[outcome.verb]} v{outcome.version.version}: it is now <ScenarioStatusPill status={outcome.version.status} testId="scenario-step-status" />.
           </p>
         )}
-        <PageSection icon={History} title="Versions" description="Newest first. A version's shocks freeze when it leaves DRAFT. Running scenarios against the maturity ladder is coming next.">
+        <PageSection
+          icon={History}
+          title="Versions"
+          description={
+            // FE-25.1: off (NEXT_PUBLIC_STRESS_COMPARE_UI), the Phase 24 text exactly.
+            STRESS_COMPARE_UI_ENABLED
+              ? "Newest first. A version's shocks freeze when it leaves DRAFT. A version confirmed for exploration or approved for test runs against a baseline maturity ladder."
+              : "Newest first. A version's shocks freeze when it leaves DRAFT. Running scenarios against the maturity ladder is coming next."
+          }
+        >
           <ul className="space-y-3">
             {versions.map((v) => (
               <VersionCard key={v.scenario_version_id} scenarioId={s.scenario_id} version={v} enabled={s.scenarios_enabled} onDone={done} />
             ))}
           </ul>
         </PageSection>
+        {/* FE-25.2: the scenario's runs with their comparison links; off (NEXT_PUBLIC_STRESS_COMPARE_UI), not mounted, the Phase 24 page exactly. */}
+        {STRESS_COMPARE_UI_ENABLED && <ScenarioRunsSection scenarioId={s.scenario_id} />}
       </div>
     </>
   )
@@ -192,6 +206,8 @@ function VersionCard({ scenarioId, version: v, enabled, onDone }: { scenarioId: 
       )}
 
       <VersionActions scenarioId={scenarioId} version={v} enabled={enabled} onDone={onDone} />
+      {/* FE-25.1: renders nothing unless the version is runnable, the caller holds the run permission and NEXT_PUBLIC_STRESS_COMPARE_UI is on. */}
+      <ScenarioRunPanel scenarioId={scenarioId} version={v} enabled={enabled} />
     </li>
   )
 }

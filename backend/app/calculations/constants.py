@@ -85,6 +85,12 @@ class PostCheck(StrEnum):
     # A re-run only (D-31 §5, BE-16.3): its result_sha256 equals its original's. Otherwise the
     # re-run ends FAILED (POST_CHECK_FAILED, details check=RERUN_REPRODUCED), no result kept.
     RERUN_REPRODUCED = "RERUN_REPRODUCED"
+    # Stressed runs only (Phase 25, D-45 §6; in code only, no CHECK widened): the overlay
+    # recomputed from the unstressed inputs equals the stored parts and applications;
+    SCENARIO_OVERLAY = "SCENARIO_OVERLAY"
+    # per flow the parts sum to the original amount (x (1 + f) for DEPOSIT_WITHDRAWAL), and per
+    # currency and direction the stressed total equals the baseline total plus declared deltas.
+    SCENARIO_CONSERVATION = "SCENARIO_CONSERVATION"
 
 
 class InputRefType(StrEnum):
@@ -146,6 +152,9 @@ class RunRefusal(StrEnum):
     MODULE_NOT_AVAILABLE = "module_not_available"
     IDEMPOTENCY_CONFLICT = "idempotency_conflict"
     RERUN_NOT_REPRODUCIBLE = "rerun_not_reproducible"  # BE-16.3: engine or manifest changed
+    # Phase 25 (D-44 §9, D-45 §8): a stressed run, or a re-run of one, while SCENARIOS_ENABLED
+    # is off.
+    SCENARIOS_DISABLED = "scenarios_disabled"
 
 
 # Audit actions (D-10, D-24 §4): the create and each of its refusals share one action.

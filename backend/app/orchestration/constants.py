@@ -194,3 +194,61 @@ MAX_DESCRIPTION = 2000
 MAX_CHANGE_SUMMARY = 1000
 MAX_TEXT_FIELD = 200  # an instrument key
 MAX_SOURCE_SYSTEM_CODE = 100
+
+
+# --- Phase 25: running scenarios and comparing them (D-45, D-46) -------------------------------
+
+
+class ApprovalState(StrEnum):
+    """D-45 §4: the approval state a stressed run pins (from its version's status at run
+    time). EXPLORATION runs are never authoritative (D-47 §3)."""
+
+    EXPLORATION = "EXPLORATION"  # CONFIRMED_FOR_EXPLORATION
+    APPROVED = "APPROVED"  # APPROVED_FOR_TEST
+
+
+APPROVAL_LABELS: dict[ApprovalState, ApprovalLabel] = {
+    ApprovalState.EXPLORATION: ApprovalLabel.EXPLORATION,
+    ApprovalState.APPROVED: ApprovalLabel.APPROVED,
+}
+
+
+class ScenarioRunAction(StrEnum):
+    """Audit action of POST scenarios/{scenario_id}/run (BE-25.3); each member run is also
+    audited `calculation_run.create`."""
+
+    RUN = "scenario.run"
+
+
+AUDIT_RUN_RESOURCE = "scenario_run"
+
+
+class ScenarioRunRefusal(StrEnum):
+    """D-45 §10: refusals of the run route. Every one is 409 (404 for not_found), audited
+    DENIED, with nothing written."""
+
+    NOT_FOUND = "not_found"  # 404: scenario, version or baseline run (absent and foreign alike)
+    SCENARIO_NOT_RUNNABLE = "scenario_not_runnable"  # not CONFIRMED_FOR_EXPLORATION/APPROVED
+    INVALID_BASELINE = "invalid_baseline"  # not a succeeded, non-stressed maturity_ladder run
+    BASELINE_NOT_REPRODUCIBLE = "baseline_not_reproducible"  # its pins cannot be re-pinned
+    NO_MATCHING_CASHFLOWS = "no_matching_cashflows"  # a shock matches no flow of the baseline
+    SCENARIOS_DISABLED = "scenarios_disabled"  # SCENARIOS_ENABLED=false
+    CALCULATIONS_DISABLED = "calculations_disabled"  # CALCULATIONS_ENABLED=false
+    IDEMPOTENCY_CONFLICT = "idempotency_conflict"  # the key was used for another request
+
+
+class PartChange(StrEnum):
+    """D-46 §4: what a shock did to one part of a cash flow (the drill-down)."""
+
+    MOVED = "MOVED"  # the delayed or unavailable fraction, now due later
+    STAYED = "STAYED"  # the remainder, due as before
+    ADDED = "ADDED"  # the extra outflow of DEPOSIT_WITHDRAWAL
+    UNCHANGED = "UNCHANGED"  # matched no shock (never listed by the drill-down)
+
+
+# D-45 §2: overlay bounds.
+MAX_PARTS_PER_FLOW = 32
+# Drill-down page size (GET .../comparison/contributions).
+MAX_CONTRIBUTIONS_PAGE = 500
+# Largest changes listed per comparison (D-46 §2), ranked over clear deltas only.
+MAX_LARGEST_CHANGES = 10

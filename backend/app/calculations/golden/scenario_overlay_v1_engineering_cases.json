@@ -1,0 +1,1739 @@
+{
+  "name": "scenario_overlay v1 engineering cases",
+  "status": "ENGINEERING — awaiting domain-expert approval",
+  "module": {
+    "code": "scenario_overlay",
+    "version": 1
+  },
+  "description": "Hand-computed engineering fixture (D-35 section 4, D-45 section 2) for the pure, split-aware scenario overlay (app/calculations/scenario_overlay.py) feeding the unchanged maturity_ladder v1. PROVISIONAL / ILLUSTRATIVE: an illustrative stress exploration, not a regulatory stress test; not a regulatory calculation; no parity with any vendor system is claimed. Fixture rules per case: buckets (0,7], (7,30], (30,90], (90,inf) as the user's design section 5 example; cashflow_direction LOAN and BOND INFLOW, DEPOSIT OUTFLOW (case 9 maps LOAN to OUTFLOW); past_due_treatment as seeded (EXCLUDE_WITH_WARNING). Amounts are exact decimal text in the flows' currency (INR, illustrative; USD in case 4). expected.parts lists every stressed input row (unchanged flows as one part with no shock sequences); expected.counts one entry per shock in declared order; expected.ladder the stressed ladder rows of the unchanged module; expected.totals the stressed totals over all buckets. Tolerance: exact (Decimal equality) for every figure.",
+  "tolerance": {
+    "amount": "0",
+    "inflows": "0",
+    "outflows": "0",
+    "net_gap": "0",
+    "cumulative_gap": "0"
+  },
+  "cases": [
+    {
+      "name": "1 The user's section 5 worked example",
+      "note": "DELAYED_INFLOWS LOAN 0.2000, 14 calendar days: LOAN 30 at day 3 -> 6 at day 17 + 24 at day 3; LOAN 20 at day 5 -> 4 at day 19 + 16 at day 5. Inflows 100/60/90 -> 90/70/90, net +20/-10/+50 -> +10/0/+50, cumulative 20/10/60 -> 10/10/60; total inflows 250 both (conservation).",
+      "reporting_date": "2026-12-31",
+      "buckets": [
+        {
+          "code": "K1",
+          "label": "(0,7]",
+          "lower_exclusive": 0,
+          "upper_inclusive": 7
+        },
+        {
+          "code": "K2",
+          "label": "(7,30]",
+          "lower_exclusive": 7,
+          "upper_inclusive": 30
+        },
+        {
+          "code": "K3",
+          "label": "(30,90]",
+          "lower_exclusive": 30,
+          "upper_inclusive": 90
+        },
+        {
+          "code": "K4",
+          "label": "(90,inf)",
+          "lower_exclusive": 90,
+          "upper_inclusive": null
+        }
+      ],
+      "directions": {
+        "LOAN": "INFLOW",
+        "BOND": "INFLOW",
+        "DEPOSIT": "OUTFLOW"
+      },
+      "instruments": [
+        {
+          "instrument_id": "I-L1",
+          "instrument_type": "LOAN"
+        },
+        {
+          "instrument_id": "I-L2",
+          "instrument_type": "LOAN"
+        },
+        {
+          "instrument_id": "I-B1",
+          "instrument_type": "BOND"
+        },
+        {
+          "instrument_id": "I-D1",
+          "instrument_type": "DEPOSIT"
+        },
+        {
+          "instrument_id": "I-B2",
+          "instrument_type": "BOND"
+        },
+        {
+          "instrument_id": "I-D2",
+          "instrument_type": "DEPOSIT"
+        },
+        {
+          "instrument_id": "I-B3",
+          "instrument_type": "BOND"
+        },
+        {
+          "instrument_id": "I-D3",
+          "instrument_type": "DEPOSIT"
+        }
+      ],
+      "cash_flows": [
+        {
+          "cashflow_id": "L1",
+          "instrument_id": "I-L1",
+          "days_after_reporting_date": 3,
+          "amount": "30",
+          "currency": "INR",
+          "origin": "CONTRACTUAL"
+        },
+        {
+          "cashflow_id": "L2",
+          "instrument_id": "I-L2",
+          "days_after_reporting_date": 5,
+          "amount": "20",
+          "currency": "INR",
+          "origin": "CONTRACTUAL"
+        },
+        {
+          "cashflow_id": "B1",
+          "instrument_id": "I-B1",
+          "days_after_reporting_date": 2,
+          "amount": "50",
+          "currency": "INR",
+          "origin": "CONTRACTUAL"
+        },
+        {
+          "cashflow_id": "D1",
+          "instrument_id": "I-D1",
+          "days_after_reporting_date": 4,
+          "amount": "80",
+          "currency": "INR",
+          "origin": "CONTRACTUAL"
+        },
+        {
+          "cashflow_id": "B2",
+          "instrument_id": "I-B2",
+          "days_after_reporting_date": 20,
+          "amount": "60",
+          "currency": "INR",
+          "origin": "CONTRACTUAL"
+        },
+        {
+          "cashflow_id": "D2",
+          "instrument_id": "I-D2",
+          "days_after_reporting_date": 25,
+          "amount": "70",
+          "currency": "INR",
+          "origin": "CONTRACTUAL"
+        },
+        {
+          "cashflow_id": "B3",
+          "instrument_id": "I-B3",
+          "days_after_reporting_date": 60,
+          "amount": "90",
+          "currency": "INR",
+          "origin": "CONTRACTUAL"
+        },
+        {
+          "cashflow_id": "D3",
+          "instrument_id": "I-D3",
+          "days_after_reporting_date": 50,
+          "amount": "40",
+          "currency": "INR",
+          "origin": "CONTRACTUAL"
+        }
+      ],
+      "shocks": [
+        {
+          "template": "DELAYED_INFLOWS",
+          "parameters": {
+            "cashflow_type": "LOAN",
+            "affected_fraction": "0.2000",
+            "delay_days": 14,
+            "delay_calendar": "CALENDAR_DAYS"
+          }
+        }
+      ],
+      "expected": {
+        "parts": [
+          {
+            "cashflow_id": "L1",
+            "days_after_reporting_date": 17,
+            "amount": "6",
+            "shock_sequences": [
+              1
+            ]
+          },
+          {
+            "cashflow_id": "L1",
+            "days_after_reporting_date": 3,
+            "amount": "24",
+            "shock_sequences": [
+              1
+            ]
+          },
+          {
+            "cashflow_id": "L2",
+            "days_after_reporting_date": 19,
+            "amount": "4",
+            "shock_sequences": [
+              1
+            ]
+          },
+          {
+            "cashflow_id": "L2",
+            "days_after_reporting_date": 5,
+            "amount": "16",
+            "shock_sequences": [
+              1
+            ]
+          },
+          {
+            "cashflow_id": "B1",
+            "days_after_reporting_date": 2,
+            "amount": "50",
+            "shock_sequences": []
+          },
+          {
+            "cashflow_id": "D1",
+            "days_after_reporting_date": 4,
+            "amount": "80",
+            "shock_sequences": []
+          },
+          {
+            "cashflow_id": "B2",
+            "days_after_reporting_date": 20,
+            "amount": "60",
+            "shock_sequences": []
+          },
+          {
+            "cashflow_id": "D2",
+            "days_after_reporting_date": 25,
+            "amount": "70",
+            "shock_sequences": []
+          },
+          {
+            "cashflow_id": "B3",
+            "days_after_reporting_date": 60,
+            "amount": "90",
+            "shock_sequences": []
+          },
+          {
+            "cashflow_id": "D3",
+            "days_after_reporting_date": 50,
+            "amount": "40",
+            "shock_sequences": []
+          }
+        ],
+        "counts": [
+          {
+            "matched_flows": 2,
+            "parts": 4,
+            "direction_mismatches": 0,
+            "skipped_past_due": 0,
+            "skipped_incomplete": 0
+          }
+        ],
+        "ladder": {
+          "INR": {
+            "K1": {
+              "inflows": "90",
+              "outflows": "80",
+              "net_gap": "10",
+              "cumulative_gap": "10"
+            },
+            "K2": {
+              "inflows": "70",
+              "outflows": "70",
+              "net_gap": "0",
+              "cumulative_gap": "10"
+            },
+            "K3": {
+              "inflows": "90",
+              "outflows": "40",
+              "net_gap": "50",
+              "cumulative_gap": "60"
+            },
+            "K4": {
+              "inflows": "0",
+              "outflows": "0",
+              "net_gap": "0",
+              "cumulative_gap": "60"
+            }
+          }
+        },
+        "totals": {
+          "INR": {
+            "inflows": "250",
+            "outflows": "190"
+          }
+        }
+      }
+    },
+    {
+      "name": "2 affected_fraction 1: the whole flow moves, no split",
+      "note": "LOAN 30 at day 3 -> 30 at day 17; LOAN 20 at day 10 -> 20 at day 24; BOND untouched.",
+      "reporting_date": "2026-12-31",
+      "buckets": [
+        {
+          "code": "K1",
+          "label": "(0,7]",
+          "lower_exclusive": 0,
+          "upper_inclusive": 7
+        },
+        {
+          "code": "K2",
+          "label": "(7,30]",
+          "lower_exclusive": 7,
+          "upper_inclusive": 30
+        },
+        {
+          "code": "K3",
+          "label": "(30,90]",
+          "lower_exclusive": 30,
+          "upper_inclusive": 90
+        },
+        {
+          "code": "K4",
+          "label": "(90,inf)",
+          "lower_exclusive": 90,
+          "upper_inclusive": null
+        }
+      ],
+      "directions": {
+        "LOAN": "INFLOW",
+        "BOND": "INFLOW",
+        "DEPOSIT": "OUTFLOW"
+      },
+      "instruments": [
+        {
+          "instrument_id": "I-L1",
+          "instrument_type": "LOAN"
+        },
+        {
+          "instrument_id": "I-L2",
+          "instrument_type": "LOAN"
+        },
+        {
+          "instrument_id": "I-B1",
+          "instrument_type": "BOND"
+        }
+      ],
+      "cash_flows": [
+        {
+          "cashflow_id": "L1",
+          "instrument_id": "I-L1",
+          "days_after_reporting_date": 3,
+          "amount": "30",
+          "currency": "INR",
+          "origin": "CONTRACTUAL"
+        },
+        {
+          "cashflow_id": "L2",
+          "instrument_id": "I-L2",
+          "days_after_reporting_date": 10,
+          "amount": "20",
+          "currency": "INR",
+          "origin": "CONTRACTUAL"
+        },
+        {
+          "cashflow_id": "B1",
+          "instrument_id": "I-B1",
+          "days_after_reporting_date": 2,
+          "amount": "50",
+          "currency": "INR",
+          "origin": "CONTRACTUAL"
+        }
+      ],
+      "shocks": [
+        {
+          "template": "DELAYED_INFLOWS",
+          "parameters": {
+            "cashflow_type": "LOAN",
+            "affected_fraction": "1.0000",
+            "delay_days": 14,
+            "delay_calendar": "CALENDAR_DAYS"
+          }
+        }
+      ],
+      "expected": {
+        "parts": [
+          {
+            "cashflow_id": "L1",
+            "days_after_reporting_date": 17,
+            "amount": "30",
+            "shock_sequences": [
+              1
+            ]
+          },
+          {
+            "cashflow_id": "L2",
+            "days_after_reporting_date": 24,
+            "amount": "20",
+            "shock_sequences": [
+              1
+            ]
+          },
+          {
+            "cashflow_id": "B1",
+            "days_after_reporting_date": 2,
+            "amount": "50",
+            "shock_sequences": []
+          }
+        ],
+        "counts": [
+          {
+            "matched_flows": 2,
+            "parts": 2,
+            "direction_mismatches": 0,
+            "skipped_past_due": 0,
+            "skipped_incomplete": 0
+          }
+        ],
+        "ladder": {
+          "INR": {
+            "K1": {
+              "inflows": "50",
+              "outflows": "0",
+              "net_gap": "50",
+              "cumulative_gap": "50"
+            },
+            "K2": {
+              "inflows": "50",
+              "outflows": "0",
+              "net_gap": "50",
+              "cumulative_gap": "100"
+            },
+            "K3": {
+              "inflows": "0",
+              "outflows": "0",
+              "net_gap": "0",
+              "cumulative_gap": "100"
+            },
+            "K4": {
+              "inflows": "0",
+              "outflows": "0",
+              "net_gap": "0",
+              "cumulative_gap": "100"
+            }
+          }
+        },
+        "totals": {
+          "INR": {
+            "inflows": "100",
+            "outflows": "0"
+          }
+        }
+      }
+    },
+    {
+      "name": "3 The due window",
+      "note": "Only LOANs due in days [4, 10] are delayed 30 days at 0.5000: day 5 (20 -> 10 at day 35 + 10) and day 10 (40 -> 20 at day 40 + 20); days 3 and 20 are untouched.",
+      "reporting_date": "2026-12-31",
+      "buckets": [
+        {
+          "code": "K1",
+          "label": "(0,7]",
+          "lower_exclusive": 0,
+          "upper_inclusive": 7
+        },
+        {
+          "code": "K2",
+          "label": "(7,30]",
+          "lower_exclusive": 7,
+          "upper_inclusive": 30
+        },
+        {
+          "code": "K3",
+          "label": "(30,90]",
+          "lower_exclusive": 30,
+          "upper_inclusive": 90
+        },
+        {
+          "code": "K4",
+          "label": "(90,inf)",
+          "lower_exclusive": 90,
+          "upper_inclusive": null
+        }
+      ],
+      "directions": {
+        "LOAN": "INFLOW",
+        "BOND": "INFLOW",
+        "DEPOSIT": "OUTFLOW"
+      },
+      "instruments": [
+        {
+          "instrument_id": "I-L1",
+          "instrument_type": "LOAN"
+        },
+        {
+          "instrument_id": "I-L2",
+          "instrument_type": "LOAN"
+        },
+        {
+          "instrument_id": "I-L3",
+          "instrument_type": "LOAN"
+        },
+        {
+          "instrument_id": "I-L4",
+          "instrument_type": "LOAN"
+        }
+      ],
+      "cash_flows": [
+        {
+          "cashflow_id": "L1",
+          "instrument_id": "I-L1",
+          "days_after_reporting_date": 3,
+          "amount": "30",
+          "currency": "INR",
+          "origin": "CONTRACTUAL"
+        },
+        {
+          "cashflow_id": "L2",
+          "instrument_id": "I-L2",
+          "days_after_reporting_date": 5,
+          "amount": "20",
+          "currency": "INR",
+          "origin": "CONTRACTUAL"
+        },
+        {
+          "cashflow_id": "L3",
+          "instrument_id": "I-L3",
+          "days_after_reporting_date": 10,
+          "amount": "40",
+          "currency": "INR",
+          "origin": "CONTRACTUAL"
+        },
+        {
+          "cashflow_id": "L4",
+          "instrument_id": "I-L4",
+          "days_after_reporting_date": 20,
+          "amount": "50",
+          "currency": "INR",
+          "origin": "CONTRACTUAL"
+        }
+      ],
+      "shocks": [
+        {
+          "template": "DELAYED_INFLOWS",
+          "parameters": {
+            "cashflow_type": "LOAN",
+            "affected_fraction": "0.5000",
+            "delay_days": 30,
+            "delay_calendar": "CALENDAR_DAYS"
+          },
+          "selector": {
+            "due_from_day": 4,
+            "due_to_day": 10
+          }
+        }
+      ],
+      "expected": {
+        "parts": [
+          {
+            "cashflow_id": "L1",
+            "days_after_reporting_date": 3,
+            "amount": "30",
+            "shock_sequences": []
+          },
+          {
+            "cashflow_id": "L2",
+            "days_after_reporting_date": 35,
+            "amount": "10",
+            "shock_sequences": [
+              1
+            ]
+          },
+          {
+            "cashflow_id": "L2",
+            "days_after_reporting_date": 5,
+            "amount": "10",
+            "shock_sequences": [
+              1
+            ]
+          },
+          {
+            "cashflow_id": "L3",
+            "days_after_reporting_date": 40,
+            "amount": "20",
+            "shock_sequences": [
+              1
+            ]
+          },
+          {
+            "cashflow_id": "L3",
+            "days_after_reporting_date": 10,
+            "amount": "20",
+            "shock_sequences": [
+              1
+            ]
+          },
+          {
+            "cashflow_id": "L4",
+            "days_after_reporting_date": 20,
+            "amount": "50",
+            "shock_sequences": []
+          }
+        ],
+        "counts": [
+          {
+            "matched_flows": 2,
+            "parts": 4,
+            "direction_mismatches": 0,
+            "skipped_past_due": 0,
+            "skipped_incomplete": 0
+          }
+        ],
+        "ladder": {
+          "INR": {
+            "K1": {
+              "inflows": "40",
+              "outflows": "0",
+              "net_gap": "40",
+              "cumulative_gap": "40"
+            },
+            "K2": {
+              "inflows": "70",
+              "outflows": "0",
+              "net_gap": "70",
+              "cumulative_gap": "110"
+            },
+            "K3": {
+              "inflows": "30",
+              "outflows": "0",
+              "net_gap": "30",
+              "cumulative_gap": "140"
+            },
+            "K4": {
+              "inflows": "0",
+              "outflows": "0",
+              "net_gap": "0",
+              "cumulative_gap": "140"
+            }
+          }
+        },
+        "totals": {
+          "INR": {
+            "inflows": "140",
+            "outflows": "0"
+          }
+        }
+      }
+    },
+    {
+      "name": "4 The currency and origin selectors",
+      "note": "Only the INR BEHAVIOURAL LOAN (100 at day 5) matches: 10 moves to day 12 and 90 stays. The USD and the CONTRACTUAL INR LOANs are untouched.",
+      "reporting_date": "2026-12-31",
+      "buckets": [
+        {
+          "code": "K1",
+          "label": "(0,7]",
+          "lower_exclusive": 0,
+          "upper_inclusive": 7
+        },
+        {
+          "code": "K2",
+          "label": "(7,30]",
+          "lower_exclusive": 7,
+          "upper_inclusive": 30
+        },
+        {
+          "code": "K3",
+          "label": "(30,90]",
+          "lower_exclusive": 30,
+          "upper_inclusive": 90
+        },
+        {
+          "code": "K4",
+          "label": "(90,inf)",
+          "lower_exclusive": 90,
+          "upper_inclusive": null
+        }
+      ],
+      "directions": {
+        "LOAN": "INFLOW",
+        "BOND": "INFLOW",
+        "DEPOSIT": "OUTFLOW"
+      },
+      "instruments": [
+        {
+          "instrument_id": "I-L1",
+          "instrument_type": "LOAN"
+        },
+        {
+          "instrument_id": "I-L2",
+          "instrument_type": "LOAN"
+        },
+        {
+          "instrument_id": "I-L3",
+          "instrument_type": "LOAN"
+        }
+      ],
+      "cash_flows": [
+        {
+          "cashflow_id": "L1",
+          "instrument_id": "I-L1",
+          "days_after_reporting_date": 5,
+          "amount": "100",
+          "currency": "INR",
+          "origin": "CONTRACTUAL"
+        },
+        {
+          "cashflow_id": "L2",
+          "instrument_id": "I-L2",
+          "days_after_reporting_date": 5,
+          "amount": "100",
+          "currency": "USD",
+          "origin": "BEHAVIOURAL"
+        },
+        {
+          "cashflow_id": "L3",
+          "instrument_id": "I-L3",
+          "days_after_reporting_date": 5,
+          "amount": "100",
+          "currency": "INR",
+          "origin": "BEHAVIOURAL"
+        }
+      ],
+      "shocks": [
+        {
+          "template": "DELAYED_INFLOWS",
+          "parameters": {
+            "cashflow_type": "LOAN",
+            "affected_fraction": "0.1000",
+            "delay_days": 7,
+            "delay_calendar": "CALENDAR_DAYS"
+          },
+          "selector": {
+            "currency": "INR",
+            "origin": "BEHAVIOURAL"
+          }
+        }
+      ],
+      "expected": {
+        "parts": [
+          {
+            "cashflow_id": "L1",
+            "days_after_reporting_date": 5,
+            "amount": "100",
+            "shock_sequences": []
+          },
+          {
+            "cashflow_id": "L2",
+            "days_after_reporting_date": 5,
+            "amount": "100",
+            "shock_sequences": []
+          },
+          {
+            "cashflow_id": "L3",
+            "days_after_reporting_date": 12,
+            "amount": "10",
+            "shock_sequences": [
+              1
+            ]
+          },
+          {
+            "cashflow_id": "L3",
+            "days_after_reporting_date": 5,
+            "amount": "90",
+            "shock_sequences": [
+              1
+            ]
+          }
+        ],
+        "counts": [
+          {
+            "matched_flows": 1,
+            "parts": 2,
+            "direction_mismatches": 0,
+            "skipped_past_due": 0,
+            "skipped_incomplete": 0
+          }
+        ],
+        "ladder": {
+          "INR": {
+            "K1": {
+              "inflows": "190",
+              "outflows": "0",
+              "net_gap": "190",
+              "cumulative_gap": "190"
+            },
+            "K2": {
+              "inflows": "10",
+              "outflows": "0",
+              "net_gap": "10",
+              "cumulative_gap": "200"
+            },
+            "K3": {
+              "inflows": "0",
+              "outflows": "0",
+              "net_gap": "0",
+              "cumulative_gap": "200"
+            },
+            "K4": {
+              "inflows": "0",
+              "outflows": "0",
+              "net_gap": "0",
+              "cumulative_gap": "200"
+            }
+          },
+          "USD": {
+            "K1": {
+              "inflows": "100",
+              "outflows": "0",
+              "net_gap": "100",
+              "cumulative_gap": "100"
+            },
+            "K2": {
+              "inflows": "0",
+              "outflows": "0",
+              "net_gap": "0",
+              "cumulative_gap": "100"
+            },
+            "K3": {
+              "inflows": "0",
+              "outflows": "0",
+              "net_gap": "0",
+              "cumulative_gap": "100"
+            },
+            "K4": {
+              "inflows": "0",
+              "outflows": "0",
+              "net_gap": "0",
+              "cumulative_gap": "100"
+            }
+          }
+        },
+        "totals": {
+          "INR": {
+            "inflows": "200",
+            "outflows": "0"
+          },
+          "USD": {
+            "inflows": "100",
+            "outflows": "0"
+          }
+        }
+      }
+    },
+    {
+      "name": "5 DEPOSIT_WITHDRAWAL +15%",
+      "note": "Each DEPOSIT stays and gains an added part of 0.1500 x amount on the same day: 80 + 12 at day 4, 70 + 10.5 at day 25. Outflows 80/70 -> 92/80.5; total outflows 150 + 22.5 = 172.5 (the declared added amount); inflows unchanged.",
+      "reporting_date": "2026-12-31",
+      "buckets": [
+        {
+          "code": "K1",
+          "label": "(0,7]",
+          "lower_exclusive": 0,
+          "upper_inclusive": 7
+        },
+        {
+          "code": "K2",
+          "label": "(7,30]",
+          "lower_exclusive": 7,
+          "upper_inclusive": 30
+        },
+        {
+          "code": "K3",
+          "label": "(30,90]",
+          "lower_exclusive": 30,
+          "upper_inclusive": 90
+        },
+        {
+          "code": "K4",
+          "label": "(90,inf)",
+          "lower_exclusive": 90,
+          "upper_inclusive": null
+        }
+      ],
+      "directions": {
+        "LOAN": "INFLOW",
+        "BOND": "INFLOW",
+        "DEPOSIT": "OUTFLOW"
+      },
+      "instruments": [
+        {
+          "instrument_id": "I-D1",
+          "instrument_type": "DEPOSIT"
+        },
+        {
+          "instrument_id": "I-D2",
+          "instrument_type": "DEPOSIT"
+        },
+        {
+          "instrument_id": "I-L1",
+          "instrument_type": "LOAN"
+        }
+      ],
+      "cash_flows": [
+        {
+          "cashflow_id": "D1",
+          "instrument_id": "I-D1",
+          "days_after_reporting_date": 4,
+          "amount": "80",
+          "currency": "INR",
+          "origin": "CONTRACTUAL"
+        },
+        {
+          "cashflow_id": "D2",
+          "instrument_id": "I-D2",
+          "days_after_reporting_date": 25,
+          "amount": "70",
+          "currency": "INR",
+          "origin": "CONTRACTUAL"
+        },
+        {
+          "cashflow_id": "L1",
+          "instrument_id": "I-L1",
+          "days_after_reporting_date": 3,
+          "amount": "50",
+          "currency": "INR",
+          "origin": "CONTRACTUAL"
+        }
+      ],
+      "shocks": [
+        {
+          "template": "DEPOSIT_WITHDRAWAL",
+          "parameters": {
+            "cashflow_type": "DEPOSIT",
+            "increase_fraction": "0.1500"
+          }
+        }
+      ],
+      "expected": {
+        "parts": [
+          {
+            "cashflow_id": "D1",
+            "days_after_reporting_date": 4,
+            "amount": "12",
+            "shock_sequences": [
+              1
+            ]
+          },
+          {
+            "cashflow_id": "D1",
+            "days_after_reporting_date": 4,
+            "amount": "80",
+            "shock_sequences": [
+              1
+            ]
+          },
+          {
+            "cashflow_id": "D2",
+            "days_after_reporting_date": 25,
+            "amount": "10.5",
+            "shock_sequences": [
+              1
+            ]
+          },
+          {
+            "cashflow_id": "D2",
+            "days_after_reporting_date": 25,
+            "amount": "70",
+            "shock_sequences": [
+              1
+            ]
+          },
+          {
+            "cashflow_id": "L1",
+            "days_after_reporting_date": 3,
+            "amount": "50",
+            "shock_sequences": []
+          }
+        ],
+        "counts": [
+          {
+            "matched_flows": 2,
+            "parts": 4,
+            "direction_mismatches": 0,
+            "skipped_past_due": 0,
+            "skipped_incomplete": 0
+          }
+        ],
+        "ladder": {
+          "INR": {
+            "K1": {
+              "inflows": "50",
+              "outflows": "92",
+              "net_gap": "-42",
+              "cumulative_gap": "-42"
+            },
+            "K2": {
+              "inflows": "0",
+              "outflows": "80.5",
+              "net_gap": "-80.5",
+              "cumulative_gap": "-122.5"
+            },
+            "K3": {
+              "inflows": "0",
+              "outflows": "0",
+              "net_gap": "0",
+              "cumulative_gap": "-122.5"
+            },
+            "K4": {
+              "inflows": "0",
+              "outflows": "0",
+              "net_gap": "0",
+              "cumulative_gap": "-122.5"
+            }
+          }
+        },
+        "totals": {
+          "INR": {
+            "inflows": "50",
+            "outflows": "172.5"
+          }
+        }
+      }
+    },
+    {
+      "name": "6 FUNDING_UNAVAILABLE for 7 days on two picked instrument keys",
+      "note": "LOANs of I-A and I-B due in (0, 7] move whole (fraction 1) to day 8: I-A 40 at day 3, I-B 30 at day 6. I-A 25 at day 10 is due later: untouched. I-C (not picked) is untouched.",
+      "reporting_date": "2026-12-31",
+      "buckets": [
+        {
+          "code": "K1",
+          "label": "(0,7]",
+          "lower_exclusive": 0,
+          "upper_inclusive": 7
+        },
+        {
+          "code": "K2",
+          "label": "(7,30]",
+          "lower_exclusive": 7,
+          "upper_inclusive": 30
+        },
+        {
+          "code": "K3",
+          "label": "(30,90]",
+          "lower_exclusive": 30,
+          "upper_inclusive": 90
+        },
+        {
+          "code": "K4",
+          "label": "(90,inf)",
+          "lower_exclusive": 90,
+          "upper_inclusive": null
+        }
+      ],
+      "directions": {
+        "LOAN": "INFLOW",
+        "BOND": "INFLOW",
+        "DEPOSIT": "OUTFLOW"
+      },
+      "instruments": [
+        {
+          "instrument_id": "I-A",
+          "instrument_type": "LOAN"
+        },
+        {
+          "instrument_id": "I-B",
+          "instrument_type": "LOAN"
+        },
+        {
+          "instrument_id": "I-C",
+          "instrument_type": "LOAN"
+        }
+      ],
+      "cash_flows": [
+        {
+          "cashflow_id": "A1",
+          "instrument_id": "I-A",
+          "days_after_reporting_date": 3,
+          "amount": "40",
+          "currency": "INR",
+          "origin": "CONTRACTUAL"
+        },
+        {
+          "cashflow_id": "B1",
+          "instrument_id": "I-B",
+          "days_after_reporting_date": 6,
+          "amount": "30",
+          "currency": "INR",
+          "origin": "CONTRACTUAL"
+        },
+        {
+          "cashflow_id": "C1",
+          "instrument_id": "I-C",
+          "days_after_reporting_date": 5,
+          "amount": "20",
+          "currency": "INR",
+          "origin": "CONTRACTUAL"
+        },
+        {
+          "cashflow_id": "A2",
+          "instrument_id": "I-A",
+          "days_after_reporting_date": 10,
+          "amount": "25",
+          "currency": "INR",
+          "origin": "CONTRACTUAL"
+        }
+      ],
+      "shocks": [
+        {
+          "template": "FUNDING_UNAVAILABLE",
+          "parameters": {
+            "unavailable_days": 7,
+            "affected_fraction": "1.0000",
+            "delay_calendar": "CALENDAR_DAYS"
+          },
+          "selector": {
+            "instrument_type": "LOAN",
+            "instrument_keys": [
+              "I-A",
+              "I-B"
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "parts": [
+          {
+            "cashflow_id": "A1",
+            "days_after_reporting_date": 8,
+            "amount": "40",
+            "shock_sequences": [
+              1
+            ]
+          },
+          {
+            "cashflow_id": "B1",
+            "days_after_reporting_date": 8,
+            "amount": "30",
+            "shock_sequences": [
+              1
+            ]
+          },
+          {
+            "cashflow_id": "C1",
+            "days_after_reporting_date": 5,
+            "amount": "20",
+            "shock_sequences": []
+          },
+          {
+            "cashflow_id": "A2",
+            "days_after_reporting_date": 10,
+            "amount": "25",
+            "shock_sequences": []
+          }
+        ],
+        "counts": [
+          {
+            "matched_flows": 2,
+            "parts": 2,
+            "direction_mismatches": 0,
+            "skipped_past_due": 0,
+            "skipped_incomplete": 0
+          }
+        ],
+        "ladder": {
+          "INR": {
+            "K1": {
+              "inflows": "20",
+              "outflows": "0",
+              "net_gap": "20",
+              "cumulative_gap": "20"
+            },
+            "K2": {
+              "inflows": "95",
+              "outflows": "0",
+              "net_gap": "95",
+              "cumulative_gap": "115"
+            },
+            "K3": {
+              "inflows": "0",
+              "outflows": "0",
+              "net_gap": "0",
+              "cumulative_gap": "115"
+            },
+            "K4": {
+              "inflows": "0",
+              "outflows": "0",
+              "net_gap": "0",
+              "cumulative_gap": "115"
+            }
+          }
+        },
+        "totals": {
+          "INR": {
+            "inflows": "115",
+            "outflows": "0"
+          }
+        }
+      }
+    },
+    {
+      "name": "7 The three shocks combined (design section 5) and a part split twice",
+      "note": "Shock 1 splits LOAN 30 at day 3 into 6 at day 17 and 24 at day 3; shock 2 adds 12 to DEPOSIT 80 at day 4; shock 3 (I-L1 unavailable 7 days at 0.5000) splits the stayed 24 at day 3 again into 12 at day 8 and 12 at day 3 (the moved 6 at day 17 is due later: untouched).",
+      "reporting_date": "2026-12-31",
+      "buckets": [
+        {
+          "code": "K1",
+          "label": "(0,7]",
+          "lower_exclusive": 0,
+          "upper_inclusive": 7
+        },
+        {
+          "code": "K2",
+          "label": "(7,30]",
+          "lower_exclusive": 7,
+          "upper_inclusive": 30
+        },
+        {
+          "code": "K3",
+          "label": "(30,90]",
+          "lower_exclusive": 30,
+          "upper_inclusive": 90
+        },
+        {
+          "code": "K4",
+          "label": "(90,inf)",
+          "lower_exclusive": 90,
+          "upper_inclusive": null
+        }
+      ],
+      "directions": {
+        "LOAN": "INFLOW",
+        "BOND": "INFLOW",
+        "DEPOSIT": "OUTFLOW"
+      },
+      "instruments": [
+        {
+          "instrument_id": "I-L1",
+          "instrument_type": "LOAN"
+        },
+        {
+          "instrument_id": "I-D1",
+          "instrument_type": "DEPOSIT"
+        },
+        {
+          "instrument_id": "I-B1",
+          "instrument_type": "BOND"
+        }
+      ],
+      "cash_flows": [
+        {
+          "cashflow_id": "L1",
+          "instrument_id": "I-L1",
+          "days_after_reporting_date": 3,
+          "amount": "30",
+          "currency": "INR",
+          "origin": "CONTRACTUAL"
+        },
+        {
+          "cashflow_id": "D1",
+          "instrument_id": "I-D1",
+          "days_after_reporting_date": 4,
+          "amount": "80",
+          "currency": "INR",
+          "origin": "CONTRACTUAL"
+        },
+        {
+          "cashflow_id": "B1",
+          "instrument_id": "I-B1",
+          "days_after_reporting_date": 2,
+          "amount": "50",
+          "currency": "INR",
+          "origin": "CONTRACTUAL"
+        }
+      ],
+      "shocks": [
+        {
+          "template": "DELAYED_INFLOWS",
+          "parameters": {
+            "cashflow_type": "LOAN",
+            "affected_fraction": "0.2000",
+            "delay_days": 14,
+            "delay_calendar": "CALENDAR_DAYS"
+          }
+        },
+        {
+          "template": "DEPOSIT_WITHDRAWAL",
+          "parameters": {
+            "cashflow_type": "DEPOSIT",
+            "increase_fraction": "0.1500"
+          }
+        },
+        {
+          "template": "FUNDING_UNAVAILABLE",
+          "parameters": {
+            "unavailable_days": 7,
+            "affected_fraction": "0.5000",
+            "delay_calendar": "CALENDAR_DAYS"
+          },
+          "selector": {
+            "instrument_type": "LOAN",
+            "instrument_keys": [
+              "I-L1"
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "parts": [
+          {
+            "cashflow_id": "L1",
+            "days_after_reporting_date": 17,
+            "amount": "6",
+            "shock_sequences": [
+              1
+            ]
+          },
+          {
+            "cashflow_id": "L1",
+            "days_after_reporting_date": 8,
+            "amount": "12",
+            "shock_sequences": [
+              1,
+              3
+            ]
+          },
+          {
+            "cashflow_id": "L1",
+            "days_after_reporting_date": 3,
+            "amount": "12",
+            "shock_sequences": [
+              1,
+              3
+            ]
+          },
+          {
+            "cashflow_id": "D1",
+            "days_after_reporting_date": 4,
+            "amount": "12",
+            "shock_sequences": [
+              2
+            ]
+          },
+          {
+            "cashflow_id": "D1",
+            "days_after_reporting_date": 4,
+            "amount": "80",
+            "shock_sequences": [
+              2
+            ]
+          },
+          {
+            "cashflow_id": "B1",
+            "days_after_reporting_date": 2,
+            "amount": "50",
+            "shock_sequences": []
+          }
+        ],
+        "counts": [
+          {
+            "matched_flows": 1,
+            "parts": 2,
+            "direction_mismatches": 0,
+            "skipped_past_due": 0,
+            "skipped_incomplete": 0
+          },
+          {
+            "matched_flows": 1,
+            "parts": 2,
+            "direction_mismatches": 0,
+            "skipped_past_due": 0,
+            "skipped_incomplete": 0
+          },
+          {
+            "matched_flows": 1,
+            "parts": 2,
+            "direction_mismatches": 0,
+            "skipped_past_due": 0,
+            "skipped_incomplete": 0
+          }
+        ],
+        "ladder": {
+          "INR": {
+            "K1": {
+              "inflows": "62",
+              "outflows": "92",
+              "net_gap": "-30",
+              "cumulative_gap": "-30"
+            },
+            "K2": {
+              "inflows": "18",
+              "outflows": "0",
+              "net_gap": "18",
+              "cumulative_gap": "-12"
+            },
+            "K3": {
+              "inflows": "0",
+              "outflows": "0",
+              "net_gap": "0",
+              "cumulative_gap": "-12"
+            },
+            "K4": {
+              "inflows": "0",
+              "outflows": "0",
+              "net_gap": "0",
+              "cumulative_gap": "-12"
+            }
+          }
+        },
+        "totals": {
+          "INR": {
+            "inflows": "80",
+            "outflows": "92"
+          }
+        }
+      }
+    },
+    {
+      "name": "8 Past-due and incomplete flows are untouched",
+      "note": "Only LOAN 20 at day 5 is shocked (10 at day 15 + 10 at day 5). Past due (day -2) and due on the reporting date (day 0, outside (0,7]) are skipped as past due; a missing amount and a missing due date are skipped as incomplete. Each passes through unchanged (the ladder excludes it).",
+      "reporting_date": "2026-12-31",
+      "buckets": [
+        {
+          "code": "K1",
+          "label": "(0,7]",
+          "lower_exclusive": 0,
+          "upper_inclusive": 7
+        },
+        {
+          "code": "K2",
+          "label": "(7,30]",
+          "lower_exclusive": 7,
+          "upper_inclusive": 30
+        },
+        {
+          "code": "K3",
+          "label": "(30,90]",
+          "lower_exclusive": 30,
+          "upper_inclusive": 90
+        },
+        {
+          "code": "K4",
+          "label": "(90,inf)",
+          "lower_exclusive": 90,
+          "upper_inclusive": null
+        }
+      ],
+      "directions": {
+        "LOAN": "INFLOW",
+        "BOND": "INFLOW",
+        "DEPOSIT": "OUTFLOW"
+      },
+      "instruments": [
+        {
+          "instrument_id": "I-L1",
+          "instrument_type": "LOAN"
+        },
+        {
+          "instrument_id": "I-L2",
+          "instrument_type": "LOAN"
+        },
+        {
+          "instrument_id": "I-L3",
+          "instrument_type": "LOAN"
+        },
+        {
+          "instrument_id": "I-L4",
+          "instrument_type": "LOAN"
+        },
+        {
+          "instrument_id": "I-L5",
+          "instrument_type": "LOAN"
+        }
+      ],
+      "cash_flows": [
+        {
+          "cashflow_id": "P1",
+          "instrument_id": "I-L1",
+          "days_after_reporting_date": -2,
+          "amount": "30",
+          "currency": "INR",
+          "origin": "CONTRACTUAL"
+        },
+        {
+          "cashflow_id": "P2",
+          "instrument_id": "I-L2",
+          "days_after_reporting_date": 0,
+          "amount": "15",
+          "currency": "INR",
+          "origin": "CONTRACTUAL"
+        },
+        {
+          "cashflow_id": "N1",
+          "instrument_id": "I-L3",
+          "days_after_reporting_date": 5,
+          "amount": null,
+          "currency": "INR",
+          "origin": "CONTRACTUAL"
+        },
+        {
+          "cashflow_id": "N2",
+          "instrument_id": "I-L4",
+          "days_after_reporting_date": null,
+          "amount": "25",
+          "currency": "INR",
+          "origin": "CONTRACTUAL"
+        },
+        {
+          "cashflow_id": "OK",
+          "instrument_id": "I-L5",
+          "days_after_reporting_date": 5,
+          "amount": "20",
+          "currency": "INR",
+          "origin": "CONTRACTUAL"
+        }
+      ],
+      "shocks": [
+        {
+          "template": "DELAYED_INFLOWS",
+          "parameters": {
+            "cashflow_type": "LOAN",
+            "affected_fraction": "0.5000",
+            "delay_days": 10,
+            "delay_calendar": "CALENDAR_DAYS"
+          }
+        }
+      ],
+      "expected": {
+        "parts": [
+          {
+            "cashflow_id": "P1",
+            "days_after_reporting_date": -2,
+            "amount": "30",
+            "shock_sequences": []
+          },
+          {
+            "cashflow_id": "P2",
+            "days_after_reporting_date": 0,
+            "amount": "15",
+            "shock_sequences": []
+          },
+          {
+            "cashflow_id": "N1",
+            "days_after_reporting_date": 5,
+            "amount": null,
+            "shock_sequences": []
+          },
+          {
+            "cashflow_id": "N2",
+            "days_after_reporting_date": null,
+            "amount": "25",
+            "shock_sequences": []
+          },
+          {
+            "cashflow_id": "OK",
+            "days_after_reporting_date": 15,
+            "amount": "10",
+            "shock_sequences": [
+              1
+            ]
+          },
+          {
+            "cashflow_id": "OK",
+            "days_after_reporting_date": 5,
+            "amount": "10",
+            "shock_sequences": [
+              1
+            ]
+          }
+        ],
+        "counts": [
+          {
+            "matched_flows": 1,
+            "parts": 2,
+            "direction_mismatches": 0,
+            "skipped_past_due": 2,
+            "skipped_incomplete": 2
+          }
+        ],
+        "ladder": {
+          "INR": {
+            "K1": {
+              "inflows": "10",
+              "outflows": "0",
+              "net_gap": "10",
+              "cumulative_gap": "10"
+            },
+            "K2": {
+              "inflows": "10",
+              "outflows": "0",
+              "net_gap": "10",
+              "cumulative_gap": "20"
+            },
+            "K3": {
+              "inflows": "0",
+              "outflows": "0",
+              "net_gap": "0",
+              "cumulative_gap": "20"
+            },
+            "K4": {
+              "inflows": "0",
+              "outflows": "0",
+              "net_gap": "0",
+              "cumulative_gap": "20"
+            }
+          }
+        },
+        "totals": {
+          "INR": {
+            "inflows": "20",
+            "outflows": "0"
+          }
+        }
+      }
+    },
+    {
+      "name": "9 A direction mismatch under the pinned rule",
+      "note": "The pinned cashflow_direction maps LOAN to OUTFLOW here, so DELAYED_INFLOWS on LOAN matches nothing: both LOAN flows are counted as direction mismatches and pass through unchanged.",
+      "reporting_date": "2026-12-31",
+      "buckets": [
+        {
+          "code": "K1",
+          "label": "(0,7]",
+          "lower_exclusive": 0,
+          "upper_inclusive": 7
+        },
+        {
+          "code": "K2",
+          "label": "(7,30]",
+          "lower_exclusive": 7,
+          "upper_inclusive": 30
+        },
+        {
+          "code": "K3",
+          "label": "(30,90]",
+          "lower_exclusive": 30,
+          "upper_inclusive": 90
+        },
+        {
+          "code": "K4",
+          "label": "(90,inf)",
+          "lower_exclusive": 90,
+          "upper_inclusive": null
+        }
+      ],
+      "directions": {
+        "LOAN": "OUTFLOW",
+        "BOND": "INFLOW",
+        "DEPOSIT": "OUTFLOW"
+      },
+      "instruments": [
+        {
+          "instrument_id": "I-L1",
+          "instrument_type": "LOAN"
+        },
+        {
+          "instrument_id": "I-L2",
+          "instrument_type": "LOAN"
+        },
+        {
+          "instrument_id": "I-B1",
+          "instrument_type": "BOND"
+        }
+      ],
+      "cash_flows": [
+        {
+          "cashflow_id": "L1",
+          "instrument_id": "I-L1",
+          "days_after_reporting_date": 3,
+          "amount": "30",
+          "currency": "INR",
+          "origin": "CONTRACTUAL"
+        },
+        {
+          "cashflow_id": "L2",
+          "instrument_id": "I-L2",
+          "days_after_reporting_date": 12,
+          "amount": "20",
+          "currency": "INR",
+          "origin": "CONTRACTUAL"
+        },
+        {
+          "cashflow_id": "B1",
+          "instrument_id": "I-B1",
+          "days_after_reporting_date": 2,
+          "amount": "50",
+          "currency": "INR",
+          "origin": "CONTRACTUAL"
+        }
+      ],
+      "shocks": [
+        {
+          "template": "DELAYED_INFLOWS",
+          "parameters": {
+            "cashflow_type": "LOAN",
+            "affected_fraction": "0.2000",
+            "delay_days": 14,
+            "delay_calendar": "CALENDAR_DAYS"
+          }
+        }
+      ],
+      "expected": {
+        "parts": [
+          {
+            "cashflow_id": "L1",
+            "days_after_reporting_date": 3,
+            "amount": "30",
+            "shock_sequences": []
+          },
+          {
+            "cashflow_id": "L2",
+            "days_after_reporting_date": 12,
+            "amount": "20",
+            "shock_sequences": []
+          },
+          {
+            "cashflow_id": "B1",
+            "days_after_reporting_date": 2,
+            "amount": "50",
+            "shock_sequences": []
+          }
+        ],
+        "counts": [
+          {
+            "matched_flows": 0,
+            "parts": 0,
+            "direction_mismatches": 2,
+            "skipped_past_due": 0,
+            "skipped_incomplete": 0
+          }
+        ],
+        "ladder": {
+          "INR": {
+            "K1": {
+              "inflows": "50",
+              "outflows": "30",
+              "net_gap": "20",
+              "cumulative_gap": "20"
+            },
+            "K2": {
+              "inflows": "0",
+              "outflows": "20",
+              "net_gap": "-20",
+              "cumulative_gap": "0"
+            },
+            "K3": {
+              "inflows": "0",
+              "outflows": "0",
+              "net_gap": "0",
+              "cumulative_gap": "0"
+            },
+            "K4": {
+              "inflows": "0",
+              "outflows": "0",
+              "net_gap": "0",
+              "cumulative_gap": "0"
+            }
+          }
+        },
+        "totals": {
+          "INR": {
+            "inflows": "50",
+            "outflows": "50"
+          }
+        }
+      }
+    }
+  ]
+}

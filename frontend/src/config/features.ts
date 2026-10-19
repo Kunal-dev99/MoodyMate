@@ -107,3 +107,15 @@ export const STRESS_EXPLORER_UI_ENABLED = process.env.NEXT_PUBLIC_STRESS_EXPLORE
  * read existing list endpoints (`limit=1`, the page's `total`); nothing is written.
  */
 export const DASHBOARD_TILES_ENABLED = process.env.NEXT_PUBLIC_DASHBOARD_TILES !== 'off'
+
+/**
+ * NEXT_PUBLIC_STRESS_COMPARE_UI=off (FE-25.1/25.2): the explorer loses the "Run against baseline"
+ * panel on runnable versions (FE-25.1) and the baseline-versus-stress comparison view (FE-25.2),
+ * and the sidebar keeps its Phase 24 description, restoring the Phase 24 explorer exactly. Only
+ * meaningful while NEXT_PUBLIC_STRESS_EXPLORER_UI is on (the explorer itself), so off there means
+ * off here. The backend's own switches are SCENARIOS_ENABLED and CALCULATIONS_ENABLED, which
+ * refuse new stressed runs (409 `scenarios_disabled` / `calculations_disabled`, audited); existing
+ * stressed runs stay readable, and the calculation run list and run detail keep labelling them
+ * ("Exploration, not approved" / "Approved scenario") whatever this switch says.
+ */
+export const STRESS_COMPARE_UI_ENABLED = STRESS_EXPLORER_UI_ENABLED && process.env.NEXT_PUBLIC_STRESS_COMPARE_UI !== 'off'
