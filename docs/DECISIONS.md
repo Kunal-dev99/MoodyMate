@@ -980,3 +980,329 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
     report once at the end.
 - **Consequences:** fewer interruptions, and every auto-resolved ruling stays traceable. Hard
   stops never get resolved automatically.
+
+## D-37 Credit risk data in the domain: counterparties and credit exposures
+
+- **Status:** active (Feature 04 plan approved by the user, 2026-10-19). PROVISIONAL (D-11).
+- **Date:** 2026-10-19
+- **Context:** Feature 04 needs obligors, exposures and credit attributes. At master `2db56b7`
+  the domain has none of them:
+  - the 0017 tables hold instrument, position and cash flow only (`domain/models.py`);
+  - `instrument` v1 has `counterparty_id` (STRING, confidential, 0007:62), but projector v1
+    does not project it: it is neither a typed column nor extension-eligible, so it stays in
+    `canonical_record` (`domain/constants.py:133-147`);
+  - `rating_category` exists only in the DRAFT `instrument` v2 (0007:85);
+  - there is no days-past-due, default flag, undrawn amount or limit, facility type,
+    collateral, origination grade or effective interest rate anywhere, and `instrument` v1
+    `maturity_date` is free text (D-29 §4).
+
+  Data Model §4 lists `counterparty` (spec :901) and `collateral_asset`/`collateral_link`
+  (:930-932), but no credit-exposure entity. §11 (:1231) leaves "whether … impairment … is in
+  scope" unresolved.
+- **Question:** how do credit attributes reach the domain with lineage to a source row?
+- **Options:**
+  - **A (recommended):** two new seeded ILLUSTRATIVE schemas, `counterparty` v1 and
+    `credit_exposure` v1. They go through the unchanged WS2 pipeline (source, import,
+    mapping, validation, reconciliation) and are projected (D-29) into new append-only
+    tables.
+  - **B:** a `position` v2 carrying the credit fields. Rejected:
+    - Feature 03 snapshots and mappings pin `position` v1 (D-18);
+    - activating v2 changes WS2 behaviour for every position source;
+    - a snapshot holds one import per schema code (D-30 §1), so liquidity positions and
+      credit exposures could not sit in one snapshot.
+  - **C:** credit data typed in the app. Rejected: there would be no lineage to a source row.
+- **Recommended (A):**
+  1. **Schemas** (seeded ACTIVE by a tagged migration, as 0007):
+     - `counterparty` v1: `counterparty_id` (key), `counterparty_name` (confidential),
+       `segment`, `country`;
+     - `credit_exposure` v1: `exposure_id` (key), `counterparty_id`, `instrument_id`
+       (optional, not read by the v1 modules), `as_of_date`, `currency`, `facility_type`,
+       `drawn_amount` and `undrawn_amount` (confidential), `days_past_due` (INTEGER),
+       `default_flag` (BOOLEAN), `origination_date`, `origination_grade`, `maturity_date`
+       (DATE, required), `effective_interest_rate` (DECIMAL, a fraction), `collateral_type`
+       and `collateral_value` (confidential).
+  2. **Identity.** A stable UUID per (tenant, source system, business key), as in D-29 §3.
+     A later import adds a version and never updates an old one.
+  3. **Projection.** The specs for the two new codes are added under `projector_version` 1.
+     The three existing specs stay frozen. `ColumnKind` gains INTEGER and BOOLEAN. A STRING
+     is still never parsed. Vocabulary fields (segment, facility type, collateral type,
+     origination grade) are kept as text, as given. The module maps them, and an unmapped
+     value is a reasoned exclusion or warning, never silent.
+  4. **References.** An exposure resolves its counterparty by business key within the
+     snapshot and the tenant, as in D-30 §4. An unresolved reference is an exclusion with a
+     reason.
+  5. **Vocabularies.** A seeded `credit_vocabulary` table (tagged, PROVISIONAL, append-only)
+     holds:
+     - `rating_grade`, with a rank and a default-grade flag;
+     - `credit_segment`;
+     - `facility_type`;
+     - `collateral_type`.
+
+     Grade codes are neutral (`G01`…`G08`, `D`). Rating-agency symbols are never used, so no
+     vendor or agency parity is implied.
+  6. **Collateral** is simplified to one type and one value per exposure. `collateral_asset`,
+     `collateral_link` and the PLANNED `collateral` module (0021) stay deferred (FC-06).
+  7. **Switch.** `CREDIT_PROJECTION_ENABLED` (default `true`). When it is off, the two new codes
+     get 409 `projection_unsupported` (audited), which is exactly the pre-Feature-04
+     behaviour. Projected rows stay readable.
+- **Consequences:**
+  - This depends on D-38, the CHECK widening.
+  - A credit snapshot holds one `counterparty` import and one `credit_exposure` import.
+  - `ambiguous_business_key` (D-30 §3) also covers counterparty keys.
+
+## D-38 D-01 exception: widen the two `schema_code` CHECKs
+
+- **Status:** active. **D-01 exception approved by the user (2026-10-19):** widen the CHECKs;
+  fallback B is not used.
+- **Date:** 2026-10-19
+- **Context:** two columns are CHECK-constrained to `instrument`, `position` and
+  `cashflow_event` (`DomainSchemaCode`):
+  - `domain_projection.schema_code` (0017, `domain/models.py:67`);
+  - `dataset_snapshot_member.schema_code` (0018, `calculations/models.py:109`).
+
+  D-37 A needs `counterparty` and `credit_exposure` in both. CLAUDE.md lists widening an
+  existing CHECK as a D-01 exception. Phase 17 avoided one by keeping the LCR warnings on
+  `lcr_result` rather than widening `calculation_warning.code`.
+- **Options:**
+  - **A (recommended):** migration 0022 replaces both CHECKs with wider ones. The constraint
+    is dropped and re-added in one transaction, under the same name.
+    - No row changes, and every existing row satisfies the wider CHECK.
+    - The downgrade refuses while any row carries a new code, then restores the narrow
+      CHECK.
+    - A test proves the round trip, and that an unknown sixth code is still refused.
+  - **B (fallback, no exception):** parallel tables `credit_domain_projection` and
+    `dataset_snapshot_credit_member`, with the snapshot content hash extended only when credit
+    members exist, so Feature 03 hashes are unchanged. This avoids the exception, but it
+    duplicates the projection and snapshot machinery (two refusal paths and two hash paths).
+- **Not widened, by design** (the Phase 17 pattern): `calculation_warning.code`,
+  `calculation_input_ref.ref_type`, `intermediate_value` (bound to ladder rows) and
+  `rule_definition.category`. Credit exclusions and warnings live on the new result tables
+  (D-41 §4), and rating pins live in a new table (D-39 §5).
+- **If declined:** Phase 19 builds option B. BE-19.1 and BE-19.4 name the fallback.
+
+## D-39 Obligor rating workflow: versioned, maker-checker, effective-dated, pinned
+
+- **Status:** active (Feature 04 plan approved by the user, 2026-10-19). PROVISIONAL.
+- **Date:** 2026-10-19
+- **Question:** how does an obligor get a grade that a calculation can rely on and reproduce?
+- **Recommended:**
+  1. **Object.** `obligor_rating` holds one immutable version per proposal, for one
+     counterparty identity. It records:
+     - the grade (`rating_grade` vocabulary);
+     - `effective_from` (DATE);
+     - a rationale of 1 to 2,000 characters (required);
+     - the proposer and the time.
+
+     The decision fields (decider, time, comment) are set once.
+  2. **Lifecycle** (a D-06 subset).
+     - A proposal is written IN_REVIEW. There is no DRAFT, because a proposal has nothing to
+       edit; a correction is a new proposal.
+     - IN_REVIEW → ACTIVE (approve) or REJECTED.
+     - ACTIVE → SUPERSEDED, in the same transaction, when another version for the same
+       counterparty and `effective_from` is approved.
+     - RETIRED is reserved, because withdrawal is deferred.
+
+     A DB trigger freezes the content, allows only these moves (once each) and refuses
+     DELETE and TRUNCATE. A partial unique index allows one ACTIVE version per (counterparty,
+     `effective_from`).
+  3. **Maker-checker.**
+     - Proposing needs `rating:propose`. Approving or rejecting needs `rating:approve`, plus
+       a comment of 1 to 1,000 characters.
+     - The decider is not the proposer (409 `self_approval`).
+     - Approving a version that was proposed before another activation for the same
+       counterparty and date gives 409 `stale_version`.
+     - Deciding a version that is not IN_REVIEW gives 409 `invalid_status`.
+     - An unknown grade gives 422 `invalid_grade`.
+     - An absent or foreign counterparty gives the same 404.
+     - Every step and refusal is audited (`obligor_rating.propose`, `.approve`, `.reject`,
+       `.supersede`), and refusals are audited DENIED.
+  4. **In effect at a date.** For counterparty *c* and date *d*, the rating in effect is the
+     ACTIVE version with the greatest `effective_from` ≤ *d*. History stays: an ACTIVE version
+     with an earlier `effective_from` still governs its own period.
+  5. **Pinning.**
+     - At run submission, the engine resolves §4 at the reporting date for every
+       counterparty in the snapshot. It writes `calculation_rating_pin` rows and a sorted
+       `ratings` manifest section, which `manifest_sha256` covers.
+     - A re-run uses the pinned rating versions, even if they have since been SUPERSEDED.
+     - With no rating in effect, the exposure is excluded as `NO_APPROVED_RATING`. The
+       source `origination_grade` is never used as a fallback.
+  6. **Switch.** `RATING_CHANGE_ENABLED` (default `true`). When it is off, proposing and
+     deciding get 409 `rating_change_disabled` (audited). Reads and runs keep working and pin
+     the ACTIVE ratings as they stand.
+  7. **No AI.** Grades are human judgements. Nothing suggests a grade (WS5).
+- **Alternatives:**
+  - A rating as a rule version. Rejected: ratings are per-obligor data, not methodology.
+  - Source-supplied current ratings only. Rejected: the requirement asks for an in-app
+    workflow. The source `origination_grade` stays as data for the SICR test.
+
+## D-40 Credit permissions and role grants
+
+- **Status:** active. **Permission change approved by the user (2026-10-19):** `rating:propose`
+  → risk_analyst, `rating:approve` → approver. PROVISIONAL (D-11).
+- **Date:** 2026-10-19
+- **Decision (proposed):** two new permissions, seeded by the tagged migration
+  `0023_credit_permissions`:
+  - `rating:propose` goes to risk_analyst;
+  - `rating:approve` goes to approver.
+
+  Nothing else changes:
+  - reads of counterparties, exposures, ratings and credit vocabularies reuse `domain:read`
+    (all five roles);
+  - ECL runs reuse `calc:run` (risk_analyst) and `calc:read`;
+  - credit rule changes reuse `rule:propose` and `rule:approve` (D-34);
+  - there is no new role and no clearance change. platform_admin, data_steward and auditor
+    gain nothing.
+- **Segregation of duties:** analysts propose ratings and approvers decide them. A user who
+  holds both roles cannot decide their own proposal (409 `self_approval`, D-39 §3).
+- **Open for the client:** whether a separate credit-officer role, a credit committee (more
+  than one approver) or approval limits by exposure size are needed. None of these is built.
+- **Consequences:**
+  - `governance/constants.py` gains `CREDIT_ROLE_PERMISSIONS`, and `ROLE_PERMISSIONS` becomes
+    WS1 ∪ WS2 ∪ WS3 ∪ credit.
+  - The WS1 matrix test covers every new route.
+
+## D-41 Credit ECL modules and engine extensions
+
+- **Status:** active (Feature 04 plan approved by the user, 2026-10-19).
+- **Date:** 2026-10-19
+- **Recommended:**
+  1. **Module `credit_ecl` v1** follows the D-31 interface: pure, Decimal only, no I/O.
+     - Its inputs are counterparty versions, credit-exposure versions, the pinned ratings and
+       the grade vocabulary (rank, default grade).
+     - Its required schemas are `counterparty` and `credit_exposure`.
+     - It reads its rules by code from its input contract. Rules already resolve by code
+       (`rules/service.py:434-451`), not by target module.
+  2. **Variant module `credit_ecl_cecl` v1** (Phase 22). It reads the same rule definitions by
+     code (owned by `credit_ecl`) and measures every exposure over its lifetime. Both modules
+     can run on the same snapshot and pins, so they can be compared.
+     - Rejected alternative: an `ecl_measurement_basis` rule parameter. `rule_definition` is
+       append-only, and a comparison would need two maker-checker cycles to flip the ACTIVE
+       version.
+  3. **Engine.**
+     - `ModuleInputs` and `ModuleResult` gain optional credit fields, which stay empty for
+       Feature 03 modules.
+     - Rating pins and the `ratings` manifest section exist only when a module's input
+       contract declares `ratings`.
+     - `ENGINE_VERSION` stays `"1"` and `MANIFEST_VERSION` stays `1`.
+       `calculations/service.py:1040-1044` refuses re-runs once either changes, so bumping
+       them would make every Feature 03 run unreproducible. A Feature 03 manifest keeps
+       exactly its key set.
+  4. **Outputs.** These are new tables under 0018's run-output guards (inserted only while the
+     run is RUNNING, then append-only):
+     - `calculation_rating_pin`;
+     - `ecl_exposure_result`: one row per in-scope exposure version, INCLUDED or EXCLUDED with
+       a reason, carrying the factors, the stage and its reason, the horizon, EAD, the LGD
+       amounts, the ECL and `warning_codes`;
+     - `ecl_term_result`: per year, for the lifetime drill-down;
+     - `ecl_result`: per currency and stage, the counts, non-zero counts, EAD and ECL totals
+       and `warning_codes`.
+
+     The figure identities are CHECK-constrained. Exclusion reasons, stage reasons and warning
+     codes are closed lists that live on these rows (D-38). A run with any of them ends
+     SUCCEEDED_WITH_WARNINGS.
+  5. **Post-checks** (`PostCheck` gains them in code only):
+     - `ECL_COVERAGE`: every exposure version is in exactly one row;
+     - `ECL_TERMS`: an exposure's ECL is the sum of its terms;
+     - `ECL_TOTALS`: each stage total is the sum of its included rows;
+     - `STAGE_RULES`: each stage is recomputed from the row's own fields.
+  6. **Rounding.** There is one declared rounding: 0.01 ROUND_HALF_EVEN (PROVISIONAL), applied
+     once per discounted term through `modules/base.py` `divide`. Everything else is exact.
+     No LGD or coverage ratio is computed, because that would need a second rounding. Amounts
+     are shown instead.
+  7. **Rule vocabularies.** `PARAMETER_VOCABULARIES` gains `rating_grade`, `credit_segment`,
+     `facility_type` and `collateral_type`. This adds no parameter kind (the D-32 §1 list is
+     unchanged) and uses only existing rule categories (no CHECK widening).
+  8. **No AI** on the run path (D-31 §8).
+- **Consequences:** retiring a module version hides it from "New run", as in Phase 17.
+  Existing runs stay readable.
+
+## D-42 Illustrative credit methodology seeds
+
+- **Status:** active (Feature 04 plan approved by the user, 2026-10-19). PROVISIONAL / ILLUSTRATIVE.
+- **Date:** 2026-10-19
+- **Context:** the client's master scale, LGD, CCF, staging criteria and discounting
+  conventions are unknown (Data Model §11). Every value below is chosen for arithmetic
+  coverage. None is calibrated, and none is taken from any agency or vendor scale.
+- **Decision (proposed):**
+  1. **Master scale.** `pd_master_scale` is a DECIMAL_MAP from `rating_grade` to the 12-month
+     TTC PD, in [0, 1] at scale 6:
+     - G01 0.000300, G02 0.000800, G03 0.002000, G04 0.005000;
+     - G05 0.012000, G06 0.030000, G07 0.080000, G08 0.200000;
+     - D 1.000000.
+  2. **TTC → PIT.** `pd_pit_scalar` is a DECIMAL in [0, 5] at scale 4, seeded 1.0000. PIT PD =
+     min(1, TTC × scalar), with `PD_CAPPED` when the cap binds.
+  3. **Lifetime term structure.** The annual PD is constant: marginal PD_k = (1 − PD)^(k−1) ×
+     PD, for k = 1…n.
+     - n = ceil(days to maturity / 365), at least 1 and at most `lifetime_max_years`
+       (INTEGER in [1, 50], seeded 30). `LIFETIME_CAPPED` is raised when the cap binds.
+     - A maturity on or before the reporting date gives n = 1 with `MATURITY_PASSED`.
+  4. **EAD** = drawn + CCF × undrawn. `ccf` is a DECIMAL_MAP over `facility_type`, in [0, 1] at
+     4 dp: TERM_LOAN 0.0000, REVOLVER 0.7500, GUARANTEE 0.5000. EAD stays constant over the
+     lifetime, with no amortisation (a documented limitation).
+  5. **LGD.**
+     - `lgd_unsecured` is a DECIMAL_MAP over `credit_segment`, 4 dp: CORPORATE 0.4500,
+       SME 0.5000, RETAIL 0.6000, SOVEREIGN 0.4500.
+     - `collateral_haircut` is a DECIMAL_MAP over `collateral_type`, 4 dp: CASH 0.0000,
+       SECURITIES 0.2000, REAL_ESTATE 0.3000.
+     - Collateral after haircut = value × (1 − haircut).
+     - Uncovered EAD = max(0, EAD − collateral after haircut).
+     - LGD amount = unsecured LGD × uncovered EAD.
+     - No collateral counts as 0. An unmapped collateral type is ignored, which is the
+       conservative choice, and raises `COLLATERAL_TYPE_UNMAPPED`.
+  6. **Staging** (IFRS 9-style, seeded as rules). The thresholds are INTEGER rules:
+     `stage2_dpd_backstop` 30, `stage3_dpd_backstop` 90 and `sicr_notch_threshold` 3.
+     - **Stage 3** when DPD ≥ the Stage 3 threshold, the pinned grade is the default grade,
+       or `default_flag` is true.
+     - **Stage 2** otherwise, when DPD ≥ the Stage 2 threshold, or current rank − origination
+       rank ≥ the notch threshold. An unknown origination grade also gives Stage 2, which is
+       the conservative choice (`ORIGINATION_GRADE_UNKNOWN`).
+     - **Stage 1** otherwise.
+     - A Stage 2 threshold that is not below the Stage 3 threshold BLOCKS the run with
+       `PARAMETERS_INVALID`.
+  7. **Measurement.**
+     - Stage 1: a 12-month horizon, i.e. one term (k = 1) with no pro-rating below one year (a
+       limitation).
+     - Stage 2: the lifetime sum of the terms.
+     - Stage 3: ECL = the LGD amount (PD 1, undiscounted, PROVISIONAL).
+     - The CECL-style variant measures Stages 1 and 2 over the lifetime alike, and Stage 3 as
+       above.
+  8. **Discounting.** Each term is PD_k × LGD amount / (1 + EIR)^k, annual, using the
+     exposure's EIR (a fraction ≥ 0). Each term is rounded once to 0.01 (D-41 §6).
+  9. **Labelling.** Every rule, module, response and page carries the D-35 §3 statement.
+     Credit pages add: "IFRS 9-style and CECL-style logic for demonstration only. Not an
+     IFRS 9 or CECL compliant measurement."
+  10. **Golden cases** are `ENGINEERING — awaiting domain-expert approval` (D-35 §4).
+- **Consequences:** values change only through rule versions (D-32 §3). Changing the grade
+  vocabulary or the shape of the term structure needs code and a migration.
+
+## D-43 Classification and masking of credit data and outputs
+
+- **Status:** active (Feature 04 plan approved by the user, 2026-10-19). PROVISIONAL. Extends D-33.
+- **Date:** 2026-10-19
+- **Decision (proposed):**
+  1. **Input fields.**
+     - Confidential: `counterparty_name`, `drawn_amount`, `undrawn_amount` and
+       `collateral_value`.
+     - Internal: segment, grades, DPD, default flag, EIR, facility type, collateral type and
+       business keys.
+     - Public: country and currency.
+  2. **Ratings.** The grade, rationale and decision comment are `internal`, so the proposing
+     analyst (clearance `internal`) can read their own rationale. This is an open item for the
+     client.
+  3. **Exposure result rows.**
+     - Amounts take their inputs' classification (confidential), so they are masked for
+       risk_analyst: drawn, undrawn, EAD, collateral after haircut, uncovered EAD, LGD amount,
+       ECL and the term amounts.
+     - Factors are `internal` and shown in clear: PD, CCF, unsecured LGD, haircut, stage and
+       its reason, grade, notches and years.
+  4. **Aggregates.**
+     - `ecl_result` EAD and ECL totals per currency and stage are `internal`, under the D-33
+       minimum-aggregation rule, which counts non-zero contributions only (non-zero EAD for
+       the EAD total, non-zero ECL for the ECL total).
+     - A currency total across stages is a derived figure: it is masked when any stage part is
+       masked, so a masked stage cannot be recovered by subtraction.
+     - Zeros stay clear and counts are public. There is no cross-currency total (no FX).
+  5. **Where it applies:** on read. Stored results and `result_sha256` do not change.
+  6. **Residual risk:** as in D-33, differencing two runs can still reveal an amount (for
+     example, when a rating change or a reporting date moves one exposure between stages).
+     This is an open item for the client before production.
