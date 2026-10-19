@@ -1,169 +1,163 @@
 # Kickoff 05 — Advanced: Agentic Stress-Test Explorer
 
-Instance of `docs/MASTER_PROMPT_FEATURE_KICKOFF.md`.
+Instance of `docs/MASTER_PROMPT_FEATURE_KICKOFF.md`. **The user's own design is binding:**
+`docs/design/agentic-stress-explorer.md`. Revised on 2026-10-19 to follow it.
 
 ## 1. Requirement
 
-- **Feature:** a new sidebar section, **Advanced**, placed directly below "AI Assistant"
+- **Feature:** a new sidebar section, **Advanced**, directly below "AI Assistant"
   (`frontend/src/config/navigation.ts:121-128`). Its first item is the **Agentic Stress-Test
-  Explorer** for the maturity ladder:
-  - an agent proposes stress scenarios, for example delayed loan repayments, increased
-    deposit withdrawals or reduced access to funding;
-  - approved scenarios run through the existing deterministic calculation framework;
-  - the impact is compared bucket by bucket against the baseline run.
-- **Innovation:** the analyst explores a structured set of plausible stress events and
-  their consequences, instead of designing every scenario by hand.
-- **Workstream / feature IDs:**
-  - WS4: RO-02 (scenario management), RO-06 (approval, for scenarios only) and RO-07
-    (reproducibility);
-  - WS5: AI-01 (structured proposals), AI-04 (thin: drafts behind approval gates, no tool
-    calls), AI-05 (offline evaluation) and AI-08 (governance);
-  - WS3: FC-08 (pinning).
+  Explorer**, which turns the maturity ladder into a scenario simulation system:
+  - an AI agent proposes financial stress situations;
+  - it configures controlled changes to cash flows;
+  - it runs the existing deterministic engine;
+  - it explains how the liquidity position changes.
 
-  The entities and endpoints reuse the spec names: Data Model §6 `scenario`,
-  `scenario_change` and `scenario_run` (spec :991-995); §7 `ai_request` and `ai_proposal`
-  (:1022, :1028); and §9 `scenario.status` and `ai_proposal.status` (:1180, :1184). WS4
-  `POST /scenarios`, `POST /scenarios/{id}/run` and `GET /scenarios/{id}/comparison`, and
-  WS5 `POST /ai/assist` and `GET /ai/requests/{id}`, are the canonical names (D-05).
-- **Problem and user:**
-  - Risk analysts want to see how the illustrative ladder reacts to plausible stresses
-    without hand-designing every case.
-  - Approvers control which scenarios may run.
-  - Auditors trace every stressed figure to the scenario version, the baseline pins and
-    the AI request that proposed it, if any.
-- **Provider:** Groq (an OpenAI-compatible API), as one provider behind a provider-neutral
-  interface. A deterministic offline mock is the default, and CI uses it. The provider is
-  configured only from environment variables (D-50).
-- **In scope:**
-  - a closed shock vocabulary: INFLOW_DELAY, INFLOW_HAIRCUT, OUTFLOW_RUN_OFF and
-    OUTFLOW_ACCELERATION (D-44);
-  - versioned scenarios with maker-checker;
-  - a pure overlay applied in the engine on the baseline run's exact pins (D-45);
-  - comparison of deltas and turns-negative buckets, with D-33/D-43-style masking (D-46);
-  - the AI proposer, with provenance and a closed data boundary (D-48, D-49);
-  - offline evaluation, documentation and verification.
+  **The AI does not calculate the ladder** (design, "Core idea").
+- **Workstream / feature IDs:**
+  - WS4: RO-02, RO-06 and RO-07;
+  - WS5: AI-01, AI-03, AI-04, AI-05 and AI-08;
+  - WS3: FC-08.
+
+  Spec names are reused: Data Model §6 `scenario`, `scenario_change`, `scenario_run`; §7
+  `ai_request`, `ai_tool_call`, `ai_proposal`; §9 statuses. The WS4 routes `POST scenarios`,
+  `POST scenarios/{id}/run` and `GET scenarios/{id}/comparison`, and the WS5 routes
+  `POST ai/assist`, `GET ai/requests/{id}`, `POST ai/explanations` and
+  `GET ai/explanations/{id}`, are canonical (D-05).
+- **In scope (design §8 MVP):**
+  - **three templates:** `DELAYED_INFLOWS`, `DEPOSIT_WITHDRAWAL` and `FUNDING_UNAVAILABLE`,
+    with exact-decimal `affected_fraction`, `delay_days` and `delay_calendar = CALENDAR_DAYS`
+    (D-44);
+  - **a deterministic scenario engine:**
+    - partial delays split a flow; the parts are stored in `scenario_contribution`, so no
+      D-01 exception is needed;
+    - a conservation post-check;
+    - each shock is run alone and combined;
+    - pinned, reproducible runs (D-45);
+  - **a comparison:** deltas, buckets that turn negative, buckets that break only when
+    combined, the largest changes, a templated summary and masked drill-down (D-46);
+  - **governance:** the analyst confirms their own scenario for exploration runs ("not
+    approved"), and promotion needs a second person (D-47, user-approved);
+  - **the agent:**
+    - natural-language intent → template spec, or clarifying questions, and never a silent
+      guess;
+    - a bounded conversation stored as hashes plus structured state;
+    - closed tools over the service layer (`create_scenario_draft`, `validate`,
+      `run_exploration` only after the human confirms, `get_result`, `compare`);
+    - "what if" adaptation (D-48);
+  - **a data boundary:** the free text goes to Groq after a length cap, a warning and a
+    deterministic row-data pre-filter, in local and staging only (D-49, user-approved);
+  - **evidence-backed explanations** checked by a deterministic verifier, with a templated
+    fallback (D-51);
+  - **offline evaluation and the §8 success metrics.**
 - **Out of scope:** see "Deferred (out of scope for Feature 05)" in `docs/DELIVERY_PLAN.md`.
   In short:
-  - splitting a flow between buckets;
-  - segment selectors;
-  - stressing LCR or credit;
-  - free-text prompts;
-  - tool-using agents;
-  - AI explanations;
-  - reports;
+  - bounded threshold search (v2);
+  - multi-scenario optimisation;
+  - a funding-source attribute and counterparty selection;
+  - business-day calendars;
+  - LCR and credit stress;
   - production use of an external LLM.
 - **Acceptance (business terms):**
-  - The sidebar shows "Advanced" below "AI Assistant", with "Agentic Stress-Test Explorer"
-    as its first item.
-  - An analyst picks a baseline ladder run and asks the agent for a set of scenarios (a
-    focus and a count, with no free text). The proposals arrive as DRAFT scenarios marked
-    AI-proposed, with model id, prompt version and hashes. Invalid AI output is refused and
-    never stored as a scenario.
-  - The analyst edits a draft, acknowledges its AI origin, and submits it. A different
-    person, an approver, approves it.
-  - The analyst runs it against the baseline. The stressed run reuses the baseline's pins
-    exactly, and re-running it gives identical hashes.
-  - The comparison shows inflow, outflow, net and cumulative deltas per currency and bucket,
-    marks the buckets that turn negative, and drills down to the changed contributions and
-    their source rows. Amounts are masked as on the ladder.
-  - With AI switched off, everything except "Propose scenarios" still works.
-  - Every page says "Illustrative stress exploration, not a regulatory stress test." Nothing
-    claims regulatory status or parity with Moody's or any vendor.
+  - "Advanced" appears below "AI Assistant", with "Agentic Stress-Test Explorer" first.
+  - The analyst types, for example, "Stress-test our 30-day liquidity if 20% of inflows are
+    delayed by 14 days". The agent produces a validated draft, or asks for what is missing.
+  - The analyst confirms the draft. The agent runs it on the baseline's exact pins and shows
+    the comparison per currency and bucket, for each shock and combined.
+  - The user's §5 worked example reproduces exactly (bucket 1 net +20 → +10, bucket 2 −10 → 0,
+    bucket 3 unchanged, total inflows conserved).
+  - Explanations cite run figures that the verifier has checked, or a templated summary is
+    shown instead.
+  - "What if 30 days?" creates a new version and compares again.
+  - Re-runs are identical.
+  - Approved scenarios need a second person, and the AI never confirms or approves.
+  - Everything is labelled "Illustrative stress exploration, not a regulatory stress test".
+    Nothing claims regulatory status or parity with Moody's or any vendor.
 
 ## 2. Pre-plan reading (done 2026-10-19, master `0e443eb`)
 
-1. **Architecture and plan text.**
+1. **Design and specs.**
+   - `docs/design/agentic-stress-explorer.md`, all of it.
    - `docs/architecture_spec.txt`:
-     - §6.2 run flow (:190-206) and §6.3 governed AI workflow (:208-220);
-     - §13 AI guardrails (:428-444), including "Do not let an agent … approve its own
-       proposal" and "External model APIs … must be approved";
-     - Data Model §6, §7 and §9 (above).
-   - `docs/workstream_plans_spec.txt`:
-     - WS4 RO-02/06/07 (:971-983) and the P2 scenario comparison, "identical input
-       snapshots" (:995-996);
-     - WS5 AI-01…08 (:1247-1264);
-     - WS5 backend responsibilities: "provider-neutral AI service interface; local/template
-       mode must work without external APIs" (:1297).
-   - `docs/ARCHITECTURE.md:59,63`: the scenario tables belong to `orchestration`, and `ai_*`
-     to `ai`.
-2. **Constraining decisions.** D-01…D-06, D-10, D-11, D-13, D-14, D-21 §2, D-26, D-31…D-36 and
-   D-43. New proposals: **D-44…D-50.**
-   - **D-47 is a hard stop:** new permissions, and who approves scenarios.
-   - **D-49 §5 is a hard stop:** live calls to an external LLM provider.
-   - **No D-01 exception:** only tables are added.
-3. **Codebase gaps.** They are listed under "Pre-plan findings" in the Feature 05 section of
-   `docs/DELIVERY_PLAN.md`. The main points:
-   - `app/ai` and `app/orchestration` are empty skeletons;
-   - `AI_ENABLED` exists and nothing reads it;
-   - `intermediate_value` allows one contribution per cash flow, so there is no split shock;
-   - the `ref_type` and warning CHECKs are closed, so the new pins and applications get new
-     tables;
-   - re-runs are version-gated, so `ENGINE_VERSION` and `MANIFEST_VERSION` stay;
-   - "AI Assistant" carries a stale "Feature 05" label;
-   - the sidebar has no group beyond "Administration";
-   - there are 49 backend tests;
-   - the migration head is 0023, with 0024–0025 reserved for Feature 04.
+     - §6.2 run flow and §6.3 governed AI (:190-220);
+     - §13 guardrails (:428-444);
+     - Data Model §6, §7 and §9.
+   - `docs/workstream_plans_spec.txt`: WS4 (:971-1005) and WS5 (:1247-1308).
+   - `docs/ARCHITECTURE.md:59,63`.
+2. **Decisions.** D-01…D-06, D-10, D-11, D-13, D-14, D-21 §2, D-26, D-30 §1, D-31…D-36 and
+   D-43. New: **D-44…D-51.**
+   - D-47 is **active, approved by the user**.
+   - D-49 §4–5 are **approved by the user**.
+   - **No D-01 exception.**
+3. **Codebase gaps.** See "Pre-plan findings" in the Feature 05 section of
+   `docs/DELIVERY_PLAN.md`:
+   - `app/ai` and `app/orchestration` are empty;
+   - `intermediate_value` allows one contribution per flow, so `scenario_contribution` is
+     needed;
+   - the CHECKs are closed, so the pins get their own tables;
+   - re-runs are version-gated;
+   - there is no funding-source or projected counterparty attribute;
+   - the "AI Assistant" label collides with this feature's name;
+   - there are 49 tests;
+   - the head is 0023, with 0024–0025 reserved.
 
 ## 3. Standing rules
 
 As in the master prompt (D-01…D-04), plus:
-- **The AI only proposes, and never calculates, submits, approves or runs** (D-31 §8, D-48
-  §7). `app/calculations` and `app/orchestration` never import `app.ai`.
-- Scenarios are typed data from a closed list. There are no formulas or code, and model output
-  is validated and refused when invalid.
-- Pure, Decimal-only, deterministic overlay; immutable runs; stressed runs pinned to the
-  snapshot, rule versions, assumption set, module version and scenario version.
-- Only aggregated, masked, synthetic context is sent to an LLM (D-49), and a sentinel test
-  enforces it.
-- Synthetic data only outside production (D-14). Live Groq calls are allowed only in `local`
-  and `staging`, and never in CI.
-- Keys only in a git-ignored `backend/.env` or the cloud secret store. Never in chat, logs,
-  errors, audit, fixtures or `openapi.json` (D-50).
-- No claim of a regulatory stress test, or of Moody's or vendor parity.
-- The backend suite stays under 50 tests (D-26): **+0** for the whole feature.
+- **The AI only interprets, proposes, orchestrates closed tools and explains.** It never
+  calculates, confirms, submits, approves, closes or touches the DB directly. `app/calculations`
+  and `app/orchestration` never import `app.ai`.
+- Scenarios are versioned data from three templates. Model output is validated and refused
+  when invalid. The agent asks when unsure.
+- A pure, Decimal-only engine: exact splits and conservation; runs pinned to the snapshot,
+  rules, assumptions, module, scenario version and shock subset; snapshots never mutated.
+- Only aggregated, masked, synthetic context and pre-filtered free text go to an LLM (D-49).
+  Live Groq runs only in local and staging, never in CI.
+- Explanations are verified against run output (D-51).
+- Keys live only in a git-ignored `backend/.env` or the cloud secret store (D-50).
+- No regulatory or vendor-parity claims.
+- D-26: **+0** backend tests (49).
 
 ## 4. Plan
 
-Delivered to `docs/DELIVERY_PLAN.md` as "Feature 05", Phases 24–27 (numbering per D-08):
+Delivered to `docs/DELIVERY_PLAN.md` as "Feature 05", Phases 24–27. The **build order follows
+the design: the engine first, then the agent.**
 
-- 24: scenario registry, maker-checker and the Advanced sidebar section (migration 0026,
-  with the scenario permissions seed);
-- 25: stressed runs and baseline comparison (0027). Recommended to start after Phase 21
-  merges, because both edit the engine;
-- 26: the agent, with AI-proposed scenarios, the provider interface (mock and Groq), the data
-  boundary and provenance (0028, with the `ai:use` seed);
-- 27: offline evaluation, documentation and verification.
+- **24:** the Scenario API: templates, versions, exploration confirmation, promotion, and the
+  Advanced section (migration 0026 with the scenario permissions seed).
+- **25:** the deterministic scenario engine and comparison (0027). It starts after Phase 21
+  merges, because both edit the engine.
+- **26:** the agent: intent, clarification, the bounded conversation, closed tools, and the
+  provider interface (mock and Groq) (0028 with the `ai:use` seed).
+- **27:** evidence-backed explanations with the verifier, offline evaluation and success
+  metrics, docs and verification (0029).
 
-Phases 24 and 26 can run in parallel with Feature 04 Phases 21–23. The migrations are
-pre-numbered 0026–0028 and re-chained in merge order by the coordinator.
+The migrations are pre-numbered 0026–0029 and re-chained in merge order by the coordinator.
 
-Decisions D-44…D-50 are proposed in `docs/DECISIONS.md`.
-
-**Status: awaiting user approval of the plan and of D-44…D-50. D-47 (permissions) and D-49 §5
-(live external LLM calls) are hard stops and need explicit approval. No code before
-approval.**
+**Status:** awaiting user approval of the revised plan. The hard stops (D-47 and D-49 §4–5)
+are already answered. Still open: the `GROQ_MODEL` id, v1 funding-source selection, and the
+PROVISIONAL bounds. No code before approval.
 
 ## 5. Groq: what the user provides, and where
 
 Nothing is needed until Phase 26 merges. CI never needs a key.
 
-- **Local live demo:** in `backend/.env` (git-ignored, `.gitignore:5-7`):
+- **Local:** in `backend/.env` (git-ignored, `.gitignore:5-7`):
   `AI_ENABLED=true`, `AI_SCENARIO_PROPOSALS_ENABLED=true`, `LLM_PROVIDER=groq`,
-  `GROQ_API_KEY=<your key>`, `GROQ_MODEL=<model id>`, and optionally
-  `LLM_TIMEOUT_SECONDS=20`. Use `ENV=local` with `DATA_CLASS=synthetic`.
-- **Cloud demo (staging):** set the same variables as environment secrets in that
-  environment's secret store. The network policy must allow HTTPS egress to `api.groq.com`.
-  If egress goes through a TLS-intercepting proxy, configure its CA bundle through the
-  environment. Never disable verification.
+  `GROQ_API_KEY=<your key>`, `GROQ_MODEL=<model id>`, and optionally `LLM_TIMEOUT_SECONDS=20`
+  and `AI_MAX_REQUEST_CHARS=1000`. Use `ENV=local` with `DATA_CLASS=synthetic`.
+- **Cloud demo (staging):** the same variables, set as environment secrets. The network
+  policy must allow HTTPS to `api.groq.com`. A TLS-intercepting proxy needs its CA bundle set
+  through the environment; verification is never disabled.
 - **Never** paste the key into chat, an issue, a PR, a doc or a test. If it was ever exposed,
   rotate it in the Groq console.
+- The analyst's free text **is** sent to Groq. The UI warns against pasting client data, and
+  the pre-filter refuses row-level-looking text before any call.
 
 ## 5–6 Build
 
-As in the master prompt, run through the CLAUDE.md phase build protocol (D-36) and
-`.claude/workflows/phase-build.js`:
+Run through the CLAUDE.md phase build protocol (D-36) and `.claude/workflows/phase-build.js`:
 - one worktree per phase, e.g. `../MoodyMate-wt/stress-p24`, with DB copy
   `createdb -T moodymate_dev moodymate_stress_p24`, and per-agent test DBs and e2e ports;
-- the backend commits the OpenAPI contract first, and the frontend starts from
-  `npm run gen:api`;
+- the backend commits the OpenAPI contract first, and the frontend runs `npm run gen:api`;
 - exactly one frontend agent owns `navigation.ts`, `features.ts` and the sidebar group.

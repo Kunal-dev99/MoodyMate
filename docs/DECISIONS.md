@@ -1332,368 +1332,475 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
      example, when a rating change or a reporting date moves one exposure between stages).
      This is an open item for the client before production.
 
-## D-44 Stress scenarios: typed shocks from a closed list, versioned, maker-checker
+## D-44 Stress scenarios: three templates, versioned data, exploration and promotion
 
-- **Status:** proposed (Feature 05 plan, 2026-10-19). PROVISIONAL / ILLUSTRATIVE.
+- **Status:** proposed (Feature 05 plan, revised 2026-10-19 to follow the user's design
+  `docs/design/agentic-stress-explorer.md`). PROVISIONAL / ILLUSTRATIVE. The approval model in
+  §5–6 was **approved by the user on 2026-10-19** (see D-47).
 - **Date:** 2026-10-19
-- **Context:** the user asked for an "Agentic Stress-Test Explorer" on the maturity ladder.
-  WS4 RO-02 ("baseline and proposed scenario overlays without mutating approved
-  configuration") and Data Model §6 (`scenario`, `scenario_change`, `scenario_run`,
-  spec :991-995) define the objects, and §9 defines `scenario.status` (spec :1180). Nothing
-  is built: `backend/app/orchestration/` is an empty skeleton (ARCHITECTURE.md maps the
-  scenario tables to it).
-- **Question:** what is a scenario, and how does it become runnable?
+- **Context:**
+  - The user's design: §4 "A scenario is data, not generated code"; §8 three MVP templates;
+    §5 the worked example.
+  - WS4 RO-02 and Data Model §6 (`scenario`, `scenario_change`, `scenario_run`, spec
+    :991-995) and §9 `scenario.status` (:1180).
+  - `backend/app/orchestration/` is an empty skeleton (ARCHITECTURE.md:59).
 - **Recommended:**
-  1. **A scenario is data, never code.** A `scenario_version` holds an ordered list of 1 to 8
-     shocks. Each shock has a `kind` from a closed list, a selector and typed parameters.
-     There are no expressions, formulas, templates or user code, as in D-19 and D-32 §1.
-     Adding a kind needs code, tests and an appended decision.
-  2. **Shock kinds (v1).** Each applies to the cash flows the selector matches, as a
-     one-to-one input transform (D-45 §2):
-     - `INFLOW_DELAY`: `days` INTEGER in [1, 3650]. Adds the days to the due date of matching
-       INFLOW cash flows (for example, delayed loan repayments).
-     - `INFLOW_HAIRCUT`: `factor` DECIMAL in [0, 1] at scale 4. Multiplies matching INFLOW
-       amounts (for example, reduced receipts or reduced access to funding through asset
-       sales).
-     - `OUTFLOW_RUN_OFF`: `factor` DECIMAL in [1, 5] at scale 4. Multiplies matching OUTFLOW
-       amounts (for example, increased deposit withdrawals).
-     - `OUTFLOW_ACCELERATION`: `days` INTEGER in [1, 3650]. Brings matching OUTFLOW cash flows
-       earlier (for example, funding that does not roll over). A flow never moves before day
-       1, and a flow already at day 1 or earlier does not move.
+  1. **Data, never code.** A `scenario_version` holds 1 to 5 shocks. Each shock is a template
+     from a closed list, with typed parameters and a selector. There are no expressions,
+     formulas or user code (D-19, D-32 §1). Adding a template needs code, tests and an
+     appended decision. Amounts and fractions are exact decimal text, never binary floats.
+  2. **Templates (v1, design §8).**
+     - **`DELAYED_INFLOWS`** (delayed loan repayments).
+       - `cashflow_type`: an instrument type whose pinned direction is INFLOW. The design's
+         `LOAN_REPAYMENT` maps to `LOAN`, because `cashflow_event` v1 has no cash-flow type
+         field.
+       - `affected_fraction`: DECIMAL, 0 < f ≤ 1, scale 4.
+       - `delay_days`: INTEGER, 1 to 3650.
+       - `delay_calendar`: ENUM, `CALENDAR_DAYS` only in v1.
 
-     **Not in v1:** a percentage shift of a flow between buckets. It splits one cash flow into
-     two contributions, and `intermediate_value` allows one contribution per cash flow and run
-     (`UNIQUE (cashflow_event_id, calculation_run_id)`, `calculations/models.py:257`).
-     Splitting would need a new contribution table and new post-checks, so it is deferred.
-  3. **Selector.**
-     - `instrument_type` is required. It must be a key of the ACTIVE `cashflow_direction` rule
-       at submission, and its direction must match the kind (INFLOW_* or OUTFLOW_*).
-       Otherwise the answer is 422 `invalid_shock` (`shock_direction_mismatch`).
-     - `currency` (ISO 4217 shape) and `origin` (CONTRACTUAL or BEHAVIOURAL) are optional.
-     - Segment and counterparty selectors are deferred, because the ladder inputs carry
-       neither.
-  4. **Validation.**
+       Each matching flow is split: f × amount moves `delay_days` later and (1 − f) × amount
+       stays. With f = 1 the whole flow moves.
+     - **`DEPOSIT_WITHDRAWAL`** (increased deposit withdrawals).
+       - `cashflow_type`: an OUTFLOW instrument type, for example `DEPOSIT`.
+       - `increase_fraction`: DECIMAL, 0 < x ≤ 1, scale 4 (for example "+15%" is `0.1500`;
+         the bound is PROVISIONAL).
+
+       Each matching outflow amount is multiplied by (1 + x). This is the only template that
+       changes amounts.
+     - **`FUNDING_UNAVAILABLE`** (reduced availability of a specified funding source).
+       - A funding-source selector (§3).
+       - `unavailable_days`: INTEGER, 1 to 365.
+       - `affected_fraction`: DECIMAL, 0 < f ≤ 1, scale 4 (1 means fully unavailable).
+       - `delay_calendar`: `CALENDAR_DAYS`.
+
+       For matching INFLOW flows due in days (0, `unavailable_days`], f × amount moves to day
+       `unavailable_days` + 1 and the rest stays. Flows due later are untouched. It is a
+       timing shock only; lost funding (reducing the amount) is deferred.
+  3. **Selectors.**
+     - **Common optional fields:** `currency`; `origin` (CONTRACTUAL or BEHAVIOURAL); and a due
+       window `due_from_day` / `due_to_day`, counted in days after the reporting date (for
+       example, "repayments expected this month").
+     - **Funding source.** There is no funding-facility attribute in the domain. For now the
+       source is selected by:
+       - `instrument_type` (required, INFLOW);
+       - optional `instrument_keys`: at most 50 instrument business keys, picked by the
+         analyst in the UI and never by the model (D-49 §3);
+       - optional `source_system_code`.
+     - **Limits of these selectors at master `0e443eb`:**
+       - A snapshot holds one import per schema code (D-30 §1). So `source_system_code`
+         matches either all of a snapshot's cash flows or none in v1. It is accepted for
+         forward compatibility, and validation reports the match count.
+       - Counterparty selection is **not possible in v1**: `instrument` v1 `counterparty_id`
+         is not projected (the D-37 context). A proper funding-source attribute and
+         counterparty selection are deferred.
+  4. **Validation (design §3 C).**
      - Bodies use `extra="forbid"`.
-     - DECIMAL values are exact decimal text, padded to scale 4. More places are refused,
-       never rounded. A JSON number with a fraction or an exponent is refused
-       (`inexact_number`), as in the D-32 amendment.
-     - Every refusal is 422 `invalid_shock`. Its details are value-free: the shock index, the
+     - Exact decimal text is padded to scale 4. More places are refused, never rounded, and
+       JSON fractions or exponents are refused (`inexact_number`).
+     - Bounds and units: `delay_calendar` must be `CALENDAR_DAYS`.
+     - `cashflow_type` and `instrument_type` must be keys of the ACTIVE `cashflow_direction`
+       rule, with the direction the template needs.
+     - Every refusal is 422 `invalid_shock`, with value-free details: the shock index, the
        field and a code.
-  5. **Lifecycle** (a subset of the Data Model §9 `scenario.status`, per D-06):
-     - DRAFT → IN_REVIEW (submit) → APPROVED_FOR_TEST (approve) or REJECTED.
-     - APPROVED_FOR_TEST → CLOSED. Closing hides the version from the run picker. Its runs
-       stay readable and re-runnable.
-     - RUNNING and TESTED are reserved, because runs are synchronous and a version may be
-       run many times.
-     - Shocks are editable only while DRAFT, and only by the author. At submit they are
-       materialised as `scenario_change` rows, one per shock (the D-32 bucket-definition
-       pattern). A DB trigger then freezes the content, allows only the moves above (once
-       each) and refuses DELETE and TRUNCATE.
-     - Several versions of one scenario may be APPROVED_FOR_TEST at once. Scenarios are
-       exploratory, so nothing is superseded.
-  6. **Maker-checker** (as D-32 §3 and D-39 §3):
-     - Writing and submitting need `scenario:propose`. Deciding and closing need
-       `scenario:approve` (D-47).
-     - Only the author may edit or submit (409 `not_author`).
-     - The decider is not the author (409 `self_approval`).
-     - A decision needs a comment of 1 to 1,000 characters.
-     - A decision on a version that is not IN_REVIEW gives 409 `invalid_status`.
-     - Submitting an `AI_PROPOSED` version needs `acknowledge_ai_origin: true`. Otherwise the
-       answer is 422 `ai_review_required` (D-48 §6).
-     - Every step and every refusal is audited (`scenario.create`, `scenario_version.update`,
-       `.submit`, `.approve`, `.reject`, `.close`). Audit details carry the shocks' sha256,
-       never their text.
-  7. **Provenance.** `scenario_version.origin` is `MANUAL` or `AI_PROPOSED`. Both values are
-     in the CHECK from the start, so Phase 26 widens nothing. For AI-proposed versions, the
-     AI link lives on `ai_proposal` (D-48 §5).
-  8. **Labelling.** Every scenario response, page and stressed run carries: "Illustrative
-     stress exploration, not a regulatory stress test. Not a regulatory calculation; no parity
-     with any vendor system is claimed." (D-35 §3).
-  9. **Switch.** `SCENARIOS_ENABLED` (default `true`). When it is off, scenario writes and
-     stressed runs get 409 `scenarios_disabled` (audited). Reads still work.
+     - **Data availability:** validating against a baseline run returns the number of
+       matching cash flows per shock, which are public counts. A run is refused while any
+       shock matches nothing (409 `no_matching_cashflows`, D-45 §10).
+  5. **Lifecycle** (D-06: the §9 `scenario.status` set plus `CONFIRMED_FOR_EXPLORATION`):
+     - **DRAFT**: editable by its author only.
+     - **DRAFT → CONFIRMED_FOR_EXPLORATION**: the author confirms their own version.
+       Exploration runs are then allowed.
+     - **DRAFT or CONFIRMED_FOR_EXPLORATION → IN_REVIEW**: the author submits it for
+       promotion.
+     - **IN_REVIEW → APPROVED_FOR_TEST** (a shared, approved scenario) **or REJECTED.** A
+       rejected version is not runnable; its author may copy it into a new version.
+     - **Any status other than DRAFT → CLOSED**: hidden from pickers. Its runs stay readable
+       and re-runnable.
+     - RUNNING and TESTED are reserved, because runs are synchronous.
+     - Content freezes when a version leaves DRAFT, and its shocks are materialised as
+       `scenario_change` rows. A DB trigger enforces the moves (once each) and refuses DELETE
+       and TRUNCATE.
+     - Only CONFIRMED_FOR_EXPLORATION and APPROVED_FOR_TEST versions can run. The run pins
+       the approval state at that moment (D-45 §4).
+  6. **Exploration versus approval (user-approved 2026-10-19).**
+     - The author's own confirmation enables **exploration runs only**. They are labelled
+       "Exploration, not approved" and are never authoritative: they are not listed in the
+       shared library and not usable as an approved scenario.
+     - Promotion is maker-checker:
+       - the approver is not the author (409 `self_approval`);
+       - a decision needs a comment of 1 to 1,000 characters;
+       - only the author may edit, confirm or submit (409 `not_author`);
+       - a version in the wrong state gives 409 `invalid_status`.
+     - For an `AI_PROPOSED` version, confirming and submitting need
+       `acknowledge_ai_origin: true` and acknowledgement of every `PROPOSED_DEFAULT`
+       parameter (D-48 §4). Otherwise the answer is 422 `ai_review_required` or
+       `unacknowledged_defaults`.
+     - **The AI never confirms, submits, approves or closes.**
+     - Every step and every refusal is audited, with the shocks' sha256 and never their text.
+  7. **Provenance.**
+     - `origin` is `MANUAL` or `AI_PROPOSED`.
+     - `parent_version_id` records adaptations (design §6.4: "what if 30 days?" is a new
+       version).
+     - `parameter_sources` records `STATED` or `PROPOSED_DEFAULT` per AI-filled parameter,
+       and is null for manual versions.
+     All of these exist from 0026 on, so later phases widen nothing.
+  8. **Labelling.** Every response and page carries: "Illustrative stress exploration, not a
+     regulatory stress test. Not a regulatory calculation; no parity with any vendor system is
+     claimed." (D-35 §3). Runs also carry "Exploration, not approved" or "Approved scenario
+     (illustrative)".
+  9. **Switch.** `SCENARIOS_ENABLED` (default `true`). When it is off, writes and stressed runs
+     get 409 `scenarios_disabled` (audited). Reads still work.
 - **Alternatives:**
-  - Free-form parameter overrides of any rule. Rejected: they cannot be validated per kind,
-    and they would let a scenario change methodology rather than inputs.
+  - Free-form rule overrides. Rejected: they cannot be validated, and they would change
+    methodology.
   - Scenarios as rule versions. Rejected: they would flip the ACTIVE methodology for every
     run (D-32 §2).
+  - An earlier draft of this plan had four non-splitting shock kinds. It was replaced by the
+    user's templates.
 
-## D-45 Stressed runs: a pure input overlay on the deterministic engine, pinned and reproducible
+## D-45 Deterministic scenario engine: split-aware overlay, own contribution table, conservation
 
-- **Status:** proposed (Feature 05 plan, 2026-10-19).
+- **Status:** proposed (Feature 05 plan, revised 2026-10-19 to the user's design §2.4–2.5, §5
+  and §7).
 - **Date:** 2026-10-19
-- **Question:** how does an approved scenario run "through the existing calculation framework"
-  without putting anything but deterministic code on the run path (D-31 §8)?
+- **Question:** how does a scenario run "through the existing maturity ladder methodology"
+  when a partial delay splits one cash flow? `intermediate_value` allows one contribution
+  per cash flow and run (`UNIQUE (cashflow_event_id, calculation_run_id)`,
+  `calculations/models.py:257`), and dropping that constraint would be a D-01 exception.
 - **Recommended:**
   1. **Same module, same pins.**
      - A stressed run is a normal `calculation_run` of `maturity_ladder` v1.
      - It copies the baseline run's pins exactly: snapshot, reporting date, module version,
-       rule set (even SUPERSEDED versions) and assumption set. The engine reuses the
-       `rerun_of` pin resolution (`calculations/service.py:1033-1069`).
-     - It adds one pin: the scenario version. So the baseline and the stressed run differ
-       only by the scenario (WS4-P2: "identical input snapshots").
-  2. **Overlay.** `app/calculations/scenario_overlay.py` is a pure function:
-     `(ModuleInputs, pinned directions, shocks) -> (ModuleInputs, applications)`. It does no
-     I/O and reads no clock, randomness or environment. It is Decimal only under
-     `exact_context()`, with no float, and the no-float grep covers it.
-     - Shocks apply in their declared order. A flow matched by two shocks gets both: day
-       shifts add, factors multiply.
-     - The transform is one-to-one. It keeps `cashflow_event_id` and changes only `due_date`
-       and/or `amount`. So the COVERAGE post-check and the `intermediate_value` uniqueness
-       hold unchanged.
-     - Only flows with all fields present and a due date on or after the reporting date are
-       shocked. Past-due and incomplete flows pass through untouched and are treated by the
-       module exactly as in the baseline.
-     - Multiplication by a scale-4 factor is exact, so there is no rounding and no declared
-       rounding. The module's `rounding=None` stays valid.
-     - The direction comes from the pinned `cashflow_direction` version. If a shock's type
-       has the wrong direction under the pinned rule, it matches nothing and the
-       `scenario_run` records `DIRECTION_MISMATCH` with a count.
-     - An overlay that cannot be applied BLOCKS the run with the existing
-       `PARAMETERS_INVALID` code, so `calculation_warning.code` is not widened.
-  3. **Module untouched.** `maturity_ladder.run` is called on the stressed inputs, unchanged.
-     The module never knows it is stressed.
+       rule set (even SUPERSEDED versions) and assumption set. It reuses the `rerun_of` pin
+       resolution (`calculations/service.py:1033-1069`).
+     - It adds the scenario version and the shock subset (§7). The snapshot and the baseline
+       records are never changed (design §7).
+  2. **Overlay (pure).** `app/calculations/scenario_overlay.py` maps
+     `(ModuleInputs, pinned directions, shocks) -> (stressed ModuleInputs, parts, applications)`.
+     It does no I/O and reads no clock, randomness or environment. It is Decimal only under
+     `exact_context()`, and the no-float grep covers it.
+     - **Parts.** Each matching flow may be split into parts. Each part is a `CashFlowInput`
+       with a deterministic id (`uuid5` of the event id and the part path). So the unchanged
+       module and the COVERAGE post-check see unique ids, and the engine maps each part back
+       to its `cashflow_event_id`.
+     - **Splitting is exact.** moved = f × amount and stayed = amount − moved. Both are exact,
+       so nothing is rounded.
+     - **Order.** Shocks apply in their declared order, to parts: a part can be split again.
+       There are at most 5 shocks and at most 32 parts per flow.
+     - **Scope.** Only flows that are complete and not past due are shocked. Others pass
+       through unchanged.
+     - **Direction.** It comes from the pinned `cashflow_direction` version. A shock whose
+       type has the wrong direction matches nothing, and this is counted.
+     - **Failure.** An overlay that cannot be applied BLOCKS the run with the existing
+       `PARAMETERS_INVALID` code. No CHECK is widened.
+  3. **Module untouched.** `maturity_ladder.run` runs on the stressed parts. The ladder's own
+     arithmetic is the existing methodology (design §2.5).
   4. **Pins and manifest.**
-     - The manifest gains a `scenario` section only for stressed runs: scenario id, version
-       id, version number, `shocks_sha256`, the shocks and `baseline_run_id`.
-       `manifest_sha256` covers it.
+     - Stressed runs only get a `scenario` section: scenario id, version id and number,
+       `shocks_sha256`, the shocks, `shock_subset`, `approval_state` (EXPLORATION or
+       APPROVED) and `baseline_run_id`.
      - `ENGINE_VERSION` stays `"1"` and `MANIFEST_VERSION` stays `1` (the D-41 §3 reasoning).
-       A non-stressed run's manifest keeps exactly the Feature 03 key set.
-     - The pin is stored in a new table, `calculation_scenario_pin`. It is not stored as a new
-       `calculation_input_ref.ref_type`, because that CHECK is closed (0018) and D-01 forbids
-       widening it.
-  5. **Outputs.**
-     - `liquidity_gap_result` and `intermediate_value` hold the stressed figures, with lineage
-       to the same cash-flow events.
-     - A new `scenario_shock_application` table (under 0018's run-output guards) holds one
-       row per (run, cash flow, shock): days and amount before and after.
-     - `result_sha256` covers the applications for stressed runs only. A non-stressed run's
-       result document keeps exactly its Feature 03 key set.
-  6. **Post-check.** `SCENARIO_OVERLAY` is added to `PostCheck` in code only. It recomputes
-     the overlay from the unstressed inputs and the pinned shocks, and checks that it equals
-     the stored applications and that unmatched flows are unchanged. The existing post-checks
-     run on the stressed inputs.
-  7. **Reproducibility.** A re-run (`rerun_of`) of a stressed run re-pins the same scenario
-     version, even when it is CLOSED, and must reproduce `result_sha256` (D-31 §5).
-  8. **Pairing.** A `scenario_run` row (Data Model §6) records the baseline run, the stressed
-     run, the scenario version and value-free outcome counts per shock (matched, direction
-     mismatch). It is append-only.
-  9. **Request.** `POST scenarios/{scenario_id}/run` takes `{version, baseline_run_id}` and an
-     `Idempotency-Key` (D-21 §2, D-31 §5). Pre-run refusals are 4xx, write no run and are
-     audited DENIED:
-     - 409 `scenario_not_approved`;
-     - 409 `invalid_baseline` (not a SUCCEEDED or SUCCEEDED_WITH_WARNINGS `maturity_ladder`
-       run, or itself a stressed run);
-     - 409 `baseline_not_reproducible` (its pins no longer resolve, or its engine or manifest
-       version changed);
-     - 409 `scenarios_disabled`;
-     - 409 `calculations_disabled`.
-  10. **No AI** on this path. `app/calculations/**` and `app/orchestration/**` import nothing
-      from `app.ai`, and a source grep enforces this.
+     - Non-stressed manifests and result documents keep exactly their Feature 03 key sets.
+     - The pin row lives in the new `calculation_scenario_pin` table, because the
+       `calculation_input_ref.ref_type` CHECK is closed.
+  5. **Outputs: no D-01 exception.**
+     - Stressed figures go to `liquidity_gap_result`, which has no per-flow constraint.
+     - Per-part contributions go to a **new `scenario_contribution` table** (instead of
+       `intermediate_value`). Its key is `UNIQUE (calculation_run_id, cashflow_event_id,
+       part_path)`. It carries `shock_sequences`, the same lineage columns as
+       `intermediate_value` (canonical record, import, source record, ordinal) and the
+       contribution classification. Stressed runs write no `intermediate_value` rows.
+     - `scenario_shock_application` holds one row per (run, flow, shock): days and amounts
+       moved or added.
+     - Both tables sit under 0018's run-output guards.
+     - The ladder results and drill-down reads serve stressed runs from
+       `scenario_contribution`.
+     - `result_sha256` covers both tables for stressed runs only.
+  6. **Post-checks** (`PostCheck`, in code only):
+     - `SCENARIO_OVERLAY`: the overlay is recomputed from the unstressed inputs and equals the
+       stored parts and applications.
+     - `SCENARIO_CONSERVATION`:
+       - per flow, the parts sum exactly to the original amount for the timing templates
+         (`DELAYED_INFLOWS`, `FUNDING_UNAVAILABLE`), and to amount × (1 + x) for
+         `DEPOSIT_WITHDRAWAL`;
+       - per currency and direction, the stressed total over all buckets equals the baseline
+         total plus the declared amount deltas. A timing-only scenario changes when money
+         arrives, not how much (design §5).
+     The existing post-checks run on the stressed parts.
+  7. **Each shock alone and combined (design §5).** Running a version with k > 1 shocks
+     creates k + 1 stressed runs: one per shock alone, and one with all of them. Each pins its
+     `shock_subset`, and one `scenario_run` groups them. With k = 1 there is one run. All of
+     them are synchronous and bounded (k ≤ 5).
+  8. **Reproducibility.** A re-run (`rerun_of`) of any stressed run re-pins the same version
+     and subset, even when the version is CLOSED, and must reproduce `result_sha256`.
+  9. **Pairing.** `scenario_run` (Data Model §6) is append-only. It holds the baseline run,
+     the scenario version, the approval state, the member runs and value-free counts per
+     shock (matched flows, parts, direction mismatches).
+  10. **Request.** `POST scenarios/{scenario_id}/run` takes `{version, baseline_run_id}` and
+      an `Idempotency-Key`. Refusals are 409, audited DENIED, with nothing written:
+      - `scenario_not_runnable` (the version is not CONFIRMED_FOR_EXPLORATION or
+        APPROVED_FOR_TEST);
+      - `invalid_baseline` (not a succeeded, non-stressed `maturity_ladder` run);
+      - `baseline_not_reproducible`;
+      - `no_matching_cashflows`;
+      - `scenarios_disabled`;
+      - `calculations_disabled`.
+  11. **No AI** on this path. `app/calculations/**` and `app/orchestration/**` never import
+      `app.ai` (grep).
 - **Alternatives:**
-  - A separate `maturity_ladder_stress` module. Rejected: it duplicates the methodology, and
-    a comparison would no longer be "same module, same pins".
-  - Mutating rule or input rows for the run. Rejected: it breaks immutability (D-31 §5).
+  - Drop the `intermediate_value` uniqueness. Rejected: it is a D-01 exception.
+  - A separate stress module. Rejected: it duplicates the methodology.
+  - Whole-flow moves only (the earlier draft). Rejected: the user's design needs partial
+    delays.
 
-## D-46 Baseline-versus-scenario comparison and its masking (extends D-33)
+## D-46 Baseline-versus-stress comparison, per-shock and combined, and its masking (extends D-33)
 
-- **Status:** proposed (Feature 05 plan, 2026-10-19). PROVISIONAL.
+- **Status:** proposed (Feature 05 plan, revised 2026-10-19 to the user's design §2.6 and §5).
+  PROVISIONAL.
 - **Date:** 2026-10-19
 - **Decision (proposed):**
-  1. **Computed on read** from the two immutable runs' `liquidity_gap_result` rows. They are
-     joined on (currency, `bucket_definition_id`), which is identical because the pins are
-     identical (D-45 §1). There is no comparison table. Arithmetic is exact Decimal
-     subtraction.
+  1. **Computed on read** from the immutable `liquidity_gap_result` rows of the baseline and
+     of every member run of a `scenario_run`. Rows are joined on (currency,
+     `bucket_definition_id`), which match because the pins are identical. There is no
+     comparison table. Arithmetic is exact Decimal subtraction.
   2. **Figures** per currency and bucket:
-     - baseline and stressed inflows, outflows, net gap and cumulative gap;
-     - their deltas (stressed − baseline);
-     - `turns_negative_net` and `turns_negative_cumulative` (baseline ≥ 0, stressed < 0).
-     Per currency, it also shows the first bucket with a negative cumulative gap, baseline
-     versus stressed (labelled "illustrative", never "survival horizon" as a regulatory
-     term). There is no cross-currency total (no FX).
+     - baseline and stressed inflows, outflows, net gap and cumulative gap, plus the deltas;
+     - these are given for each shock alone and for the combined run;
+     - `turns_negative_net` and `turns_negative_cumulative`, meaning baseline ≥ 0 and
+       stressed < 0;
+     - `breaks_only_combined`, meaning the combined run is negative while the baseline and
+       every single-shock run are not;
+     - the largest changes, ranked by absolute net delta among clear deltas only (design
+       §2.6);
+     - the first negative cumulative bucket, baseline versus stressed (labelled
+       illustrative).
+
+     There is no cross-currency total. A deterministic, templated (non-AI) summary of these
+     facts is part of the response. It is the fallback for D-51.
   3. **Masking.**
-     - Each side is masked exactly as its own ladder (D-33 and its amendments).
-     - A delta is a derived figure: it is masked when either side is masked.
-     - A delta is also masked when fewer than `CALC_MIN_AGGREGATE_COUNT` non-zero
-       contributions in that currency and bucket were changed by the scenario. Otherwise a
-       shock that matches one flow would show that flow's amount × (factor − 1).
-     - Once one cumulative delta in a currency is masked, the rest of that currency's
-       cumulative deltas stay masked.
-     - A turns-negative flag is shown only when both figures it reads are clear. Otherwise it
-       is `null` ("masked").
+     - Each side is masked as its own ladder (D-33).
+     - **The minimum aggregation counts distinct non-zero cash flows, not parts.** Two parts
+       of one flow are one amount.
+     - A delta is masked when either side is masked, or when it was changed by fewer than
+       `CALC_MIN_AGGREGATE_COUNT` distinct non-zero flows.
+     - Once a cumulative delta in a currency is masked, the rest of that currency's cumulative
+       deltas stay masked.
+     - Flags are `null` when they read a masked figure.
+     - Masked deltas are never ranked, so the ranking cannot leak their size.
      - Zeros stay clear and counts are public.
-  4. **Drill-down.** Per bucket, per shock it shows the changed contributions: cash flow,
-     instrument key, shock sequence and kind, days and bucket before and after, and amount
-     before and after.
-     - Amounts take the contribution classification (confidential), so they are masked for
-       risk_analyst.
-     - Days, buckets and shock kinds are internal.
-     - Every row links to the existing run results and source-row lineage (D-31 §6).
-  5. **Residual risk:** as D-33. Differencing a scenario and its baseline, or two scenarios,
-     can still narrow down amounts. This is an open item for the client before production.
+  4. **Drill-down** per bucket and per shock subset lists the changed parts: cash flow,
+     instrument key, shock sequences, days and bucket before and after, and the amount moved,
+     stayed or added.
+     - Amounts are confidential and masked for risk_analyst.
+     - Days, buckets and templates are internal.
+     - Every row links to the source-row lineage (D-31 §6). This is the evidence that D-51
+       cites.
+  5. **Residual risk:** as D-33. Differencing scenarios and the baseline can narrow down
+     amounts. This is an open item for the client before production.
 
-## D-47 Scenario and AI permissions and role grants
+## D-47 Scenario and AI permissions, and the exploration/approval model
 
-- **Status:** proposed. **HARD STOP: needs user approval** (a change to permissions and to who
-  approves what, CLAUDE.md). PROVISIONAL (D-11).
+- **Status:** **active. Approved by the user on 2026-10-19** (a hard stop: permissions, and who
+  approves what). PROVISIONAL (D-11).
 - **Date:** 2026-10-19
-- **Options:**
-  - **A (recommended):** three new permissions, seeded by tagged migrations:
-    - `scenario:propose` → risk_analyst (0026): create, edit, submit;
-    - `scenario:approve` → approver (0026): approve, reject, close;
-    - `ai:use` → risk_analyst (0028): request AI scenario proposals. The service also
-      requires `scenario:propose`, because the AI only ever creates drafts.
-
-    Everything else reuses existing permissions:
-    - reads of scenarios, scenario runs, comparisons and AI request metadata use `calc:read`
-      (all five roles);
-    - stressed runs use `calc:run` (risk_analyst).
-
-    There is no new role and no clearance change. platform_admin, data_steward and auditor
-    gain nothing.
-  - **B (no new permissions):** `rule:propose` covers scenario authoring and AI requests,
-    and `rule:approve` covers scenario decisions. This still changes what an existing
-    permission lets its holders approve, so it is also a hard stop. It removes the option of
-    turning AI off per role.
-- **Segregation of duties:**
-  - the analyst (and the AI on the analyst's behalf) proposes;
-  - the approver decides;
-  - the analyst runs.
-  A user who holds both roles cannot decide their own version (409 `self_approval`). The AI
-  can never submit, approve or run anything (D-48 §7).
-- **Open for the client:** whether scenario approval needs a separate role (for example, an
-  ALM committee), and whether AI use should be restricted further.
+- **Decision (user-approved, option A):**
+  1. **New permissions**, seeded by tagged migrations:
+     - `scenario:propose` → risk_analyst (0026). It covers create, edit, **confirm for
+       exploration** (own versions only), submit for promotion, and close of own
+       non-approved versions.
+     - `scenario:approve` → approver (0026). It covers **promotion**: approve or reject an
+       IN_REVIEW version, and close an approved version.
+     - `ai:use` → risk_analyst (0028). It covers agent conversations and explanations. The
+       service also requires `scenario:propose`, because the agent only creates drafts.
+  2. **Reused permissions.**
+     - Reads of scenarios, runs, comparisons, AI conversation metadata, tool-call logs and
+       explanations use `calc:read` (all five roles).
+     - Stressed runs, including the agent's `run_exploration` tool on the user's behalf, use
+       `calc:run` (risk_analyst).
+  3. **Who approves what (user-approved).**
+     - The analyst confirms their own scenario for exploration runs. Those runs are labelled
+       "Exploration, not approved" and are never authoritative.
+     - Promoting a scenario to an approved, shared one needs a second person, an approver who
+       is not the author (409 `self_approval`).
+     - **The AI never confirms or approves anything.**
+  4. Nothing else changes: no new role and no clearance change. platform_admin, data_steward
+     and auditor gain nothing.
+- **Open for the client before production:** whether self-confirmed exploration is acceptable
+  in production, and whether promotion needs a committee or an ALM role.
 - **Consequences:**
   - `governance/constants.py` gains `SCENARIO_ROLE_PERMISSIONS` and `AI_ROLE_PERMISSIONS`.
   - `ROLE_PERMISSIONS` becomes WS1 ∪ WS2 ∪ WS3 ∪ credit ∪ scenario ∪ AI.
   - The WS1 matrix test covers every new route.
 
-## D-48 AI scenario proposer: provider interface, structured output, validation and provenance
+## D-48 The agent: a controlled workflow of intent, clarification and closed tools
 
-- **Status:** proposed (Feature 05 plan, 2026-10-19).
+- **Status:** proposed (Feature 05 plan, revised 2026-10-19 to the user's design §3 A–D and
+  §6).
 - **Date:** 2026-10-19
-- **Context:** WS5 AI-01 (structured, reviewable proposals, "never arbitrary executable
-  code"), AI-04 (allowlisted, approval-gated orchestration) and AI-08 (model and version
-  logging, redaction, human oversight). WS5 backend responsibilities ask for "a
-  provider-neutral AI service interface; local/template mode must work without external
-  APIs". Arch §13 says: "Do not let an agent … approve its own proposal". `backend/app/ai/`
-  is an empty skeleton.
+- **Context:**
+  - The user's design: "a controlled workflow, not one unrestricted LLM call".
+  - WS5: AI-01, AI-04 ("allowlisted APIs through scoped permissions, approval gates and logged
+    tool calls") and AI-08.
+  - Arch §13 forbids an agent that runs arbitrary SQL, changes history, or approves its own
+    proposal.
+  - `backend/app/ai/` is an empty skeleton.
 - **Recommended:**
-  1. **Provider interface.** `app/ai/providers/` defines a `ScenarioProposalProvider`
-     protocol: `complete(ProviderRequest) -> ProviderResponse`. The response carries the
-     content text, model id, token counts and latency. There are two implementations:
-     - `MockProvider`: deterministic and offline. It builds candidates from the context's
-       instrument types and directions. Tests can switch it to fixed invalid fixtures. It
-       records the last request so leak tests can inspect it. It is the default
-       (`LLM_PROVIDER=mock`), and CI uses only this one.
-     - `GroqProvider`: Groq's OpenAI-compatible Chat Completions API through the existing
-       `httpx` dependency (`pyproject.toml:26`), with no new SDK. It uses JSON-object
-       response mode, a temperature of 0, a timeout, a token cap and a bounded retry on
-       timeout or 429 only.
-     A further provider is one more class plus an appended decision.
-  2. **Task.** `POST ai/assist` (the WS5 name, D-05) takes `task: "SCENARIO_PROPOSAL"` (a
-     closed enum with one member in v1), `baseline_run_id`, `focus` and `count`:
-     - `focus` is one of INFLOW_STRESS, OUTFLOW_STRESS, FUNDING_STRESS or COMBINED;
-     - `count` is 1 to `AI_MAX_CANDIDATES`, default 3.
-     There is **no free-text prompt from the user in v1**, which closes user-side prompt
-     injection and accidental pasting of client values. Free-text steering is deferred.
-  3. **Prompt.** A versioned template in code (`scenario_proposal.v1`). It holds the system
-     instructions, the JSON schema of the answer, the shock vocabulary with bounds, and the
-     D-49 context, marked as data. It asks for a structured set of candidates that span
-     severities (MILD, MODERATE, SEVERE, as a label only), each with a name of at most 80
-     characters, a rationale of at most 500 characters and 1 to 8 shocks.
-  4. **Validation, fail closed.**
-     - The response must be at most `LLM_MAX_RESPONSE_BYTES`. It is parsed as JSON with
-       `parse_float=Decimal`, so no binary float is ever created.
-     - The top level is `{"scenarios": [...]}`, with at most `count` items and
-       `extra="forbid"` throughout.
-     - Each candidate goes through the D-44 §2–4 validators. Its selector values must also
-       come from the context's own vocabulary.
-     - A valid candidate becomes a scenario with a DRAFT version (`origin = AI_PROPOSED`,
-       author = the requesting analyst).
-     - An invalid candidate is refused with value-free codes, and nothing is written for it.
-     - If no candidate is valid, the request ends `INVALID_OUTPUT`.
-     - Nothing in the output is executed, evaluated or used as a formula.
-  5. **Provenance** (Data Model §7 names).
-     - `ai_request` records: task, requester, provider, model id, prompt template version,
-       `context_sha256`, `prompt_sha256` (the exact request body minus credentials),
-       `response_sha256`, the status, latency, token counts and a value-free error code.
-       Statuses: PENDING, COMPLETED, INVALID_OUTPUT, FAILED and REFUSED.
-     - `ai_proposal` records: one row per candidate, with status VALIDATED or REJECTED (the
-       Data Model §9 subset; DRAFT, IN_REVIEW, APPROVED_FOR_SCENARIO and EXPIRED are
-       reserved), the validated structured shocks and their sha256, the
-       `scenario_version_id` it created, and the rejection codes.
-     - **Raw prompts and raw responses are never stored**, only their hashes. The
-       candidate's rationale (at most 500 characters, generated text with no client data) is
-       kept on the draft. It is shown as plain text, labelled "AI-generated, unverified".
-     - Both tables are append-only, except one status move PENDING → terminal on
-       `ai_request`. A trigger enforces this.
-  6. **Human review.** An AI draft is edited like any draft. The UI shows the AI-proposed
-     shocks next to the current ones. Submitting needs an explicit acknowledgement
-     (D-44 §6).
-  7. **No authority.** The AI service creates DRAFT versions and nothing else. It has no tool
-     calls in v1, and it never submits, approves, closes or runs. A source grep on `app/ai/`
-     enforces this (no reference to those service functions). Multi-step tool use (AI-04) is
-     deferred.
-  8. **Limits.**
-     - `AI_RATE_LIMIT_PER_HOUR` per user (default 20) is counted from `ai_request` rows.
-       Exceeding it gives 429 `ai_rate_limited`, retryable.
-     - `LLM_TIMEOUT_SECONDS` (default 20, at most 60).
-     - `LLM_MAX_OUTPUT_TOKENS` (default 1500, at most 4000).
-     - `LLM_MAX_RESPONSE_BYTES` (default 32768).
-     - `LLM_MAX_RETRIES` (default 1, at most 2).
-     - Provider failures give 504 `ai_provider_timeout` or 502 `ai_provider_error`, both
-       retryable. Their details carry the status class only, never the provider's body.
-  9. **Switches, fail closed.**
-     - Both `AI_ENABLED` (exists, default `false`) and `AI_SCENARIO_PROPOSALS_ENABLED`
-       (default `true`) must be on. Otherwise the answer is 409 `ai_disabled` (audited).
-     - With `LLM_PROVIDER=groq` and no key, the answer is 503 `ai_not_configured` (audited)
-       and the app still starts.
-     - With AI off, every scenario, run and comparison route works unchanged (Arch §13: "the
-       core product must function when AI is disabled").
+  1. **Provider interface.** `app/ai/providers/` defines `AgentProvider.complete(ProviderRequest)
+     -> ProviderResponse`. It returns the content, model id, tokens and latency.
+     - `MockProvider` is deterministic and offline. It runs from scripted fixtures, records
+       its requests, and is the default (`LLM_PROVIDER=mock`). CI uses only this one.
+     - `GroqProvider` calls Groq's OpenAI-compatible Chat Completions API through the
+       existing `httpx` (`pyproject.toml:26`), with no SDK. It uses JSON-object mode,
+       temperature 0, a timeout, a token cap, and a retry on timeout or 429 only.
+  2. **A turn.** `POST ai/assist` (the WS5 name) takes `task: "SCENARIO_PLANNING"`,
+     `baseline_run_id`, an optional `conversation_id`, an optional free-text `message`
+     (pre-filtered per D-49 §4) and optional structured `answers`. The model must return
+     exactly one closed outcome, validated with `extra="forbid"` and parsed with
+     `parse_float=Decimal`:
+     - **`DRAFT_SPEC`**: 1 to `AI_MAX_DRAFTS_PER_TURN` (default 3) scenario specs. Each has
+       a template, parameters (each tagged `STATED` or `PROPOSED_DEFAULT`), a name of at most
+       80 characters and a rationale of at most 500;
+     - **`NEEDS_CLARIFICATION`**: questions, each `{shock_index, template, parameter,
+       reason: MISSING | AMBIGUOUS | OUT_OF_BOUNDS, options?}`. Parameters must exist in the
+       template. The UI renders the question text from templates, never from model prose;
+     - **`TOOL_CALL`**: one call from the closed list (§6);
+     - **`UNSUPPORTED`**: a reason code.
 
-## D-49 AI data boundary: what may be sent to an LLM, and where a live provider may run
+     Anything else is refused as `INVALID_OUTPUT`, and nothing is written.
+  3. **Intent and selection (design §3 A–B).** Specs go through the D-44 validators.
+     - "Delay 20% of loan inflows by two weeks" becomes `DELAYED_INFLOWS {cashflow_type:
+       LOAN, affected_fraction: "0.2000", delay_days: 14, delay_calendar: CALENDAR_DAYS}`.
+     - A spec that is missing a required parameter is turned into `NEEDS_CLARIFICATION` by
+       the server, whatever the model returned.
+  4. **Never guess silently.**
+     - A `STATED` numeric parameter is cross-checked deterministically. Its number, or its
+       percent form, must appear in the user's message or answers. Otherwise it is
+       downgraded to `PROPOSED_DEFAULT`.
+     - `PROPOSED_DEFAULT` values are highlighted, and each must be acknowledged at confirm
+       (D-44 §6).
+     - Funding-source `instrument_keys` are always asked for, and answered through the UI
+       picker. They never come from the model, and are never sent to it.
+  5. **A bounded conversation.**
+     - A conversation has at most `AI_MAX_TURNS` turns (default 6) and expires after
+       `AI_CONVERSATION_TTL_MINUTES` (default 60).
+     - State is stored structurally in `ai_conversation`: the templates, parameters and their
+       sources, open questions, the handle map and the status (OPEN, COMPLETED, EXPIRED,
+       CLOSED).
+     - Each turn is an `ai_request` that stores hashes only. **Raw user text, prompts and
+       responses are never stored, and never replayed.** The next turn sends the structured
+       state plus the new message.
+     - Structured answers that complete a spec build the draft deterministically, with no
+       model call.
+  6. **Closed tools (design §3 D).** `app/ai/tools.py` defines typed functions that call the
+     application's own service layer in-process, under the requesting user's principal.
+     Permissions apply and fail closed. The tools are:
+     - **`create_scenario_draft`**: a DRAFT version, `origin = AI_PROPOSED`, optionally with
+       `parent_version_id` (to adapt);
+     - **`validate`**: the D-44 validators plus the match counts against the baseline;
+     - **`run_exploration`**: refused unless a **human** has already confirmed the version
+       (CONFIRMED_FOR_EXPLORATION) or it is APPROVED_FOR_TEST. Confirming is a user route,
+       never a tool;
+     - **`get_result`**: run status and the masked summary;
+     - **`compare`**: the masked D-46 facts.
 
-- **Status:** proposed. **§5 (live calls to an external provider) needs user approval**:
-  aggregated synthetic data leaves the platform for a third party. Production use is an open
-  item for the client (Arch §13: "External model APIs are optional and must be approved for
-  data residency, contractual terms, privacy and retention").
+     The rules for tool calls:
+     - There is no DB, SQL, HTTP, file or approval tool.
+     - Arguments use per-conversation handles (`S1`, `V2`, `R1`), never UUIDs.
+     - Results passed back to the model are filtered to the D-49 schema.
+     - At most `AI_MAX_TOOL_CALLS` per turn (default 6). An unknown tool or bad arguments end
+       the turn as REFUSED.
+     - Every call writes an `ai_tool_call` row (Data Model §7): the tool, the arguments'
+       sha256, the authorization result, an outcome code and the latency. It is also audited
+       as `ai_tool_call.<tool>`.
+  7. **Observe and adapt (design §6.3–6.4).** The agent sees run status through
+     `get_result`. "What if the delay were 30 days?" creates a new version with
+     `parent_version_id`. The user confirms it, and the agent runs it and compares it side by
+     side with the parent run. A bounded threshold search is deferred to v2.
+  8. **Provenance.**
+     - `ai_request` (per turn): task, requester, conversation and turn, provider, model id,
+       prompt template version (`scenario_planning.v1`), `context_sha256`, `prompt_sha256`,
+       `response_sha256`, the message's sha256 and length, the status (PENDING, COMPLETED,
+       NEEDS_CLARIFICATION, INVALID_OUTPUT, FAILED, REFUSED), latency, tokens and an error
+       code.
+     - `ai_proposal` (per spec): status VALIDATED or REJECTED (a §9 subset), the structured
+       shocks and their sha256, the `scenario_version_id` and the codes.
+     - `ai_tool_call` and `ai_conversation`.
+     - There are no raw-text columns. Rows are append-only, with trigger-enforced status
+       moves.
+  9. **No authority.** The agent never confirms, submits, approves, closes, edits history or
+     executes funding transactions (design §6). A source grep on `app/ai/` enforces this: no
+     reference to the confirm, submit, approval or close services, and no repository or
+     SQLAlchemy import outside `app/ai/repository.py`, which holds the AI tables only.
+  10. **Limits and switches, fail closed.**
+      - `AI_RATE_LIMIT_PER_HOUR`: 429 `ai_rate_limited`, retryable.
+      - The timeout, token, response-size and retry caps of D-50. A provider timeout is 504
+        `ai_provider_timeout` and a provider error is 502 `ai_provider_error`. Both carry the
+        status class only.
+      - `AI_ENABLED` and `AI_SCENARIO_PROPOSALS_ENABLED` must both be on, else 409
+        `ai_disabled`.
+      - `groq` without a key gives 503 `ai_not_configured`.
+      - With AI off, every scenario, run and comparison route works, and the D-46 templated
+        summary replaces explanations (Arch §13).
+
+## D-49 AI data boundary: context, free text, pre-filter and where a live provider may run
+
+- **Status:** proposed. **§4 (sending the analyst's free text) and §5 (live Groq in local and
+  staging only) were approved by the user on 2026-10-19** (a hard stop: data leaves the
+  platform for a third party). Production use stays an open item for the client (Arch §13).
 - **Date:** 2026-10-19
-- **Decision (proposed):**
-  1. **The context is a closed schema** (`ScenarioContext`, `extra="forbid"`). It holds only:
-     - the D-44 statement;
+- **Decision:**
+  1. **The context is a closed schema** (`AgentContext`, `extra="forbid"`). It holds only:
+     - the D-44 statement and the template catalogue with bounds;
      - the bucket codes, labels and day bounds of the pinned bucket rule;
      - the currencies present;
-     - the instrument types and their directions, from the pinned `cashflow_direction`
-       rule;
-     - per currency and bucket: inflows, outflows, net gap and cumulative gap as exact
-       decimal text, or `"MASKED"`;
-     - the shock vocabulary with bounds;
-     - the requested focus and count.
-  2. **Masked as the least-cleared reader would see it.** Ladder figures go through the D-33
-     masking at clearance `internal`, whoever the caller is, with the minimum-aggregation
-     rule. So no figure built from fewer than `CALC_MIN_AGGREGATE_COUNT` non-zero
-     contributions is ever sent.
+     - the instrument types and their directions, from the pinned `cashflow_direction`;
+     - per currency and bucket: inflows, outflows, net and cumulative gap as exact text, or
+       `"MASKED"`;
+     - the structured conversation state (D-48 §5);
+     - masked tool results, with handles instead of ids.
+  2. **Masked as the least-cleared reader would see it.** Figures go through D-33/D-46 at
+     clearance `internal`, whoever the caller is. So no figure built from fewer than
+     `CALC_MIN_AGGREGATE_COUNT` distinct non-zero flows is ever sent.
   3. **Never sent:**
-     - row-level values, business keys, ids (UUIDs), names or source rows;
+     - row-level values, business keys (including the funding `instrument_keys`), UUIDs,
+       names or source rows;
      - counterparty or credit data;
-     - user free text;
      - anything classified `confidential` or `restricted`.
-     Context strings are restricted to `^[A-Z0-9_]{1,40}$` (codes) or server constants, so
-     injected text in source data cannot reach the prompt.
-  4. **Enforced by a test.** A sentinel amount alone in a bucket, and a sentinel instrument
-     business key, never appear in the recorded provider request. The request also contains
-     no UUID or business key, and its top-level keys equal the `ScenarioContext` fields.
-  5. **Where a live provider may run.**
-     - `LLM_PROVIDER=groq` is refused at startup (D-13 style) when `ENV` is `test` (so CI can
-       never call Groq) or `production`, or when `DATA_CLASS=client`.
+
+     Context strings are codes matching `^[A-Z0-9_]{1,40}$`, or server constants.
+  4. **Free text (user-approved).** The analyst's message is sent to the provider, under
+     these controls:
+     - It is capped at `AI_MAX_REQUEST_CHARS` (default 1000).
+     - The UI shows a warning next to the input: "Do not paste client data, names, account
+       or instrument identifiers, or row-level figures."
+     - **A deterministic pre-filter runs before any call.** It refuses the message with 422
+       `request_looks_like_row_data` (audited with codes only, nothing sent) when the text
+       contains:
+       - a run of 6 or more digits, ignoring spaces, commas and dots between digits;
+       - more than `AI_MAX_NUMBERS_IN_REQUEST` numeric tokens (default 6);
+       - a UUID, an email address, or an IBAN-like token;
+       - an identifier-shaped token (`[A-Za-z]{2,}[-_]?\d{3,}`, the shape of the sample keys
+         such as `CP-0008`);
+       - any token equal to a business key in the baseline snapshot (checked server-side).
+     - Only the message's sha256 and length are stored.
+     - The prompt marks the message as untrusted data. The closed outcomes and closed tools
+       (D-48) bound what injected text could do.
+  5. **Where a live provider may run (user-approved).**
+     - `LLM_PROVIDER=groq` is refused at startup when `ENV` is `test` (so CI never calls Groq)
+       or `production`, or when `DATA_CLASS=client`.
      - It is allowed in `local` and `staging`, which hold synthetic data only (D-14).
-     - At request time the service also refuses (409 `ai_data_class_refused`) unless the
-       effective data class is `synthetic`.
-     - Enabling it in production needs a new decision after the client's approval (residency,
-       terms, privacy, retention).
-  6. **Egress.** A live demo needs the environment's network policy to allow HTTPS to
-     `api.groq.com`. `GROQ_BASE_URL` must be `https://` and, outside `local`, its host must
-     be `api.groq.com`. TLS verification is never disabled.
+     - At request time it is refused (409 `ai_data_class_refused`) unless the effective data
+       class is `synthetic`.
+     - Production needs a new decision after the client's approval (residency, terms,
+       privacy, retention).
+  6. **Egress.** HTTPS to `api.groq.com` must be allowed by the environment's network policy.
+     `GROQ_BASE_URL` must be `https://` and, outside `local`, its host must be
+     `api.groq.com`. TLS verification is never disabled.
+  7. **Enforced by tests:**
+     - a sentinel amount alone in a bucket and a sentinel business key never appear in any
+       recorded provider request;
+     - the request contains no UUID;
+     - its top-level keys equal the `AgentContext` fields;
+     - a loop over pre-filter cases refuses each one before any provider call.
 
 ## D-50 LLM provider configuration and secret handling
 
@@ -1715,7 +1822,12 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
      | `LLM_MAX_RESPONSE_BYTES` | `32768` | 1–65536 |
      | `LLM_MAX_RETRIES` | `1` | 0–2 |
      | `AI_RATE_LIMIT_PER_HOUR` | `20` | ≥ 1 |
-     | `AI_MAX_CANDIDATES` | `5` | 1–8 |
+     | `AI_MAX_REQUEST_CHARS` | `1000` | 1–4000 (D-49 §4) |
+     | `AI_MAX_NUMBERS_IN_REQUEST` | `6` | 1–20 (D-49 §4) |
+     | `AI_MAX_DRAFTS_PER_TURN` | `3` | 1–5 |
+     | `AI_MAX_TURNS` | `6` | 1–10 |
+     | `AI_MAX_TOOL_CALLS` | `6` | 1–10 per turn |
+     | `AI_CONVERSATION_TTL_MINUTES` | `60` | 5–1440 |
      | `SCENARIOS_ENABLED` | `true` | boolean (D-44 §9) |
 
   2. **Where the key lives.**
@@ -1737,3 +1849,49 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
        a sentinel key and `httpx.MockTransport`. No test makes a network call.
   4. **`GET ai/status`** shows whether AI is enabled, the provider kind, the model id and
      `configured: true/false`. It never shows the key, any part of it, or its length.
+
+## D-51 Evidence-backed explanations and the deterministic verifier
+
+- **Status:** proposed (Feature 05 plan, 2026-10-19, from the user's design §3 E, §5: "The
+  explanation has to come from the actual run output, never from invented figures").
+- **Date:** 2026-10-19
+- **Recommended:**
+  1. **Routes** (the WS5 names): `POST ai/explanations` (`ai:use`) takes `{scenario_run_id,
+     conversation_id?}`. `GET ai/explanations/{explanation_id}` uses `calc:read`. The agent
+     may also request one after `compare`.
+  2. **Facts in.** The model receives a numbered fact list (`F1`, `F2`, …) built from the D-46
+     comparison at clearance `internal`. Each fact is: kind, currency, bucket code and label,
+     figure, shock subset, and value as exact text or `MASKED`.
+     - The scenario parameters are facts too, carrying both forms (for example
+       `affected_fraction 0.2000` and `20%`).
+     - Lineage facts carry counts only: the number of changed flows and parts per bucket and
+       shock.
+     - Nothing row-level is included (D-49 §3).
+  3. **Structured out.** The output is `{sentences: [{text (at most 300 characters),
+     citations: [fact ids, at least 1]}]}`, with at most 8 sentences.
+  4. **Deterministic verifier.** The explanation is accepted only if:
+     - every sentence cites existing facts;
+     - every numeric token in the text equals (as normalised decimal text) the value, or the
+       absolute value, of one of its cited facts;
+     - every bucket code or label in the text belongs to a cited fact;
+     - no `MASKED` fact is given a value;
+     - no forbidden claim appears ("regulatory stress test" outside the negating statement,
+       compliant, certified, guaranteed, Moody's, vendor parity).
+  5. **Failure.** Any mismatch or uncited figure **refuses the whole explanation**
+     (`REFUSED`, with value-free codes). The UI then shows the D-46 templated, non-AI summary,
+     labelled as such.
+  6. **Stored.** An `ai_explanation` row (Data Model §7 family, append-only) holds:
+     - the status (VERIFIED or REFUSED);
+     - the verified sentences and their citations (generated text, verified against facts
+       the reader may see);
+     - the verifier codes;
+     - the hashes of the facts, the prompt and the response.
+
+     The raw response is not stored.
+  7. **Evidence links.** Each citation links to the drill-down for that fact's currency,
+     bucket and shock subset (D-46 §4), and from there to the source-row lineage.
+  8. **Masking.** The agent sees, and so can say, only `internal`-clear facts. The same
+     verified text is shown to every role.
+- **Consequences:** an explanation can never introduce a figure the run did not produce. The
+  "share of explanations backed by evidence" metric (design §8) is `VERIFIED / all` from
+  these rows.
