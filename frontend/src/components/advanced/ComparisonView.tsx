@@ -33,6 +33,7 @@ import {
   columnLabel,
   columnsOf,
   combinedOnlyBuckets,
+  combinedOnlyUnknown,
   fetchComparison,
   firstNegativeText,
   heatLevel,
@@ -217,6 +218,7 @@ export function ComparisonTable({
             const open = expanded.has(r.bucket_code)
             const b = buckets.find((x) => x.code === r.bucket_code)
             const only = r.breaks_only_combined
+            const unknown = combinedOnlyUnknown(r)
             return (
               <Fragment key={r.bucket_code}>
                 <TableRow
@@ -251,9 +253,19 @@ export function ComparisonTable({
                         Breaks only when combined
                       </Badge>
                     )}
-                    {only === null && (
-                      <div className="mt-1 text-[10px] text-muted-foreground" data-testid="combined-only-unknown" title="The flag reads a masked figure, so it is not shown.">
+                    {unknown === 'masked' && (
+                      <div className="mt-1 text-[10px] text-muted-foreground" data-testid="combined-only-unknown" data-reason="masked" title="The flag reads a masked figure, so it is not shown.">
                         combined-only: masked
+                      </div>
+                    )}
+                    {unknown === 'not_assessable' && (
+                      <div
+                        className="mt-1 text-[10px] text-muted-foreground"
+                        data-testid="combined-only-unknown"
+                        data-reason="not_assessable"
+                        title="Fewer single-shock runs were compared than the scenario has shocks, so the flag cannot be assessed."
+                      >
+                        combined-only: not assessable (needs every single-shock run)
                       </div>
                     )}
                   </TableCell>

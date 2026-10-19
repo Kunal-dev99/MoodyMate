@@ -73,8 +73,11 @@ One JSON object per case, UTF-8. All amounts are decimal strings, never JSON fra
   amount is `null`) and the D-44 `shocks`; `expected` has `parts` (every stressed input row:
   cash-flow key, day, amount and the shock sequences that touched it; an unchanged flow is one
   part with none), `counts` (per shock, in declared order), `ladder` (the stressed rows of the
-  unchanged module) and `totals` (per currency, over all buckets). It is a pure-function
-  pack: `scenario_run_kit.check_overlay_pure` runs it, outside the end-to-end loops.
+  unchanged module) and `totals` (per currency, over all buckets). The file's top-level
+  `tolerance` is `{metric: "0"}`: exact only, and the loop asserts every value is `"0"`. Each
+  case may carry a `note` (free text for the reader; the loop does not read it). It is a
+  pure-function pack: `scenario_run_kit.check_overlay_pure` runs it, outside the end-to-end
+  loops.
 
 The test runs each file under its own module: ladder files in the ladder loop, `lcr_hqla`
 files in the LCR part, each over its own snapshot.

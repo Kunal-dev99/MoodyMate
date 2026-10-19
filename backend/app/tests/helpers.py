@@ -40,7 +40,9 @@ def cid() -> str:
 
 
 def events(db: str, correlation_id: str) -> list[Any]:
-    """In the order written: heap order is not insertion order once cleanup frees pages."""
+    """In the order written: heap order is not insertion order once cleanup frees pages.
+    occurred_at is transaction-start time; ctid is a best-effort tie-break for rows written in
+    one transaction."""
     return sql(
         db,
         "SELECT * FROM audit_event WHERE correlation_id = $1 ORDER BY occurred_at, ctid",

@@ -175,7 +175,7 @@ describe('the baseline picker filter (FE-25.1 Done-when)', () => {
     expect(baselineCandidates(runs).map((r) => r.run_id)).toEqual(['new', 'old'])
   })
 
-  it('asks the server for maturity_ladder runs per succeeded status, then filters out stressed runs', async () => {
+  it('asks the server for non-stressed maturity_ladder runs per succeeded status, and still filters out stressed runs', async () => {
     const get = vi.spyOn(api, 'GET').mockImplementation(((_path: string, init: { params: { query: { status: string } } }) =>
       Promise.resolve(
         respond(200, {
@@ -189,8 +189,8 @@ describe('the baseline picker filter (FE-25.1 Done-when)', () => {
     expect(get).toHaveBeenCalledTimes(2)
     const queries = get.mock.calls.map((c) => (c[1] as { params: { query: Record<string, unknown> } }).params.query)
     expect(queries).toEqual([
-      { module_code: 'maturity_ladder', status: 'SUCCEEDED', limit: 200, offset: 0 },
-      { module_code: 'maturity_ladder', status: 'SUCCEEDED_WITH_WARNINGS', limit: 200, offset: 0 },
+      { module_code: 'maturity_ladder', status: 'SUCCEEDED', stressed: false, limit: 200, offset: 0 },
+      { module_code: 'maturity_ladder', status: 'SUCCEEDED_WITH_WARNINGS', stressed: false, limit: 200, offset: 0 },
     ])
     expect(runs.map((r) => r.run_id)).toEqual(['warned', 'plain'])
   })

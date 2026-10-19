@@ -67,13 +67,14 @@ export const baselineOptionText = (r: Pick<RunSummary, 'run_id' | 'reporting_dat
   `${r.run_id.slice(0, 8)}… · reporting date ${r.reporting_date} · ${r.module.code} v${r.module.version} · ${r.status}`
 
 /**
- * The tenant's succeeded maturity_ladder runs (calc:read), one page per succeeded status, so a
- * crowd of failed runs never hides a baseline. Filtered with `baselineCandidates`.
+ * The tenant's succeeded, non-stressed maturity_ladder runs (calc:read), one page per succeeded
+ * status, so a crowd of failed runs never hides a baseline. `stressed: false` has the server drop
+ * stressed runs (Q23), so they never use up a page; `baselineCandidates` still filters as a guard.
  */
 export const fetchBaselines = async (signal: AbortSignal): Promise<RunSummary[]> => {
   const pages: RunPage[] = await Promise.all(
     (['SUCCEEDED', 'SUCCEEDED_WITH_WARNINGS'] as const).map((status) =>
-      call(() => api.GET('/api/v1/calculation-runs', { params: { query: { module_code: BASELINE_MODULE, status, limit: BASELINE_PAGE, offset: 0 } }, signal })),
+      call(() => api.GET('/api/v1/calculation-runs', { params: { query: { module_code: BASELINE_MODULE, status, stressed: false, limit: BASELINE_PAGE, offset: 0 } }, signal })),
     ),
   )
   return baselineCandidates(pages.flatMap((p) => p.items))

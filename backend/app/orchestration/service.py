@@ -1409,7 +1409,10 @@ def _comparison(
                     # changed it, of those flows. A cumulative delta also carries every
                     # earlier net delta's, so once masked it stays masked in its currency.
                     # The viewer's clearance then masks it; a zero net, inflow or outflow
-                    # delta stays clear.
+                    # delta stays clear. No differencing: the stressed side's ladder classes
+                    # (`ladder_classes`, from the same changed-flow counts per part) already
+                    # mask a stressed figure changed by too few flows, even at zero, and
+                    # a delta is masked when either side is.
                     delta = s_val[f] - b_val[f]
                     if f == "cumulative_gap":
                         code = most_sensitive([b_code[f], s_code[f], net_class, carried[i] or agg])

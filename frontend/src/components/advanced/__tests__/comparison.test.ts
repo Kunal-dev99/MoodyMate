@@ -8,6 +8,7 @@ import {
   columnLabel,
   columnsOf,
   combinedOnlyBuckets,
+  combinedOnlyUnknown,
   compareMagnitude,
   comparisonHref,
   deltaText,
@@ -249,13 +250,38 @@ describe('null flags (FE-25.2 Done-when)', () => {
     expect(one(INR.rows[0].cells[0])).not.toMatch(/data-testid="turns-negative(-unknown)?"/)
   })
 
-  it('renders a null combined-only flag as unknown, without the highlight', () => {
+  it('renders a null combined-only flag as masked or not assessable, and nothing for one shock (Q12)', () => {
     const html = renderTable('net_gap')
     const rows = attrsOf(html, 'comparison-row')
     expect(rows.map((r) => r['data-combined-only'])).toEqual(['null', 'true', 'false'])
-    expect(attrsOf(html, 'combined-only-unknown')).toHaveLength(1)
+    // B1 reads shock 2's masked stressed net gap: masked.
+    expect(attrsOf(html, 'combined-only-unknown').map((u) => u['data-reason'])).toEqual(['masked'])
+    expect(html).toContain('combined-only: masked')
     expect(unknownCombinedOnly(INR)).toEqual(['B1'])
+    expect(INR.rows.map(combinedOnlyUnknown)).toEqual(['masked', null, null])
     expect(rows[0].class ?? '').not.toContain('outline-warning')
+
+    // Two shocks, but only shock 1's single run was compared (shock 2 failed): not assessable, nothing masked.
+    const partial: ComparisonCurrency = {
+      ...INR,
+      rows: [row('B1', 1, [cell([1], false, { net_gap: fig('20', '10', '-10') }), cell([1, 2], true, { net_gap: fig('20', '-5', '-25') })], null)],
+    }
+    expect(combinedOnlyUnknown(partial.rows[0])).toBe('not_assessable')
+    const partialHtml = renderTable('net_gap', partial)
+    expect(attrsOf(partialHtml, 'combined-only-unknown').map((u) => u['data-reason'])).toEqual(['not_assessable'])
+    expect(partialHtml).toContain('combined-only: not assessable (needs every single-shock run)')
+    expect(partialHtml).not.toContain('combined-only: masked')
+
+    // A one-shock scenario: the flag is always null and the row shows nothing, even when masked.
+    const single: ComparisonCurrency = {
+      ...INR,
+      rows: [row('B1', 1, [cell([1], true, { net_gap: fig('20', M, M), turns_negative_net: null })], null), row('B2', 2, [cell([1], true)], null)],
+    }
+    expect(single.rows.map(combinedOnlyUnknown)).toEqual(['one_shock', 'one_shock'])
+    const singleHtml = renderTable('net_gap', single)
+    expect(attrsOf(singleHtml, 'comparison-row').map((r) => r['data-combined-only'])).toEqual(['null', 'null'])
+    expect(attrsOf(singleHtml, 'combined-only-unknown')).toHaveLength(0)
+    expect(singleHtml).not.toContain('combined-only:')
   })
 
   it('reads a masked or absent first-negative bucket as masked or "never negative"', () => {

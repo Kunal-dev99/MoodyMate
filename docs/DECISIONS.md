@@ -1606,7 +1606,7 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
     part counts toward the 32-part cap. Nothing is rounded.
   - **§2 and §9 per-shock counts (Q10).** The counts are each shock applied alone to the
     baseline inputs, which matches the single-shock member runs and the "refused while any
-    shock matches nothing" rule (D-44 §4, §10). Flows due on day 0 are never shocked: the
+    shock matches nothing" rule (D-44 §4, D-45 §10). Flows due on day 0 are never shocked: the
     ladder excludes them as `OUTSIDE_BUCKETS`, so moving one into a bucket would break the
     per-currency total in `SCENARIO_CONSERVATION`. The key `skipped_past_due` keeps its name,
     so the contract does not change, but it is defined as "due on or before the reporting
@@ -1625,8 +1625,8 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
        `baseline_not_reproducible`, and `no_matching_cashflows`.
 
     This fits the Phase 24 amendment to D-44 §4 (permission, then the scoped 404, then the
-    state checks). A replay may complete member runs that a crash left missing. Each completed member pins
-    the `scenario_run`'s recorded version, `shocks_sha256`, subset and baseline pins without
+    state checks). A replay may complete member runs that a crash left missing. Each
+    completed member pins the `scenario_run`'s recorded version, `shocks_sha256`, subset and baseline pins without
     resolving them again (§8), and each is audited `calculation_run.create`. The route
     description states this order.
 
@@ -1698,6 +1698,29 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
     - (c) The largest changes are ranked across every member's cells, but within each
       currency: the rank restarts at 1 for each currency. There is no FX and no
       cross-currency figure (D-35 §1). Only clear deltas are ranked.
+- **Amendment (2026-10-19, Phase 25 build, auto-resolved; review follow-up R1, R4):** §2, §3
+  and §5.
+  - **§3 few-changed-flows on stressed figures (R1, review MEDIUM).** Masking only the delta
+    left it recoverable as stressed minus baseline. So a stressed figure carries the changed
+    flows' classification whenever 0 < its distinct non-zero changed flows <
+    `CALC_MIN_AGGREGATE_COUNT`. This applies per ladder row and per direction × origin part.
+    Such a figure **stays masked even at zero**, and the cumulative carry (Q11, Q17)
+    applies to it. The rule lives in the stressed run's own ladder classification. So the
+    comparison, the stressed run's `GET …/maturity-ladder` and every other reader mask it
+    the same way. Baseline figures are unchanged.
+  - **§5 residual risk, named (R1).** Two routes remain, and both can still narrow down a
+    masked amount:
+    - conservation across buckets in timing-only scenarios: per currency and direction the
+      stressed total equals the baseline total (D-45 §6);
+    - differencing across members: the combined delta minus a clear single-shock delta.
+
+    Fully closing them needs complementary suppression, or D-33 option C. Option C is a
+    clearance change, so it is a hard stop and a client decision. This stays an open item
+    for the client before production.
+  - **§2 summary versioning (R4).** `SUMMARY_TEMPLATE_VERSION` stays `"1"`, because no
+    version was released before this merge (the Q12 per-currency sentence is part of "1").
+    From merge onward, any change to the sentence templates or to how they are chosen bumps
+    it. Masking changes alone do not.
 
 ## D-47 Scenario and AI permissions, and the exploration/approval model
 

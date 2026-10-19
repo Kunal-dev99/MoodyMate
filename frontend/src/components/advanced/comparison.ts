@@ -210,9 +210,30 @@ export const turnsNegative = (cell: Pick<ComparisonCell, 'turns_negative_net' | 
 export const combinedOnlyBuckets = (currency: Pick<ComparisonCurrency, 'rows'>): string[] =>
   currency.rows.filter((r) => r.breaks_only_combined === true).map((r) => r.bucket_code)
 
-/** Rows whose combined-only flag is unknown because it reads a masked figure. */
+/**
+ * Rows whose combined-only flag is `null`: it reads a masked figure, or it is not assessable
+ * because fewer single-shock runs were compared than the version has shocks, which is always so
+ * for a one-shock scenario (Q12). `combinedOnlyUnknown` tells which.
+ */
 export const unknownCombinedOnly = (currency: Pick<ComparisonCurrency, 'rows'>): string[] =>
   currency.rows.filter((r) => r.breaks_only_combined === null).map((r) => r.bucket_code)
+
+/**
+ * Why a row's combined-only flag is `null` (Q12), or `null` when the server sent a flag:
+ *  - `one_shock`: the combined run has one shock, so there is nothing to combine. Show nothing.
+ *  - `masked`: a net gap the flag reads (any member's baseline or stressed) is masked.
+ *  - `not_assessable`: otherwise. Fewer single-shock runs were compared than there are shocks
+ *    (e.g. a failed member), or no combined run was compared.
+ * The combined run's `shock_subset` holds every shock of the version, so its length is the count.
+ */
+export type CombinedOnlyUnknown = 'one_shock' | 'masked' | 'not_assessable'
+export function combinedOnlyUnknown(row: Pick<ComparisonRow, 'breaks_only_combined' | 'cells'>): CombinedOnlyUnknown | null {
+  if (row.breaks_only_combined !== null) return null
+  const combined = row.cells.find((c) => c.combined)
+  if (combined && combined.shock_subset.length === 1) return 'one_shock'
+  if (row.cells.some((c) => isMasked(c.net_gap.baseline) || isMasked(c.net_gap.stressed))) return 'masked'
+  return 'not_assessable'
+}
 
 // --- first negative cumulative bucket -----------------------------------------------------------
 

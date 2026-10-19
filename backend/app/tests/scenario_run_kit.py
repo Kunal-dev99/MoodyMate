@@ -28,8 +28,12 @@ tampered-part test double (part 5c) is what the run uses.
 The golden file schema (one engineering file, several cases):
 
     {"name", "status": GOLDEN_STATUS, "module": {"code": "scenario_overlay", "version": 1},
-     "description", "cases": [{
-        "name", "reporting_date", "buckets": [{code, label, lower_exclusive, upper_inclusive}],
+     "description",
+     "tolerance": {metric: "0"},      # per metric; "0" = exact, the only value v1 accepts
+     "cases": [{
+        "name",
+        "note",                         # free text for the reader; the loop does not read it
+        "reporting_date", "buckets": [{code, label, lower_exclusive, upper_inclusive}],
         "directions": {instrument_type: INFLOW|OUTFLOW},
         "instruments": [{"instrument_id", "instrument_type"}],
         "cash_flows": [{"cashflow_id", "instrument_id", "days_after_reporting_date" | null,
@@ -45,6 +49,7 @@ The golden file schema (one engineering file, several cases):
 """
 
 import dataclasses
+import itertools
 import json
 import re
 import uuid
@@ -308,6 +313,7 @@ def check_overlay_pure() -> None:
     pack = json.loads(OVERLAY_GOLDEN.read_text(encoding="utf-8"), parse_float=_no_fraction)
     assert pack["status"] == GOLDEN_STATUS
     assert pack["module"] == {"code": "scenario_overlay", "version": 1}
+    assert set(pack["tolerance"].values()) == {"0"}  # exact only: the loop compares with ==
     covered: set[str] = set()
     for case in pack["cases"]:
         reporting = date.fromisoformat(case["reporting_date"])
@@ -700,22 +706,24 @@ def check_scenario_runs(
         found = await real_classes(self, keys, instrument_type)
         return {k: "confidential" if k == "SC-LOAN-2" else c for k, c in found.items()}
 
-    monkeypatch.setattr(DomainService, "instrument_key_classes", confidential)
-    [funding] = [m for m in three["members"] if m["shock_subset"] == [3]]
-    [stored] = sql(db, "SELECT manifest->'scenario' AS s FROM calculation_run WHERE id = $1",
-                   uuid.UUID(funding["calculation_run_id"]))  # fmt: skip
-    pinned = no_float(stored["s"])
-    assert pinned["shocks"][2]["selector"]["instrument_keys"] == ["SC-LOAN-2"]  # stored clear
-    assert pinned["shocks_sha256"] == canonical_sha256(pinned["shocks"])
-    for headers, keys in ((steward, ["SC-LOAN-2"]), (analyst, [MASKED])):
-        r = api.get(f"{RUNS}/{funding['calculation_run_id']}", headers=headers)
-        assert r.status_code == 200 and ("SC-LOAN-2" in r.text) is (keys != [MASKED]), r.text
-        section = no_float(r.text)["manifest"]["scenario"]
-        assert section["shocks"][2]["selector"]["instrument_keys"] == keys, section
-        assert section["shocks_sha256"] == pinned["shocks_sha256"]
-        seen = api.get(f"{SCENARIOS}/{combined['scenario_id']}", headers=headers).json()
-        assert seen["versions"][0]["shocks"][2]["selector"]["instrument_keys"] == keys
-    monkeypatch.setattr(DomainService, "instrument_key_classes", real_classes)
+    # The double only changes what the real classes give: SC-LOAN-2 is internal unpatched.
+    assert real_key_classes(db, ["SC-LOAN-2"], "LOAN") == {"SC-LOAN-2": "internal"}
+    with monkeypatch.context() as patch:
+        patch.setattr(DomainService, "instrument_key_classes", confidential)
+        [funding] = [m for m in three["members"] if m["shock_subset"] == [3]]
+        [stored] = sql(db, "SELECT manifest->'scenario' AS s FROM calculation_run WHERE id = $1",
+                       uuid.UUID(funding["calculation_run_id"]))  # fmt: skip
+        pinned = no_float(stored["s"])
+        assert pinned["shocks"][2]["selector"]["instrument_keys"] == ["SC-LOAN-2"]  # stored clear
+        assert pinned["shocks_sha256"] == canonical_sha256(pinned["shocks"])
+        for headers, keys in ((steward, ["SC-LOAN-2"]), (analyst, [MASKED])):
+            r = api.get(f"{RUNS}/{funding['calculation_run_id']}", headers=headers)
+            assert r.status_code == 200 and ("SC-LOAN-2" in r.text) is (keys != [MASKED]), r.text
+            section = no_float(r.text)["manifest"]["scenario"]
+            assert section["shocks"][2]["selector"]["instrument_keys"] == keys, section
+            assert section["shocks_sha256"] == pinned["shocks_sha256"]
+            seen = api.get(f"{SCENARIOS}/{combined['scenario_id']}", headers=headers).json()
+            assert seen["versions"][0]["shocks"][2]["selector"]["instrument_keys"] == keys
 
     # --- comparison (BE-25.4) ------------------------------------------------------------------
     cpath = f"{SCENARIOS}/{combined['scenario_id']}/comparison"
@@ -768,15 +776,15 @@ def check_scenario_runs(
     assert {r["breaks_only_combined"] for c in lone.json()["currencies"] for r in c["rows"]} == {
         None
     }
-    # Largest changes: ranked by absolute net delta, clear deltas only.
+    # Largest changes: ranked by absolute net delta, clear deltas only. For risk_analyst every
+    # non-zero net delta of this fixture is masked, so its list is empty (stated, so that
+    # _check_largest(hidden) does not pass unnoticed on an empty list).
     _check_largest(clear)
     _check_largest(hidden)
+    assert clear["largest_changes"] and hidden["largest_changes"] == []
     # D-46 §3: B05 combined changed by 2 distinct flows (4 parts), fewer than the minimum: the
     # delta field is masked for risk_analyst and clear for data_steward, and every later
-    # cumulative delta of INR stays masked. This masks the delta field only: the same cell's
-    # baseline and stressed figures stay clear (each side is its own ladder, with enough
-    # flows), so the delta is still derivable as stressed - baseline (D-46 §5 residual risk,
-    # an open item; not protected by this assertion).
+    # cumulative delta of INR stays masked.
     hcells = _cells(hidden)
     b05 = hcells[("B05", (1, 2, 3))]
     assert b05["changed_flow_count"] == 2 and b05["net_gap"]["delta"] == MASKED
@@ -784,6 +792,49 @@ def check_scenario_runs(
     for code in ("B05", "B06"):  # the combined cumulative deltas from the masked net onward
         assert hcells[(code, (1, 2, 3))]["cumulative_gap"]["delta"] == MASKED, code
         assert not is_masked(cells[(code, (1, 2, 3))]["cumulative_gap"]["delta"]), code
+    # No masking by differencing (D-46 §3): the stressed run's own ladder classes mask a part
+    # changed by 0 < n < minimum distinct flows (even at zero), so a masked delta always has
+    # a masked side and stressed - baseline cannot give it back.
+    assert b05["net_gap"]["stressed"] == MASKED
+    for code in ("B05", "B06"):  # the stressed cumulative from the masked net onward
+        assert hcells[(code, (1, 2, 3))]["cumulative_gap"]["stressed"] == MASKED, code
+    for k, cell in hcells.items():
+        for f in FIGURES:
+            if is_masked(cell[f]["delta"]):
+                assert is_masked(cell[f]["baseline"]) or is_masked(cell[f]["stressed"]), (k, f)
+    # The leak this closes here: shock 1 alone moves parts of 2 loans out of B02, so B02's
+    # inflows delta is masked while its baseline (3 flows) is clear: the stressed side, 90
+    # before the fix, is now masked too.
+    b02 = hcells[("B02", (1,))]["inflows"]
+    assert (b02["baseline"], b02["stressed"], b02["delta"]) == ("100.00", MASKED, MASKED)
+    # The baseline side is unchanged: it reads exactly as the baseline run's own ladder, and
+    # each member's stressed side as the member run's ladder (one masking for every reader).
+    member_ids = {tuple(m["shock_subset"]): m["calculation_run_id"] for m in three["members"]}
+    reads = [(baseline_id, list(member_ids), "baseline")] + [
+        (run_id, [subset], "stressed") for subset, run_id in member_ids.items()
+    ]
+    for headers, view in ((analyst, hcells), (steward, cells)):
+        for run_id, subsets, side in reads:
+            page = no_float(api.get(f"{RUNS}/{run_id}/maturity-ladder", headers=headers).text)
+            [inr_rows] = page["currencies"]
+            for row, subset, f in itertools.product(inr_rows["rows"], subsets, FIGURES):
+                got = view[(row["bucket_code"], subset)][f][side]
+                assert got == row[f], (side, row["bucket_code"], subset, f)
+    # The combined run's own ladder: B05 net and the cumulative from B05 onward are masked for
+    # risk_analyst; data_steward reads every figure of the comparison and the ladder in clear.
+    for headers, hide in ((analyst, True), (steward, False)):
+        page = no_float(api.get(f"{RUNS}/{member_ids[(1, 2, 3)]}/maturity-ladder",
+                                headers=headers).text)  # fmt: skip
+        [inr_rows] = page["currencies"]
+        order = [row["bucket_code"] for row in inr_rows["rows"]]
+        got = {row["bucket_code"]: row for row in inr_rows["rows"]}
+        assert (got["B05"]["net_gap"] == MASKED) is hide
+        for code in order[order.index("B05") :]:
+            assert (got[code]["cumulative_gap"] == MASKED) is hide, code
+        if not hide:
+            assert not any(is_masked(v) for row in inr_rows["rows"] for v in row.values())
+    assert not any(is_masked(v) for cell in cells.values() for f in FIGURES
+                   for v in cell[f].values())  # fmt: skip
     contributions = api.get(
         f"{cpath}/contributions",
         params={**params, "shock_subset": [1, 2, 3], "limit": 500},
@@ -975,13 +1026,45 @@ def check_lcr_baseline(
 
 
 def clear_scenario_runs(db: str) -> None:
-    """Remove the four Phase 25 tables' rows and the Phase 24 scenarios this kit created
-    (their user triggers lifted for one transaction each), so the downgrade below 0027 can be
-    exercised on the older guards (0026 refuses while a scenario exists)."""
+    """Clears all scenario and scenario-run rows in the test DB; call only after every Phase
+    24/25 assertion in the function. (Their user triggers are lifted for one transaction each,
+    so the downgrade below 0027 can be exercised on the older guards: 0026 refuses while a
+    scenario exists.)"""
     from app.tests.conftest import _SCENARIO_CLEANUP, _SCENARIO_RUN_CLEANUP, script
 
     script(db, _SCENARIO_RUN_CLEANUP)
     script(db, _SCENARIO_CLEANUP)
+
+
+def real_key_classes(db: str, keys: list[str], instrument_type: str) -> dict[str, str]:
+    """`DomainService.instrument_key_classes` itself (no test double), in the default tenant."""
+    import asyncio
+
+    from app.core.principal import Principal
+    from app.db.session import Database
+    from app.domain.service import DomainService
+    from app.governance.constants import DEFAULT_TENANT_ID, Permission, Role
+
+    async def run() -> dict[str, str]:
+        database = Database(db)
+        principal = Principal(
+            user_id=uuid.uuid4(),
+            tenant_id=DEFAULT_TENANT_ID,
+            issuer="test",
+            subject="key-class-reader",
+            display_name="Key class reader (test)",
+            email=None,
+            roles=frozenset({Role.RISK_ANALYST.value}),
+            permissions=frozenset({Permission.DOMAIN_READ.value}),
+        )
+        try:
+            async with database.sessionmaker() as session:
+                service = DomainService(session, principal)
+                return await service.instrument_key_classes(keys, instrument_type)
+        finally:
+            await database.dispose()
+
+    return asyncio.run(run())
 
 
 def api_token(api: TestClient, role: str) -> dict[str, str]:

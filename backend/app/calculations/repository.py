@@ -307,6 +307,39 @@ class CalculationRepository(_Writes[CalculationRun]):
         )
         return [(r[0], r[1], r[2], r[3], int(r[4])) for r in result]
 
+    async def scenario_changed_counts(
+        self, run_id: uuid.UUID
+    ) -> list[tuple[str, str, str, str, int, tuple[str, ...]]]:
+        """Per currency, bucket code, direction and origin of a stressed run: the number of
+        DISTINCT changed non-zero flows there, and their classifications. A flow counts under
+        its bucket before and after, as in `scenario_changed` (D-46 §3: a stressed figure
+        changed by too few flows would give their amounts back as stressed - baseline)."""
+        sc = ScenarioContribution
+        result = await self.session.execute(
+            select(
+                sc.unit,
+                sc.bucket_code,
+                sc.original_bucket_code,
+                sc.direction,
+                sc.origin,
+                sc.cashflow_event_id,
+                sc.classification,
+            ).where(  # fmt: skip
+                sc.tenant_id == self.scope.tenant_id,
+                sc.calculation_run_id == run_id,
+                sc.change != "UNCHANGED",
+                sc.value != 0,
+            )
+        )
+        flows: dict[tuple[str, str, str, str], set[uuid.UUID]] = {}
+        codes: dict[tuple[str, str, str, str], set[str]] = {}
+        for unit, after, before, direction, origin, event_id, code in result.tuples():
+            for bucket in {after, before}:
+                key = (unit, bucket, direction, origin)
+                flows.setdefault(key, set()).add(event_id)
+                codes.setdefault(key, set()).add(code)
+        return [(*key, len(flows[key]), tuple(sorted(codes[key]))) for key in sorted(flows)]
+
     async def scenario_changed(
         self, run_id: uuid.UUID
     ) -> list[tuple[str, str, str, uuid.UUID, str]]:

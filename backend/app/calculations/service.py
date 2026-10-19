@@ -578,6 +578,7 @@ def ladder_classes(
     rows: Sequence[LiquidityGapResult],
     parts: Iterable[tuple[uuid.UUID, str, str, str, int]],
     minimum: int,
+    changed: Iterable[tuple[uuid.UUID, str, str, str, int]] = (),
 ) -> dict[uuid.UUID, dict[str, str]]:
     """D-33 minimum aggregation (CALC_MIN_AGGREGATE_COUNT, PROVISIONAL): the classification
     of every figure of every ladder row, for masking on read.
@@ -592,6 +593,12 @@ def ladder_classes(
       are derived from;
     - the cumulative gap carries the most sensitive classification so far in its currency,
       since it is derived from every earlier net gap.
+
+    A stressed run also passes `changed` (D-46 §3): per row, direction and origin, the
+    distinct changed non-zero flows (counted under their bucket before and after) and their
+    most sensitive classification. On top of the rule above, a part changed by 0 < count <
+    minimum flows takes that classification too, whatever its value (zero included), so
+    stressed - baseline cannot give back a delta the comparison masks.
     """
     counts: dict[tuple[uuid.UUID, str, str], tuple[int, str]] = {}
     for row_id, direction, origin, code, n in parts:
@@ -599,6 +606,11 @@ def ladder_classes(
         if known is not None:
             n, code = n + known[0], most_sensitive([code, known[1]])
         counts[(row_id, direction, origin)] = (n, code)
+    few = {
+        (row_id, direction, origin): code
+        for row_id, direction, origin, code, n in changed
+        if 0 < n < minimum
+    }
     classes: dict[uuid.UUID, dict[str, str]] = {}
     carried: dict[str, str] = {}
     for row in sorted(rows, key=lambda r: (r.currency, r.bucket_sequence)):
@@ -606,6 +618,8 @@ def ladder_classes(
         for name, (direction, origin) in LADDER_PARTS.items():
             n, code = counts.get((row.id, direction, origin), (0, row.classification))
             mine[name] = code if 0 < n < minimum else row.classification
+            if (row.id, direction, origin) in few:
+                mine[name] = most_sensitive([mine[name], few[(row.id, direction, origin)]])
         mine["inflows"] = most_sensitive([mine["inflows_contractual"], mine["inflows_behavioural"]])
         mine["outflows"] = most_sensitive(
             [mine["outflows_contractual"], mine["outflows_behavioural"]]
@@ -2416,17 +2430,25 @@ class CalculationService:
             )
         version_id = uuid.UUID(pinned[0]["rule_version_id"])
         rows = await self.repo.gap_rows(run.id)
-        parts = (  # D-46 §3: a stressed run counts distinct flows, not parts
-            await self.repo.scenario_part_counts(run.id)
-            if is_stressed(run)
-            else await self.repo.part_counts(run.id)
-        )
+        changed: list[tuple[uuid.UUID, str, str, str, int]] = []
+        if is_stressed(run):  # D-46 §3: a stressed run counts distinct flows, not parts
+            parts = await self.repo.scenario_part_counts(run.id)
+            # ... and masks a part changed by too few flows, so that stressed - baseline does
+            # not give back the delta the comparison masks (whoever reads the stressed run).
+            row_ids = {(r.currency, r.bucket_code): r.id for r in rows}
+            found = await self.repo.scenario_changed_counts(run.id)
+            for unit, bucket, direction, origin, n, codes in found:
+                row_id = row_ids.get((unit, bucket))
+                if row_id is not None:
+                    changed.append((row_id, direction, origin, most_sensitive(codes), n))
+        else:
+            parts = await self.repo.part_counts(run.id)
         return LadderView(
             row,
             version_id,
             await self.rules.bucket_definitions(version_id),
             rows,
-            ladder_classes(rows, parts, min_aggregate_count),
+            ladder_classes(rows, parts, min_aggregate_count, changed),
             min_aggregate_count,
         )
 

@@ -3199,6 +3199,9 @@ Goal: a risk analyst runs a confirmed (exploration) or approved scenario against
 This is the engine the agent will drive, and it works without AI.
 
 **Start after Phase 21 merges** (see Dependencies).
+*Note (2026-10-19):* the user chose to build Phase 25 before Phase 21. So, per the existing
+Dependencies bullet, the Phase 21 merge hands its `calculations/service.py` conflict to the
+backend engineer (Phase 25 report, Q6).
 
 - [x] **BE-25.1** Migration 0027:
   - `scenario_run` (append-only);
@@ -3307,7 +3310,7 @@ This is the engine the agent will drive, and it works without AI.
     `check_lcr_baseline` (:958-974, called at `test_calculations.py:1404`); re-runs after
     CLOSED :940-950. WS1: `test_ws1_verification.py:351-371` (matrix), :743 and :963-969
     (AUDITED). Same passing runs as BE-25.1; WS1 `4 passed`.
-- [ ] **BE-25.4** Comparison reads (D-46): `GET scenario-runs`, `GET scenarios/{scenario_id}/comparison`
+- [x] **BE-25.4** Comparison reads (D-46): `GET scenario-runs`, `GET scenarios/{scenario_id}/comparison`
   and `…/comparison/contributions`. They return exact decimal text, columns per shock and
   combined, `breaks_only_combined`, the largest changes, the templated summary and the D-44 §8
   statement with the approval label.
@@ -3324,21 +3327,20 @@ This is the engine the agent will drive, and it works without AI.
       - the largest changes are ranked over clear deltas only;
       - a delta built from fewer than `CALC_MIN_AGGREGATE_COUNT` **distinct** changed flows is
         masked for risk_analyst and clear for data_steward, even when it has three or more
-        parts, and the cumulative deltas after it stay masked;
+        parts, and the cumulative deltas after it stay masked. The cell's **stressed** figure
+        is masked the same way, even at zero, and so is the same figure in the stressed run's
+        own `GET …/maturity-ladder` (per row and per direction × origin part, with the
+        cumulative carry). Baseline figures are unchanged (amended 2026-10-19, D-46
+        amendment R1, auto-resolved);
       - drill-down amounts are masked for risk_analyst, while days, buckets and templates are
         clear;
       - each drill-down row resolves to its `scenario_contribution` and its source row;
       - the templated summary cites only clear figures.
-  - *Not ticked (2026-10-19):* each listed assertion exists and passes
-    (`scenario_run_kit.py:720-875`; `test_ws1_verification.py:361-371`, :430, :496-510). But
-    the open review MEDIUM (a few-flows delta is masked while its own baseline and stressed
-    figures are clear in the same cell, so it can be recovered by differencing) may change the
-    masking this task asserts. Tick once the decision-resolver has ruled and any fix has been
-    re-run.
+  - *Evidence (2026-10-19):* R1 fix in the stressed run's ladder classification (`calculations/service.py` `ladder_classes(..., changed)`, `repository.py` `scenario_changed_counts`); kit asserts every masked delta has a masked side, B02 `{1}` inflows `(100.00, MASKED, MASKED)`, the combined ladder masks B05 net and the cumulative onward, and data_steward sees all in clear (`scenario_run_kit.py:720-905`); disabling the fix fails at `scenario_run_kit.py:804`. Full backend suite `49 passed` on the merged tree.
 - *Note (Phase 24 report, Q16):* the scenario Close action UI (a hide, with the D-47 §1
   permission split shown cosmetically) is not in Phase 24 or 25 FE scope; it is an
   unscheduled follow-up. The route exists and is tested (BE-24.3).
-- [ ] **FE-25.1** A "Run against baseline" panel on a CONFIRMED_FOR_EXPLORATION or
+- [x] **FE-25.1** A "Run against baseline" panel on a CONFIRMED_FOR_EXPLORATION or
   APPROVED_FOR_TEST version:
   - a baseline picker (succeeded, non-stressed `maturity_ladder` runs);
   - the validation dry run, showing the match counts per shock, with run disabled while any
@@ -3355,13 +3357,8 @@ This is the engine the agent will drive, and it works without AI.
       SUCCEEDED_WITH_WARNINGS (never FAILED or BLOCKED; amended 2026-10-19, Phase 25 report
       Q22, auto-resolved), and the run list shows the exploration badge;
     - a vitest covers the picker's filter and the zero-match state.
-  - *Not ticked (2026-10-19):* both Done-when checks pass (`e2e/scenario-run.spec.ts:94` and
-    :184, `5 passed (12.6s)` on `moodymate_e2e_p25fefix`; `scenario-run.test.ts:148-247`). Still
-    missing is the Q23 ruling's frontend half: the picker still calls `GET /calculation-runs`
-    without `stressed=false` (`scenario-runs.ts:76`), so a client-side-only filter can push
-    real baselines out of the 200-run page. Fix: pass `stressed: false`, keep the client filter
-    as a defence, then re-run the vitest and both Phase 25 specs.
-- [ ] **FE-25.2** The comparison view (`NEXT_PUBLIC_STRESS_COMPARE_UI`):
+  - *Evidence (2026-10-19):* `fetchBaselines` passes `stressed: false` and keeps the client filter (`scenario-runs.ts:76`); `scenario-run.test.ts` updated; `e2e/scenario-run.spec.ts:94`, :184 pass; vitest 618 passed.
+- [x] **FE-25.2** The comparison view (`NEXT_PUBLIC_STRESS_COMPARE_UI`):
   - a currency × bucket table and heat map of net and cumulative deltas, with inflows and
     outflows on expand;
   - columns for each shock alone and for the combined run;
@@ -3377,15 +3374,7 @@ This is the engine the agent will drive, and it works without AI.
       two runs' ladder rows, and a drill-down row leads to its source row;
     - a vitest covers masked deltas, `null` flags and the combined-only highlight;
     - with the switch off, the Phase 24 UI is restored.
-  - *Not ticked (2026-10-19):* both Done-when checks pass (`e2e/scenario-compare.spec.ts:98`,
-    `5 passed`; `comparison.test.ts:145-389`). But the Q12 backend fix changed what a `null`
-    `breaks_only_combined` means: it can now also mean "not assessable" (k = 1, or a single-shock
-    member not compared). `ComparisonView.tsx:254-256` still shows every `null` as
-    "combined-only: masked", and `comparison.ts:213` and the test at
-    `comparison.test.ts:252` say the same. So every single-shock scenario is shown as masked.
-    Fix: show "not assessable" when no masked figure is involved, or a neutral "unknown" with
-    both reasons. Update the comment and the vitest, then re-run `scenario-compare.spec.ts`
-    against the fixed backend.
+  - *Evidence (2026-10-19):* `combinedOnlyUnknown` distinguishes masked, not assessable and one-shock (`comparison.ts`, `ComparisonView.tsx` `data-reason`); `comparison.test.ts` covers all three; `e2e/scenario-compare.spec.ts:98` passes; vitest 618 passed.
 
 *Test budget:* 49 → 49 (folded).
 *Reversibility:* additive tables. The downgrade refuses while stressed runs exist.
