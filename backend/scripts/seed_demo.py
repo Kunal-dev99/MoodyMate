@@ -2,10 +2,13 @@
 
 Populates a running LOCAL backend so every page has something to show:
 
-1. Projected data: the synthetic instrument, position and cash-flow samples, each through its
-   own source and ACTIVE mapping (data_steward maps, approver approves), validated and
-   projected into the domain.
-2. Credit data: the synthetic counterparty and credit-exposure samples, the same way.
+1. Projected data: the synthetic instrument, position and cash-flow samples, each with an
+   ACTIVE mapping (data_steward maps, approver approves), validated and projected into the
+   domain. Instruments and cash flows share the source "Core banking instruments (demo)"
+   (contract v1 instrument, v2 cashflow_event): an instrument lists only the cash flows of its
+   own source (D-29 §3). Positions come from "Positions (demo)".
+2. Credit data: the synthetic counterparty and credit-exposure samples, the same way, from
+   "Counterparty master (demo)" and "Credit exposures (demo)".
 3. Obligor ratings: one proposed by risk_analyst and approved by approver (ACTIVE), and one
    left IN_REVIEW for the Ratings review queue.
 4. Calculations: a dataset snapshot of the projected instrument, position and cash-flow
@@ -18,8 +21,9 @@ Populates a running LOCAL backend so every page has something to show:
      approver (the Shared library).
 
 Every step goes through the public API as the seeded dev users (no SQL), so permissions,
-maker-checker and audit apply exactly as in the UI. Re-running is safe: finished steps are
-skipped and a half-finished one is moved on from where it stopped.
+maker-checker and audit apply exactly as in the UI. Sources and mappings have stable codes
+(demo_instruments, demo_cashflows, ...). Re-running is safe: finished steps are skipped and a
+half-finished one is moved on from where it stopped.
 
 Refused unless the backend config is ENV=local with synthetic data (D-13, D-14): dev sessions
 exist only in local/test, and test databases are disposable (D-03).
@@ -30,11 +34,13 @@ Usage (from backend/, with the backend running):
 
 import argparse
 import csv
+import io
 import json
 import sys
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -51,7 +57,6 @@ XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 REPORTING_DATE = "2026-12-20"
 CALC_MODULES = ("maturity_ladder", "lcr_hqla")
 SUCCEEDED = ("SUCCEEDED", "SUCCEEDED_WITH_WARNINGS")
-SNAPSHOT_SCHEMAS = ("instrument", "position", "cashflow_event")
 
 LOAN_DELAY = {
     "template": "DELAYED_INFLOWS",
@@ -113,16 +118,26 @@ def _new_key() -> str:
 
 
 @dataclass(frozen=True)
-class Sample:
-    """A synthetic sample file and the schema it lands in."""
+class Source:
+    """A demo source, found again by its stable code on a re-run."""
 
     code: str
-    file: str
+    name: str
     fmt: str
     mime: str
+    owner: str
+
+
+@dataclass(frozen=True)
+class Feed:
+    """A synthetic sample file, the schema it lands in and the mapping that maps it."""
+
+    schema: str
+    file: str
     key: str
     columns: tuple[str, ...]
-    owner: str
+    mapping_code: str
+    mapping_name: str
 
 
 def _csv_columns(file: str) -> tuple[str, ...]:
@@ -136,32 +151,41 @@ def _json_columns(file: str) -> tuple[str, ...]:
     return tuple(json.loads((SAMPLES / file).read_text())["records"][0])
 
 
-POSITION = Sample(
-    "position", "position.xlsx", "XLSX", XLSX, "position_id",
+CSV, TREASURY, CREDIT = "text/csv", "Treasury data team (demo)", "Credit data team (demo)"
+
+# Instruments and their cash flows share one source: the instrument detail lists the cash flows
+# of its own source only (a business key is unique per source, D-29 §3).
+CORE = Source("demo_instruments", "Core banking instruments (demo)", "CSV", CSV, TREASURY)
+POSITIONS = Source("demo_positions", "Positions (demo)", "XLSX", XLSX, TREASURY)
+COUNTERPARTIES = Source("demo_counterparties", "Counterparty master (demo)", "CSV", CSV, CREDIT)
+EXPOSURES = Source("demo_credit_exposures", "Credit exposures (demo)", "CSV", CSV, CREDIT)
+
+INSTRUMENT = Feed(
+    "instrument", "instrument.csv", "instrument_id", _csv_columns("instrument.csv"),
+    "demo_instruments", "Core banking instruments (demo)",
+)  # fmt: skip
+CASHFLOW = Feed(
+    "cashflow_event", "cashflow_event.json", "cashflow_id", _json_columns("cashflow_event.json"),
+    "demo_cashflows", "Cash-flow schedule (demo)",
+)  # fmt: skip
+POSITION = Feed(
+    "position", "position.xlsx", "position_id",
     ("position_id", "instrument_id", "account_id", "legal_entity_id", "as_of_date",
      "quantity", "balance", "currency", "valuation_date"),
-    "Treasury data team (demo)",
+    "demo_positions", "Positions (demo)",
 )  # fmt: skip
-CASHFLOW = Sample(
-    "cashflow_event", "cashflow_event.json", "JSON", "application/json", "cashflow_id",
-    _json_columns("cashflow_event.json"), "Treasury data team (demo)",
+COUNTERPARTY = Feed(
+    "counterparty", "counterparty.csv", "counterparty_id", _csv_columns("counterparty.csv"),
+    "demo_counterparties", "Counterparty master (demo)",
 )  # fmt: skip
-COUNTERPARTY = Sample(
-    "counterparty", "counterparty.csv", "CSV", "text/csv", "counterparty_id",
-    _csv_columns("counterparty.csv"), "Credit data team (demo)",
-)  # fmt: skip
-CREDIT_EXPOSURE = Sample(
-    "credit_exposure", "credit_exposure.csv", "CSV", "text/csv", "exposure_id",
-    _csv_columns("credit_exposure.csv"), "Credit data team (demo)",
+CREDIT_EXPOSURE = Feed(
+    "credit_exposure", "credit_exposure.csv", "exposure_id", _csv_columns("credit_exposure.csv"),
+    "demo_credit_exposures", "Credit exposures (demo)",
 )  # fmt: skip
 
-
-def _projected_import(api: Api, schema_code: str) -> str | None:
-    """The newest projected import of a schema, if any."""
-    found = api.items(
-        "data_steward", "/api/v1/imports", schema_code=schema_code, projected="true", limit=1
-    )
-    return str(found[0]["id"]) if found else None
+# Imports that can still be validated, or are validated and only wait for projection.
+PENDING = ("RECEIVED", "MAPPING_REQUIRED", "COMPLETED", "COMPLETED_WITH_WARNINGS")
+VALIDATED = ("COMPLETED", "COMPLETED_WITH_WARNINGS")
 
 
 def _schema(api: Api, code: str) -> dict[str, Any]:
@@ -172,27 +196,119 @@ def _schema(api: Api, code: str) -> dict[str, Any]:
     return schema
 
 
-def _create_source(
-    api: Api, code: str, name: str, profile: dict[str, Any], contract: dict[str, Any]
-) -> dict[str, Any]:
-    body = {"code": code, "name": name, "kind": "FILE_DROP", "profile": profile}
-    source: dict[str, Any] = api.post(
-        "data_steward", "/api/v1/sources", body | {"contract": contract}, 201
+def _find_source(api: Api, code: str) -> dict[str, Any] | None:
+    sources = api.items("data_steward", "/api/v1/sources", limit=200)
+    return next((s for s in sources if s["code"] == code), None)
+
+
+def _contract_for(api: Api, feed: Feed) -> dict[str, Any]:
+    """The instrument contract copies the seeded core_banking one; the others list the
+    sample's columns, all required."""
+    if feed.schema == "instrument":
+        core = _find_source(api, "core_banking")
+        if not core or not core.get("current_contract"):
+            raise SeedError("the seeded core_banking source is missing: run `alembic upgrade head`")
+        keep = ("schema_id", "expected_columns", "business_key_columns", "control_total_columns")
+        return {k: core["current_contract"][k] for k in keep}
+    return {
+        "schema_id": _schema(api, feed.schema)["id"],
+        "expected_columns": [{"name": c, "required": True} for c in feed.columns],
+        "business_key_columns": [feed.key],
+        "control_total_columns": [],
+    }
+
+
+def _projected_import(api: Api, schema_code: str, source_id: str) -> str | None:
+    """The newest projected import of a schema from a source, if any."""
+    found = api.items(
+        "data_steward",
+        "/api/v1/imports",
+        source_id=source_id,
+        schema_code=schema_code,
+        projected="true",
+        limit=1,
     )
-    return source
+    return str(found[0]["id"]) if found else None
 
 
-def _upload(api: Api, source_id: str, file: str, mime: str) -> dict[str, Any]:
+def _ensure_source(api: Api, src: Source, feed: Feed) -> dict[str, Any]:
+    """The source by its code, created (with this feed's contract) if absent."""
+    found = _find_source(api, src.code)
+    if found is not None:
+        return found
+    profile = {
+        "format": src.fmt,
+        "encoding": "UTF-8",
+        "owner": src.owner,
+        "default_classification": "confidential",
+    }
+    body = {"code": src.code, "name": src.name, "kind": "FILE_DROP", "profile": profile}
+    created: dict[str, Any] = api.post(
+        "data_steward", "/api/v1/sources", body | {"contract": _contract_for(api, feed)}, 201
+    )
+    print(f"  source {src.code} ({src.name!r}) created")
+    return created
+
+
+def _ensure_contract(api: Api, source: dict[str, Any], feed: Feed) -> dict[str, Any]:
+    """The source's current contract when it targets the feed's schema, else a new contract
+    version that does (the earlier version is SUPERSEDED, never edited)."""
+    current: dict[str, Any] | None = source.get("current_contract")
+    if current is not None and current["schema_code"] == feed.schema:
+        return current
+    body = _contract_for(api, feed) | {
+        "change_summary": f"Demo seed: this source now also delivers {feed.schema} files."
+    }
+    added: dict[str, Any] = api.post(
+        "data_steward", f"/api/v1/sources/{source['id']}/contracts", body, 201
+    )
+    print(f"  source {source['code']}: contract v{added['version']} for {feed.schema}")
+    return added
+
+
+def _file(feed: Feed, src: Source) -> tuple[str, bytes]:
+    """The sample as the source's format delivers it. The JSON cash-flow sample goes to the
+    CSV instrument source as the same records in CSV, under the D-24 marker line."""
+    path = SAMPLES / feed.file
+    if path.suffix.lstrip(".").upper() == src.fmt:
+        return feed.file, path.read_bytes()
+    if path.suffix != ".json" or src.fmt != "CSV":
+        raise SeedError(f"no conversion of {feed.file} to {src.fmt}")
+    sample = json.loads(path.read_text(encoding="utf-8"), parse_float=Decimal)
+    out = io.StringIO()
+    out.write(f"# {sample['marker']}\n")
+    writer = csv.writer(out, lineterminator="\n")
+    writer.writerow(feed.columns)
+    writer.writerows([record[c] for c in feed.columns] for record in sample["records"])
+    return f"{path.stem}.csv", out.getvalue().encode("utf-8")
+
+
+def _upload(api: Api, source_id: str, name: str, data: bytes, mime: str) -> dict[str, Any]:
     headers = api.auth("data_steward") | {"Idempotency-Key": _new_key()}
-    with (SAMPLES / file).open("rb") as fh:
-        r = api.http.post(
-            "/api/v1/imports",
-            headers=headers,
-            data={"source_id": source_id, "synthetic_attested": "true"},
-            files={"file": (file, fh, mime)},
-        )
+    r = api.http.post(
+        "/api/v1/imports",
+        headers=headers,
+        data={"source_id": source_id, "synthetic_attested": "true"},
+        files={"file": (name, data, mime)},
+    )
     upload: dict[str, Any] = api.check(r, 201).json()
     return upload
+
+
+def _pending_import(api: Api, source_id: str, feed: Feed, contract_id: str) -> dict[str, Any]:
+    """An unprojected import of this contract left by an interrupted run, if any."""
+    found = api.items(
+        "data_steward",
+        "/api/v1/imports",
+        source_id=source_id,
+        schema_code=feed.schema,
+        projected="false",
+        limit=50,
+    )
+    return next(
+        (i for i in found if i["source_contract_id"] == contract_id and i["status"] in PENDING),
+        {},
+    )
 
 
 def _same_name_rules(api: Api, upload: dict[str, Any], columns: tuple[str, ...]) -> list[Any]:
@@ -236,111 +352,99 @@ def _instrument_rules() -> list[dict[str, Any]]:
     ]
 
 
-def _activate_mapping(
-    api: Api, contract_id: str, import_id: str, code: str, rules: list[Any]
+def _ensure_mapping(
+    api: Api, source_id: str, contract_id: str, upload: dict[str, Any], feed: Feed
 ) -> None:
-    """Create a mapping, dry-run it on the import, submit (steward) and approve (approver)."""
-    body = {"code": code, "name": f"{code} (demo)", "source_contract_id": contract_id}
-    created = api.post("data_steward", "/api/v1/mappings", body | {"rules": rules}, 201)
-    version = created["versions"][0]
-    dry = api.post(
-        "data_steward",
-        f"/api/v1/imports/{import_id}/mappings/validate",
-        {"mapping_version_id": version["id"]},
-        201,
-    )
-    if not dry["ok"]:
-        raise SeedError(f"mapping {code} dry run failed: {json.dumps(dry)}")
+    """The feed's mapping by code, created if absent, then moved on to ACTIVE: dry run on the
+    import and submit (steward), approve (approver)."""
+    found = api.items("data_steward", "/api/v1/mappings", source_id=source_id, limit=200)
+    hit = next((m for m in found if m["code"] == feed.mapping_code), None)
+    if hit is None:
+        rules = (
+            _instrument_rules()
+            if feed.schema == "instrument"
+            else _same_name_rules(api, upload, feed.columns)
+        )
+        body = {
+            "code": feed.mapping_code,
+            "name": feed.mapping_name,
+            "source_contract_id": contract_id,
+            "rules": rules,
+        }
+        version = api.post("data_steward", "/api/v1/mappings", body, 201)["versions"][0]
+        print(f"  mapping {feed.mapping_code} ({feed.mapping_name!r}) created")
+    else:
+        if hit["source_contract_id"] != contract_id:
+            raise SeedError(
+                f"mapping {feed.mapping_code} maps contract v{hit['contract_version']}, not the "
+                "source's current one: reset the demo database and seed again"
+            )
+        if hit["active_version"] is not None:
+            return
+        detail = api.get("data_steward", f"/api/v1/mappings/{hit['id']}")
+        version = max(detail["versions"], key=lambda v: int(v["version"]))
     base = f"/api/v1/mappings/{version['mapping_id']}/versions/{version['version']}"
-    api.post("data_steward", f"{base}/submit", {}, 200)
-    api.post("approver", f"{base}/approval", {"decision": "APPROVE"}, 200)
+    status = version["status"]
+    if status == "DRAFT":
+        dry = api.post(
+            "data_steward",
+            f"/api/v1/imports/{upload['id']}/mappings/validate",
+            {"mapping_version_id": version["id"]},
+            201,
+        )
+        if not dry["ok"]:
+            raise SeedError(f"mapping {feed.mapping_code} dry run failed: {json.dumps(dry)}")
+        status = api.post("data_steward", f"{base}/submit", {}, 200)["status"]
+    if status == "IN_REVIEW":
+        status = api.post("approver", f"{base}/approval", {"decision": "APPROVE"}, 200)["status"]
+    if status != "ACTIVE":
+        raise SeedError(f"mapping {feed.mapping_code} v{version['version']} is {status}")
 
 
-def _validate_and_project(api: Api, import_id: str) -> int:
-    job = api.post("data_steward", f"/api/v1/imports/{import_id}/validate", {}, 200)
-    if job["status"] not in ("COMPLETED", "COMPLETED_WITH_WARNINGS"):
-        raise SeedError(f"import {import_id} validated as {job['status']}")
+def _validate_and_project(api: Api, upload: dict[str, Any]) -> int:
+    import_id = upload["id"]
+    if upload["status"] not in VALIDATED:
+        job = api.post("data_steward", f"/api/v1/imports/{import_id}/validate", {}, 200)
+        if job["status"] not in VALIDATED:
+            raise SeedError(f"import {import_id} validated as {job['status']}")
     projection = api.post("data_steward", f"/api/v1/imports/{import_id}/projection", {}, 201)
     return int(projection["projected_count"])
 
 
-def _project_instruments(api: Api, stamp: str) -> None:
-    """instrument.csv on a source whose contract copies the seeded core_banking one."""
-    if _projected_import(api, "instrument"):
-        print("  instrument: already projected, skipped")
+def project(api: Api, src: Source, feed: Feed) -> None:
+    """One sample through its source: contract, import, ACTIVE mapping, validate, project.
+    A step already done is reused, so a re-run creates nothing."""
+    source = _ensure_source(api, src, feed)
+    if _projected_import(api, feed.schema, source["id"]):
+        print(f"  {feed.schema} via {src.code}: already projected, skipped")
         return
-    sources = api.items("data_steward", "/api/v1/sources", limit=200)
-    core = next((s for s in sources if s["code"] == "core_banking"), None)
-    if not core or not core.get("current_contract"):
-        raise SeedError("the seeded core_banking source is missing: run `alembic upgrade head`")
-    contract, profile = core["current_contract"], core["profile"]
-    keep_profile = ("format", "encoding", "delimiter", "owner", "default_classification")
-    keep_contract = (
-        "schema_id", "expected_columns", "business_key_columns", "control_total_columns",
-    )  # fmt: skip
-    code = f"{PREFIX}_instr_{stamp}"
-    source = _create_source(
-        api,
-        code,
-        "Instruments (demo seed)",
-        {k: profile[k] for k in keep_profile if k in profile},
-        {k: contract[k] for k in keep_contract},
-    )
-    upload = _upload(api, source["id"], "instrument.csv", "text/csv")
-    contract_id = source["current_contract"]["id"]
-    _activate_mapping(api, contract_id, upload["id"], code, _instrument_rules())
-    print(f"  instrument: {_validate_and_project(api, upload['id'])} projected")
-
-
-def _project_sample(api: Api, sample: Sample, stamp: str) -> None:
-    """A sample on its own source (contract = the file's columns) and same-name mapping."""
-    if _projected_import(api, sample.code):
-        print(f"  {sample.code}: already projected, skipped")
-        return
-    code = f"{PREFIX}_{sample.code}_{stamp}"
-    source = _create_source(
-        api,
-        code,
-        f"{sample.code} (demo seed)",
-        {
-            "format": sample.fmt,
-            "encoding": "UTF-8",
-            "owner": sample.owner,
-            "default_classification": "confidential",
-        },
-        {
-            "schema_id": _schema(api, sample.code)["id"],
-            "expected_columns": [{"name": c, "required": True} for c in sample.columns],
-            "business_key_columns": [sample.key],
-            "control_total_columns": [],
-        },
-    )
-    upload = _upload(api, source["id"], sample.file, sample.mime)
-    if upload["schema_code"] != sample.code:
-        raise SeedError(f"{sample.file} landed in {upload['schema_code']}, not {sample.code}")
-    rules = _same_name_rules(api, upload, sample.columns)
-    _activate_mapping(api, source["current_contract"]["id"], upload["id"], code, rules)
-    print(f"  {sample.code}: {_validate_and_project(api, upload['id'])} projected")
+    contract = _ensure_contract(api, source, feed)
+    upload = _pending_import(api, source["id"], feed, contract["id"])
+    if not upload:
+        name, data = _file(feed, src)
+        upload = _upload(api, source["id"], name, data, src.mime)
+        if upload["schema_code"] != feed.schema:
+            raise SeedError(f"{name} landed in {upload['schema_code']}, not {feed.schema}")
+    _ensure_mapping(api, source["id"], contract["id"], upload, feed)
+    count = _validate_and_project(api, upload)
+    print(f"  {feed.schema} via {src.code}: {count} projected")
 
 
 # --- 1. projected market data ------------------------------------------------------------------
 
 
-def seed_projected_data(api: Api, stamp: str) -> None:
-    _project_instruments(api, stamp)
-    _project_sample(api, POSITION, stamp)
-    _project_sample(api, CASHFLOW, stamp)
+def seed_projected_data(api: Api) -> None:
+    project(api, CORE, INSTRUMENT)
+    project(api, POSITIONS, POSITION)
+    project(api, CORE, CASHFLOW)  # after the instruments: a new contract version on CORE
 
 
 # --- 2. credit data ---------------------------------------------------------------------------
 
 
-def seed_credit_data(api: Api, stamp: str) -> None:
-    if api.get("data_steward", "/api/v1/counterparties", limit=1)["total"] > 0:
-        print("  counterparties already present, skipped")
-        return
-    _project_sample(api, COUNTERPARTY, stamp)
-    _project_sample(api, CREDIT_EXPOSURE, stamp)
+def seed_credit_data(api: Api) -> None:
+    project(api, COUNTERPARTIES, COUNTERPARTY)
+    project(api, EXPOSURES, CREDIT_EXPOSURE)
 
 
 # --- 3. obligor ratings -----------------------------------------------------------------------
@@ -390,26 +494,33 @@ def seed_ratings(api: Api) -> None:
 # --- 4. calculations --------------------------------------------------------------------------
 
 
-def _succeeded_run(api: Api, module_code: str) -> dict[str, Any] | None:
-    for status in SUCCEEDED:
-        path = "/api/v1/calculation-runs"
-        runs = api.items("risk_analyst", path, module_code=module_code, status=status, limit=1)
-        if runs:
-            return runs[0]
-    return None
-
-
 def _snapshot(api: Api) -> str:
-    """One snapshot of the newest projected import per schema (the server reuses a match)."""
+    """One snapshot of the projected instrument, position and cash-flow imports of the demo
+    sources (the server returns an equal existing snapshot instead of a new one)."""
     import_ids = []
-    for code in SNAPSHOT_SCHEMAS:
-        import_id = _projected_import(api, code)
+    for src, feed in ((CORE, INSTRUMENT), (POSITIONS, POSITION), (CORE, CASHFLOW)):
+        source = _find_source(api, src.code)
+        import_id = _projected_import(api, feed.schema, source["id"]) if source else None
         if import_id is None:
-            raise SeedError(f"no projected {code} import to snapshot")
+            raise SeedError(f"no projected {feed.schema} import from {src.code} to snapshot")
         import_ids.append(import_id)
     snapshot = api.post("risk_analyst", "/api/v1/dataset-snapshots", {"import_ids": import_ids})
     print(f"  snapshot {snapshot['snapshot_id']}: {len(snapshot['members'])} imports")
     return str(snapshot["snapshot_id"])
+
+
+def _succeeded_run(api: Api, module_code: str, snapshot_id: str) -> dict[str, Any] | None:
+    """A finished run of the module on this snapshot and reporting date, if any."""
+    for status in SUCCEEDED:
+        path = "/api/v1/calculation-runs"
+        runs = api.items("risk_analyst", path, module_code=module_code, status=status, limit=200)
+        pins = (snapshot_id, REPORTING_DATE)
+        hit = next(
+            (r for r in runs if (r["dataset_snapshot_id"], r["reporting_date"]) == pins), None
+        )
+        if hit is not None:
+            return hit
+    return None
 
 
 def _module_version(api: Api, code: str) -> str:
@@ -435,13 +546,12 @@ def _run_contents(api: Api, run: dict[str, Any]) -> str:
 
 
 def seed_calculations(api: Api) -> None:
-    snapshot_id: str | None = None
+    snapshot_id = _snapshot(api)
     for code in CALC_MODULES:
-        run = _succeeded_run(api, code)
+        run = _succeeded_run(api, code, snapshot_id)
         if run is not None:
             print(f"  {code}: run {run['run_id']} already {run['status']}, skipped")
             continue
-        snapshot_id = snapshot_id or _snapshot(api)
         body = {
             "dataset_snapshot_id": snapshot_id,
             "module_version_id": _module_version(api, code),
@@ -570,10 +680,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"The backend is not reachable at {args.api} ({exc}).", file=sys.stderr)
         return 1
 
-    stamp = uuid.uuid4().hex[:8]
     steps: tuple[tuple[str, Callable[[], None]], ...] = (
-        ("Projected synthetic data", lambda: seed_projected_data(api, stamp)),
-        ("Credit data", lambda: seed_credit_data(api, stamp)),
+        ("Projected synthetic data", lambda: seed_projected_data(api)),
+        ("Credit data", lambda: seed_credit_data(api)),
         ("Obligor ratings", lambda: seed_ratings(api)),
         (f"Calculations (reporting date {REPORTING_DATE})", lambda: seed_calculations(api)),
         ("Scenarios", lambda: seed_scenarios(api)),
