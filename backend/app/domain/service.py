@@ -719,6 +719,36 @@ class DomainService:
     ) -> list[tuple[InstrumentVersion, str]]:
         return await self.repo.instrument_versions_by_id(ids)
 
+    async def instrument_key_classes(
+        self, keys: Sequence[str], instrument_type: str | None = None
+    ) -> dict[str, str]:
+        """Business key -> the classification of its `instrument_id` field, for the tenant's
+        instruments with that key (any source) and, when given, a version of
+        `instrument_type` (the GET /instruments filter). Each instrument is classified by its
+        latest version's pinned schema, as the catalogue masks it; a key held by several
+        instruments takes the most sensitive code. A key that matches nothing is absent."""
+        versions: dict[uuid.UUID, list[InstrumentVersion]] = {}
+        for v in await self.repo.instrument_versions_by_key(sorted(set(keys))):
+            versions.setdefault(v.instrument_id, []).append(v)
+        if instrument_type is not None:
+            versions = {
+                i: vs
+                for i, vs in versions.items()
+                if any(v.instrument_type_code == instrument_type for v in vs)
+            }
+        if not versions:
+            return {}
+        pins = await self._pins()
+        out: dict[str, str] = {}
+        for instrument in await self.repo.instruments_by_id(list(versions)):
+            latest = versions[instrument.id][-1]
+            code = pins.classes(latest.schema_version_id).get("instrument_id", UNCLASSIFIED)
+            seen = out.get(instrument.business_key)
+            rank = len(_CLASS_RANK)
+            if seen is None or _CLASS_RANK.get(code, rank) > _CLASS_RANK.get(seen, rank):
+                out[instrument.business_key] = code
+        return out
+
     async def instrument(self, instrument_id: uuid.UUID) -> InstrumentView:
         """One instrument with its versions, attributes and cash flows: 404 alike for an
         absent and a foreign id (D-04)."""

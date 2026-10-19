@@ -6,7 +6,7 @@ import { EnvironmentBanner } from '@/components/layout/EnvironmentBanner'
 import { Header } from '@/components/layout/header'
 import { Sidebar, type NavItem } from '@/components/layout/sidebar'
 import { ThemeToggle } from '@/components/layout/ThemeToggle'
-import { adminWorkspaces, mainWorkspaces, type Workspace } from '@/config/navigation'
+import { adminWorkspaces, advancedWorkspaces, mainWorkspaces, type Workspace } from '@/config/navigation'
 
 const toNav = ({ href, label, icon }: Workspace): NavItem => ({ href, label, icon })
 
@@ -23,6 +23,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     <>
       <Sidebar
         mainNav={mainWorkspaces.filter(visible).map(toNav)}
+        advancedNav={advancedWorkspaces.filter(visible).map(toNav)}
         adminNav={adminWorkspaces.filter(visible).map(toNav)}
         brandName="MoodyMate"
         brandTagline="Financial Risk Platform"

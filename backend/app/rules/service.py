@@ -491,6 +491,15 @@ class RulesService:
         )
         return rule_set
 
+    async def active_parameters(self, code: str) -> Mapping[str, Any] | None:
+        """The parameters of the ACTIVE version of the tenant's rule `code`, or None when it
+        has none (Phase 24: the scenario validators read `cashflow_direction`, D-44 §4)."""
+        definitions = await self.repo.definitions([code])
+        if not definitions:
+            return None
+        active = await self.repo.active_versions([definitions[0].id])
+        return active[0].parameters if active else None
+
     async def bucket_definitions(
         self, rule_version_id: uuid.UUID
     ) -> list[MaturityBucketDefinition]:

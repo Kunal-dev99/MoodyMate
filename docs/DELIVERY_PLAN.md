@@ -3005,7 +3005,7 @@ from the three templates (one or several shocks), edits it and confirms it for e
 The analyst may also submit it for promotion, and a different person, an approver, approves
 or rejects it. Nothing runs yet.
 
-- [ ] **BE-24.1** Migration 0026 (`0026_scenarios`):
+- [x] **BE-24.1** Migration 0026 (`0026_scenarios`):
   - `scenario`: code unique per tenant, name and description;
   - `scenario_version`:
     - version and status (D-44 §5, including `CONFIRMED_FOR_EXPLORATION`);
@@ -3027,7 +3027,18 @@ or rejects it. Nothing runs yet.
       (the architect checks it);
     - the downgrade refuses while a scenario exists;
     - every seed row carries its tag.
-- [ ] **BE-24.2** Templates and static validators (`app/orchestration/scenario_templates.py`,
+  - *Evidence:* `0026_scenarios.py` (revision 0026 / down 0023, pre-numbered; re-chained at
+    merge; MATRIX :82-85 equals the Feature 05 matrix table and
+    `governance/constants.py:145-151` `SCENARIO_ROLE_PERMISSIONS`, joined into
+    `ROLE_PERMISSIONS` :160 — architect checked); `test_ws1_verification.py::
+    test_migration_round_trip_and_downgrade_guards` :954-999 (downgrade refused with a
+    scenario, rows unchanged; previous head -> 0026 round trip; seeded join ==
+    `ROLE_PERMISSIONS`; every `0026_scenario_permissions` row tagged); `scenario_kit.py`
+    `check_triggers` :608-631 (IN_REVIEW shock UPDATE, backwards/reserved moves, DELETE and
+    TRUNCATE on all three tables, rows unchanged), called from `test_rules.py:789`. CLI round
+    trip on `moodymate_scratch_p24` (`0023 -> 0026 -> 0023 -> 0026 (head)`). Targeted runs:
+    `6 passed` (WS1 + rules + calculations, p24_be_fix).
+- [x] **BE-24.2** Templates and static validators (`app/orchestration/scenario_templates.py`,
   pure, per D-44 §2–4), plus `GET scenario-templates`.
   - *Done-when:*
     - a loop in the `test_rules.py` fold over a table of bodies gets 422 `invalid_shock`, with
@@ -3051,7 +3062,13 @@ or rejects it. Nothing runs yet.
       example);
     - `GET scenario-templates` lists exactly the three templates, with bounds;
     - the WS1 matrix lists the route with 200 for every role.
-- [ ] **BE-24.3** Lifecycle routes: `POST scenarios`, `POST …/versions`, `PUT …/versions/{version}`,
+  - *Evidence:* `scenario_kit.py` INVALID :177-225 (every listed case, plus trailing-newline
+    and `unknown_instrument` rows) driven by `check_validation` :277-303 (422 `invalid_shock`,
+    exactly one value-free problem, DENIED, nothing written, no echo); accepted alone and
+    combined :305-337 (scale-4 padding, canonical sha256); `check_templates` :228-274 (exactly
+    three templates with bounds, 200 for every role); `test_ws1_verification.py:327-334`
+    (`calc:read`, 200 x5).
+- [x] **BE-24.3** Lifecycle routes: `POST scenarios`, `POST …/versions`, `PUT …/versions/{version}`,
   `…/confirm`, `…/submit`, `…/approval` and `…/close` (D-44 §5–6, D-47 §3), audited, with
   `SCENARIOS_ENABLED` validated at startup.
   - *Done-when:* the `test_rules.py` fold asserts:
@@ -3068,24 +3085,42 @@ or rejects it. Nothing runs yet.
     - CLOSED hides a version from pickers, and it stays readable by id;
     - switch-off gives 409 `scenarios_disabled`, audited DENIED, with nothing written;
     - the WS1 audit-completeness test lists all seven mutating routes, with their actions.
-- [ ] **BE-24.4** Reads: `GET scenarios` and `GET scenarios/{scenario_id}`. Every response
+  - *Evidence:* `scenario_kit.py` `check_lifecycle`: `not_author` on PUT/confirm/submit
+    :410-420; author confirms alone :427-432; `scenario_change` == shocks :433-442, :481-484;
+    `invalid_status` deciding a DRAFT / a confirmed version :465-468 and twice :515-518;
+    missing comment 422 :489-493; `self_approval` (APPROVE and REJECT) and promotion by a
+    different approver :495-514; shared library APPROVED_FOR_TEST only :451-457, :530-538;
+    CLOSED hidden and readable by id :540-564; switch-off 409 `scenarios_disabled`, DENIED,
+    nothing written, reads work :568-595. `test_ws1_verification.py` AUDITED :697-704 and
+    driven :894-921. `SCENARIOS_ENABLED: bool` (`core/config.py:130`) is validated by the
+    settings model at startup.
+- [x] **BE-24.4** Reads: `GET scenarios` and `GET scenarios/{scenario_id}`. Every response
   carries `labels.statement` (D-44 §8).
   - *Done-when:*
     - the WS1 matrix and isolation tests list both routes, with 200 for every role and the
       same 404 for another tenant's id and a random id;
     - the `test_rules.py` fold asserts that `labels.statement` equals the constant.
-- [ ] **BE-24.5** The contract: the `openapi.json` export (contract first), plus PROVISIONAL rows
+  - *Evidence:* `test_ws1_verification.py:327-334` (both reads `calc:read`, 200 x5), :473
+    (same 404 for another tenant's id and a random id) and :575-605 (the six writes by id,
+    404 audited DENIED); `scenario_kit.py` `assert_labelled` :155-159 against
+    `SCENARIO_STATEMENT` (`orchestration/constants.py:108`), applied to every list, detail
+    and write response.
+- [x] **BE-24.5** The contract: the `openapi.json` export (contract first), plus PROVISIONAL rows
   in `docs/RETENTION.md` for the three tables.
   - *Done-when:*
     - the CI OpenAPI drift check passes;
     - `grep -c scenario docs/RETENTION.md` shows the three tables.
-- [ ] **FE-24.1** The Advanced sidebar section (the one owner of `navigation.ts` and
+  - *Evidence:* `python -m scripts.export_openapi --check` -> `openapi.json is up to date`
+    (rc 0, after the fix-round re-export); `docs/RETENTION.md:49-51`, three PROVISIONAL rows
+    (`scenario`, `scenario_version`, `scenario_change`), `grep -c` -> 3. The frontend
+    `schema.d.ts` drift (CI `gen:api` diff) is open under FE-24.2.
+- [x] **FE-24.1** The Advanced sidebar section (the one owner of `navigation.ts` and
   `features.ts`):
   - `advancedWorkspaces` with the item "Agentic Stress-Test Explorer" (`/advanced/stress-explorer`,
     `calc:read`, a lucide `FlaskConical` icon), behind `NEXT_PUBLIC_STRESS_EXPLORER_UI`;
   - `sidebar.tsx` renders an "Advanced" heading and group right after the main nav (so
     directly below "AI Assistant") and before "Administration";
-  - `(platform)/layout.tsx` passes it in;
+  - `AppShell` (rendered by `(platform)/layout.tsx`) passes it in;
   - `findWorkspace` includes it;
   - the "AI Assistant" placeholder is relabelled from `phase: 'Feature 05'` to
     `{ phase: 'WS5', workstream: 'planned' }`;
@@ -3098,7 +3133,12 @@ or rejects it. Nothing runs yet.
     - the AI Assistant placeholder reads "Scheduled for WS5 (planned)";
     - a Playwright test: risk_analyst opens the item and sees the banner text "Illustrative
       stress exploration, not a regulatory stress test".
-- [ ] **FE-24.2** The explorer's library, editor, detail and review:
+  - *Evidence:* `advanced-nav.test.ts:68` (order), :134-177 (switch off: no "Advanced", the
+    Phase 23 list, `AdvancedGate` 404), :117-130 ("Scheduled for WS5 (planned)"); vitest `9
+    passed`; `e2e/advanced-nav.spec.ts:11` passed (`4 passed (10.5s)`, ports 8124/3124), banner
+    text asserted at :32. The Phase 23 list is pinned from master a290978; refresh at merge
+    if master's nav changed (Phase 24 report, Q10).
+- [x] **FE-24.2** The explorer's library, editor, detail and review:
   - **tabs:** "Shared library" (APPROVED_FOR_TEST), "My explorations" and, for
     `scenario:approve`, "Review";
   - **the editor:** template cards from `GET scenario-templates`, with typed inputs and
@@ -3121,6 +3161,20 @@ or rejects it. Nothing runs yet.
       CALENDAR_DAYS only);
     - a vitest checks the status pill against the `openapi.json` enum;
     - there are no hand-written payload types (grep).
+  - *Not ticked (2026-10-19):* the Playwright steps (`stress-explorer.spec.ts:38`, :134,
+    :178), the editor vitests and the pill-vs-enum vitest (`advanced.test.ts:143`) pass, but
+    the evidence predates the final contract. After the backend fix round:
+    - `frontend/src/api/schema.d.ts` was not regenerated (`instrument_keys?: string[] | null`
+      at :3011, while `openapi.json` has `string | MaskedValue` items), so CI's
+      `npm run gen:api && git diff --exit-code` step fails;
+    - `components/advanced/scenarios.ts:228` still reads `details` as a bare list, so with
+      `details.problems` (D-44 amendment, Q9) the editor shows no problem lines; the fixture
+      at `advanced.test.ts:363` uses the old shape;
+    - `components/advanced/editor.ts:237` silently drops masked instrument keys when a new
+      version or edit is loaded from a stored shock; it must show them as masked and tell the
+      user they cannot be carried over (the detail view shows only a count, so it is safe).
+    Missing: those fixes, then tsc, the advanced vitests and both Phase 24 Playwright specs
+    re-run, with the result lines.
 
 *Test budget:* 49 → 49 (folded).
 *Reversibility:* additive tables and a tagged seed. The 0026 downgrade refuses while scenarios
@@ -3243,6 +3297,9 @@ This is the engine the agent will drive, and it works without AI.
         clear;
       - each drill-down row resolves to its `scenario_contribution` and its source row;
       - the templated summary cites only clear figures.
+- *Note (Phase 24 report, Q16):* the scenario Close action UI (a hide, with the D-47 §1
+  permission split shown cosmetically) is not in Phase 24 or 25 FE scope; it is an
+  unscheduled follow-up. The route exists and is tested (BE-24.3).
 - [ ] **FE-25.1** A "Run against baseline" panel on a CONFIRMED_FOR_EXPLORATION or
   APPROVED_FOR_TEST version:
   - a baseline picker (succeeded, non-stressed `maturity_ladder` runs);

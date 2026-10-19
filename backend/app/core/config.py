@@ -123,6 +123,11 @@ class Settings(BaseSettings):
     # rating_change_disabled (audited); reads and runs keep working and pin the ACTIVE
     # ratings as they stand. Validated at startup (D-13): a non-boolean stops the app.
     RATING_CHANGE_ENABLED: bool = True
+    # Phase 24 (WS4 RO-02, D-44 §9, D-02): scenario writes (create, version, edit, confirm,
+    # submit, decide, close). Off answers 409 scenarios_disabled to every write (audited
+    # DENIED, nothing written); reads keep working. Validated at startup (D-13): a
+    # non-boolean stops the app.
+    SCENARIOS_ENABLED: bool = True
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
 
     # D-15: root of the write-once raw artifact store. Required outside local/test (D-13);

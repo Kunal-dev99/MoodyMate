@@ -15,6 +15,7 @@ from app.domain import router as domain
 from app.governance import router as governance
 from app.ingestion import router as ingestion
 from app.mapping import router as mapping
+from app.orchestration import router as orchestration
 from app.reconciliation import router as reconciliation
 from app.rules import assumptions_router
 from app.rules import router as rules
@@ -32,6 +33,7 @@ def build_api_router(settings: Settings) -> APIRouter:
     api_router.include_router(rules.router)
     api_router.include_router(assumptions_router.router)
     api_router.include_router(calculations.router)
+    api_router.include_router(orchestration.router)  # Phase 24: the Scenario API
     if settings.dev_sessions_enabled:
         api_router.include_router(governance.dev_router)
     return api_router

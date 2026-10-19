@@ -1456,6 +1456,36 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
     run (D-32 §2).
   - An earlier draft of this plan had four non-splitting shock kinds. It was replaced by the
     user's templates.
+- **Amendment (2026-10-19, Phase 24 build, auto-resolved):** §4–6 made precise.
+  - **§4 vocabulary (Q3).** `invalid_shock` problem codes are `orchestration.constants.
+    ShockProblem`: `not_a_list`, `too_few_shocks`, `too_many_shocks`, `not_an_object`,
+    `unknown_field`, `required`, `unknown_template`, `inexact_number` (a JSON fraction, or an
+    exponent including exponent text such as `"2E-1"`), `not_decimal`, `too_many_places`
+    (refused, never rounded), `not_integer`, `not_text`, `out_of_range`, `unsupported_value`
+    (outside a field's enum, e.g. `BUSINESS_DAYS`), `unknown_instrument_type`,
+    `direction_mismatch` (both against the ACTIVE `cashflow_direction` rule),
+    `invalid_window`, `too_many_items` (more than 50 keys), `duplicate_item` and
+    `unknown_instrument` (a picked key that is not an instrument of the tenant with a version
+    of the selector's `instrument_type` that the author may see; absent and hidden answer
+    alike, D-33). An unknown key's name is never echoed (`unknown_field` on its container
+    path). Patterns are matched whole (`fullmatch`), so trailing newlines are refused.
+  - **§4 shape (Q9).** `details = {"problems": [{"shock_index": int | null, "field": str,
+    "code": ShockProblem}]}`, the same object wrapper as `rules/service.py`. `field` is a
+    structural path (e.g. `parameters.affected_fraction`); `shock_index` is 0-based, the same
+    convention as `scenario_change.shock_index`, and null with `field = "shocks"` for
+    list-level problems. A reversed window is reported on `selector.due_from_day`.
+  - **§4 order (Q8).** On every route that names a scenario or version (and the Phase 25
+    routes): permission (403, the dependency) → the tenant-scoped lookup of the path's
+    scenario/version (404, absent and foreign alike) → body and state checks. Body validation
+    (422 `invalid_shock`) never runs before the scoped 404. As built, `PUT …/versions/{n}`
+    checks authorship and status (409 `not_author` / `invalid_status`) before the body (422),
+    which is stricter (a non-author learns nothing about validation); a missing
+    `parent_version` on `POST …/versions` is a 404 after the body check, inside an already
+    scoped scenario.
+  - **§5–6 DB guards (Q6).** The 0026 trigger also refuses `decided_by = authored_by`
+    (maker-checker in the DB as well as the service's 409 `self_approval`), and `scenario` rows
+    are fully append-only (no UPDATE). Renaming a scenario later needs an additive change
+    (e.g. a name on the version).
 
 ## D-45 Deterministic scenario engine: split-aware overlay, own contribution table, conservation
 
@@ -1630,6 +1660,19 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
   - `governance/constants.py` gains `SCENARIO_ROLE_PERMISSIONS` and `AI_ROLE_PERMISSIONS`.
   - `ROLE_PERMISSIONS` becomes WS1 ∪ WS2 ∪ WS3 ∪ credit ∪ scenario ∪ AI.
   - The WS1 matrix test covers every new route.
+- **Amendment (2026-10-19, Phase 24 build, auto-resolved):** §1 close, made precise (Q5). No
+  change to who can do what; this restates §1 and the Feature 05 endpoint table.
+  - **Route gate:** `POST …/versions/{n}/close` is declared any-of
+    `scenario:propose|scenario:approve` (`core/auth.py` `require_any_permission`); either
+    permission passes the dependency, which still fails closed (403) for everyone else. A
+    single-permission declaration behaves exactly as before.
+  - **Service check by status:** CONFIRMED_FOR_EXPLORATION, IN_REVIEW and REJECTED need
+    `scenario:propose` and authorship (else 409 `not_author`); APPROVED_FOR_TEST needs
+    `scenario:approve`, with no authorship requirement (closing hides, it does not promote).
+    The wrong permission is 403 `forbidden` with `details.required_permission` naming only the
+    one applicable permission.
+  - DRAFT, an already CLOSED version and the reserved RUNNING and TESTED are 409
+    `invalid_status`. The AI never closes (checked by grep in Phase 26).
 
 ## D-48 The agent: a controlled workflow of intent, clarification and closed tools
 

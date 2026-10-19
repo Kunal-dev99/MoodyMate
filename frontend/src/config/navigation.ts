@@ -4,6 +4,7 @@ import {
   Database,
   FileBarChart,
   FileStack,
+  FlaskConical,
   GitCompare,
   Landmark,
   LayoutDashboard,
@@ -13,7 +14,14 @@ import {
 } from 'lucide-react'
 import type { Schemas } from '@/api/client'
 import type { NavItem } from '@/components/layout/sidebar'
-import { CALCULATIONS_UI_ENABLED, CREDIT_DOMAIN_UI_ENABLED, DOMAIN_UI_ENABLED, RATINGS_UI_ENABLED, RULES_UI_ENABLED } from '@/config/features'
+import {
+  CALCULATIONS_UI_ENABLED,
+  CREDIT_DOMAIN_UI_ENABLED,
+  DOMAIN_UI_ENABLED,
+  RATINGS_UI_ENABLED,
+  RULES_UI_ENABLED,
+  STRESS_EXPLORER_UI_ENABLED,
+} from '@/config/features'
 
 /**
  * Platform workspaces (Architecture §14). `planned` workspaces render a clear
@@ -124,9 +132,31 @@ export const mainWorkspaces: Workspace[] = [
     label: 'AI Assistant',
     icon: Bot,
     description: 'Evidence-backed explanations and proposals. Optional; can be disabled.',
-    planned: { phase: 'Feature 05', workstream: 'WS5' },
+    // FE-24.1: "Feature 05" is now the Advanced stress explorer; this workspace stays planned under WS5.
+    // PlannedWorkspace renders "Scheduled for <phase> (<workstream>)": "Scheduled for WS5 (planned)".
+    planned: { phase: 'WS5', workstream: 'planned' },
   },
 ]
+
+/**
+ * FE-24.1: the sidebar's "Advanced" section, rendered right after the main nav (so directly below
+ * "AI Assistant") and before "Administration". Empty while NEXT_PUBLIC_STRESS_EXPLORER_UI=off, so
+ * the sidebar has no "Advanced" heading and equals the Phase 23 one exactly (D-02). The explorer
+ * is an illustrative exploration tool, never a regulatory stress test (D-44 §8).
+ */
+export const advancedWorkspaces: Workspace[] = STRESS_EXPLORER_UI_ENABLED
+  ? [
+      {
+        slug: 'stress-explorer',
+        href: '/advanced/stress-explorer',
+        label: 'Agentic Stress-Test Explorer',
+        icon: FlaskConical,
+        description:
+          'Author scenarios from the approved shock templates, confirm them for exploration and promote them through maker-checker approval. Illustrative, not a regulatory stress test.',
+        permission: 'calc:read',
+      },
+    ]
+  : []
 
 export const adminWorkspaces: Workspace[] = [
   {
@@ -191,5 +221,5 @@ export const domainSections: WorkspaceSection[] =
     : []
 
 export function findWorkspace(slug: string): Workspace | undefined {
-  return [...mainWorkspaces, ...adminWorkspaces].find((w) => w.slug === slug)
+  return [...mainWorkspaces, ...advancedWorkspaces, ...adminWorkspaces].find((w) => w.slug === slug)
 }

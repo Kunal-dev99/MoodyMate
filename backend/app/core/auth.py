@@ -122,13 +122,34 @@ async def get_principal(
 PrincipalDependency = Callable[..., Awaitable[Principal]]
 
 
+# Joins the alternatives of an any-of declaration (require_any_permission).
+ANY_OF_SEPARATOR = "|"
+
+
+def permission_alternatives(declared: str) -> frozenset[str]:
+    """The permissions any one of which satisfies a declared permission (one, or an any-of
+    declaration such as "scenario:propose|scenario:approve")."""
+    return frozenset(declared.split(ANY_OF_SEPARATOR))
+
+
+def require_any_permission(*permissions: str) -> PrincipalDependency:
+    """Fail closed (D-04) on a route that one of several permissions may reach, the finer
+    check being the service's (e.g. close: the author with scenario:propose, an approver with
+    scenario:approve; Feature 05 endpoint table). Declared as "a|b" so the route registry and
+    the WS1 matrix see it; a 403 names the same string."""
+    assert len(permissions) >= 2 and AUTHENTICATED not in permissions
+    return require_permission(ANY_OF_SEPARATOR.join(permissions))
+
+
 def require_permission(permission: str) -> PrincipalDependency:
+    alternatives = permission_alternatives(permission)
+
     async def dependency(
         request: Request,
         principal: Annotated[Principal, Depends(get_principal)],
         session: Annotated[AsyncSession, Depends(get_session)],
     ) -> Principal:
-        if permission != AUTHENTICATED and permission not in principal.permissions:
+        if permission != AUTHENTICATED and not alternatives & set(principal.permissions):
             # BE-3.2: denied requests are audited, in their own session so that nothing
             # else pending in the request's session is committed by a refusal.
             route = request.scope.get("route")
@@ -153,7 +174,9 @@ def require_permission(permission: str) -> PrincipalDependency:
         return principal
 
     setattr(dependency, PERMISSION_ATTR, permission)
-    dependency.__name__ = f"require_{permission.replace(':', '_')}"
+    dependency.__name__ = "require_" + permission.replace(":", "_").replace(
+        ANY_OF_SEPARATOR, "_or_"
+    )
     return dependency
 
 
