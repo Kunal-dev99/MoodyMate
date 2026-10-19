@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CreditValueCell } from '@/components/credit/CreditValueCell'
 import { CreditVocabularies } from '@/components/credit/CreditVocabularies'
 import {
@@ -207,6 +207,8 @@ describe('placeholders relabelled (FE-19.1)', () => {
 })
 
 describe('credit reversibility (FE-19.1, D-02)', () => {
+  // FE-20.1: these assert the Phase 19 tab strip, which NEXT_PUBLIC_RATINGS_UI=off restores exactly.
+  beforeEach(() => vi.stubEnv('NEXT_PUBLIC_RATINGS_UI', 'off'))
   afterEach(() => {
     vi.unstubAllEnvs()
     vi.resetModules()

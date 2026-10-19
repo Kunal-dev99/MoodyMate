@@ -2435,7 +2435,7 @@ Goal: a risk analyst proposes an obligor rating (grade, effective date and ratio
 different person, an approver, approves or rejects it. Ratings are immutable versions with a
 history, and the service can say which rating was in effect for an obligor on any date.
 
-- [ ] **BE-20.1** Migration 0023:
+- [x] **BE-20.1** Migration 0023:
   - `obligor_rating` (D-39 §1–2), with the lifecycle trigger, the partial unique index on
     one ACTIVE per (counterparty, `effective_from`), and refused DELETE and TRUNCATE;
   - the tagged seed `0023_credit_permissions`: `rating:propose` and `rating:approve` and
@@ -2449,7 +2449,15 @@ history, and the service can say which rating was in effect for an obligor on an
     - the seeded `role_permission` join equals `ROLE_PERMISSIONS`, including the table above
       (the architect checks it);
     - the downgrade refuses while a rating exists.
-- [ ] **BE-20.2** `POST counterparties/{id}/ratings` and `POST obligor-ratings/{id}/approval`
+  - *Evidence:* `0023_credit_permissions.py` (revision 0023 / down 0022; MATRIX :61-64 equals
+    the table above and `governance/constants.py:129-135`); `test_credit.py::
+    test_credit_domain_projection_snapshots_reads_and_guards` (seeded join == ROLE_PERMISSIONS
+    and tagged grants == the table :352-373; frozen copies :375-382; content UPDATEs, illegal
+    moves, DELETE, TRUNCATE :854-870; UniqueViolation on a second ACTIVE :873-877; downgrade
+    refusal with a rating, then 0022/0021 trips :908-978); CLI round trip on
+    `moodymate_scratch_p20` (`0022 -> 0023 -> 0022 -> 0023 (head)`). Merge is blocked until
+    `test_calculations.py:1560` pins head `"0023"` (Phase 20 report, MAJOR).
+- [x] **BE-20.2** `POST counterparties/{id}/ratings` and `POST obligor-ratings/{id}/approval`
   (D-39 §3), audited `obligor_rating.*`, with `RATING_CHANGE_ENABLED` validated at startup.
   - *Done-when:* `test_credit.py` asserts:
     - a user with both roles cannot decide their own proposal (409 `self_approval`);
@@ -2458,7 +2466,14 @@ history, and the service can say which rating was in effect for an obligor on an
     - `stale_version`, `invalid_status`, 422 `invalid_grade`, and the switch-off 409;
     - each refusal has its DENIED audit event;
     - the WS1 audit-completeness test lists both POST routes.
-- [ ] **BE-20.3** `GET obligor-ratings` and `GET obligor-ratings/{id}`, the rating history
+  - *Evidence:* `test_credit.py` ratings fold: 422 `invalid_grade` + DENIED :669-685;
+    `self_approval` (both roles) :687-696; `invalid_status`, `stale_version` :707-717 and
+    :759-761; SUPERSEDED with `superseded_by_rating_id` and one ACTIVE per date :719-736,
+    :779-783; switch-off 409 `rating_change_disabled`, DENIED, nothing written, and the
+    non-boolean `Settings` failure :831-849; `test_ws1_verification.py` AUDITED :623-624
+    and exercised :801-809. Targeted runs: `5 passed` (test_credit + WS1, p20b) and
+    `1 passed` / `4 passed` after fixes (p20fix).
+- [x] **BE-20.3** `GET obligor-ratings` and `GET obligor-ratings/{id}`, the rating history
   in the counterparty detail, and the service function "rating in effect at date" (D-39 §4)
   that Phase 21 uses.
   - *Done-when:*
@@ -2468,7 +2483,11 @@ history, and the service can say which rating was in effect for an obligor on an
     - (added 2026-10-19, Phase 19 auto-resolved ruling) the `test_credit.py` ratings fold
       approves G05 for CP-0008 and asserts that the rating in effect for EXP-0008 is 3 notches
       below its G02 origination (by `credit_vocabulary` `rating_grade` rank).
-- [ ] **FE-20.1** A Ratings panel on the counterparty detail, behind
+  - *Evidence:* `test_credit.py` in-effect loop over 7 dates (none on 2025-06-29) :807-819;
+    EXP-0008 G05 vs G02 = 3 notches :820-829; history order and D-43 §2 masking :798-805;
+    `test_ws1_verification.py:304-307` (both GETs `domain:read`, 200 for every role); WS1
+    matrix printout `GET /api/v1/obligor-ratings ... 200 200 200 200 200` (both routes).
+- [x] **FE-20.1** A Ratings panel on the counterparty detail, behind
   `NEXT_PUBLIC_RATINGS_UI`:
   - the history: grade, effective date, status, proposer and decider;
   - a "Propose rating" dialog (gated on `rating:propose`) with a grade picker from
@@ -2477,13 +2496,20 @@ history, and the service can say which rating was in effect for an obligor on an
   - *Done-when:*
     - a Playwright test: risk_analyst proposes, and the panel shows IN_REVIEW;
     - a vitest covers the form's validation states.
-- [ ] **FE-20.2** A ratings review queue at `/domain/ratings` (read with `domain:read`;
+  - *Evidence:* `e2e/ratings-panel.spec.ts:98` passed (asserts IN_REVIEW :140-150; isolated
+    DBs `moodymate_test_p20fe` and `moodymate_e2e_p20fe2`); `ratings.test.ts:98-194` ("the
+    propose form validation states", 19 cases passed).
+- [x] **FE-20.2** A ratings review queue at `/domain/ratings` (read with `domain:read`;
   actions gated on `rating:approve`). The approve/reject dialog has a required comment.
   - *Done-when:*
     - a Playwright test: approver approves, and the counterparty shows ACTIVE;
     - the proposer (risk_analyst) sees no Approve button and gets a backend 403 on a direct
       POST, because the role lacks `rating:approve` (as FE-16.2 was built);
     - a vitest checks the rating-status pill against the `openapi.json` enum.
+  - *Evidence:* `e2e/ratings-review.spec.ts:123` (no Approve/Reject; direct POST 403 :149,
+    still IN_REVIEW :153) and `:156` (200 ACTIVE :180; panel row ACTIVE :197-199) passed
+    twice; `review.test.ts:51-59` (pill styles == openapi.json `ObligorRatingStatus`), 45
+    cases passed.
 
 *Test budget:* 49 → 49 (folded).
 *Reversibility:* an additive table and a tagged permission seed. The downgrade refuses while

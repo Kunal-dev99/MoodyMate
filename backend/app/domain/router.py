@@ -14,6 +14,12 @@ The WS3 domain endpoints of Phase 14 (the Feature 03 endpoint table, D-34):
 - Feature 04 (Phase 19, D-37, D-43), all `domain:read`: GET /credit-vocabularies,
   GET /counterparties, GET /counterparties/{counterparty_id}, GET /credit-exposures and
   GET /credit-exposures/{exposure_id}. Confidential credit fields (D-43 §1) are masked on read.
+- Phase 20 (D-39, D-40): POST /counterparties/{counterparty_id}/ratings (`rating:propose`),
+  POST /obligor-ratings/{rating_id}/approval (`rating:approve`), GET /obligor-ratings and
+  GET /obligor-ratings/{rating_id} (`domain:read`), and the rating history in GET
+  /counterparties/{counterparty_id}. RATING_CHANGE_ENABLED=false answers 409
+  rating_change_disabled to both writes (audited); the rationale and decision comment are
+  confidential (D-43 §2).
 
 Tenant scope comes from the principal (D-04): another tenant's id is the same 404 as a
 random one.
@@ -29,10 +35,15 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import require_permission
-from app.core.classification import UNCLASSIFIED, mask_mapping
+from app.core.classification import UNCLASSIFIED, MaskedValue, mask_mapping
 from app.core.principal import Principal
 from app.db.session import get_session
-from app.domain.constants import CreditVocabularyKind, DomainSchemaCode
+from app.domain.constants import (
+    RATING_CLASSIFICATIONS,
+    CreditVocabularyKind,
+    DomainSchemaCode,
+    ObligorRatingStatus,
+)
 from app.domain.models import (
     CashflowEvent,
     CounterpartyVersion,
@@ -58,6 +69,10 @@ from app.domain.schemas import (
     InstrumentSummary,
     InstrumentTypeOut,
     InstrumentVersionOut,
+    ObligorRatingCreate,
+    ObligorRatingDecision,
+    ObligorRatingOut,
+    ObligorRatingPage,
     ProjectionOut,
     ProjectionSummary,
     Value,
@@ -69,6 +84,7 @@ from app.domain.service import (
     ExposureRow,
     InstrumentRow,
     ProjectionView,
+    RatingRow,
     SchemaPins,
 )
 from app.governance.constants import FieldType, Permission
@@ -77,6 +93,8 @@ from app.ingestion.constants import ImportStatus
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 DomainReader = Annotated[Principal, Depends(require_permission(Permission.DOMAIN_READ))]
 DomainProjector = Annotated[Principal, Depends(require_permission(Permission.DOMAIN_PROJECT))]
+RatingProposer = Annotated[Principal, Depends(require_permission(Permission.RATING_PROPOSE))]
+RatingApprover = Annotated[Principal, Depends(require_permission(Permission.RATING_APPROVE))]
 
 router = APIRouter(tags=["domain"])
 MASKED_HASH = "masked"  # a string, so the payload_sha256 field keeps its type
@@ -650,6 +668,7 @@ async def get_counterparty(
             _exposure_version(v, key, view.pins, clear, view.vocabulary)
             for v, key in view.exposure_versions
         ],
+        ratings=[_rating(r, view.pins, clear) for r in view.ratings],
     )
 
 
@@ -748,3 +767,136 @@ async def get_credit_exposure(
             for v in row.versions
         ],
     )
+
+
+# --- Phase 20: the obligor rating workflow (BE-20.2, BE-20.3, D-39) -------------------------
+
+
+def _rating(row: RatingRow, pins: SchemaPins, clear: frozenset[str]) -> ObligorRatingOut:
+    """One rating version, masked (D-43 §2): the grade is internal, the rationale and the
+    decision comment confidential; the counterparty key is masked as the counterparty's
+    business key (its latest version's schema field; unknown: unclassified, fail closed)."""
+    r = row.rating
+    shown = mask_mapping(
+        {"grade": r.grade, "rationale": r.rationale, "decision_comment": r.decision_comment},
+        RATING_CLASSIFICATIONS,
+        clear,
+    )
+    key: Value = (
+        _business_key(
+            row.counterparty_key, "counterparty_id", pins, row.key_schema_version_id, clear
+        )
+        if row.key_schema_version_id is not None
+        else MaskedValue(classification=UNCLASSIFIED)
+    )
+    return ObligorRatingOut(
+        rating_id=r.id,
+        counterparty_id=r.counterparty_id,
+        counterparty_key=key,
+        grade=shown["grade"],
+        grade_rank=row.grade_rank if isinstance(shown["grade"], str) else None,
+        effective_from=r.effective_from,
+        rationale=shown["rationale"],
+        status=ObligorRatingStatus(r.status),
+        proposed_by=r.proposed_by,
+        proposer_user_id=r.proposer_user_id,
+        proposed_at=r.proposed_at,
+        decided_by=r.decided_by,
+        decided_at=r.decided_at,
+        decision_comment=shown["decision_comment"],
+        superseded_at=r.superseded_at,
+        superseded_by_rating_id=r.superseded_by_rating_id,
+    )
+
+
+@router.post(
+    "/counterparties/{counterparty_id}/ratings",
+    response_model=ObligorRatingOut,
+    status_code=201,
+    operation_id="proposeObligorRating",
+)
+async def propose_obligor_rating(
+    request: Request,
+    counterparty_id: uuid.UUID,
+    body: ObligorRatingCreate,
+    principal: RatingProposer,
+    session: SessionDep,
+) -> ObligorRatingOut:
+    """Propose a rating for one counterparty (D-39 §1, §3): an immutable version written
+    IN_REVIEW, audited `obligor_rating.propose`. Refusals, each audited DENIED: 404
+    `not_found` alike for an absent and another tenant's counterparty (D-04), 409
+    `rating_change_disabled` while RATING_CHANGE_ENABLED is off, 422 `invalid_grade` (not a
+    `rating_grade` code of the tenant)."""
+    view = await DomainService(session, principal).propose_rating(
+        counterparty_id,
+        body.grade,
+        body.effective_from,
+        body.rationale,
+        request.app.state.settings.RATING_CHANGE_ENABLED,
+    )
+    return _rating(view.row, view.pins, principal.clear_classifications)
+
+
+@router.post(
+    "/obligor-ratings/{rating_id}/approval",
+    response_model=ObligorRatingOut,
+    operation_id="decideObligorRating",
+)
+async def decide_obligor_rating(
+    request: Request,
+    rating_id: uuid.UUID,
+    body: ObligorRatingDecision,
+    principal: RatingApprover,
+    session: SessionDep,
+) -> ObligorRatingOut:
+    """Maker-checker (D-39 §3). APPROVE makes an IN_REVIEW version ACTIVE and any ACTIVE
+    version for the same counterparty and `effective_from` SUPERSEDED, in one transaction;
+    REJECT ends it REJECTED. Audited `obligor_rating.approve` / `.reject` / `.supersede`.
+    Refusals, each audited DENIED: 404 `not_found` (absent or another tenant's), 409
+    `rating_change_disabled`, 409 `invalid_status` (not IN_REVIEW), 409 `self_approval` (the
+    proposer), 409 `stale_version` (another version for the same counterparty and date was
+    activated after this one was proposed: propose again)."""
+    view = await DomainService(session, principal).decide_rating(
+        rating_id, body.decision, body.comment, request.app.state.settings.RATING_CHANGE_ENABLED
+    )
+    return _rating(view.row, view.pins, principal.clear_classifications)
+
+
+@router.get("/obligor-ratings", response_model=ObligorRatingPage, operation_id="listObligorRatings")
+async def list_obligor_ratings(
+    principal: DomainReader,
+    session: SessionDep,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    status: Annotated[
+        ObligorRatingStatus | None,
+        Query(description="Only versions in this status (IN_REVIEW for the review queue)."),
+    ] = None,
+    counterparty_id: Annotated[
+        uuid.UUID | None, Query(description="Only this counterparty's versions.")
+    ] = None,
+) -> ObligorRatingPage:
+    """The obligor rating versions of the caller's tenant (every status unless filtered),
+    newest proposal first."""
+    page = await DomainService(session, principal).ratings(status, counterparty_id, limit, offset)
+    clear = principal.clear_classifications
+    return ObligorRatingPage(
+        items=[_rating(r, page.pins, clear) for r in page.rows],
+        total=page.total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get(
+    "/obligor-ratings/{rating_id}",
+    response_model=ObligorRatingOut,
+    operation_id="getObligorRating",
+)
+async def get_obligor_rating(
+    rating_id: uuid.UUID, principal: DomainReader, session: SessionDep
+) -> ObligorRatingOut:
+    """One rating version. 404 `not_found` alike for an absent and another tenant's id
+    (D-04)."""
+    view = await DomainService(session, principal).rating(rating_id)
+    return _rating(view.row, view.pins, principal.clear_classifications)

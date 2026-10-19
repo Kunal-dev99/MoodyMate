@@ -13,7 +13,7 @@ import {
 } from 'lucide-react'
 import type { Schemas } from '@/api/client'
 import type { NavItem } from '@/components/layout/sidebar'
-import { CALCULATIONS_UI_ENABLED, CREDIT_DOMAIN_UI_ENABLED, DOMAIN_UI_ENABLED, RULES_UI_ENABLED } from '@/config/features'
+import { CALCULATIONS_UI_ENABLED, CREDIT_DOMAIN_UI_ENABLED, DOMAIN_UI_ENABLED, RATINGS_UI_ENABLED, RULES_UI_ENABLED } from '@/config/features'
 
 /**
  * Platform workspaces (Architecture §14). `planned` workspaces render a clear
@@ -66,7 +66,9 @@ export const mainWorkspaces: Workspace[] = [
           (RULES_UI_ENABLED
             ? 'Instrument catalogue with its lineage to imports, and the registry: methodology rules and their versions, calculation modules and assumption sets.'
             : 'Instrument catalogue: projected versions, attributes, cash flows and their lineage to imports.') +
-          (CREDIT_DOMAIN_UI_ENABLED ? ' Counterparties and credit exposures with their versions and lineage.' : ''),
+          (CREDIT_DOMAIN_UI_ENABLED ? ' Counterparties and credit exposures with their versions and lineage.' : '') +
+          // FE-20.1: the ratings are named only while they are live (NEXT_PUBLIC_RATINGS_UI); off, the Phase 19 text.
+          (CREDIT_DOMAIN_UI_ENABLED && RATINGS_UI_ENABLED ? ' Obligor ratings with maker-checker approval.' : ''),
         permission: 'domain:read',
       }
     : {
@@ -153,9 +155,18 @@ export interface WorkspaceSection {
   permission: Schemas['Permission']
 }
 
+/**
+ * FE-20.1/20.2: the Ratings tab (the review queue at /domain/ratings, read with domain:read; its
+ * actions need rating:approve), only while NEXT_PUBLIC_RATINGS_UI and NEXT_PUBLIC_CREDIT_DOMAIN_UI
+ * are on. Off, the Phase 19 tab strip exactly (D-02).
+ */
+const ratingSections: WorkspaceSection[] = RATINGS_UI_ENABLED
+  ? [{ slug: 'ratings', href: '/domain/ratings', label: 'Ratings', permission: 'domain:read' }]
+  : []
+
 /** FE-19.1: the Counterparties tab (domain:read), only while NEXT_PUBLIC_CREDIT_DOMAIN_UI is on. */
 const creditSections: WorkspaceSection[] = CREDIT_DOMAIN_UI_ENABLED
-  ? [{ slug: 'counterparties', href: '/domain/counterparties', label: 'Counterparties', permission: 'domain:read' }]
+  ? [{ slug: 'counterparties', href: '/domain/counterparties', label: 'Counterparties', permission: 'domain:read' }, ...ratingSections]
   : []
 
 /** FE-16.1: the read-only registry tabs, only while NEXT_PUBLIC_RULES_UI is on. */
@@ -169,7 +180,7 @@ const registrySections: WorkspaceSection[] = RULES_UI_ENABLED
 
 /**
  * FE-16.1: the Financial Domain's pages: the Phase 14 instrument catalogue (at /domain, as
- * before), FE-19.1's counterparties and the read-only registry of rules, modules and assumption
+ * before), FE-19.1's counterparties, FE-20's ratings queue and the read-only registry of rules, modules and assumption
  * sets. Empty while both NEXT_PUBLIC_RULES_UI and NEXT_PUBLIC_CREDIT_DOMAIN_UI are off or the
  * workspace is planned, so /domain shows no tab strip, as in Phase 15 (D-02). With
  * NEXT_PUBLIC_CREDIT_DOMAIN_UI=off alone the list is the Phase 18 one exactly.

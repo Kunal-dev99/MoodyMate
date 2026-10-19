@@ -72,6 +72,56 @@ class CreditVocabularyKind(StrEnum):
     COLLATERAL_TYPE = "collateral_type"
 
 
+class ObligorRatingStatus(StrEnum):
+    """The obligor rating lifecycle (D-39 §2, a D-06 subset). A proposal is written IN_REVIEW
+    (no DRAFT: a correction is a new proposal); IN_REVIEW -> ACTIVE or REJECTED; ACTIVE ->
+    SUPERSEDED when another version for the same counterparty and `effective_from` is
+    approved. RETIRED is reserved (withdrawal is deferred)."""
+
+    IN_REVIEW = "IN_REVIEW"
+    ACTIVE = "ACTIVE"
+    REJECTED = "REJECTED"
+    SUPERSEDED = "SUPERSEDED"
+    RETIRED = "RETIRED"
+
+
+class ObligorRatingAction(StrEnum):
+    """Audit actions of the rating workflow (D-39 §3); refusals are audited DENIED."""
+
+    PROPOSE = "obligor_rating.propose"
+    APPROVE = "obligor_rating.approve"
+    REJECT = "obligor_rating.reject"
+    SUPERSEDE = "obligor_rating.supersede"
+
+
+class ObligorRatingRefusal(StrEnum):
+    """Refusals of the two rating writes (D-39 §3), each audited DENIED with its code."""
+
+    RATING_CHANGE_DISABLED = "rating_change_disabled"  # 409: RATING_CHANGE_ENABLED=false
+    INVALID_STATUS = "invalid_status"  # 409: the version is not IN_REVIEW
+    SELF_APPROVAL = "self_approval"  # 409: the proposer decides their own proposal
+    STALE_VERSION = "stale_version"  # 409: another version was activated since the proposal
+    INVALID_GRADE = "invalid_grade"  # 422: not a rating_grade code of the tenant
+
+
+# D-39 §2: status -> the statuses it may move to (also enforced by the 0023 trigger).
+RATING_TRANSITIONS: dict[ObligorRatingStatus, tuple[ObligorRatingStatus, ...]] = {
+    ObligorRatingStatus.IN_REVIEW: (ObligorRatingStatus.ACTIVE, ObligorRatingStatus.REJECTED),
+    ObligorRatingStatus.ACTIVE: (ObligorRatingStatus.SUPERSEDED, ObligorRatingStatus.RETIRED),
+}
+
+# D-43 §2: the grade is internal; the rationale and the decision comment are confidential
+# (masked for risk_analyst, the proposer included, and auditor).
+RATING_CLASSIFICATIONS = {
+    "grade": "internal",
+    "rationale": "confidential",
+    "decision_comment": "confidential",
+}
+
+RATING_RATIONALE_MAX = 2000  # D-39 §1
+RATING_COMMENT_MAX = 1000  # D-39 §3
+
+
 class ColumnKind(StrEnum):
     """The type of a typed domain column, as the schema field type it accepts. A field
     projects into the column only when its pinned data type is exactly this one: a STRING

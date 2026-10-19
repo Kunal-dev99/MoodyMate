@@ -272,6 +272,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/counterparties/{counterparty_id}/ratings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Propose Obligor Rating
+         * @description Propose a rating for one counterparty (D-39 §1, §3): an immutable version written
+         *     IN_REVIEW, audited `obligor_rating.propose`. Refusals, each audited DENIED: 404
+         *     `not_found` alike for an absent and another tenant's counterparty (D-04), 409
+         *     `rating_change_disabled` while RATING_CHANGE_ENABLED is off, 422 `invalid_grade` (not a
+         *     `rating_grade` code of the tenant).
+         */
+        post: operations["proposeObligorRating"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/credit-exposures": {
         parameters: {
             query?: never;
@@ -844,6 +868,74 @@ export interface paths {
         get: operations["getMyPermissions"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/obligor-ratings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Obligor Ratings
+         * @description The obligor rating versions of the caller's tenant (every status unless filtered),
+         *     newest proposal first.
+         */
+        get: operations["listObligorRatings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/obligor-ratings/{rating_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Obligor Rating
+         * @description One rating version. 404 `not_found` alike for an absent and another tenant's id
+         *     (D-04).
+         */
+        get: operations["getObligorRating"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/obligor-ratings/{rating_id}/approval": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decide Obligor Rating
+         * @description Maker-checker (D-39 §3). APPROVE makes an IN_REVIEW version ACTIVE and any ACTIVE
+         *     version for the same counterparty and `effective_from` SUPERSEDED, in one transaction;
+         *     REJECT ends it REJECTED. Audited `obligor_rating.approve` / `.reject` / `.supersede`.
+         *     Refusals, each audited DENIED: 404 `not_found` (absent or another tenant's), 409
+         *     `rating_change_disabled`, 409 `invalid_status` (not IN_REVIEW), 409 `self_approval` (the
+         *     proposer), 409 `stale_version` (another version for the same counterparty and date was
+         *     activated after this one was proposed: propose again).
+         */
+        post: operations["decideObligorRating"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1925,6 +2017,11 @@ export interface components {
              * @description Projected credit-exposure versions naming this counterparty's business key, in the caller's tenant.
              */
             exposure_versions: components["schemas"]["CreditExposureVersionOut"][];
+            /**
+             * Ratings
+             * @description The rating history (D-39 §4): every version in every status, by effective_from descending, then proposed_at descending. Superseded and rejected versions are kept, never deleted.
+             */
+            ratings: components["schemas"]["ObligorRatingOut"][];
             /** Source Code */
             source_code: string;
             /**
@@ -4353,6 +4450,133 @@ export interface components {
          * @enum {string}
          */
         NullPolicy: "ALLOW_NULL" | "REJECT_NULL" | "USE_DEFAULT";
+        /**
+         * ObligorRatingCreate
+         * @description A proposal (D-39 §1): written IN_REVIEW. A correction is a new proposal.
+         */
+        ObligorRatingCreate: {
+            /**
+             * Effective From
+             * Format: date
+             * @description The first date the grade governs (ISO date).
+             */
+            effective_from: string;
+            /**
+             * Grade
+             * @description A `rating_grade` code of the caller's tenant's credit vocabulary (GET /credit-vocabularies). Unknown: 422 invalid_grade.
+             */
+            grade: string;
+            /** Rationale */
+            rationale: string;
+        };
+        /** ObligorRatingDecision */
+        ObligorRatingDecision: {
+            /** Comment */
+            comment: string;
+            /** @description APPROVE makes the version ACTIVE and any ACTIVE version for the same counterparty and `effective_from` SUPERSEDED, in one transaction; REJECT ends it. */
+            decision: components["schemas"]["ProposalDecision"];
+        };
+        /**
+         * ObligorRatingOut
+         * @description One immutable rating version (D-39 §1-2). Content never changes; the decision fields
+         *     are set once.
+         */
+        ObligorRatingOut: {
+            /**
+             * Counterparty Id
+             * Format: uuid
+             */
+            counterparty_id: string;
+            /**
+             * Counterparty Key
+             * @description The counterparty's business key, masked like the counterparty's own.
+             */
+            counterparty_key: string | components["schemas"]["MaskedValue"];
+            /** Decided At */
+            decided_at: string | null;
+            /**
+             * Decided By
+             * @description Who approved or rejected it.
+             */
+            decided_by: string | null;
+            /**
+             * Decision Comment
+             * @description Confidential (D-43 §2): masked for a caller not cleared for it (masked even while undecided, so its absence is not revealed).
+             */
+            decision_comment: string | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Effective From
+             * Format: date
+             */
+            effective_from: string;
+            /**
+             * Grade
+             * @description A `rating_grade` vocabulary code (internal, D-43 §2).
+             */
+            grade: string | components["schemas"]["MaskedValue"];
+            /**
+             * Grade Rank
+             * @description The grade's `rating_grade` rank (higher is worse); null if the code has no vocabulary entry or the grade is masked.
+             */
+            grade_rank: number | null;
+            /**
+             * Proposed At
+             * Format: date-time
+             */
+            proposed_at: string;
+            /**
+             * Proposed By
+             * @description The proposer's actor id.
+             */
+            proposed_by: string;
+            /**
+             * Proposer User Id
+             * Format: uuid
+             * @description The proposer never decides their own proposal (409 self_approval).
+             */
+            proposer_user_id: string;
+            /**
+             * Rating Id
+             * Format: uuid
+             */
+            rating_id: string;
+            /**
+             * Rationale
+             * @description Confidential (D-43 §2): masked for a caller not cleared for it, the proposer included.
+             */
+            rationale: string | components["schemas"]["MaskedValue"];
+            status: components["schemas"]["ObligorRatingStatus"];
+            /**
+             * Superseded At
+             * @description When a later approval for the same counterparty and date replaced it.
+             */
+            superseded_at: string | null;
+            /** Superseded By Rating Id */
+            superseded_by_rating_id: string | null;
+        };
+        /** ObligorRatingPage */
+        ObligorRatingPage: {
+            /**
+             * Items
+             * @description Newest proposal first (proposed_at descending, then rating_id).
+             */
+            items: components["schemas"]["ObligorRatingOut"][];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /** Total */
+            total: number;
+        };
+        /**
+         * ObligorRatingStatus
+         * @description The obligor rating lifecycle (D-39 §2, a D-06 subset). A proposal is written IN_REVIEW
+         *     (no DRAFT: a correction is a new proposal); IN_REVIEW -> ACTIVE or REJECTED; ACTIVE ->
+         *     SUPERSEDED when another version for the same counterparty and `effective_from` is
+         *     approved. RETIRED is reserved (withdrawal is deferred).
+         * @enum {string}
+         */
+        ObligorRatingStatus: "IN_REVIEW" | "ACTIVE" | "REJECTED" | "SUPERSEDED" | "RETIRED";
         /** OidcClientConfig */
         OidcClientConfig: {
             /** Client Id */
@@ -4426,7 +4650,7 @@ export interface components {
          * Permission
          * @enum {string}
          */
-        Permission: "schema:read" | "schema:propose" | "schema:approve" | "audit:read" | "admin:read" | "source:read" | "source:manage" | "import:read" | "import:write" | "mapping:read" | "mapping:propose" | "mapping:approve" | "quarantine:read" | "quality:review" | "domain:read" | "domain:project" | "rule:read" | "rule:propose" | "rule:approve" | "calc:read" | "calc:run";
+        Permission: "schema:read" | "schema:propose" | "schema:approve" | "audit:read" | "admin:read" | "source:read" | "source:manage" | "import:read" | "import:write" | "mapping:read" | "mapping:propose" | "mapping:approve" | "quarantine:read" | "quality:review" | "domain:read" | "domain:project" | "rule:read" | "rule:propose" | "rule:approve" | "calc:read" | "calc:run" | "rating:propose" | "rating:approve";
         /**
          * PinningRun
          * @description A calculation run that pins a rule version (through its rule set).
@@ -6911,6 +7135,50 @@ export interface operations {
             };
         };
     };
+    proposeObligorRating: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                counterparty_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ObligorRatingCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObligorRatingOut"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     listCreditExposures: {
         parameters: {
             query?: {
@@ -8236,6 +8504,135 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MyPermissions"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    listObligorRatings: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                /** @description Only versions in this status (IN_REVIEW for the review queue). */
+                status?: components["schemas"]["ObligorRatingStatus"] | null;
+                /** @description Only this counterparty's versions. */
+                counterparty_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObligorRatingPage"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    getObligorRating: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rating_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObligorRatingOut"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    decideObligorRating: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rating_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ObligorRatingDecision"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObligorRatingOut"];
                 };
             };
             /** @description Client error (standard envelope) */

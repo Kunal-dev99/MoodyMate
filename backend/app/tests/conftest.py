@@ -46,6 +46,7 @@ WS3_PREFIXES = (
     "/assumption-sets",
     "/counterparties",  # Phase 19: the credit reads are WS3 domain routes
     "/credit-",
+    "/obligor-ratings",  # Phase 20: the rating reads and the approval POST
 )
 
 
@@ -328,8 +329,20 @@ _CALC_CLEANUP = "\n".join(
     ]
 )
 
+# Phase 20 obligor ratings (0023) reference counterparties and their proposer's user
+# account: removed before both. Lifecycle-guarded (DELETE and TRUNCATE refused), so the
+# table's user triggers are lifted for this one transaction.
+_RATING_CLEANUP = """
+BEGIN;
+ALTER TABLE obligor_rating DISABLE TRIGGER USER;
+DELETE FROM obligor_rating;
+ALTER TABLE obligor_rating ENABLE TRIGGER USER;
+COMMIT;
+"""
+
 # Deletes everything that is not seed data (D-11), children first.
 _CLEANUP = [
+    _RATING_CLEANUP,
     "DELETE FROM user_role",
     "DELETE FROM user_account",
     "DELETE FROM role_permission WHERE seeded_by IS NULL",
@@ -387,6 +400,7 @@ def script(url: str, statements: str) -> None:
 def clean(url: str) -> None:
     for statement in _CLEANUP:
         if statement in (
+            _RATING_CLEANUP,
             _CALC_CLEANUP,
             _CREDIT_CLEANUP,
             _DOMAIN_CLEANUP,

@@ -1557,7 +1557,7 @@ def test_registry_snapshot_run_and_maturity_ladder(
     # transaction: nothing changes; 0020 alone refuses while LCR results exist (BE-17.1).
     # Without them, head -> 0017 -> head.
     head = str(ScriptDirectory.from_config(Config("alembic.ini")).get_current_head())
-    assert sql(db, "SELECT version_num FROM alembic_version")[0]["version_num"] == head == "0022"
+    assert sql(db, "SELECT version_num FROM alembic_version")[0]["version_num"] == head == "0023"
     before = calc_counts(db)
     try:
         for target in (m20.down_revision, "0017"):

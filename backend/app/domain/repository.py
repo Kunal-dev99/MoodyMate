@@ -2,20 +2,21 @@
 
 The only code that touches the DB session for this module. Every query applies the
 principal's scope (D-04): every domain table carries `tenant_id`, and every query here
-filters on the caller's tenant. Nothing here updates or deletes (the tables are
-append-only).
+filters on the caller's tenant. Nothing here deletes, and nothing updates except an obligor
+rating version's one status move (Phase 20); every other table is append-only.
 """
 
 import uuid
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
-from sqlalchemy import Select, exists, func, insert, select, text
+from sqlalchemy import Select, exists, func, insert, select, text, update
 
 from app.db.base import Base
 from app.db.repository import ScopedRepository
-from app.domain.constants import DomainSchemaCode
+from app.domain.constants import CreditVocabularyKind, DomainSchemaCode, ObligorRatingStatus
 from app.domain.models import (
     CashflowEvent,
     Counterparty,
@@ -29,6 +30,7 @@ from app.domain.models import (
     InstrumentAttributeValue,
     InstrumentType,
     InstrumentVersion,
+    ObligorRating,
     Position,
     PositionVersion,
 )
@@ -412,6 +414,16 @@ class DomainRepository(ScopedRepository[DomainProjection]):
         )
         return result.scalar_one_or_none()
 
+    async def counterparties_by_id(self, ids: Sequence[uuid.UUID]) -> list[Counterparty]:
+        if not ids:
+            return []
+        result = await self.session.execute(
+            select(Counterparty).where(
+                Counterparty.tenant_id == self.scope.tenant_id, Counterparty.id.in_(ids)
+            )
+        )
+        return list(result.scalars())
+
     async def counterparty_versions(self, ids: Sequence[uuid.UUID]) -> list[CounterpartyVersion]:
         """Every version of these counterparties, oldest first per counterparty."""
         if not ids:
@@ -504,3 +516,141 @@ class DomainRepository(ScopedRepository[DomainProjection]):
             )
         )
         return [(row[0], row[1]) for row in result]
+
+    # --- Phase 20: obligor ratings (BE-20.2, BE-20.3, D-39), in the caller's tenant ----------
+    # The only update is a rating version's status move (`move_rating`), which the 0023
+    # lifecycle trigger also enforces; nothing is deleted.
+
+    async def lock_counterparty_ratings(self, counterparty_id: uuid.UUID) -> None:
+        """Serialise the rating writes of one counterparty within the tenant for this
+        transaction (so two approvals for one date cannot both find no ACTIVE version)."""
+        await self.session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": f"obligor_rating:{counterparty_id}:{self.scope.tenant_id}"},
+        )
+
+    async def rating_grades(self) -> dict[str, int]:
+        """The tenant's `rating_grade` codes and their ranks (higher is worse)."""
+        result = await self.session.execute(
+            select(CreditVocabulary.code, CreditVocabulary.rank).where(
+                CreditVocabulary.tenant_id == self.scope.tenant_id,
+                CreditVocabulary.vocabulary == CreditVocabularyKind.RATING_GRADE.value,
+            )
+        )
+        return {row[0]: int(row[1]) for row in result if row[1] is not None}
+
+    async def rating(self, rating_id: uuid.UUID, fresh: bool = False) -> ObligorRating | None:
+        query = select(ObligorRating).where(
+            ObligorRating.id == rating_id, ObligorRating.tenant_id == self.scope.tenant_id
+        )
+        if fresh:
+            query = query.execution_options(populate_existing=True)
+        return (await self.session.execute(query)).scalar_one_or_none()
+
+    async def active_rating(
+        self, counterparty_id: uuid.UUID, effective_from: date
+    ) -> ObligorRating | None:
+        """The ACTIVE version for this counterparty and date (at most one: partial unique
+        index)."""
+        result = await self.session.execute(
+            select(ObligorRating)
+            .where(
+                ObligorRating.tenant_id == self.scope.tenant_id,
+                ObligorRating.counterparty_id == counterparty_id,
+                ObligorRating.effective_from == effective_from,
+                ObligorRating.status == ObligorRatingStatus.ACTIVE.value,
+            )
+            .execution_options(populate_existing=True)
+        )
+        return result.scalar_one_or_none()
+
+    async def move_rating(
+        self,
+        rating_id: uuid.UUID,
+        status: ObligorRatingStatus,
+        *,
+        decided_by: str | None = None,
+        comment: str | None = None,
+        superseded_by: uuid.UUID | None = None,
+    ) -> None:
+        """A rating version's one status move (D-39 §2). A decision records who, when
+        (database clock) and why; a supersession when and by which version."""
+        values: dict[str, object] = {"status": status.value, "updated_at": func.now()}
+        if decided_by is not None:
+            values |= {
+                "decided_by": decided_by,
+                "decided_at": func.clock_timestamp(),
+                "decision_comment": comment,
+            }
+        if superseded_by is not None:
+            values |= {
+                "superseded_at": func.clock_timestamp(),
+                "superseded_by_rating_id": superseded_by,
+            }
+        result = await self.session.execute(
+            update(ObligorRating)
+            .where(ObligorRating.id == rating_id, ObligorRating.tenant_id == self.scope.tenant_id)
+            .values(**values)
+            .execution_options(synchronize_session=False)
+        )
+        if getattr(result, "rowcount", 1) != 1:
+            raise RuntimeError("obligor rating not found in scope")
+        await self.session.flush()
+
+    async def rating_page(
+        self,
+        status: ObligorRatingStatus | None,
+        counterparty_id: uuid.UUID | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[ObligorRating], int]:
+        """Rating versions of the tenant, newest proposal first (then by id)."""
+        query = select(ObligorRating).where(ObligorRating.tenant_id == self.scope.tenant_id)
+        if status is not None:
+            query = query.where(ObligorRating.status == status.value)
+        if counterparty_id is not None:
+            query = query.where(ObligorRating.counterparty_id == counterparty_id)
+        total = await self.session.scalar(select(func.count()).select_from(query.subquery()))
+        result = await self.session.execute(
+            query.order_by(ObligorRating.proposed_at.desc(), ObligorRating.id)
+            .limit(limit)
+            .offset(offset)
+        )
+        return list(result.scalars()), int(total or 0)
+
+    async def rating_history(self, counterparty_id: uuid.UUID) -> list[ObligorRating]:
+        """Every version of one counterparty, by `effective_from` descending, then
+        `proposed_at` descending (then by id)."""
+        result = await self.session.execute(
+            select(ObligorRating)
+            .where(
+                ObligorRating.tenant_id == self.scope.tenant_id,
+                ObligorRating.counterparty_id == counterparty_id,
+            )
+            .order_by(
+                ObligorRating.effective_from.desc(),
+                ObligorRating.proposed_at.desc(),
+                ObligorRating.id,
+            )
+        )
+        return list(result.scalars())
+
+    async def ratings_in_effect(
+        self, counterparty_ids: Sequence[uuid.UUID], at: date
+    ) -> list[ObligorRating]:
+        """D-39 §4: for each counterparty, the ACTIVE version with the greatest
+        `effective_from` on or before `at` (none before its first)."""
+        if not counterparty_ids:
+            return []
+        result = await self.session.execute(
+            select(ObligorRating)
+            .where(
+                ObligorRating.tenant_id == self.scope.tenant_id,
+                ObligorRating.counterparty_id.in_(counterparty_ids),
+                ObligorRating.status == ObligorRatingStatus.ACTIVE.value,
+                ObligorRating.effective_from <= at,
+            )
+            .distinct(ObligorRating.counterparty_id)
+            .order_by(ObligorRating.counterparty_id, ObligorRating.effective_from.desc())
+        )
+        return list(result.scalars())

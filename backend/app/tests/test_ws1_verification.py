@@ -61,6 +61,19 @@ ROLES = [r.value for r in Role]
 MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
 ALLOWED_OUTCOMES = {200, 201, 404, 409, 422}  # a permitted role is never refused
 
+RATINGS = "/api/v1/obligor-ratings"  # Phase 20
+
+
+def proposed_rating(api: TestClient, headers: dict[str, str], counterparty_id: str) -> Any:
+    """Phase 20: one obligor rating proposal (IN_REVIEW) for this counterparty."""
+    r = api.post(
+        f"{COUNTERPARTIES}/{counterparty_id}/ratings",
+        json={"grade": "G03", "effective_from": "2026-01-01", "rationale": "WS1 check."},
+        headers=headers,
+    )
+    assert r.status_code == 201, r.text
+    return r.json()
+
 
 def protected_routes(api: TestClient) -> list[tuple[str, str, str]]:
     """(method, path template, declared permission) for every protected /api/v1 route."""
@@ -174,6 +187,8 @@ def test_route_by_role_authorization_matrix(api: TestClient, db: str) -> None:
         "instrument_id": projected["instrument_id"],  # Phase 14: GET /instruments/{id}
         "counterparty_id": credit["counterparty_id"],  # Phase 19: GET /counterparties/{id}
         "exposure_id": credit["exposure_id"],  # Phase 19: GET /credit-exposures/{id}
+        # Phase 20: GET /obligor-ratings/{id}
+        "rating_id": proposed_rating(api, analyst, credit["counterparty_id"])["rating_id"],
         "snapshot_id": calculated["snapshot_id"],  # Phase 15: GET /dataset-snapshots/{id}
         "run_id": calculated["run_id"],  # Phase 15: GET /calculation-runs/{id}[/...]
         # Phase 16 (BE-16.4): the run manifest's pin resolves through the detail route.
@@ -283,6 +298,22 @@ def test_route_by_role_authorization_matrix(api: TestClient, db: str) -> None:
         assert {role: row[role] for role in ROLES} == {
             role: 422 if role == writer else 403 for role in ROLES
         }, row
+    # BE-20.3: the rating reads are domain:read, 2xx for every seeded role; BE-20.2: proposing
+    # is rating:propose (risk_analyst only), deciding rating:approve (approver only): their
+    # empty body is a 422, everyone else a 403 (D-40).
+    for route in ("GET /api/v1/obligor-ratings", "GET /api/v1/obligor-ratings/{rating_id}"):
+        [row] = [r for r in WS1_MATRIX if r["route"] == route]
+        assert row["permission"] == "domain:read", route
+        assert all(row[role] == 200 for role in ROLES), row
+    for route, permission, writer in (
+        ("POST /api/v1/counterparties/{counterparty_id}/ratings", "rating:propose", "risk_analyst"),
+        ("POST /api/v1/obligor-ratings/{rating_id}/approval", "rating:approve", "approver"),
+    ):
+        [row] = [r for r in WS1_MATRIX if r["route"] == route]
+        assert row["permission"] == permission, route
+        assert {role: row[role] for role in ROLES} == {
+            role: 422 if role == writer else 403 for role in ROLES
+        }, row
     assert len(WS1_MATRIX) >= 12
 
 
@@ -307,6 +338,9 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
     here_rule = rule_id(db, "past_due_treatment")  # Phase 16
     here_assumption_set = sql(db, "SELECT id FROM assumption_set")[0]["id"]
     here_credit = projected_credit(api, db, steward, dev_token(api, "approver"))  # Phase 19
+    here_rating = proposed_rating(
+        api, dev_token(api, "risk_analyst"), here_credit["counterparty_id"]
+    )
 
     other_tenant = insert_tenant(db, f"other-{uuid.uuid4().hex[:6]}")
     outsider = token_for(
@@ -330,6 +364,7 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
         COUNTERPARTIES,  # Phase 19: the credit catalogues are per tenant
         EXPOSURES,
         RULES,  # Phase 16: the rule registry is per tenant
+        RATINGS,  # Phase 20
         SNAPSHOTS,
         RUNS,
         MODULES,
@@ -374,6 +409,8 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
             f"{COUNTERPARTIES}/{uuid.uuid4()}",
         ),
         (f"{EXPOSURES}/{here_credit['exposure_id']}", f"{EXPOSURES}/{uuid.uuid4()}"),
+        # Phase 20: this tenant's rating, and the counterparty's history through its detail.
+        (f"{RATINGS}/{here_rating['rating_id']}", f"{RATINGS}/{uuid.uuid4()}"),
         # Phase 16: this tenant's seeded rule.
         (f"{RULES}/{here_rule}", f"{RULES}/{uuid.uuid4()}"),
         (
@@ -475,6 +512,27 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
             assert (r.status_code, r.json()["code"]) == (404, "not_found"), path
             [denied] = events(db, correlation)
             assert (denied["action"], denied["outcome"]) == (action, "DENIED")
+    # Phase 20 (D-39 §3): proposing for this tenant's counterparty and deciding this tenant's
+    # rating are the same 404 as absent ones, audited DENIED.
+    rating_writes: tuple[tuple[str, str, dict[str, Any]], ...] = (
+        (
+            f"{COUNTERPARTIES}/{here_credit['counterparty_id']}/ratings",
+            "obligor_rating.propose",
+            {"grade": "G03", "effective_from": "2026-01-01", "rationale": "Cross tenant"},
+        ),
+        (f"{COUNTERPARTIES}/{uuid.uuid4()}/ratings", "obligor_rating.propose",
+         {"grade": "G03", "effective_from": "2026-01-01", "rationale": "Cross tenant"}),
+        (f"{RATINGS}/{here_rating['rating_id']}/approval", "obligor_rating.approve",
+         {"decision": "APPROVE", "comment": "Cross tenant"}),
+        (f"{RATINGS}/{uuid.uuid4()}/approval", "obligor_rating.approve",
+         {"decision": "APPROVE", "comment": "Cross tenant"}),
+    )  # fmt: skip
+    for path, action, payload in rating_writes:
+        correlation = cid()
+        r = api.post(path, json=payload, headers={**outsider, "X-Correlation-ID": correlation})
+        assert (r.status_code, r.json()["code"]) == (404, "not_found"), path
+        [denied] = events(db, correlation)
+        assert (denied["action"], denied["outcome"]) == (action, "DENIED"), path
     for run_id in (here_calculated["run_id"], str(uuid.uuid4())):
         correlation = cid()
         r = api.post(
@@ -502,6 +560,7 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
         "credit_exposure",
         "credit_exposure_version",
         "credit_vocabulary",
+        "obligor_rating",  # Phase 20
         "dataset_snapshot",
         "calculation_run",
         "rule_set",
@@ -560,6 +619,9 @@ AUDITED = {
     "POST /api/v1/rules/{rule_id}/versions": "rule.propose",
     "POST /api/v1/rules/{rule_id}/versions/{version}/submit": "rule.submit",
     "POST /api/v1/rules/{rule_id}/versions/{version}/approval": "rule.approve",
+    # Phase 20 (BE-20.2): the obligor rating workflow.
+    "POST /api/v1/counterparties/{counterparty_id}/ratings": "obligor_rating.propose",
+    "POST /api/v1/obligor-ratings/{rating_id}/approval": "obligor_rating.approve",
 }
 
 
@@ -733,6 +795,21 @@ def test_every_mutating_route_is_listed_and_emits_an_audit_event(api: TestClient
         {"decision": "APPROVE", "comment": "Audit check."},
     )
     assert approved["status"] == "ACTIVE", approved
+    # Phase 20: an analyst proposes an obligor rating and an approver approves it.
+    credit = projected_credit(api, db, steward, approver)
+    rating = call(
+        "POST /api/v1/counterparties/{counterparty_id}/ratings",
+        analyst,
+        f"{COUNTERPARTIES}/{credit['counterparty_id']}/ratings",
+        {"grade": "G04", "effective_from": "2026-01-01", "rationale": "Audit check."},
+    )
+    decided = call(
+        "POST /api/v1/obligor-ratings/{rating_id}/approval",
+        approver,
+        f"{RATINGS}/{rating['rating_id']}/approval",
+        {"decision": "APPROVE", "comment": "Audit check."},
+    )
+    assert decided["status"] == "ACTIVE", decided
     wider = upload(
         api,
         steward,

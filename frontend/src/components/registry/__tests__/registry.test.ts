@@ -220,6 +220,8 @@ describe('registry reversibility (FE-16.1, D-02)', () => {
 
   it('lists the registry tabs and names the registry while NEXT_PUBLIC_RULES_UI is on', async () => {
     // FE-19.1 adds a Counterparties tab behind NEXT_PUBLIC_CREDIT_DOMAIN_UI (on by default).
+    // FE-20.1 adds a Ratings tab behind NEXT_PUBLIC_RATINGS_UI; off, this Phase 19 list exactly.
+    vi.stubEnv('NEXT_PUBLIC_RATINGS_UI', 'off')
     vi.resetModules()
     const on = await import('@/config/navigation')
     expect(on.domainSections.map((s) => s.href)).toEqual([

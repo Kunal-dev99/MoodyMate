@@ -32,6 +32,9 @@ class Permission(StrEnum):
     RULE_APPROVE = "rule:approve"
     CALC_READ = "calc:read"
     CALC_RUN = "calc:run"
+    # Feature 04 credit (BE-20.1, D-40; seeded by the tagged migration 0023_credit_permissions).
+    RATING_PROPOSE = "rating:propose"
+    RATING_APPROVE = "rating:approve"
 
 
 class Role(StrEnum):
@@ -119,10 +122,25 @@ WS3_ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
     Role.AUDITOR: _WS3_READ,
 }
 
-# The full seeded matrix (0003 + 0010 + 0017). Authorization reads the database, not this
-# table.
+# docs/DELIVERY_PLAN.md Feature 04 (D-40, PROVISIONAL D-11; permission change approved by the
+# user 2026-10-19), seeded by migration 0023 (frozen copy there). Analysts propose obligor
+# ratings and approvers decide them; every other credit read or write reuses an existing
+# permission, and platform_admin, data_steward and auditor gain nothing.
+CREDIT_ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
+    Role.PLATFORM_ADMIN: frozenset(),
+    Role.DATA_STEWARD: frozenset(),
+    Role.RISK_ANALYST: frozenset({Permission.RATING_PROPOSE}),
+    Role.APPROVER: frozenset({Permission.RATING_APPROVE}),
+    Role.AUDITOR: frozenset(),
+}
+
+# The full seeded matrix (0003 + 0010 + 0017 + 0023). Authorization reads the database, not
+# this table.
 ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
-    role: WS1_ROLE_PERMISSIONS[role] | WS2_ROLE_PERMISSIONS[role] | WS3_ROLE_PERMISSIONS[role]
+    role: WS1_ROLE_PERMISSIONS[role]
+    | WS2_ROLE_PERMISSIONS[role]
+    | WS3_ROLE_PERMISSIONS[role]
+    | CREDIT_ROLE_PERMISSIONS[role]
     for role in Role
 }
 

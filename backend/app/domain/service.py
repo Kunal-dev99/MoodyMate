@@ -29,6 +29,21 @@ kept as given and counted UNKNOWN_VALUE outside the seeded `credit_vocabulary` (
 The catalogue reads (instruments; Feature 04: credit vocabularies, counterparties and credit
 exposures, BE-19.5) are tenant-scoped; values are masked by the router from the
 classification of each value's schema field, in the schema version the row pins.
+
+Phase 20 (BE-20.2, BE-20.3, D-39): the obligor rating workflow.
+
+- `propose_rating`: a new immutable version, written IN_REVIEW, audited
+  `obligor_rating.propose` (`rating:propose`).
+- `decide_rating`: maker-checker (`rating:approve`). APPROVE supersedes the ACTIVE version
+  for the same counterparty and `effective_from` and activates this one in one transaction
+  (`obligor_rating.approve`, `.supersede`); REJECT ends it (`.reject`). The proposer never
+  decides (409 self_approval); a version proposed before another activation for its date is
+  stale (409 stale_version); only IN_REVIEW is decided (409 invalid_status).
+- Every refusal is audited DENIED with its code, including 409 rating_change_disabled while
+  RATING_CHANGE_ENABLED is off and 422 invalid_grade. The writes of one counterparty are
+  serialised by a transaction-scoped lock.
+- `ratings_in_effect(ids, at)` / `rating_in_effect(id, at)` (D-39 §4): the ACTIVE version
+  with the greatest `effective_from` on or before the date (Phase 21 pins it).
 """
 
 import re
@@ -40,6 +55,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any, NoReturn
 
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.classification import UNCLASSIFIED
@@ -53,9 +69,13 @@ from app.domain.constants import (
     PROJECTABLE_STATUSES,
     PROJECTION_SPECS,
     PROJECTOR_VERSION,
+    RATING_CLASSIFICATIONS,
     ColumnKind,
     CreditVocabularyKind,
     DomainSchemaCode,
+    ObligorRatingAction,
+    ObligorRatingRefusal,
+    ObligorRatingStatus,
     ProjectionRefusal,
     ProjectionSpec,
 )
@@ -72,6 +92,7 @@ from app.domain.models import (
     InstrumentAttributeValue,
     InstrumentType,
     InstrumentVersion,
+    ObligorRating,
     PositionVersion,
 )
 from app.domain.repository import (
@@ -82,7 +103,7 @@ from app.domain.repository import (
     IdentityRef,
     InstrumentFilter,
 )
-from app.governance.constants import AuditOutcome, ClassificationCode
+from app.governance.constants import AuditOutcome, ClassificationCode, ProposalDecision
 from app.governance.models import SchemaField
 from app.governance.service import SchemaService, audit_by, record_denial
 from app.ingestion.constants import ImportStatus
@@ -302,11 +323,37 @@ class CreditPage:
 
 
 @dataclass(frozen=True)
+class RatingRow:
+    """One obligor rating version with what the router needs to show it."""
+
+    rating: ObligorRating
+    counterparty_key: str  # the counterparty's business key (masked by the router)
+    key_schema_version_id: uuid.UUID | None  # the counterparty's latest version's schema
+    grade_rank: int | None  # the grade's rating_grade rank
+
+
+@dataclass(frozen=True)
+class RatingView:
+    row: RatingRow
+    pins: SchemaPins
+
+
+@dataclass(frozen=True)
+class RatingPage:
+    rows: list[RatingRow]
+    total: int
+    pins: SchemaPins
+
+
+@dataclass(frozen=True)
 class CounterpartyView:
     row: CounterpartyRow
     exposure_versions: list[tuple[CreditExposureVersion, str]]  # with the exposure's key
     pins: SchemaPins
     vocabulary: Mapping[CreditVocabularyKind, frozenset[str]]
+    # Phase 20 (BE-20.3): every rating version, by effective_from then proposed_at, newest
+    # first.
+    ratings: list[RatingRow] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -745,6 +792,7 @@ class DomainService:
             await self.repo.exposure_versions_naming(counterparty.business_key),
             await self._pins(),
             await self.credit_vocabulary_codes(),
+            await self._rating_rows(await self.repo.rating_history(counterparty.id)),
         )
 
     async def exposures(self, f: ExposureFilter, limit: int, offset: int) -> CreditPage:
@@ -765,3 +813,258 @@ class DomainService:
             raise ApiError(404, "not_found", "Credit exposure not found.")
         [row] = await self._exposure_rows([exposure])
         return ExposureView(row, await self._pins(), await self.credit_vocabulary_codes())
+
+    # --- Phase 20: the obligor rating workflow (BE-20.2, BE-20.3, D-39) ---------------------
+
+    async def _rating_rows(self, ratings: Sequence[ObligorRating]) -> list[RatingRow]:
+        """Each rating with its counterparty's business key, the schema version that key is
+        masked by (the counterparty's latest version) and its grade's rank."""
+        ids = sorted({r.counterparty_id for r in ratings})
+        keys = {c.id: c.business_key for c in await self.repo.counterparties_by_id(ids)}
+        latest: dict[uuid.UUID, uuid.UUID] = {}
+        for v in await self.repo.counterparty_versions(ids):  # oldest first: the last wins
+            latest[v.counterparty_id] = v.schema_version_id
+        ranks = await self.repo.rating_grades() if ratings else {}
+        return [
+            RatingRow(
+                r,
+                keys.get(r.counterparty_id, ""),
+                latest.get(r.counterparty_id),
+                ranks.get(r.grade),
+            )
+            for r in ratings
+        ]
+
+    async def _rating_view(self, rating: ObligorRating) -> RatingView:
+        [row] = await self._rating_rows([rating])
+        return RatingView(row, await self._pins())
+
+    async def _refuse_rating(
+        self, action: str, resource_type: str, resource_id: uuid.UUID, error: ApiError
+    ) -> NoReturn:
+        """Roll back, audit the refusal (DENIED, reason = the error code) and raise it."""
+        await record_denial(
+            self.session, self.principal, action, resource_type, str(resource_id), error.code
+        )
+        raise error
+
+    def _audit_rating(
+        self,
+        action: str,
+        rating: ObligorRating,
+        approval_ref: str | None = None,
+        comment: str | None = None,
+        **extra: Any,
+    ) -> None:
+        """A rating step, value-light: ids, grade (internal) and date; the comment is
+        confidential (D-43 §2); the rationale stays on the row."""
+        details: dict[str, Any] = {
+            "rating_id": str(rating.id),
+            "counterparty_id": str(rating.counterparty_id),
+            "grade": rating.grade,
+            "effective_from": rating.effective_from.isoformat(),
+            **extra,
+        }
+        classes = dict.fromkeys(details, ClassificationCode.PUBLIC.value)
+        classes["grade"] = RATING_CLASSIFICATIONS["grade"]
+        if comment is not None:
+            details["comment"] = comment
+            classes["comment"] = RATING_CLASSIFICATIONS["decision_comment"]
+        audit_by(
+            self.session,
+            self.principal,
+            action,
+            "obligor_rating",
+            resource_id=str(rating.id),
+            approval_ref=approval_ref,
+            details=details,
+            details_classification=classes,
+        )
+
+    @staticmethod
+    def _disabled() -> ApiError:
+        return ApiError(
+            409,
+            ObligorRatingRefusal.RATING_CHANGE_DISABLED,
+            "Rating changes are switched off in this environment; the ACTIVE ratings still "
+            "apply and runs keep working.",
+        )
+
+    async def propose_rating(
+        self,
+        counterparty_id: uuid.UUID,
+        grade: str,
+        effective_from: date,
+        rationale: str,
+        enabled: bool,
+    ) -> RatingView:
+        """A new version, written IN_REVIEW (D-39 §1-3), audited `obligor_rating.propose`.
+        Refused, audited DENIED: switch off (409), an absent or foreign counterparty (the
+        same 404, D-04), a grade outside the tenant's `rating_grade` vocabulary (422)."""
+        action = ObligorRatingAction.PROPOSE.value
+        if not enabled:
+            await self._refuse_rating(action, "counterparty", counterparty_id, self._disabled())
+        counterparty = await self.repo.counterparty(counterparty_id)
+        if counterparty is None:
+            await self._refuse_rating(
+                action,
+                "counterparty",
+                counterparty_id,
+                ApiError(404, "not_found", "Counterparty not found."),
+            )
+        if grade not in await self.repo.rating_grades():
+            await self._refuse_rating(
+                action,
+                "counterparty",
+                counterparty_id,
+                ApiError(
+                    422,
+                    ObligorRatingRefusal.INVALID_GRADE,
+                    "The grade is not a rating_grade code of the credit vocabulary.",
+                ),
+            )
+        await self.repo.lock_counterparty_ratings(counterparty.id)
+        rating = ObligorRating(
+            id=uuid.uuid4(),
+            tenant_id=self.principal.tenant_id,
+            counterparty_id=counterparty.id,
+            grade=grade,
+            effective_from=effective_from,
+            rationale=rationale,
+            status=ObligorRatingStatus.IN_REVIEW.value,
+            proposed_by=self.principal.actor,
+            proposer_user_id=self.principal.user_id,
+            # The database clock after the counterparty lock: what stale_version compares.
+            proposed_at=func.clock_timestamp(),
+            created_by=self.principal.actor,
+        )
+        self.repo.add(rating)
+        await self.repo.flush()
+        self._audit_rating(action, rating)
+        await self.session.commit()
+        return await self._fresh_view(rating.id)
+
+    async def _fresh_view(self, rating_id: uuid.UUID) -> RatingView:
+        rating = await self.repo.rating(rating_id, fresh=True)
+        assert rating is not None  # written in this tenant just now
+        return await self._rating_view(rating)
+
+    async def decide_rating(
+        self, rating_id: uuid.UUID, decision: ProposalDecision, comment: str, enabled: bool
+    ) -> RatingView:
+        """Maker-checker (D-39 §3). APPROVE supersedes the ACTIVE version for the same
+        counterparty and `effective_from` (if any) and activates this one, in one
+        transaction; REJECT ends it. Refused, audited DENIED: switch off (409), absent or
+        foreign (404), not IN_REVIEW (409 invalid_status), the proposer (409 self_approval),
+        another version for the date activated after this one was proposed (409
+        stale_version)."""
+        approve = decision == ProposalDecision.APPROVE
+        action = (ObligorRatingAction.APPROVE if approve else ObligorRatingAction.REJECT).value
+        if not enabled:
+            await self._refuse_rating(action, "obligor_rating", rating_id, self._disabled())
+        found = await self.repo.rating(rating_id)
+        if found is None:
+            await self._refuse_rating(
+                action,
+                "obligor_rating",
+                rating_id,
+                ApiError(404, "not_found", "Obligor rating not found."),
+            )
+        await self.repo.lock_counterparty_ratings(found.counterparty_id)
+        rating = await self.repo.rating(rating_id, fresh=True)  # as of the lock
+        assert rating is not None  # never deleted
+        if rating.status != ObligorRatingStatus.IN_REVIEW.value:
+            await self._refuse_rating(
+                action,
+                "obligor_rating",
+                rating_id,
+                ApiError(
+                    409,
+                    ObligorRatingRefusal.INVALID_STATUS,
+                    f"The rating is {rating.status}; only an IN_REVIEW rating is decided.",
+                    {"status": rating.status},
+                ),
+            )
+        if rating.proposer_user_id == self.principal.user_id:
+            await self._refuse_rating(
+                action,
+                "obligor_rating",
+                rating_id,
+                ApiError(
+                    409,
+                    ObligorRatingRefusal.SELF_APPROVAL,
+                    "You cannot decide on a rating you proposed (maker-checker).",
+                ),
+            )
+        ref = str(rating.id)
+        if not approve:
+            await self.repo.move_rating(
+                rating.id,
+                ObligorRatingStatus.REJECTED,
+                decided_by=self.principal.actor,
+                comment=comment,
+            )
+            self._audit_rating(action, rating, ref, comment)
+            await self.session.commit()
+            return await self._fresh_view(rating.id)
+        active = await self.repo.active_rating(rating.counterparty_id, rating.effective_from)
+        if active is not None and active.decided_at is not None:
+            if active.decided_at > rating.proposed_at:
+                await self._refuse_rating(
+                    action,
+                    "obligor_rating",
+                    rating_id,
+                    ApiError(
+                        409,
+                        ObligorRatingRefusal.STALE_VERSION,
+                        "Another rating for this counterparty and date was approved after "
+                        "this one was proposed; approving it would undo that decision. "
+                        "Propose again.",
+                        {"active_rating_id": str(active.id)},
+                    ),
+                )
+        if active is not None:  # first: one ACTIVE version per date (partial unique index)
+            await self.repo.move_rating(
+                active.id, ObligorRatingStatus.SUPERSEDED, superseded_by=rating.id
+            )
+        await self.repo.move_rating(
+            rating.id,
+            ObligorRatingStatus.ACTIVE,
+            decided_by=self.principal.actor,
+            comment=comment,
+        )
+        self._audit_rating(action, rating, ref, comment)
+        if active is not None:
+            self._audit_rating(ObligorRatingAction.SUPERSEDE.value, active, ref, superseded_by=ref)
+        await self.session.commit()
+        return await self._fresh_view(rating.id)
+
+    async def ratings(
+        self,
+        status: ObligorRatingStatus | None,
+        counterparty_id: uuid.UUID | None,
+        limit: int,
+        offset: int,
+    ) -> RatingPage:
+        items, total = await self.repo.rating_page(status, counterparty_id, limit, offset)
+        return RatingPage(await self._rating_rows(items), total, await self._pins())
+
+    async def rating(self, rating_id: uuid.UUID) -> RatingView:
+        """One rating version: 404 alike for an absent and a foreign id (D-04)."""
+        rating = await self.repo.rating(rating_id)
+        if rating is None:
+            raise ApiError(404, "not_found", "Obligor rating not found.")
+        return await self._rating_view(rating)
+
+    async def ratings_in_effect(
+        self, counterparty_ids: Sequence[uuid.UUID], at: date
+    ) -> dict[uuid.UUID, ObligorRating]:
+        """D-39 §4, for Phase 21's pinning: counterparty id -> the ACTIVE version with the
+        greatest `effective_from` on or before `at`. A counterparty with none (before its
+        first ACTIVE version, or never rated) is absent: never a fallback grade."""
+        found = await self.repo.ratings_in_effect(sorted(set(counterparty_ids)), at)
+        return {r.counterparty_id: r for r in found}
+
+    async def rating_in_effect(self, counterparty_id: uuid.UUID, at: date) -> ObligorRating | None:
+        """D-39 §4 for one counterparty of the caller's tenant (None when none applies)."""
+        return (await self.ratings_in_effect([counterparty_id], at)).get(counterparty_id)

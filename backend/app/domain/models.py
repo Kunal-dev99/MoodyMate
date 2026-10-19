@@ -19,6 +19,9 @@ their `counterparty_version` and `credit_exposure_version` rows (as above: one p
 canonical record; days past due INTEGER, the default flag BOOLEAN), and the seeded
 PROVISIONAL `credit_vocabulary`.
 
+Phase 20 (BE-20.1, D-39), migration 0023: `obligor_rating`, one immutable version per rating
+proposal, lifecycle-guarded (not append-only: its status and decision fields move once).
+
 Every table carries `tenant_id` and is read through `ScopedRepository` (D-04). All of them
 are append-only: UPDATE, DELETE and TRUNCATE raise (DB triggers). Insert triggers check that
 a row is in the tenant of the import, source, identity or projection it names, and that a
@@ -28,7 +31,7 @@ version and payload hash. Every enum column has a CHECK (D-06).
 
 import uuid
 from collections.abc import Iterable
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
 from typing import Any
@@ -37,21 +40,27 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Date,
+    DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, ScopedModel
 from app.domain.constants import (
+    RATING_COMMENT_MAX,
+    RATING_RATIONALE_MAX,
     CashflowOrigin,
     CashflowType,
     CreditVocabularyKind,
     DomainSchemaCode,
+    ObligorRatingStatus,
 )
 from app.governance.constants import FieldType
 
@@ -375,3 +384,72 @@ class CreditVocabulary(ScopedModel, Base):
     description: Mapped[str | None] = mapped_column(String(1000))
     provisional: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     seeded_by: Mapped[str | None] = mapped_column(String(100))
+
+
+# --- Feature 04: the obligor rating workflow (BE-20.1, D-39), migration 0023 -----------------
+
+
+class ObligorRating(ScopedModel, Base):
+    """One immutable obligor rating version (D-39 §1-2): a grade of the tenant's
+    `rating_grade` vocabulary for one counterparty identity from `effective_from`, with its
+    rationale and proposer. Written IN_REVIEW; the decision fields (decider, time, comment)
+    are set once, on the move out of IN_REVIEW, and the superseded fields once, on the move
+    ACTIVE -> SUPERSEDED. A DB trigger freezes the content, allows only the D-39 §2 moves
+    and refuses DELETE and TRUNCATE; a partial unique index keeps one ACTIVE version per
+    (counterparty, `effective_from`)."""
+
+    __tablename__ = "obligor_rating"
+    __table_args__ = (
+        CheckConstraint(_in("status", ObligorRatingStatus), name="status"),
+        CheckConstraint(
+            f"char_length(rationale) BETWEEN 1 AND {RATING_RATIONALE_MAX}", name="rationale"
+        ),
+        CheckConstraint(
+            "decision_comment IS NULL OR char_length(decision_comment) BETWEEN 1 AND "
+            f"{RATING_COMMENT_MAX}",
+            name="decision_comment",
+        ),
+        CheckConstraint(
+            "(decided_by IS NULL) = (decided_at IS NULL)"
+            " AND (decided_by IS NULL) = (decision_comment IS NULL)"
+            " AND (status = 'IN_REVIEW') = (decided_at IS NULL)",
+            name="decision",
+        ),
+        CheckConstraint(
+            "(superseded_at IS NULL) = (superseded_by_rating_id IS NULL)"
+            " AND (status = 'SUPERSEDED') = (superseded_at IS NOT NULL)",
+            name="superseded",
+        ),
+        CheckConstraint(
+            "superseded_by_rating_id IS NULL OR superseded_by_rating_id <> id",
+            name="superseded_by",
+        ),
+        Index(
+            "uq_obligor_rating_one_active",
+            "counterparty_id",
+            "effective_from",
+            unique=True,
+            postgresql_where=text("status = 'ACTIVE'"),
+        ),
+    )
+
+    tenant_id: Mapped[uuid.UUID] = _tenant()
+    counterparty_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("counterparty.id"), index=True, nullable=False
+    )
+    grade: Mapped[str] = mapped_column(String(50), nullable=False)
+    effective_from: Mapped[date] = mapped_column(Date, nullable=False)
+    rationale: Mapped[str] = mapped_column(String(RATING_RATIONALE_MAX), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    proposed_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    proposer_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user_account.id"), nullable=False
+    )
+    proposed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    decided_by: Mapped[str | None] = mapped_column(String(255))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decision_comment: Mapped[str | None] = mapped_column(String(RATING_COMMENT_MAX))
+    superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    superseded_by_rating_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("obligor_rating.id")
+    )

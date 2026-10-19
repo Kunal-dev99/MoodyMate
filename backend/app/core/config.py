@@ -118,6 +118,11 @@ class Settings(BaseSettings):
     # reject a rule version). Off freezes the rules at their ACTIVE versions: the writes
     # answer 409 rule_change_disabled (audited); reads and runs keep working.
     RULE_CHANGE_ENABLED: bool = True
+    # Phase 20 (CR-02, D-39 §6, D-02): the obligor rating workflow (propose, approve or
+    # reject). Off freezes ratings at their ACTIVE versions: the writes answer 409
+    # rating_change_disabled (audited); reads and runs keep working and pin the ACTIVE
+    # ratings as they stand. Validated at startup (D-13): a non-boolean stops the app.
+    RATING_CHANGE_ENABLED: bool = True
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
 
     # D-15: root of the write-once raw artifact store. Required outside local/test (D-13);
