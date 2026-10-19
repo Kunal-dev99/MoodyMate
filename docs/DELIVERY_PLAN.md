@@ -2755,3 +2755,623 @@ with the safer default (D-36):
    pro-rating acceptable for the prototype?
 7. **Test headroom:** stay at 49 with no spare slot, or fold `test_config.py` in BE-19.1 to
    free two?
+
+## Feature 05 — Advanced: Agentic Stress-Test Explorer
+
+Kickoff: `docs/prompts/kickoffs/05-agentic-stress-explorer.md` · Status: **PROPOSED, awaiting
+user approval.** D-44…D-50 are proposed. Hard stops: **D-47** (new permissions and who
+approves scenarios) and **D-49 §5** (live calls to an external LLM provider). There is **no
+D-01 exception**: only new tables are added, and no CHECK is widened.
+
+**What it is.** The sidebar gets a new **Advanced** section, directly below "AI Assistant".
+Its first item is the **Agentic Stress-Test Explorer** for the maturity ladder:
+1. An agent proposes a structured set of plausible stress scenarios as typed data.
+2. An analyst reviews and edits them, and an approver approves them.
+3. Each approved scenario runs through the unchanged deterministic engine on the exact pins of
+   a baseline run.
+4. The explorer compares the impact per currency and bucket.
+
+The AI only proposes and never calculates (D-31 §8, D-45 §10). Everything is labelled
+"Illustrative stress exploration, not a regulatory stress test" (D-44 §8).
+
+Numbering (D-08): global **Phases 24–27**, with tasks `BE-24.1`/`FE-24.1` to `BE-27.n`/`FE-27.n`.
+Feature IDs reuse the signed-off WS plans:
+
+| ID | Feature (WS plan) | Slice built here |
+|---|---|---|
+| RO-02 | Scenario management (WS4) | `scenario`, `scenario_version`, `scenario_change`, `scenario_run`; overlay runs; baseline comparison |
+| RO-06 | Exception and approval handling (WS4) | maker-checker on scenario versions only |
+| RO-07 | Run history and reproducibility (WS4) | stressed runs pinned and re-runnable |
+| AI-01 | Natural-language rule proposals → structured proposals (WS5) | structured scenario proposals only, with no free-text input |
+| AI-04 | Agentic workflow orchestration (WS5) | thin: proposals become drafts behind approval gates, with no tool calls |
+| AI-05 | AI evaluation (WS5 FE/BE-AI-05) | an offline evaluation fixture run in CI |
+| AI-08 | AI governance and model controls (WS5) | provider interface, data boundary, provenance, limits, secrets |
+| FC-08 | Pinning (WS3) | the scenario version as a pin |
+
+**Dependencies.**
+- The feature needs **Feature 03 only** (maturity ladder, rules, runs, `rerun_of`). It does
+  not read or change any Feature 04 table or module, so it can be built independently of
+  Phases 21–23.
+- **Running in parallel with Feature 04:**
+  - **Phases 24 and 26** touch no Feature 04 file except the shared registry lists:
+    `governance/constants.py` `ROLE_PERMISSIONS`, the WS1 test hunks, `navigation.ts` and
+    `features.ts`. They may run in parallel with Phases 21–23, in their own worktrees
+    (CLAUDE.md step 6).
+  - **Phase 25** edits the engine: `CalculationService.create`, `_manifest`, `_rerun_pins`
+    and `result_document` in `calculations/service.py`, plus `test_calculations.py`.
+    BE-21.2 edits the same functions. **Recommended: start Phase 25 after Phase 21 merges.**
+    Otherwise the coordinator hands the service.py conflict to the Phase 25 backend
+    engineer at merge.
+  - Phase 26 needs Phase 24 (drafts) but not Phase 25. Its UI's run-and-compare step needs
+    Phase 25 merged first.
+
+**Constraining decisions:**
+- **D-01:** additive tables only. `calculation_input_ref.ref_type`,
+  `calculation_warning.code`, `intermediate_value` and every other closed CHECK stay as they
+  are (D-45 §4–5).
+- **D-02:** downgrades are tested and refuse while non-seed rows exist. Every phase sits behind
+  a switch:
+  - backend: `SCENARIOS_ENABLED`, `AI_ENABLED` and `AI_SCENARIO_PROPOSALS_ENABLED`;
+  - frontend: `NEXT_PUBLIC_STRESS_EXPLORER_UI`, `NEXT_PUBLIC_STRESS_COMPARE_UI` and
+    `NEXT_PUBLIC_AI_SCENARIO_UI`.
+- **D-03 / D-36:** one worktree per phase (e.g. `../MoodyMate-wt/stress-p24`) and a DB copy
+  (`createdb -T moodymate_dev moodymate_stress_p24`). Contract first, a one-message fan-out,
+  and pre-numbered migrations 0026–0028.
+- **D-04:** fail closed. Each endpoint names its permission (table below). Every new table
+  carries `tenant_id` and is read through `ScopedRepository`.
+- **D-06:** enums are UPPERCASE. `scenario_version.status` is a subset of Data Model §9
+  `scenario.status`, and `ai_proposal.status` is a subset of §9 `ai_proposal.status`.
+- **D-10 / D-24 §4:** every mutation and every refused write is audited, with hashes, never
+  shock or prompt text.
+- **D-11:** permissions are seeded with tags and marked PROVISIONAL.
+- **D-13:** the LLM settings are validated at startup.
+- **D-14:** synthetic data only outside production. Live LLM calls are allowed only in local
+  and staging (D-49 §5).
+- **D-26:** **+0 tests** (see the test budget).
+- **D-31 / D-32 / D-33 / D-35** are reused unchanged, and extended by D-44…D-46.
+- **D-31 §8:** no AI on the run path.
+
+**Pre-plan findings** (codebase at master `0e443eb`):
+- **AI and scenario packages are empty.** `backend/app/ai/*.py` and `backend/app/orchestration/*.py`
+  are skeletons ("Empty until a delivery-plan task fills it"). ARCHITECTURE.md:59 maps
+  `scenario`, `scenario_change` and `scenario_run` to `orchestration`, and :63 maps `ai_*` to
+  `ai`.
+- **AI configuration.**
+  - `AI_ENABLED: bool = False` (`core/config.py:66`) is read nowhere except
+    `test_config.py:108`.
+  - `.env` is git-ignored (`.gitignore:5-7`), and `backend/.env.example:6` carries
+    `AI_ENABLED=false`.
+  - `httpx` is already a dependency (`pyproject.toml:26`), so no SDK is needed for Groq's
+    OpenAI-compatible API.
+  - Settings already hide input in errors (`config.py:61`).
+- **One contribution per cash flow and run.** `intermediate_value` has
+  `UNIQUE (cashflow_event_id, calculation_run_id)` (`calculations/models.py:257`), so a shock
+  that splits a flow between buckets cannot be stored. The percentage shift is deferred
+  (D-44 §2).
+- **Closed CHECKs.** `calculation_input_ref.ref_type` (`models.py:201`) and
+  `calculation_warning.code` (`constants.py:50-71`) are closed, so the scenario pin and the
+  per-flow applications need their own tables (D-45 §4–5). `PostCheck` is code only
+  (`constants.py:74-87`), so `SCENARIO_OVERLAY` needs no migration.
+- **Engine.**
+  - Re-runs are gated on `ENGINE_VERSION` and `MANIFEST_VERSION` (`service.py:1040-1044`).
+    The baseline-pin copy reuses `_rerun_pins` (`service.py:1033-1069`), and the manifest is
+    built in `_manifest` (`service.py:1251-1327`).
+  - `CashFlowInput` is frozen (`modules/base.py:38-47`), and `exact_context()` traps
+    rounding (`core/decimals.py:31-37`). A factor of scale 4 times an amount is exact, so the
+    overlay needs no rounding.
+- **Seeded direction.** `cashflow_direction`: LOAN and BOND → INFLOW, DEPOSIT → OUTFLOW
+  (D-35 §1). The user's examples map to INFLOW_DELAY on LOAN, OUTFLOW_RUN_OFF on DEPOSIT, and
+  OUTFLOW_ACCELERATION on DEPOSIT or INFLOW_HAIRCUT on BOND.
+- **Navigation.**
+  - "AI Assistant" is the last main item (`config/navigation.ts:121-128`), and it is labelled
+    `planned: { phase: 'Feature 05', workstream: 'WS5' }`. That now collides with this
+    feature's name, so FE-24.1 relabels it, as FE-19.1 did.
+  - The sidebar renders the main nav and an "Administration" group only
+    (`components/layout/sidebar.tsx:151-173`), so the Advanced group is new.
+- **Tests and migrations.**
+  - There are **49** backend test functions in 22 files. The cap is "under 50", so there is no
+    spare slot.
+  - The migration head is `0023`, and 0024–0025 are pre-numbered for Phases 21–22.
+
+### Endpoints and permissions (all under `/api/v1`)
+
+The WS4 and WS5 names are canonical (D-05): `POST scenarios`, `POST scenarios/{scenario_id}/run`,
+`GET scenarios/{scenario_id}/comparison`, `POST ai/assist` and `GET ai/requests/{request_id}`.
+The others are added in the same style.
+
+| Endpoint | Permission | Phase |
+|---|---|---|
+| `GET scenario-shock-kinds` (kinds, parameters, bounds, selector vocabulary) | `calc:read` | 24 |
+| `GET scenarios` (filter status, origin), `GET scenarios/{scenario_id}` (versions, shocks, provenance) | `calc:read` | 24 |
+| `POST scenarios` (name, description, first DRAFT version) | `scenario:propose` | 24 |
+| `POST scenarios/{scenario_id}/versions` (new DRAFT, optionally copied from a version) | `scenario:propose` | 24 |
+| `PUT scenarios/{scenario_id}/versions/{version}` (edit a DRAFT; author only) | `scenario:propose` | 24 |
+| `POST scenarios/{scenario_id}/versions/{version}/submit` | `scenario:propose` | 24 |
+| `POST scenarios/{scenario_id}/versions/{version}/approval` (APPROVE / REJECT + comment) | `scenario:approve` | 24 |
+| `POST scenarios/{scenario_id}/versions/{version}/close` | `scenario:approve` | 24 |
+| `POST scenarios/{scenario_id}/run` (`version`, `baseline_run_id`; `Idempotency-Key`) | `calc:run` | 25 |
+| `GET scenario-runs` (filter scenario, baseline run) | `calc:read` | 25 |
+| `GET scenarios/{scenario_id}/comparison?scenario_run_id=` | `calc:read` | 25 |
+| `GET scenarios/{scenario_id}/comparison/contributions?scenario_run_id=&currency=&bucket_code=` (paginated) | `calc:read` | 25 |
+| `GET ai/status` | `calc:read` | 26 |
+| `POST ai/assist` (`task=SCENARIO_PROPOSAL`, `baseline_run_id`, `focus`, `count`) | `ai:use` (and the service requires `scenario:propose`) | 26 |
+| `GET ai/requests`, `GET ai/requests/{request_id}` (metadata and hashes only) | `calc:read` | 26 |
+
+Existing run routes (`GET calculation-runs`, `GET calculation-runs/{run_id}` and re-runs via
+`POST calculation-runs`) gain an optional `scenario` summary on stressed runs. This is an
+additive response field, and the existing permissions are unchanged.
+
+### Role → permission matrix additions (seed; PROVISIONAL, D-11, D-47, **hard stop**)
+
+| Role | scenario:propose | scenario:approve | ai:use |
+|---|---|---|---|
+| platform_admin | | | |
+| data_steward | | | |
+| risk_analyst | ✓ | | ✓ |
+| approver | | ✓ | |
+| auditor | | | |
+
+No role and no clearance change. If D-47 B is chosen instead, the three columns are replaced
+by `rule:propose` / `rule:approve`, and BE-24.1 and BE-26.1 seed nothing.
+
+### Test budget (D-26)
+
+The suite is at **49** (cap: under 50). This feature adds **no test function**. Every check is
+folded into an existing function, in its own small hunk:
+
+| Area | Folded into |
+|---|---|
+| scenario lifecycle, shock validation, AI proposal validation, provenance, triggers, permission join | `test_rules.py::test_governed_rule_changes_and_pinning` (the governed-change pattern) |
+| overlay golden cases, stressed runs, re-runs, comparison and masking, no-`app.ai`-import grep | `test_calculations.py::test_registry_snapshot_run_and_maturity_ladder` |
+| LLM settings guards | `test_config.py::test_settings_fail_closed` |
+| key never in logs | `test_config.py::test_logs_never_carry_tokens_or_secrets` |
+| no secret in `openapi.json`; additive migrations | `test_committed_artifacts.py` (both functions) |
+| no row-level data in the LLM context; no prompt, response or key in logs, errors or audit | `test_import_no_leak.py::test_no_sentinel_in_logs_error_bodies_or_audit` |
+| route × role matrix, isolation, audit completeness, migration round trip | the four `test_ws1_verification.py` functions |
+
+| Phase | Change | Count after |
+|---|---|---|
+| 24 | +0 | 49 |
+| 25 | +0 | 49 |
+| 26 | +0 | 49 |
+| 27 | +0 (marker and folds only) | 49 |
+
+*Coordinator option (open question 3):* fold `test_config.py`'s three functions into one
+(−2, no assertion lost), and give this feature one `test_stress_explorer.py` (+1) → 48. If
+taken, every row above that names `test_rules.py` or `test_calculations.py` moves to the new
+file, with the same assertions. Checked with `pytest --collect-only -q`.
+
+### Migrations (pre-numbered, CLAUDE.md protocol step 6)
+
+| Rev | Phase | Content | Downgrade refuses while |
+|---|---|---|---|
+| 0026 | 24 | `scenario`, `scenario_version`, `scenario_change` with lifecycle triggers; tagged seed `0026_scenario_permissions` | any scenario row exists |
+| 0027 | 25 | `scenario_run`, `calculation_scenario_pin`, `scenario_shock_application` (0018 run-output guards on the last two) | any scenario run, pin or application exists |
+| 0028 | 26 | `ai_request`, `ai_proposal` with triggers; tagged seed `0028_ai_permissions` | any `ai_request` row exists |
+
+0026–0028 are labels reserved for this feature. The chain is merge order. Whichever of 0024,
+0025 and 0026–0028 merges first sits on the current head, and the coordinator re-chains each
+later migration's `down_revision` at merge (step 6). The head pin in `test_calculations.py`
+moves with each merge. No migration carries `D01_EXCEPTION`.
+
+### Phase 24 — Scenario registry, maker-checker and the Advanced section (RO-02, RO-06; WS4-P0)
+
+Goal: in the new Advanced → Agentic Stress-Test Explorer, a risk analyst authors a stress
+scenario from the closed shock vocabulary, edits it and submits it, and a different person,
+an approver, approves or rejects it. Nothing runs yet.
+
+- [ ] **BE-24.1** Migration 0026 (`0026_scenarios`):
+  - `scenario`: code unique per tenant, name and description;
+  - `scenario_version`: version, status, `origin` (MANUAL, AI_PROPOSED), `shocks` JSONB,
+    `shocks_sha256`, author, submit and decision fields, close fields and
+    `ai_acknowledged`;
+  - `scenario_change`: one row per shock at submit;
+  - triggers per D-44 §5: shocks are updatable only while DRAFT, the moves are the allowed
+    ones (once each), and DELETE and TRUNCATE are refused on all three tables;
+  - the tagged seed `0026_scenario_permissions` (D-47, **hard stop**) and
+    `SCENARIO_ROLE_PERMISSIONS`.
+  - *Done-when:*
+    - the previous head → 0026 → previous head → 0026 round trip passes in
+      `test_ws1_verification.py::test_migration_round_trip_and_downgrade_guards`;
+    - the `test_rules.py` fold proves that a shock UPDATE on an IN_REVIEW version, an illegal
+      move, and DELETE and TRUNCATE on each table are refused by the DB;
+    - the seeded `role_permission` join equals `ROLE_PERMISSIONS`, including the matrix above
+      (the architect checks it);
+    - the downgrade refuses while a scenario exists;
+    - every seed row carries its tag.
+- [ ] **BE-24.2** Shock vocabulary and validators (`app/orchestration/scenario_shocks.py`, pure,
+  per D-44 §2–4), plus `GET scenario-shock-kinds`.
+  - *Done-when:*
+    - a loop in the `test_rules.py` fold over a table of bodies gets 422 `invalid_shock`, with
+      the expected value-free code, for each of these:
+      - an unknown kind;
+      - an extra field;
+      - a formula-like string (`"amount*2"`);
+      - an exponent (`"1E+2"`);
+      - a JSON fractional number;
+      - 5 decimal places;
+      - a factor outside its bounds;
+      - days 0 and 3651;
+      - an unknown instrument type;
+      - a direction mismatch (INFLOW_DELAY on DEPOSIT);
+      - 9 shocks;
+    - the four valid kinds are accepted;
+    - `GET scenario-shock-kinds` lists exactly the four kinds, with bounds;
+    - the WS1 matrix lists the route with 200 for every role.
+- [ ] **BE-24.3** Lifecycle routes: `POST scenarios`, `POST …/versions`, `PUT …/versions/{version}`,
+  `…/submit`, `…/approval` and `…/close` (D-44 §5–6), audited, with `SCENARIOS_ENABLED`
+  validated at startup.
+  - *Done-when:* the `test_rules.py` fold asserts:
+    - a user holding both roles gets 409 `self_approval`;
+    - a different analyst gets 409 `not_author` on PUT and on submit;
+    - 409 `invalid_status` when deciding a DRAFT or deciding twice;
+    - a missing comment gets 422;
+    - the `scenario_change` rows equal the shocks at submit;
+    - CLOSED hides the version from `GET scenarios?status=APPROVED_FOR_TEST`, and it stays
+      readable by id;
+    - switch-off gives 409 `scenarios_disabled`, audited DENIED, with nothing written;
+    - the WS1 audit-completeness test lists all six mutating routes, with their actions.
+- [ ] **BE-24.4** Reads: `GET scenarios` and `GET scenarios/{scenario_id}`. Every response
+  carries `labels.statement` (D-44 §8).
+  - *Done-when:*
+    - the WS1 matrix and isolation tests list both routes, with 200 for every role and the
+      same 404 for another tenant's id and a random id;
+    - the `test_rules.py` fold asserts that `labels.statement` equals the constant.
+- [ ] **BE-24.5** The contract: the `openapi.json` export (contract first), plus PROVISIONAL rows
+  in `docs/RETENTION.md` for the three tables.
+  - *Done-when:*
+    - the CI OpenAPI drift check passes;
+    - `grep -c scenario docs/RETENTION.md` shows the three tables.
+- [ ] **FE-24.1** The Advanced sidebar section (the one owner of `navigation.ts` and
+  `features.ts`):
+  - `advancedWorkspaces` with the item "Agentic Stress-Test Explorer" (`/advanced/stress-explorer`,
+    `calc:read`, a lucide `FlaskConical` icon), behind `NEXT_PUBLIC_STRESS_EXPLORER_UI`;
+  - `sidebar.tsx` renders an "Advanced" heading and group right after the main nav (so
+    directly below "AI Assistant") and before "Administration";
+  - `(platform)/layout.tsx` passes it in;
+  - `findWorkspace` includes it;
+  - the "AI Assistant" placeholder is relabelled from `phase: 'Feature 05'` to
+    `{ phase: 'WS5', workstream: 'planned' }`;
+  - the explorer page shell carries the illustrative banner.
+  - *Done-when:*
+    - a vitest asserts the order Workspace items → "AI Assistant" → "Advanced" heading →
+      "Agentic Stress-Test Explorer" → "Administration";
+    - with the switch off, there is no "Advanced" heading, the nav equals the Phase 23 list
+      and `/advanced/stress-explorer` is a 404;
+    - the AI Assistant placeholder reads "Scheduled for WS5 (planned)";
+    - a Playwright test: risk_analyst opens the item and sees the banner text "Illustrative
+      stress exploration, not a regulatory stress test".
+- [ ] **FE-24.2** Scenario list, editor, detail and review:
+  - the editor's shock rows come from `GET scenario-shock-kinds`. Each row has a kind picker,
+    a selector picker and typed numeric inputs with bounds. There is no free-text formula
+    field;
+  - the detail shows the versions and their status, author and decider;
+  - a review tab is shown for `scenario:approve`, with a required comment;
+  - the run actions stay hidden until Phase 25.
+  - *Done-when:*
+    - a Playwright test:
+      1. the analyst creates "Delayed loan repayments + deposit run-off" (INFLOW_DELAY LOAN
+         30; OUTFLOW_RUN_OFF DEPOSIT 1.2500) and submits it;
+      2. the approver approves it with a comment, and the status shows APPROVED_FOR_TEST;
+      3. the analyst sees no Approve button and gets a backend 403 on a direct POST;
+    - a vitest covers the editor's validation states (bounds, scale 4, required fields);
+    - a vitest checks the status pill against the `openapi.json` enum;
+    - there are no hand-written payload types (grep).
+
+*Test budget:* 49 → 49 (folded).
+*Reversibility:* additive tables and a tagged seed. The 0026 downgrade refuses while scenarios
+exist. `SCENARIOS_ENABLED=false` refuses writes (409, audited), and reads keep working.
+CLOSED and REJECTED versions are hidden by status, never deleted.
+`NEXT_PUBLIC_STRESS_EXPLORER_UI=off` removes the Advanced section and its routes, which
+restores the Phase 23 sidebar exactly.
+
+### Phase 25 — Stressed runs and baseline comparison (RO-02, RO-07, FC-08; WS4-P2)
+
+Goal: a risk analyst runs an approved scenario against a baseline `maturity_ladder` run. The
+engine copies the baseline's pins, applies the deterministic overlay and runs the unchanged
+module. The explorer then compares baseline and stressed per currency and bucket (inflow,
+outflow, net and cumulative deltas, and the buckets that turn negative), with masked
+drill-down to the changed contributions and their source rows. Re-running a stressed run
+reproduces it exactly.
+
+**Start after Phase 21 merges** (see Dependencies).
+
+- [ ] **BE-25.1** Migration 0027:
+  - `scenario_run` (append-only);
+  - `calculation_scenario_pin` and `scenario_shock_application` (D-45 §4–5), under 0018's
+    run-output guards (inserted only while the run is RUNNING, then append-only).
+  - *Done-when:*
+    - the round trip passes;
+    - the Phase 15 guard loop in `test_calculations.py` also covers the two run-output tables
+      (+0);
+    - `scenario_run` refuses UPDATE, DELETE and TRUNCATE;
+    - the downgrade refuses while any of the three tables has a row.
+- [ ] **BE-25.2** The pure overlay, `app/calculations/scenario_overlay.py` (D-45 §2).
+  - *Done-when:*
+    - the `test_calculations.py` golden loop reads
+      `backend/app/calculations/golden/scenario_overlay_v1_engineering_cases.json` (status
+      `ENGINEERING — awaiting domain-expert approval`). Its hand-computed cases cover:
+      - each of the four kinds;
+      - two shocks on one flow (days added, factors multiplied);
+      - the currency and origin selectors;
+      - past-due and incomplete flows left untouched;
+      - the acceleration clamp at day 1;
+      - an INFLOW_HAIRCUT of 0;
+      - the identity shock (factor 1.0000);
+      - a direction mismatch under the pinned rule (matches nothing, counted);
+    - the existing no-float grep covers the file;
+    - a grep in the same test asserts that nothing under `app/calculations/` or
+      `app/orchestration/` imports `app.ai`.
+- [ ] **BE-25.3** Engine and run route (D-45 §1, §4–9):
+  - `ScenarioRunSpec` (its fingerprint covers the scenario version and the baseline run);
+  - the baseline pin copy;
+  - the `scenario` manifest section;
+  - the pin row and the application rows;
+  - the `SCENARIO_OVERLAY` post-check;
+  - re-runs of stressed runs;
+  - `POST scenarios/{scenario_id}/run`, audited `scenario.run` plus `calculation_run.create`.
+  - *Done-when:* the `test_calculations.py` fold asserts:
+    - a non-stressed `maturity_ladder` run's manifest and result document have exactly the
+      Feature 03 key sets;
+    - `ENGINE_VERSION == "1"` and `MANIFEST_VERSION == 1`;
+    - a stressed run's manifest equals its baseline's in every section except the added
+      `scenario` section;
+    - an identity scenario (INFLOW_HAIRCUT LOAN 1.0000) gives `liquidity_gap_result` figures
+      equal to the baseline's, row by row;
+    - after its version is CLOSED, a re-run of a stressed run has the same `manifest_sha256`
+      and `result_sha256`;
+    - each of `scenario_not_approved`, `invalid_baseline` (an LCR run, and a stressed run used
+      as a baseline), `scenarios_disabled` and `calculations_disabled` gives 409, audited
+      DENIED, with no run written;
+    - an Idempotency-Key replay returns the same run;
+    - the WS1 matrix lists the route: 201 for risk_analyst, 403 for the others.
+- [ ] **BE-25.4** Comparison reads (D-46): `GET scenario-runs`, `GET scenarios/{scenario_id}/comparison`
+  and `…/comparison/contributions`, with exact decimal text and the D-44 §8 statement.
+  - *Done-when:*
+    - the WS1 matrix and isolation tests list the three routes, with 200 for every role;
+    - the `test_calculations.py` fold asserts on the sample:
+      - every delta equals the stressed figure minus the baseline figure exactly;
+      - the turns-negative flags match the hand-computed buckets;
+      - a delta built from fewer than `CALC_MIN_AGGREGATE_COUNT` changed non-zero
+        contributions is masked for risk_analyst and clear for data_steward, and the
+        cumulative deltas after it in that currency stay masked;
+      - drill-down amounts are masked for risk_analyst, while days, buckets and kinds are
+        clear;
+      - each drill-down row resolves to the run's `intermediate_value` and its source row.
+- [ ] **FE-25.1** A "Run against baseline" panel on an APPROVED_FOR_TEST version. It has a
+  baseline picker (SUCCEEDED or SUCCEEDED_WITH_WARNINGS `maturity_ladder` runs that are not
+  stressed), shows the pins that will be reused, and submits with an Idempotency-Key. The
+  existing run detail and run list show a "Stressed: <scenario> v<n>" badge, with links to the
+  baseline and the scenario, when `scenario` is present.
+  - *Done-when:*
+    - a Playwright test: risk_analyst runs the FE-24.2 scenario on a baseline, the run reaches
+      a SUCCEEDED status, and the run list shows the badge;
+    - a vitest covers the picker's filter (it excludes LCR runs and stressed runs).
+- [ ] **FE-25.2** The comparison view (`NEXT_PUBLIC_STRESS_COMPARE_UI`):
+  - a currency × bucket table and heat map of net and cumulative deltas, with inflow and
+    outflow deltas on expand;
+  - turns-negative markers;
+  - the first negative cumulative bucket, baseline versus stressed;
+  - side-by-side comparison of up to three scenario runs on the same baseline;
+  - drill-down to the changed contributions, then to the run results and the source row;
+  - `MaskedValue`;
+  - the illustrative banner.
+  - *Done-when:*
+    - a Playwright test as data_steward (clear amounts): one bucket's net delta equals the
+      difference of the two runs' ladder rows, and a drill-down row leads to its source row;
+    - a vitest covers masked deltas and the `null` turns-negative flag;
+    - with the switch off, the Phase 24 UI is restored (no run panel, no comparison routes).
+
+*Test budget:* 49 → 49 (folded).
+*Reversibility:* additive tables. The downgrade refuses while stressed runs exist.
+`SCENARIOS_ENABLED=false` or `CALCULATIONS_ENABLED=false` refuses new stressed runs, and
+existing ones stay readable. Feature 03 runs, manifests and re-runs are unaffected (asserted in
+BE-25.3). `NEXT_PUBLIC_STRESS_COMPARE_UI=off` restores the Phase 24 explorer.
+
+### Phase 26 — The agent: AI-proposed scenarios with provenance (AI-01, AI-04 thin, AI-08; WS5-P0/P2)
+
+Goal: from a baseline run, the analyst asks the agent for a structured set of plausible
+stress scenarios (a focus and a count, with no free text). The agent receives only the D-49
+masked, aggregated, synthetic context. Its output is validated against the D-44 schema:
+valid candidates become DRAFT scenarios marked AI_PROPOSED with full provenance, and invalid
+ones are refused. CI uses the offline mock provider only. Groq is used only where D-49 §5
+allows it, and only with a key from the environment.
+
+- [ ] **BE-26.1** Migration 0028:
+  - `ai_request` and `ai_proposal` (D-48 §5), with triggers: append-only, with one PENDING →
+    terminal move on `ai_request`, and DELETE and TRUNCATE refused;
+  - there are no columns for a raw prompt or a raw response;
+  - the tagged seed `0028_ai_permissions` (`ai:use` → risk_analyst, D-47, **hard stop**) and
+    `AI_ROLE_PERMISSIONS`.
+  - *Done-when:*
+    - the round trip passes;
+    - the `test_rules.py` fold proves that a content UPDATE, a second status move, DELETE and
+      TRUNCATE are refused;
+    - the column lists of both tables contain no `prompt`, `response` or `content_text`
+      column;
+    - the seeded join equals `ROLE_PERMISSIONS`;
+    - the downgrade refuses while an `ai_request` exists.
+- [ ] **BE-26.2** The provider interface and settings (D-48 §1, D-50):
+  - `app/ai/providers/` with `ScenarioProposalProvider`, `MockProvider` and `GroqProvider`
+    (httpx, `/chat/completions`, JSON-object mode, temperature 0, timeout, token cap, retry
+    on timeout or 429 only);
+  - the D-50 settings, with the D-49 §5 startup guards;
+  - the `gsk_` log redaction.
+  - *Done-when:*
+    - `test_config.py::test_settings_fail_closed` asserts that `LLM_PROVIDER=groq` is refused
+      with `ENV=test`, with `ENV=production` and with `DATA_CLASS=client`;
+    - it also asserts that a non-https or (outside local) non-`api.groq.com` `GROQ_BASE_URL`
+      is refused, and that out-of-range limits are refused;
+    - it asserts that `repr(settings)` never shows the key;
+    - `test_logs_never_carry_tokens_or_secrets` drives `GroqProvider` through an
+      `httpx.MockTransport` answering 401, 429, 500 and a timeout, with a sentinel
+      `gsk_SENTINEL…` key. The sentinel and the transport's response body never appear in the
+      logs or in the mapped `ApiError`;
+    - no test opens a network socket.
+- [ ] **BE-26.3** The context builder, prompt and validation pipeline (D-48 §3–5, D-49 §1–4):
+  - `app/ai/scenario_context.py` builds `ScenarioContext` from the baseline ladder, masked at
+    clearance `internal`;
+  - the prompt template `scenario_proposal.v1`;
+  - parsing with `parse_float=Decimal`;
+  - per-candidate validation through the BE-24.2 validators;
+  - drafts written through one narrow function (`create_ai_draft`) of the orchestration
+    service;
+  - the hashes.
+  - *Done-when:*
+    - the `test_import_no_leak.py` fold:
+      - takes a synthetic snapshot in which one cash flow with a sentinel amount sits alone in
+        a bucket, with a sentinel instrument business key;
+      - asserts that the `MockProvider`'s recorded request contains neither sentinel, matches
+        no UUID or business-key regex, and has top-level context keys equal to the
+        `ScenarioContext` fields;
+    - the `test_rules.py` fold, with the mock's invalid fixtures (non-JSON, an extra field, a
+      formula string, an out-of-bounds factor, an unknown instrument type, more than `count`
+      candidates):
+      - writes REJECTED `ai_proposal` rows with the expected codes, and no scenario;
+      - ends the request `INVALID_OUTPUT` when no candidate is valid;
+    - with the valid fixture, it writes `count` DRAFT versions with `origin = AI_PROPOSED`,
+      author = the requester, and an `ai_request` with the model id, `prompt_version =
+      scenario_proposal.v1` and 64-hex `prompt_sha256`, `response_sha256` and
+      `context_sha256`.
+- [ ] **BE-26.4** AI routes: `GET ai/status`, `POST ai/assist`, `GET ai/requests` and
+  `GET ai/requests/{request_id}`, with the D-48 §8–9 guards, the D-49 §5 request-time check,
+  and the D-44 §6 acknowledgement on submit.
+  - *Done-when:*
+    - the WS1 matrix lists the four routes: `ai/assist` is 201 for risk_analyst and 403 for
+      the others, and the reads are 200 for every role;
+    - the audit-completeness test lists `ai/assist`;
+    - the `test_rules.py` fold asserts:
+      - `AI_ENABLED=false` gives 409 `ai_disabled`, audited DENIED, with nothing written;
+      - with AI off, `POST scenarios`, submit, approval and `POST scenarios/{scenario_id}/run`
+        still succeed (core independence);
+      - `groq` without a key gives 503 `ai_not_configured`;
+      - the request after `AI_RATE_LIMIT_PER_HOUR` gets 429 `ai_rate_limited` with
+        `retryable: true`;
+      - submitting an AI_PROPOSED version without `acknowledge_ai_origin` gives 422
+        `ai_review_required`;
+      - `GET ai/status` never contains the key;
+      - a grep finds no reference in `app/ai/` to submit, approval, close or run functions.
+- [ ] **FE-26.1** A "Propose scenarios" panel in the explorer (`NEXT_PUBLIC_AI_SCENARIO_UI`, and
+  hidden when `GET ai/status` reports AI disabled):
+  - a baseline picker, a focus picker (the closed list) and a count from 1 to 5;
+  - a provider and model chip, plus an "Offline mock provider" badge when `mock`;
+  - the results: VALIDATED drafts (open in the editor, with "AI-proposed" against "current"
+    shocks side by side) and REJECTED candidates with their codes;
+  - the AI provenance on the scenario detail;
+  - an acknowledgement checkbox on submit for AI-proposed versions.
+  - *Done-when:*
+    - a Playwright test, with the mock provider and AI enabled in the e2e env:
+      1. the analyst proposes 3 scenarios;
+      2. opens one, changes a factor and submits it with the acknowledgement;
+      3. the approver approves it;
+      4. the analyst runs it, and the comparison renders;
+    - a vitest covers the disabled, not-configured and rate-limited states;
+    - a vitest shows that a rationale containing `<script>` renders as literal text.
+
+*Test budget:* 49 → 49 (folded).
+*Reversibility:* additive tables and a tagged seed. The downgrade refuses while AI requests
+exist. `AI_ENABLED=false` (the default) or `AI_SCENARIO_PROPOSALS_ENABLED=false` refuses
+`ai/assist` (409, audited). Scenarios, runs and comparisons are unaffected, and existing AI
+drafts stay ordinary drafts. `LLM_PROVIDER=mock` removes all egress.
+`NEXT_PUBLIC_AI_SCENARIO_UI=off` restores the Phase 25 explorer.
+
+### Phase 27 — Evaluation, documentation and verification (AI-05, AI-08; WS5-P5)
+
+Goal: the agent is evaluated offline in CI for validity, refusal and leakage. The data boundary,
+provider setup and limitations are documented. The feature is proven end to end by a marker
+and a Playwright smoke.
+
+- [ ] **BE-27.1** Offline evaluation fixture, `backend/app/ai/evals/scenario_proposal_v1.json`.
+  Its cases:
+  - valid sets for each focus;
+  - model output that tries to break the schema ("ignore the schema", a formula string, an
+    extra `code` field, 50 candidates);
+  - a context with a masked bucket;
+  - an empty-vocabulary refusal.
+  It is run against `MockProvider` scripted responses. A developer-only
+  `scripts/eval_scenario_proposer.py --provider groq` may record live scores (model id,
+  prompt version, valid and rejected counts; never the key or the raw output) in
+  `docs/evidence/phase-27/`. That is optional evidence, not a gate.
+  - *Done-when:* the `test_rules.py` fold runs every fixture case with its expected outcome,
+    in CI.
+- [ ] **BE-27.2** Documentation:
+  - `docs/CALCULATION_MODULES.md` gains a "Scenario overlay" section (kinds, semantics,
+    limitations, the deferred split shift);
+  - a new `docs/AI_GOVERNANCE.md` covers the D-49 boundary, providers, the D-50 env vars, key
+    handling, egress, limits and provenance;
+  - `docs/RETENTION.md` gains rows for 0027 and 0028;
+  - the golden README names who must approve the overlay fixtures;
+  - ARCHITECTURE.md is updated by the architect once D-44…D-50 are active.
+  - *Done-when:* grep finds every new table, every shock kind and every D-50 variable in those
+    files.
+- [ ] **BE-27.3** A `stress` pytest marker, as a CI step printing the scenario and AI route
+  matrix. It is applied to:
+  - the WS1 matrix, isolation and audit tests;
+  - `test_rules.py`, `test_calculations.py`, `test_config.py` and `test_import_no_leak.py`;
+  - the migration round trip.
+  - *Done-when:*
+    - `pytest -m stress` runs green in CI on the Phase 27 PR;
+    - `pytest --collect-only -q` reports 49 or fewer.
+- [ ] **BE-27.4** No secrets in artifacts. The `test_committed_artifacts.py` fold asserts that
+  `openapi.json` contains no `GROQ`, no `API_KEY` and no `gsk_` string, and no settings schema.
+  The `test_import_no_leak.py` fold asserts that the sentinel key, prompt and response never
+  reach logs, error bodies or audit details.
+  - *Done-when:* both folds pass (+0).
+- [ ] **FE-27.1** Playwright smoke (mock provider):
+  1. the analyst proposes scenarios;
+  2. edits one and submits it;
+  3. the approver approves it;
+  4. the analyst runs it against a baseline;
+  5. the comparison shows a turns-negative bucket;
+  6. a drill-down reaches a source row;
+  7. a re-run of the stressed run is identical.
+  - *Done-when:* the `e2e` job passes in CI with the stress specs, and the `playwright-report`
+    artifact exists.
+- [ ] **FE-27.2** Disclaimer guard: every explorer page shows the D-44 §8 statement.
+  - *Done-when:* a vitest renders each explorer page and greps that no text claims a
+    regulatory stress test, compliance, certification, or parity with Moody's or any vendor,
+    other than the negating statement.
+
+*Test budget:* 49 → 49.
+*Reversibility:* docs, fixtures, a marker and tests only.
+
+### Deferred (out of scope for Feature 05)
+
+- **Percentage shift of a flow between buckets** (splitting one cash flow). `intermediate_value`
+  allows one contribution per flow and run. It needs a new contribution table and post-checks
+  (D-44 §2).
+- **Segment, counterparty or instrument-level selectors.** The ladder inputs carry no segment.
+  Shocks on credit exposures or ECL belong to Feature 04 follow-ups.
+- **Stressing LCR/HQLA or credit modules.** The overlay is defined for `maturity_ladder`
+  inputs only. Other modules need their own shock kinds and decisions.
+- **Free-text analyst prompts and conversational refinement**, because of prompt-injection
+  and leak risk (D-48 §2).
+- **Multi-step, tool-using agents** (AI-04 allowlisted calls such as "run" or "compare"). The
+  agent never runs or approves anything.
+- **AI explanations of comparison results** (AI-03), and retrieval over documents (AI-02).
+- **Stored comparison tables, report exports and benchmark tolerances** (RO-04, RO-05).
+- **Async jobs and scenario batches** (RO-01). Runs stay synchronous, so RUNNING and TESTED
+  are reserved.
+- **Seeded example scenarios** and scenario import or export.
+- **Other LLM providers, self-hosted models, data-residency controls, and production use of an
+  external provider.** These need the client's approval (D-49 §5).
+- **Reverse stress testing, probability weighting and macro scenario generators.** These are
+  methodology the client must own.
+- **Committee approval or an ALM role** (D-47 open item).
+- **Any regulatory stress-test template** (for example, a supervisory scenario format). Not
+  claimed and not built.
+
+### Open questions for the user (Feature 05)
+
+1. **D-47 (hard stop):** approve `scenario:propose` and `ai:use` → risk_analyst and
+   `scenario:approve` → approver (A)? Or reuse `rule:propose` / `rule:approve` (B)?
+2. **D-49 §5 (hard stop):** approve live calls to Groq from `local` and `staging` only, with
+   the masked, aggregated, synthetic context of D-49 §1? Which `GROQ_MODEL` should be used?
+3. **Test budget:** stay at 49 with everything folded (planned), or let the coordinator fold
+   `test_config.py`'s three functions into one and add `test_stress_explorer.py` (→ 48)?
+4. **Shock scope:** is deferring the percentage bucket split acceptable for v1, given that
+   INFLOW_DELAY and OUTFLOW_ACCELERATION move whole flows?
+5. **AI rationale text:** keep the model's rationale (at most 500 characters, labelled
+   unverified) on the draft (planned), or keep hashes only?
+6. **Sequencing:** start Phase 25 after Phase 21 merges (recommended), or in parallel with a
+   coordinator-led rebase?
