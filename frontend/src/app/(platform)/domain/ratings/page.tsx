@@ -14,7 +14,7 @@ export default function RatingsPage() {
     <>
       <PageHeader
         title="Ratings"
-        description="Obligor rating proposals waiting for a decision. An approver who is not the proposer approves or rejects each one with a comment (maker-checker, D-39). Grades are human judgements: nothing here suggests one."
+        description="Obligor rating proposals waiting for a decision. An approver who is not the proposer approves or rejects each one with a comment (maker-checker). Grades are human judgements: nothing here suggests one."
       />
       <RegistryTabs />
       <div className="px-6 pb-6">

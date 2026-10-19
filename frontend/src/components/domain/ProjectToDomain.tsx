@@ -31,6 +31,8 @@ import {
   type Projection,
   type ProjectionOrigin,
 } from './domain'
+import { formatTimestamp } from '@/lib/format'
+import { ActorLabel, useActorText } from '@/components/common/ActorLabel'
 
 /*
  * FE-14.2: "Project to domain" on the import page (D-29). Offered only for a validated import
@@ -83,8 +85,8 @@ function FieldCountList({ counts, testId, none }: { counts: Record<string, numbe
   )
 }
 
-const ORIGIN_TEXT: Record<ProjectionOrigin, (p: Projection) => string> = {
-  existing: (p) => `Projected ${new Date(p.projected_at).toLocaleString()} by ${p.projected_by}, as the server reports it.`,
+const ORIGIN_TEXT: Record<ProjectionOrigin, (p: Projection, who: string) => string> = {
+  existing: (p, who) => `Projected ${formatTimestamp(p.projected_at)} by ${who}, as the server reports it.`,
   created: (p) => `Projected now: one ${rowLabel(p.schema_code)} per accepted canonical record.`,
   replayed: () => 'Already projected: the server returned the existing projection. Nothing new was written.',
 }
@@ -94,10 +96,11 @@ export function ProjectionSummaryView({ projection, origin }: { projection: Proj
   const s = p.summary
   const conserves = projectionConserves(p)
   const browse = browseLink(p)
+  const actorText = useActorText()
   return (
     <div className="space-y-4" data-testid="projection-summary" data-projection-id={p.projection_id} data-origin={origin}>
       <p className="rounded-md border border-border bg-surface-2 px-3 py-2 text-sm" data-testid="projection-outcome">
-        {ORIGIN_TEXT[origin](p)}
+        {ORIGIN_TEXT[origin](p, actorText(p.projected_by))}
       </p>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <Count label="Accepted (manifest)" value={p.accepted_count} testId="projection-accepted" />
@@ -128,13 +131,15 @@ export function ProjectionSummaryView({ projection, origin }: { projection: Proj
           <span className="font-mono text-xs text-muted-foreground">{p.schema_version_id}</span>
           {isCreditSchemaCode(p.schema_code) && (
             <div className="text-xs text-muted-foreground" data-testid="projection-credit-schema">
-              Seeded illustrative credit schema (D-37), provisional.
+              {/* D-37 */}
+              Seeded illustrative credit schema, provisional.
             </div>
           )}
         </Field>
         <Field label="Projector version">
           <span className="font-mono">v{p.projector_version}</span>
-          <span className="text-muted-foreground"> · frozen field projection spec (D-29 §4)</span>
+          {/* D-29 §4 */}
+          <span className="text-muted-foreground"> · frozen field projection spec</span>
         </Field>
         <Field label="Records read" testId="projection-records">
           <span className="font-mono">{s.records}</span>
@@ -142,11 +147,12 @@ export function ProjectionSummaryView({ projection, origin }: { projection: Proj
         <Field label="Rows projected" testId="projection-rows">
           <span className="font-mono">{s.rows_projected}</span>
         </Field>
-        <Field label="TYPE_NOT_PROJECTED" testId="projection-type-not-projected">
+        {/* TYPE_NOT_PROJECTED / UNKNOWN_VALUE: the server's codes, shown in plain language (P-3). */}
+        <Field label="Kept in canonical form only" testId="projection-type-not-projected">
           <FieldCountList counts={s.type_not_projected} testId="type-not-projected" none="none" />
           <div className="text-xs text-muted-foreground">Values whose pinned field type differs from the typed column; they stay in the canonical record.</div>
         </Field>
-        <Field label="UNKNOWN_VALUE" testId="projection-unknown-values">
+        <Field label="Outside the vocabulary" testId="projection-unknown-values">
           <FieldCountList counts={s.unknown_values} testId="unknown-value" none="none" />
           <div className="text-xs text-muted-foreground">Values outside a seeded provisional vocabulary; still projected.</div>
         </Field>
@@ -160,7 +166,7 @@ export function ProjectionSummaryView({ projection, origin }: { projection: Proj
         </Field>
         <Field label="Projected">
           <Mono>
-            {p.projected_by} · {new Date(p.projected_at).toLocaleString()}
+            <ActorLabel actor={p.projected_by} /> · {formatTimestamp(p.projected_at)}
           </Mono>
         </Field>
       </dl>
@@ -238,7 +244,7 @@ function ProjectionPanel({ job }: { job: ImportDetail }) {
     <PageSection
       icon={Landmark}
       title="Financial Domain projection"
-      description="One immutable domain row per accepted canonical record, with lineage to it (D-29). Projecting again returns the same projection and writes nothing."
+      description="One immutable domain row per accepted canonical record, with lineage to it. Projecting again returns the same projection and writes nothing."
       headerRight={
         <RequirePermission permission="domain:project" fallback={null}>
           <Button size="sm" onClick={project} disabled={busy || state.kind === 'loading'} data-testid="domain-project">

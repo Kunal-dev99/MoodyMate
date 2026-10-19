@@ -25,6 +25,8 @@ import {
 } from '@/components/ingestion/reconciliation'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { formatTimestamp } from '@/lib/format'
+import { ActorLabel } from '@/components/common/ActorLabel'
 
 /*
  * FE-12.1: an import's reconciliation (DI-05), read-only. Validation writes it once; this
@@ -78,7 +80,7 @@ function Summary({ run, job }: { run: ReconciliationRun; job: ImportDetail }) {
       </Field>
       <Field label="Reconciled">
         <Mono>
-          {run.reconciled_by} · {new Date(run.reconciled_at).toLocaleString()}
+          <ActorLabel actor={run.reconciled_by} /> · {formatTimestamp(run.reconciled_at)}
         </Mono>
       </Field>
       <Field label="Reconciler version">
@@ -281,7 +283,7 @@ export function ImportReconciliationTab({ job }: { job: ImportDetail }) {
       <PageSection
         icon={Scale}
         title="Reconciliation"
-        description="Row-count conservation, the declared row count and each control total, as reconciled by the server at validation (BE-12.2)."
+        description="Row-count conservation, the declared row count and each control total, as reconciled by the server at validation."
         headerRight={run ? <ReconciliationOutcomePill outcome={run.outcome} /> : undefined}
       >
         {body}

@@ -691,7 +691,9 @@ describe('ladder figures under D-33 minimum aggregation (FE-15.2)', () => {
     const exact = renderToStaticMarkup(
       createElement(LadderFigureValue, { row: few({ inflows: '9007199254740993.000000000000000001' }), figure: 'inflows', minAggregateCount: 3, testId: 'y' }),
     )
-    expect(exact).toContain('>9007199254740993.000000000000000001<')
+    // Grouped by thousands on the string (P-7): no digit lost to float; data-value keeps the server's text.
+    expect(exact).toContain('>9,007,199,254,740,993.000000000000000001<')
+    expect(exact).toContain('data-value="9007199254740993.000000000000000001"')
     expect(exact).not.toContain('-hint')
   })
 

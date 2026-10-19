@@ -16,6 +16,7 @@ import { ProposalStatusPill } from '@/components/schemas/ProposalStatusPill'
 import { PROPOSAL_STATUS_STYLE, type Proposal, type ProposalStatus } from '@/components/schemas/proposals'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { formatTimestamp } from '@/lib/format'
 
 type State = { kind: 'loading' } | { kind: 'ready'; items: Proposal[] } | { kind: 'forbidden'; cid: string | null }
 
@@ -116,7 +117,7 @@ export default function ProposalsPage() {
                         <ProposalStatusPill status={p.status} />
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
-                        {new Date(p.created_at).toLocaleString()}
+                        {formatTimestamp(p.created_at)}
                       </TableCell>
                     </TableRow>
                   ))}

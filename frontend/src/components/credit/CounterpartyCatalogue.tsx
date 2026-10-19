@@ -191,7 +191,7 @@ function Counterparties({ vocab, sources }: { vocab: VocabularyEntry[]; sources:
         <Input
           aria-label="Country"
           placeholder="e.g. DE"
-          className="h-9 w-20 font-mono uppercase"
+          className="h-9 w-24 font-mono uppercase placeholder:normal-case"
           maxLength={2}
           value={draft.country}
           onChange={(e) => setDraft({ ...draft, country: e.target.value })}
@@ -329,7 +329,7 @@ function Counterparties({ vocab, sources }: { vocab: VocabularyEntry[]; sources:
     <PageSection
       icon={Building2}
       title={state.kind === 'ready' ? `${state.page.total} counterpart${state.page.total === 1 ? 'y' : 'ies'}` : 'Counterparties'}
-      description="One row per counterparty (tenant, source and business key). 'Current' is not defined: a calculation pins versions through a dataset snapshot (D-29 §3). Names are confidential and masked by your clearance (D-43)."
+      description="One row per counterparty (tenant, source and business key). 'Current' is not defined: a calculation pins versions through a dataset snapshot. Names are confidential and masked by your clearance."
     >
       {filters}
       {body}
@@ -357,7 +357,7 @@ function Exposures({ vocab }: { vocab: VocabularyEntry[] }) {
         <Input
           aria-label="Currency"
           placeholder="e.g. EUR"
-          className="h-9 w-24 font-mono uppercase"
+          className="h-9 w-24 font-mono uppercase placeholder:normal-case"
           maxLength={3}
           value={draft.currency}
           onChange={(e) => setDraft({ ...draft, currency: e.target.value })}
@@ -471,7 +471,7 @@ function Exposures({ vocab }: { vocab: VocabularyEntry[] }) {
                   <CreditValueCell value={x.facility_type} />
                 </TableCell>
                 <TableCell className="text-right text-sm">
-                  <CreditValueCell value={x.drawn_amount} testId="exposure-drawn" />
+                  <CreditValueCell value={x.drawn_amount} testId="exposure-drawn" money />
                 </TableCell>
                 <TableCell className="text-sm">
                   <CreditValueCell value={x.currency} />
@@ -506,7 +506,7 @@ function Exposures({ vocab }: { vocab: VocabularyEntry[] }) {
     <PageSection
       icon={Wallet}
       title={state.kind === 'ready' ? `${state.page.total} credit exposure${state.page.total === 1 ? '' : 's'}` : 'Credit exposures'}
-      description="One row per exposure (tenant, source and business key), latest version shown. Amounts are exact decimal text in the exposure's currency; drawn, undrawn and collateral amounts are confidential and masked by your clearance (D-43). An exposure's counterparty is resolved within a dataset snapshot, not here (D-37 §4)."
+      description="One row per exposure (tenant, source and business key), latest version shown. Amounts are exact decimal text in the exposure's currency; drawn, undrawn and collateral amounts are confidential and masked by your clearance. An exposure's counterparty is resolved within a dataset snapshot, not here."
     >
       {filters}
       {body}

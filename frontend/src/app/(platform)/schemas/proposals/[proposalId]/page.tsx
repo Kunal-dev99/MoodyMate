@@ -21,6 +21,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
+import { formatTimestamp } from '@/lib/format'
+import { ActorLabel } from '@/components/common/ActorLabel'
 
 type State = { kind: 'loading' } | { kind: 'ready'; p: Proposal } | { kind: 'error'; status: number; cid: string | null }
 
@@ -127,7 +129,7 @@ export default function ProposalDetailPage() {
               <>
                 <dt className="text-muted-foreground">Decided by</dt>
                 <dd className="font-mono text-xs">
-                  {p.decided_by} · {p.decided_at && new Date(p.decided_at).toLocaleString()}
+                  <ActorLabel actor={p.decided_by} /> · {p.decided_at && formatTimestamp(p.decided_at)}
                   {p.decision_comment && <span className="ml-2 font-sans text-sm">“{p.decision_comment}”</span>}
                 </dd>
               </>

@@ -100,3 +100,10 @@ export const RATINGS_UI_ENABLED = process.env.NEXT_PUBLIC_RATINGS_UI !== 'off'
  * scenario writes (409 `scenarios_disabled`, audited); reads keep working either way.
  */
 export const STRESS_EXPLORER_UI_ENABLED = process.env.NEXT_PUBLIC_STRESS_EXPLORER_UI !== 'off'
+
+/**
+ * NEXT_PUBLIC_DASHBOARD_TILES=off (demo polish P-13): the Overview page loses its count tiles and
+ * shows its previous description again, restoring the earlier dashboard exactly. The tiles only
+ * read existing list endpoints (`limit=1`, the page's `total`); nothing is written.
+ */
+export const DASHBOARD_TILES_ENABLED = process.env.NEXT_PUBLIC_DASHBOARD_TILES !== 'off'

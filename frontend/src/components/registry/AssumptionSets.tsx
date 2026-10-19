@@ -16,10 +16,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { cn } from '@/lib/utils'
 import { LabelBadges, VersionStatusPill } from './RegistryBadges'
 import { assumptionSetHref, assumptionSetsHref, type AssumptionSetDetail, type AssumptionSetList } from './registry'
+import { formatTimestamp } from '@/lib/format'
+import { ApprovalActor, AuthorActor, isSeededVersion } from './GovernedActor'
 
-const READ_ONLY = 'Seeded and read-only in this release: authoring is deferred (D-32 §6). Every run pins the ACTIVE version of the baseline set.'
-const when = (at: string | null) => (at ? new Date(at).toLocaleString() : '—')
-const effective = (from: string | null, to: string | null) => `${from ?? '—'} → ${to ?? 'open'}`
+const READ_ONLY = 'Seeded and read-only in this release: authoring is deferred. Every run pins the ACTIVE version of the baseline set.'
+const when = (at: string | null) => (at ? formatTimestamp(at) : '—')
+const effective = (from: string | null, to: string | null) => (from === null && to === null ? 'Open-ended' : `${from ?? '—'} → ${to ?? 'open'}`)
 
 const fetchList = (signal: AbortSignal) => call(() => api.GET('/api/v1/assumption-sets', { signal }))
 const fetchDetail = (id: string) => (signal: AbortSignal) =>
@@ -91,7 +93,7 @@ export function AssumptionSetListView() {
               <TableCell className="max-w-xs text-xs">{a.provenance}</TableCell>
               <TableCell className="font-mono text-xs">{effective(a.effective_from, a.effective_to)}</TableCell>
               <TableCell className="text-xs">
-                {a.approved_by ?? '—'}
+                <ApprovalActor actor={a.approved_by} seeded={isSeededVersion(a)} />
                 {a.approved_at && <div className="text-muted-foreground">{when(a.approved_at)}</div>}
               </TableCell>
             </TableRow>
@@ -181,10 +183,16 @@ export function AssumptionSetView({ assumptionSetId }: { assumptionSetId: string
               <span className="font-mono text-xs">{effective(a.effective_from, a.effective_to)}</span>
             </Field>
             <Field label="Authored by">
-              <span className="text-xs">{a.authored_by}</span> <span className="text-xs text-muted-foreground">{when(a.created_at)}</span>
+              <span className="text-xs">
+                <AuthorActor actor={a.authored_by} />
+              </span>{' '}
+              <span className="text-xs text-muted-foreground">{when(a.created_at)}</span>
             </Field>
             <Field label="Approved by">
-              <span className="text-xs">{a.approved_by ?? '—'}</span> <span className="text-xs text-muted-foreground">{a.approved_at ? when(a.approved_at) : ''}</span>
+              <span className="text-xs">
+                <ApprovalActor actor={a.approved_by} seeded={isSeededVersion(a)} />
+              </span>{' '}
+              <span className="text-xs text-muted-foreground">{a.approved_at ? when(a.approved_at) : ''}</span>
             </Field>
             <Field label="Content SHA-256">
               <span className="break-all font-mono text-xs">{a.content_sha256}</span>

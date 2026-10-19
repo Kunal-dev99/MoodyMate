@@ -175,7 +175,9 @@ describe('projection summary (FE-14.2)', () => {
   it('labels a projection read on load as the server reported it, not as projected now', () => {
     const html = renderToStaticMarkup(createElement(ProjectionSummaryView, { projection: projection(), origin: 'existing' }))
     expect(html).toContain('data-origin="existing"')
-    expect(html).toContain('by user:steward, as the server reports it')
+    // P-1: the actor in plain language (the raw `user:steward` stays in the tooltip).
+    expect(html).toContain('by User · steward, as the server reports it')
+    expect(html).toContain('title="user:steward"')
     expect(html).not.toContain('Projected now')
     expect(originOf(201)).toBe('created')
     expect(originOf(200)).toBe('replayed')

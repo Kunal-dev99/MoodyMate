@@ -19,6 +19,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScenarioStatusPill } from './ScenarioStatusPill'
 import { PAGE_SIZE, TAB_LABELS, fetchScenarios, libraryQuery, scenarioHref, tabOf, tabsFor, type ExplorerTab, type ScenarioPage } from './scenarios'
+import { formatTimestamp } from '@/lib/format'
+import { ActorLabel } from '@/components/common/ActorLabel'
+
+/** Each tab's empty state has its own icon (P-11). */
+const EMPTY_ICON: Record<ExplorerTab, typeof Library> = { shared: Library, mine: FlaskConical, review: Inbox }
 
 const TAB_TEXT: Record<ExplorerTab, { title: string; description: string; empty: string }> = {
   shared: {
@@ -115,7 +120,7 @@ export function ScenarioLibrary() {
 }
 
 function LibraryTable({ page, tab, empty, onPage }: { page: ScenarioPage; tab: ExplorerTab; empty: string; onPage: (offset: number) => void }) {
-  if (page.items.length === 0) return <EmptyState icon={Library} title={empty} />
+  if (page.items.length === 0) return <EmptyState icon={EMPTY_ICON[tab]} title={empty} />
   return (
     <div className="space-y-3">
       <Table data-testid="scenario-table">
@@ -124,7 +129,7 @@ function LibraryTable({ page, tab, empty, onPage }: { page: ScenarioPage; tab: E
             <TableHead>Scenario</TableHead>
             <TableHead>Code</TableHead>
             <TableHead>Latest version</TableHead>
-            <TableHead>{tab === 'shared' ? 'Approved version' : 'Matching versions'}</TableHead>
+            <TableHead>{tab === 'shared' ? 'Approved version' : 'Versions'}</TableHead>
             <TableHead>Created by</TableHead>
             <TableHead>Created</TableHead>
           </TableRow>
@@ -150,7 +155,8 @@ function LibraryTable({ page, tab, empty, onPage }: { page: ScenarioPage; tab: E
                       <span className="font-mono text-xs" data-testid="scenario-row-approved">
                         v{s.approved_version}
                       </span>
-                      <Badge variant="success">Approved scenario (illustrative)</Badge>
+                      {/* The latest version's status pill already says it is approved: no second badge (P-11). */}
+                      {s.approved_version !== s.latest_version && <Badge variant="success">Approved scenario (illustrative)</Badge>}
                     </span>
                   ) : (
                     <span className="text-xs text-muted-foreground">—</span>
@@ -161,8 +167,10 @@ function LibraryTable({ page, tab, empty, onPage }: { page: ScenarioPage; tab: E
                   </span>
                 )}
               </TableCell>
-              <TableCell className="font-mono text-xs">{s.created_by}</TableCell>
-              <TableCell className="text-xs">{new Date(s.created_at).toLocaleString()}</TableCell>
+              <TableCell className="text-xs">
+                <ActorLabel actor={s.created_by} />
+              </TableCell>
+              <TableCell className="text-xs">{formatTimestamp(s.created_at)}</TableCell>
             </TableRow>
           ))}
         </TableBody>

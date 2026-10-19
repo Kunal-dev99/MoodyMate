@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
 import type { components } from '../src/api/schema'
-import { API, bearer, ensureActiveMapping, signIn, uploadSample } from './support'
+import { API, bearer, ensureActiveMapping, groupDecimal, signIn, uploadSample } from './support'
 
 /**
  * Feature 03 Phase 14 browser checks against the real stack (backend ENV=test, synthetic).
@@ -199,7 +199,9 @@ test('FE-14.1: the steward browses the catalogue to an instrument and its import
   await expect(card.getByTestId('version-attribute')).toHaveCount(version!.attributes.length)
   // The steward is cleared for `notional`: the exact decimal text the API sent.
   expect(typeof version!.notional).toBe('string')
-  await expect(card.getByTestId('version-notional')).toHaveText(version!.notional as string)
+  // Grouped by thousands (P-7); data-value keeps the server's exact text.
+  await expect(card.getByTestId('version-notional')).toHaveText(groupDecimal(version!.notional as string))
+  await expect(card.getByTestId('version-notional')).toHaveAttribute('data-value', version!.notional as string)
   if (process.env.DOMAIN_SCREENSHOT) await page.screenshot({ path: `${process.env.DOMAIN_SCREENSHOT}/instrument.png`, fullPage: true })
 
   // 3. Lineage: the version's import link opens that import.

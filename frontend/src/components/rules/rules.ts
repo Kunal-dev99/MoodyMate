@@ -159,7 +159,7 @@ export function editorFor(rule: Pick<RuleDetail, 'parameter_schema' | 'vocabular
     case 'DECIMAL_MAP':
       return { kind: 'DECIMAL_MAP', vocabulary: rule.vocabulary, spec: decimalSpec(schema), entries: entriesOf(p.map, rule.vocabulary) }
     default:
-      return { kind: 'UNSUPPORTED', reason: 'This rule declares a parameter kind outside the closed list (D-32 §1). It cannot be edited here.' }
+      return { kind: 'UNSUPPORTED', reason: 'This rule declares a parameter kind outside the closed list. It cannot be edited here.' }
   }
 }
 

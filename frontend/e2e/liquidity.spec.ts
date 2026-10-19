@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import type { components } from '../src/api/schema'
 import { projectedSyntheticImports, sameDecimal, sumDecimals } from './calc-support'
-import { API, bearer, signIn } from './support'
+import { API, bearer, groupDecimal, signIn } from './support'
 
 /**
  * Feature 03 Phase 17 browser checks against the real stack (backend ENV=test, synthetic).
@@ -34,7 +34,8 @@ const MODULE = 'lcr_hqla'
 let run: Schemas['RunDetail'] | null = null
 
 const isPost = (page: Page, url: string) => page.waitForResponse((r) => r.request().method() === 'POST' && r.url() === url)
-const shown = (v: unknown): string => (typeof v === 'string' ? v : v === null ? '' : 'masked')
+// Money figures are shown grouped by thousands (P-7); the ratio is not money and is not grouped.
+const shown = (v: unknown): string => (typeof v === 'string' ? groupDecimal(v) : v === null ? '' : 'masked')
 
 /** A currency's figures and where the liquidity view shows each (FE-17.1). */
 const figures = (c: Schemas['LiquidityCurrency']) =>
@@ -128,7 +129,7 @@ test('FE-17.1: the approver sees HQLA components, outflows, capped inflows and t
       await expect(ratio).toHaveAttribute('data-computable', 'false')
       await expect(ratio).toContainText('not computable')
       await expect(block.getByTestId('lcr-ratio-warning')).toContainText('LCR_DENOMINATOR_ZERO')
-    } else await expect(ratio).toHaveText(shown(c.ratio))
+    } else await expect(ratio).toHaveText(typeof c.ratio === 'string' ? c.ratio : 'masked')
 
     // HQLA components: every asset row, included (by level) or excluded with its reason.
     await expect(block.getByTestId('hqla-asset')).toHaveCount(c.assets.length)
@@ -143,7 +144,7 @@ test('FE-17.1: the approver sees HQLA components, outflows, capped inflows and t
     const included = block.locator('[data-testid="hqla-asset"][data-included="true"]').getByTestId('hqla-asset-hqla')
     const values = (await included.allTextContents()).map((t) => t.trim())
     const total = (await block.getByTestId('lcr-hqla').textContent())!.trim()
-    expect(total).toBe(c.hqla_total)
+    expect(total).toBe(groupDecimal(c.hqla_total as string))
     expect(sameDecimal(sumDecimals(values), total), `${c.currency}: HQLA ${values.join(' + ')} = ${total}`).toBe(true)
     // And each level's displayed subtotal equals its displayed rows.
     for (const level of await block.getByTestId('hqla-level').all()) {
@@ -174,7 +175,7 @@ test('FE-17.1: risk_analyst sees the asset rows masked (D-33) and every figure a
     for (const [testId, value] of figures(c)) {
       const cell = block.getByTestId(testId)
       if (typeof value === 'string') {
-        await expect(cell).toHaveText(value)
+        await expect(cell).toHaveText(groupDecimal(value))
         await expect(cell).not.toHaveAttribute('data-masked', 'true')
       } else {
         await expect(cell).toHaveAttribute('data-masked', 'true')

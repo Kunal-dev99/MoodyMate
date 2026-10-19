@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type APIRequestContext } from '@playwright/test'
 import type { components } from '../src/api/schema'
-import { API, SAMPLES, bearer, signIn, uploadSample } from './support'
+import { API, SAMPLES, actorTitle, bearer, signIn, uploadSample } from './support'
 
 /**
  * Feature 04 Phase 20 browser check against the real stack (backend ENV=test, synthetic).
@@ -134,7 +134,7 @@ test('FE-20.2: the proposer (risk_analyst) sees the proposal IN_REVIEW with no A
   await expect(row).toHaveAttribute('data-status', 'IN_REVIEW')
   await expect(row.getByTestId('review-status')).toHaveText('In review')
   await expect(row.getByTestId('review-effective-from')).toHaveText(proposal.effective_from)
-  await expect(row.getByTestId('review-proposer')).toContainText('(you)')
+  await expect(row.getByTestId('review-proposer')).toContainText('You')
   await expect(row).toHaveAttribute('data-gate', 'self_approval')
   await expect(row.getByTestId('review-self-approval')).toBeVisible()
   // risk_analyst holds rating:propose, not rating:approve: no Approve or Reject anywhere in the queue.
@@ -198,5 +198,5 @@ test('FE-20.2: the approver approves with a required comment, and the counterpar
   const panelRow = page.getByTestId('ratings-panel').locator(`[data-testid="rating-row"][data-id="${proposal.rating_id}"]`)
   await expect(panelRow).toHaveAttribute('data-status', 'ACTIVE')
   await expect(panelRow.getByTestId('rating-status')).toHaveText('Active')
-  await expect(panelRow.getByTestId('rating-decider')).toContainText(decided.decided_by!)
+  await expect(panelRow.getByTestId('rating-decider').locator('[data-actor-kind]')).toHaveAttribute('title', actorTitle(decided.decided_by!))
 })

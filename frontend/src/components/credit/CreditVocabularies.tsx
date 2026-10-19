@@ -15,7 +15,7 @@ export function CreditVocabularies({ items }: { items: VocabularyEntry[] }) {
     <PageSection
       icon={BookOpen}
       title="Credit vocabularies"
-      description="Seeded by the platform until the client defines its own. Values are kept as given on projection; a value outside a vocabulary is still projected, and modules exclude or warn on it with a reason (D-37 §3)."
+      description="Seeded by the platform until the client defines its own. Values are kept as given on projection; a value outside a vocabulary is still projected, and modules exclude or warn on it with a reason."
       headerRight={anyProvisional ? <ProvisionalBadge /> : undefined}
     >
       {items.length === 0 ? (

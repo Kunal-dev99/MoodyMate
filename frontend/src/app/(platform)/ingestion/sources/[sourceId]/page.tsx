@@ -34,6 +34,8 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { IMPORTS_UI_ENABLED, MAPPING_UI_ENABLED } from '@/config/features'
+import { formatTimestamp } from '@/lib/format'
+import { ActorLabel } from '@/components/common/ActorLabel'
 
 type State = { kind: 'loading' } | { kind: 'ready'; source: SourceDetail } | LoadFailure
 
@@ -230,7 +232,7 @@ export default function SourceDetailPage() {
             <dd>{p.default_classification}</dd>
             <dt className="text-muted-foreground">Registered</dt>
             <dd className="font-mono text-xs">
-              {source.created_by} · {new Date(source.created_at).toLocaleString()}
+              <ActorLabel actor={source.created_by} /> · {formatTimestamp(source.created_at)}
             </dd>
           </dl>
         </PageSection>
@@ -245,7 +247,7 @@ export default function SourceDetailPage() {
                 <TableHead>Columns</TableHead>
                 <TableHead>Business key</TableHead>
                 <TableHead>Control totals</TableHead>
-                <TableHead>Content SHA-256</TableHead>
+                <TableHead className="whitespace-nowrap">Content SHA-256</TableHead>
                 <TableHead>Created</TableHead>
               </TableRow>
             </TableHeader>
@@ -266,8 +268,8 @@ export default function SourceDetailPage() {
                     {c.content_sha256.slice(0, 12)}…
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
-                    <span className="font-mono">{c.created_by}</span>
-                    <div>{new Date(c.created_at).toLocaleString()}</div>
+                    <ActorLabel actor={c.created_by} />
+                    <div>{formatTimestamp(c.created_at)}</div>
                     {c.change_summary && <div className="text-foreground">“{c.change_summary}”</div>}
                   </TableCell>
                 </TableRow>

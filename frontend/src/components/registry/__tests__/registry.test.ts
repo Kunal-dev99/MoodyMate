@@ -188,7 +188,9 @@ describe('modules: AVAILABLE and PLANNED are shown apart, PLANNED never as ready
     expect(html).toContain('Available · illustrative prototype')
     expect(html).toContain('data-testid="illustrative-badge"')
     expect(html).toContain('Runnable now')
-    expect(html).toContain('no parity with any vendor system is claimed')
+    // The server's statement shows once per page, above the groups, not on every card.
+    expect(html).not.toContain('no parity with any vendor system is claimed')
+    expect(html).toContain('Engine version')
     // Unchanged by FE-18.1: the implementation pill, no planned badge, no contracts block.
     expect(html).toContain('data-testid="module-implementation"')
     expect(html).not.toMatch(/planned-module-badge|module-contracts/)

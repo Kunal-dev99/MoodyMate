@@ -34,6 +34,8 @@ import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { MAPPING_UI_ENABLED } from '@/config/features'
 import { cn } from '@/lib/utils'
+import { formatTimestamp } from '@/lib/format'
+import { ActorLabel } from '@/components/common/ActorLabel'
 
 /*
  * FE-11.1: the import's validation dashboard. "Validate" runs once (D-21); the counts and
@@ -73,7 +75,7 @@ function Counts({ manifest }: { manifest: ImportManifest }) {
   const q = manifest.quality
   const total = outcomeTotal(q)
   return (
-    <PageSection icon={Sigma} title="Row outcomes" description="As reported by the server: every source row has exactly one outcome (D-20).">
+    <PageSection icon={Sigma} title="Row outcomes" description="As reported by the server: every source row has exactly one outcome.">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4" data-testid="validation-counts">
         <Count label="Accepted" value={q.accepted_records} testId="count-accepted" />
         <Count label="Quarantined" value={q.quarantined_records} testId="count-quarantined" tone={q.quarantined_records ? 'text-[hsl(var(--warning))]' : undefined} />
@@ -97,7 +99,7 @@ function Counts({ manifest }: { manifest: ImportManifest }) {
 function ManifestPanel({ manifest }: { manifest: ImportManifest }) {
   const m = manifest
   return (
-    <PageSection icon={ClipboardCheck} title="Manifest" description="Written once at validation and never changed: what a calculation run pins (D-22).">
+    <PageSection icon={ClipboardCheck} title="Manifest" description="Written once at validation and never changed: what a calculation run pins.">
       <dl className="grid grid-cols-[220px_1fr] gap-y-1 text-sm" data-testid="validation-manifest">
         <Field label="Manifest ID" testId="manifest-id">
           <Mono>{m.manifest_id}</Mono>
@@ -113,7 +115,7 @@ function ManifestPanel({ manifest }: { manifest: ImportManifest }) {
         </Field>
         <Field label="Validated">
           <Mono>
-            {m.validated_by} · {new Date(m.validated_at).toLocaleString()}
+            <ActorLabel actor={m.validated_by} /> · {formatTimestamp(m.validated_at)}
           </Mono>
         </Field>
         <Field label="Artifact">
@@ -382,7 +384,7 @@ export function ImportValidationTab({ job, onChanged }: { job: ImportDetail; onC
     <PageSection
       icon={FileSearch}
       title="Validation"
-      description="Applies the import's pinned schema version and the contract's ACTIVE mapping version, once (D-21). A re-run is a new import."
+      description="Applies the import's pinned schema version and the contract's ACTIVE mapping version, once. A re-run is a new import."
       headerRight={
         canValidate(job.status, manifest) ? (
           <RequirePermission permission="import:write" fallback={null}>

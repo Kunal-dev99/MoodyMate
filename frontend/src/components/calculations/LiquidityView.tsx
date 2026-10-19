@@ -50,7 +50,7 @@ export function LcrFigure({ value, count, min, testId }: { value: HqlaAsset['bal
   const hint = lcrMaskHint(value, count, min)
   return (
     <span className="inline-flex flex-col">
-      <ShownValue value={value} testId={testId} />
+      <ShownValue value={value} testId={testId} money />
       {hint && (
         <span className="mt-0.5 text-[11px] leading-tight text-muted-foreground" data-testid={`${testId}-hint`}>
           {hint}
@@ -150,13 +150,13 @@ function AssetRow({ a }: { a: HqlaAsset }) {
       </TableCell>
       <TableCell className="text-xs">{a.level ? <span className="font-mono">{a.level}</span> : <span className="text-muted-foreground">—</span>}</TableCell>
       <TableCell className="text-right text-sm">
-        <ShownValue value={a.balance} testId="hqla-asset-balance" />
+        <ShownValue value={a.balance} testId="hqla-asset-balance" money />
       </TableCell>
       <TableCell className="text-right text-sm">
         {a.haircut === null ? <span className="text-muted-foreground">—</span> : <span className="font-mono" data-testid="hqla-asset-haircut">{a.haircut}</span>}
       </TableCell>
       <TableCell className="text-right text-sm">
-        <ShownValue value={a.hqla_value} testId="hqla-asset-hqla" />
+        <ShownValue value={a.hqla_value} testId="hqla-asset-hqla" money />
       </TableCell>
       <TableCell className="text-xs" data-testid="hqla-asset-reason" data-reason={a.exclusion_reason ?? ''}>
         {a.included ? (
@@ -317,7 +317,7 @@ export function LcrPrototypeNotice({ limitations }: { limitations: string[] }) {
       <AlertTitle>LCR/HQLA prototype — not a regulatory LCR</AlertTitle>
       <AlertDescription className="text-foreground">
         <p className="text-xs">
-          Per currency with no FX; the value is the position balance; parameters are seeded, illustrative and provisional (D-35). Not for client
+          Per currency with no FX; the value is the position balance; parameters are seeded, illustrative and provisional. Not for client
           decisions.
         </p>
         {limitations.length > 0 && (
@@ -383,9 +383,9 @@ export function LiquidityView({ run }: { run: RunDetail }) {
             <LcrCurrencyView key={c.currency} row={c} min={value.min_aggregate_count} horizonDays={value.inflow_horizon_days} />
           ))}
           <p className="text-xs text-muted-foreground">
-            Per currency, no FX (D-35). HQLA = Σ eligible balance × (1 − haircut); outflows = Σ balance × run-off; inflows = min(Σ inflow × rate, cap ×
+            Per currency, no FX. HQLA = Σ eligible balance × (1 − haircut); outflows = Σ balance × run-off; inflows = min(Σ inflow × rate, cap ×
             outflows); ratio = HQLA / (outflows − inflows), 4 dp ROUND_HALF_EVEN, not computable when that is zero or negative. Aggregates are{' '}
-            <span className="font-mono">internal</span> (D-33), except a figure built from fewer than{' '}
+            <span className="font-mono">internal</span>, except a figure built from fewer than{' '}
             <span className="font-mono" data-testid="lcr-min-aggregate-count">
               {value.min_aggregate_count}
             </span>{' '}

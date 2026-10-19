@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 import type { components } from '../src/api/schema'
-import { API, SAMPLES, bearer, signIn, uploadSample } from './support'
+import { API, SAMPLES, bearer, groupDecimal, signIn, uploadSample } from './support'
 
 /**
  * Feature 04 Phase 19 browser check against the real stack (backend ENV=test, synthetic).
@@ -184,7 +184,9 @@ test('FE-19.1: the steward projects both credit imports and browses counterparty
   await expect(card.getByTestId('version-canonical-record')).toHaveText(version!.canonical_record_id)
   await expect(card.getByTestId('version-source-record')).toHaveText(version!.source_record_id)
   expect(typeof version!.drawn_amount).toBe('string')
-  await expect(card.getByTestId('version-drawn')).toHaveText(version!.drawn_amount as string)
+  // Grouped by thousands (P-7); data-value keeps the server's exact text.
+  await expect(card.getByTestId('version-drawn')).toHaveText(groupDecimal(version!.drawn_amount as string))
+  await expect(card.getByTestId('version-drawn')).toHaveAttribute('data-value', version!.drawn_amount as string)
   if (process.env.DOMAIN_SCREENSHOT) await page.screenshot({ path: `${process.env.DOMAIN_SCREENSHOT}/exposure.png`, fullPage: true })
 
   // 5. Lineage: the version's import link (import and source row) opens that import.

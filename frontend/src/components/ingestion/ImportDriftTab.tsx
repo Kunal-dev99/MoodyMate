@@ -27,6 +27,8 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { formatTimestamp } from '@/lib/format'
+import { ActorLabel } from '@/components/common/ActorLabel'
 
 /*
  * FE-12.2: an import's drift alerts (DI-06) against its source's baseline. Reading is GET
@@ -99,10 +101,8 @@ function Review({ event }: { event: DriftEvent }) {
       <div className="flex flex-wrap items-center gap-2">
         <DriftStatusPill status={event.status} />
         <span className="text-muted-foreground">by</span>
-        <span className="font-mono text-xs" data-testid="drift-reviewed-by">
-          {event.reviewed_by}
-        </span>
-        {event.reviewed_at && <span className="font-mono text-xs text-muted-foreground">· {new Date(event.reviewed_at).toLocaleString()}</span>}
+        <ActorLabel actor={event.reviewed_by} className="text-xs" testId="drift-reviewed-by" />
+        {event.reviewed_at && <span className="font-mono text-xs text-muted-foreground">· {formatTimestamp(event.reviewed_at)}</span>}
       </div>
       <p className="mt-1 whitespace-pre-wrap break-words" data-testid="drift-review-comment">
         {event.review_comment}
@@ -172,7 +172,7 @@ function DriftAlert({ event, onReviewed }: { event: DriftEvent; onReviewed: () =
           <dt className="text-muted-foreground">Detected</dt>
           <dd>
             <Mono>
-              {new Date(event.created_at).toLocaleString()} · detector v{event.detector_version}
+              {formatTimestamp(event.created_at)} · detector v{event.detector_version}
             </Mono>
           </dd>
           <dt className="text-muted-foreground">Thresholds</dt>

@@ -111,7 +111,7 @@ export function SignIn() {
                 AUTH_MODE=dev on a local or test environment.
               </CardDescription>
             </CardHeader>
-            <CardContent className="grid gap-3 sm:grid-cols-2">
+            <CardContent className="grid items-start gap-3 sm:grid-cols-2">
               {personas.map((p) => (
                 <button
                   key={p.role}

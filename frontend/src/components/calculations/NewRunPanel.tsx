@@ -41,6 +41,8 @@ import {
   type PinRow,
   type Snapshot,
 } from './calculations'
+import { formatTimestamp } from '@/lib/format'
+import { ActorLabel } from '@/components/common/ActorLabel'
 
 const selectClass = 'h-9 w-full rounded-md border border-input bg-background px-2 text-sm'
 
@@ -121,7 +123,7 @@ function DatasetStep({
                   <option value="">— none —</option>
                   {candidates[code].items.map((job) => (
                     <option key={job.id} value={job.id}>
-                      {job.source_code} · {new Date(job.created_at).toLocaleString()} · {job.row_count} rows · {job.status} · {job.id.slice(0, 8)}
+                      {job.source_code} · {formatTimestamp(job.created_at)} · {job.row_count} rows · {job.status} · {job.id.slice(0, 8)}
                     </option>
                   ))}
                 </select>
@@ -131,7 +133,7 @@ function DatasetStep({
         )}
         <p className="text-xs text-muted-foreground" data-testid="candidates-scope">
           Offered: the {CANDIDATES_PER_SCHEMA} newest imports per schema that the server lists as projected into the Financial Domain (GET /imports?projected=true).
-          QUARANTINED imports count with their accepted rows only; their held counts travel into the run manifest (D-30 §3).
+          QUARANTINED imports count with their accepted rows only; their held counts travel into the run manifest.
         </p>
         {reads.map((m) => (
           <p key={m.module_version_id} className="text-xs text-muted-foreground">
@@ -157,7 +159,7 @@ function DatasetStep({
     <PageSection
       icon={Database}
       title="1. Dataset snapshot"
-      description="Pin at most one projected import per schema. The snapshot is content-addressed: the same members return the existing snapshot and nothing is written (D-30 §2)."
+      description="Pin at most one projected import per schema. The snapshot is content-addressed: the same members return the existing snapshot and nothing is written."
     >
       <div className="space-y-4" data-testid="new-run-dataset">
         {body}
@@ -187,7 +189,7 @@ function SnapshotResult({ snapshot, origin }: { snapshot: Snapshot; origin: 'cre
         </dd>
         <dt className="text-muted-foreground">Created</dt>
         <dd className="font-mono text-xs">
-          {snapshot.created_by} · {new Date(snapshot.created_at).toLocaleString()}
+          <ActorLabel actor={snapshot.created_by} /> · {formatTimestamp(snapshot.created_at)}
         </dd>
       </dl>
       <SnapshotMembers members={snapshot.members} />
@@ -234,7 +236,7 @@ function ModuleStep({
     )
   }
   return (
-    <PageSection icon={Puzzle} title="2. Module" description="Only AVAILABLE module versions run. PLANNED ones are declared extension points and never run (D-31 §1).">
+    <PageSection icon={Puzzle} title="2. Module" description="Only AVAILABLE module versions run. PLANNED ones are declared extension points and never run.">
       {body}
     </PageSection>
   )
@@ -249,7 +251,7 @@ function PinsTable({ rows }: { rows: PinRow[] }) {
           <TableHead>What</TableHead>
           <TableHead>Version</TableHead>
           <TableHead>ID</TableHead>
-          <TableHead>SHA-256</TableHead>
+          <TableHead className="whitespace-nowrap">SHA-256</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -312,7 +314,7 @@ export function NewRunPanel() {
     <div className="space-y-4" data-testid="new-run-panel">
       <DatasetStep state={state} loaded={candidates} modules={moduleList} onRetry={candidateLoader.load} dispatch={dispatch} />
       <ModuleStep state={state} loaded={modules} onRetry={moduleLoader.load} dispatch={dispatch} />
-      <PageSection icon={CalendarDays} title="3. Reporting date" description="Buckets count calendar days after this date (D-35 §1).">
+      <PageSection icon={CalendarDays} title="3. Reporting date" description="Buckets count calendar days after this date.">
         <Input
           type="date"
           aria-label="Reporting date"
@@ -326,7 +328,7 @@ export function NewRunPanel() {
       <PageSection
         icon={ListChecks}
         title="4. Review the pins, then submit"
-        description="What the run will pin, as the server reports it now. The rule set is content-addressed from these rule versions when the run is written (D-32 §4); the run's manifest is the record."
+        description="What the run will pin, as the server reports it now. The rule set is content-addressed from these rule versions when the run is written; the run's manifest is the record."
       >
         <div className="space-y-4" data-testid="new-run-review">
           {picked ? (

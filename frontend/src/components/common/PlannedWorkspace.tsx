@@ -33,16 +33,12 @@ export function PlannedWorkspace({ slug }: { slug: string }) {
         actions={<Badge variant="secondary">Planned</Badge>}
       />
       <div className="px-6 pb-6">
+        {/* The delivery phase stays in config/navigation.ts (`planned`); users see product copy (P-12). */}
         <PageSection icon={workspace.icon} title="Not available yet">
           <EmptyState
             icon={CalendarClock}
             title="This workspace is planned, not built"
-            description={
-              <>
-                Scheduled for <strong>{workspace.planned.phase}</strong> (
-                {workspace.planned.workstream}). See docs/DELIVERY_PLAN.md.
-              </>
-            }
+            description="Planned for a later release."
           />
         </PageSection>
       </div>

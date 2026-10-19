@@ -38,6 +38,8 @@ import {
   RECONCILIATION_UI_ENABLED,
   VALIDATION_UI_ENABLED,
 } from '@/config/features'
+import { formatTimestamp } from '@/lib/format'
+import { ActorLabel } from '@/components/common/ActorLabel'
 
 type State = { kind: 'loading' } | { kind: 'ready'; job: ImportDetail } | LoadFailure
 
@@ -206,7 +208,7 @@ function ImportView({ importId }: { importId: string }) {
 
   const sections = (
     <>
-      <PageSection icon={FileCheck2} title="3. Status" description="Status as reported by the server.">
+      <PageSection icon={FileCheck2} title="Status" description="Status as reported by the server.">
         <dl className="grid grid-cols-[200px_1fr] gap-y-1 text-sm" data-testid="import-summary">
           <Field label="Import ID">
             <span className="font-mono text-xs" data-testid="import-id">
@@ -255,7 +257,7 @@ function ImportView({ importId }: { importId: string }) {
           )}
           <Field label="Uploaded">
             <span className="font-mono text-xs">
-              {job.created_by} · {new Date(job.created_at).toLocaleString()}
+              <ActorLabel actor={job.created_by} /> · {formatTimestamp(job.created_at)}
             </span>
           </Field>
           <Field label="Correlation ID">

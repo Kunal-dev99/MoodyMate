@@ -120,13 +120,14 @@ describe('the AI Assistant placeholder relabelled (FE-24.1)', () => {
     expect([...mainWorkspaces, ...advancedWorkspaces, ...adminWorkspaces].filter((w) => w.planned?.phase === 'Feature 05')).toEqual([])
   })
 
-  it('the placeholder page reads "Scheduled for WS5 (planned)"', async () => {
+  it('the placeholder page reads "Planned for a later release." (P-12)', async () => {
     vi.doMock('@/components/auth/SessionProvider', () => ({ useCurrentSession: () => ({ has: () => true }) }))
     vi.doMock('next/navigation', () => ({ usePathname: () => '/assistant' }))
     vi.resetModules()
     const { PlannedWorkspace } = await import('@/components/common/PlannedWorkspace')
     const html = renderToStaticMarkup(createElement(PlannedWorkspace, { slug: 'assistant' }))
-    expect(html.replace(/<[^>]+>|<!-- -->/g, '')).toContain('Scheduled for WS5 (planned)')
+    expect(html.replace(/<[^>]+>|<!-- -->/g, '')).toContain('Planned for a later release.')
+    expect(html).not.toContain('WS5')
     expect(html).not.toContain('Feature 05')
   })
 })

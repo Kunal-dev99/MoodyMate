@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import type { components } from '../src/api/schema'
-import { API, bearer, signIn } from './support'
+import { API, actorTitle, bearer, signIn } from './support'
 
 /**
  * Feature 03 Phase 16 browser checks against the real stack (backend ENV=test, synthetic).
@@ -56,7 +56,10 @@ test('FE-16.1: the seeded maturity_buckets rule shows its ILLUSTRATIVE badge and
     const r = history.locator(`[data-testid="rule-version-row"][data-version="${v.version}"]`)
     await expect(r).toHaveAttribute('data-status', v.status)
     await expect(r.getByTestId('rule-version-status')).toHaveAttribute('data-status', v.status)
-    await expect(r.getByTestId('rule-version-author')).toHaveText(v.authored_by)
+    // The author reads in plain language (P-1 / blocker 3); the raw actor stays in the tooltip.
+    const author = r.getByTestId('rule-version-author').locator('[data-actor-kind]')
+    await expect(author).toHaveAttribute('title', actorTitle(v.authored_by))
+    if (v.seeded) await expect(author).toHaveText('Platform seed (illustrative)')
     await expect(r.getByTestId('rule-version-run-count')).toHaveAttribute('data-run-count', String(v.run_count))
     if (v.seeded) await expect(r.getByTestId('seeded-badge')).toBeVisible()
   }

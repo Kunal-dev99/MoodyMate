@@ -73,8 +73,8 @@ function SplitFigures({
   return (
     <span className="inline-flex flex-col items-end">
       <span>
-        <ShownValue value={row[inflow]} testId={`ladder-inflows-${part}`} /> /{' '}
-        <ShownValue value={row[outflow]} testId={`ladder-outflows-${part}`} />
+        <ShownValue value={row[inflow]} testId={`ladder-inflows-${part}`} money /> /{' '}
+        <ShownValue value={row[outflow]} testId={`ladder-outflows-${part}`} money />
       </span>
       {hint && (
         <span className="mt-0.5 text-[11px] leading-tight text-muted-foreground" data-testid={`ladder-${part}-hint`}>
@@ -279,7 +279,7 @@ function Contributions({
                     </TableCell>
                     <TableCell className="text-xs">{c.origin}</TableCell>
                     <TableCell className="text-right text-sm">
-                      <ShownValue value={c.value} testId="contribution-value" />
+                      <ShownValue value={c.value} testId="contribution-value" money />
                       {!isMasked(c.value) && <span className="text-xs text-muted-foreground"> {c.unit}</span>}
                     </TableCell>
                     <TableCell className="text-sm">
@@ -358,7 +358,7 @@ function Contributions({
     <PageSection
       icon={ListTree}
       title={`Contributions · ${currency} · ${row?.bucket_label ?? bucket}`}
-      description="Each bucketed cash flow, with its lineage to the instrument, the import and the source row. A value is masked unless your clearance covers the most sensitive field it reads (D-33)."
+      description="Each bucketed cash flow, with its lineage to the instrument, the import and the source row. A value is masked unless your clearance covers the most sensitive field it reads."
       headerRight={
         <Button variant="ghost" size="sm" onClick={() => router.replace(runHref(run.run_id), { scroll: false })} data-testid="contributions-close">
           <X className="mr-1 h-3.5 w-3.5" />
@@ -458,8 +458,8 @@ export function MaturityLadderView({ run }: { run: RunDetail }) {
             />
           ))}
           <p className="text-xs text-muted-foreground">
-            Per currency, no FX (D-35). Net gap = inflows − outflows; the cumulative gap is the running sum of net gaps in bucket order. Aggregates are{' '}
-            <span className="font-mono">internal</span> (D-33), except a figure built from fewer than{' '}
+            Per currency, no FX. Net gap = inflows − outflows; the cumulative gap is the running sum of net gaps in bucket order. Aggregates are{' '}
+            <span className="font-mono">internal</span>, except a figure built from fewer than{' '}
             <span className="font-mono" data-testid="ladder-min-aggregate-count">
               {value.min_aggregate_count}
             </span>{' '}

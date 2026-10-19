@@ -280,3 +280,13 @@ export async function validateAndProject(request: APIRequestContext, steward: Re
   const projection: Schemas['ProjectionOut'] = await projected.json()
   expect(projection.projected_count).toBe(job.manifest!.quality.accepted_records)
 }
+
+/**
+ * The `title` an ActorLabel carries for a raw actor (P-1): the actor itself, or
+ * "<display name> (<actor>)" when it is the signed-in user. Shown text is "You",
+ * "User · <8 chars>" or "Platform seed"; the tooltip keeps the full id.
+ */
+export const actorTitle = (actor: string) => new RegExp(`(^|\\()${actor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\)?$`)
+
+/** Money is shown grouped by thousands on the exact decimal string (P-7); e2e compares the same way. */
+export { groupDecimal } from '../src/lib/format'

@@ -15,7 +15,8 @@ type Schemas = components['schemas']
 // --- exact decimal text (test arithmetic only: the UI never parses a value) -------------------
 
 function units(text: string): { value: bigint; scale: number } {
-  const m = /^(-?)(\d+)(?:\.(\d+))?$/.exec(text.trim())
+  // Money is shown grouped by thousands (P-7): the grouping commas are display-only.
+  const m = /^(-?)(\d+)(?:\.(\d+))?$/.exec(text.trim().replace(/,/g, ''))
   expect(m, `"${text}" is exact decimal text`).toBeTruthy()
   const [, sign, whole, frac = ''] = m!
   const value = BigInt(`${whole}${frac}`)

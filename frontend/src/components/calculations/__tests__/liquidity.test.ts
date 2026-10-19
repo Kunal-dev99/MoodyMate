@@ -183,9 +183,10 @@ describe('HQLA components, outflows and capped inflows (FE-17.1)', () => {
     expect(hidden).toMatch(/data-testid="lcr-cap-applied" data-applied="masked" data-masked="true"/)
   })
 
-  it('shows exact decimal text as the server sent it (never parsed or reformatted)', () => {
+  it('shows exact decimal text as the server sent it (never parsed; grouped by thousands on the string, P-7)', () => {
     const out = html(eur({ hqla_total: '9007199254740993.000000000000000001' }))
-    expect(out).toContain('>9007199254740993.000000000000000001<')
+    expect(out).toContain('>9,007,199,254,740,993.000000000000000001<')
+    expect(out).toContain('data-value="9007199254740993.000000000000000001"')
   })
 
   it('risk_analyst: asset rows and figures from too few contributions are masked, with why (D-33)', () => {

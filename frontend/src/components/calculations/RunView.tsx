@@ -21,6 +21,8 @@ import { MaturityLadderView } from './MaturityLadderView'
 import { RunIdentity } from './RunIdentity'
 import { RunStatusPill } from './RunStatusPill'
 import { POST_CHECK_TEXT, RUN_STATUS_STYLE, SEVERITY_VARIANT, WARNING_TEXT, hasResults, showsLiquidity, type RunDetail, type RunWarning } from './calculations'
+import { formatTimestamp } from '@/lib/format'
+import { useActorText } from '@/components/common/ActorLabel'
 
 const CRUMBS = [{ label: 'Calculations', href: '/calculations' }]
 
@@ -65,7 +67,7 @@ function Outcome({ run }: { run: RunDetail }) {
   const lcr = showsLiquidity(run)
   const labels = OUTCOME_LABELS[lcr ? 'lcr' : 'ladder']
   return (
-    <PageSection icon={ClipboardList} title="Outcome" description="Value-free counts and the engine's post-checks (D-31 §3), as the server recorded them when the run ended.">
+    <PageSection icon={ClipboardList} title="Outcome" description="Value-free counts and the engine's post-checks, as the server recorded them when the run ended.">
       {!o ? (
         <p className="text-sm text-muted-foreground" data-testid="outcome-none">
           Set when the run ends.
@@ -191,6 +193,7 @@ function Warnings({ warnings }: { warnings: RunWarning[] }) {
  * NEXT_PUBLIC_LIQUIDITY_UI=off, which restores the Phase 15 layout exactly).
  */
 export function RunView({ runId }: { runId: string }) {
+  const actorText = useActorText()
   const [state, setState] = useState<Loaded<RunDetail>>({ kind: 'loading' })
   const loader = useMemo(() => createLoader(fetchRun(runId), setState, 'Could not load the run'), [runId])
 
@@ -223,8 +226,8 @@ export function RunView({ runId }: { runId: string }) {
     <>
       <PageHeader
         title={`Run ${run.run_id.slice(0, 8)} · ${run.module.name}`}
-        description={`${run.module.code} v${run.module.version} for reporting date ${run.reporting_date}. Started ${new Date(run.started_at).toLocaleString()} by ${run.created_by}${
-          run.ended_at ? `, ended ${new Date(run.ended_at).toLocaleString()}` : ''
+        description={`${run.module.code} v${run.module.version} for reporting date ${run.reporting_date}. Started ${formatTimestamp(run.started_at)} by ${actorText(run.created_by)}${
+          run.ended_at ? `, ended ${formatTimestamp(run.ended_at)}` : ''
         }.`}
         breadcrumbs={[...CRUMBS, { label: run.run_id.slice(0, 8) }]}
         actions={<RunStatusPill status={run.status} testId="run-detail-status" />}
@@ -233,7 +236,7 @@ export function RunView({ runId }: { runId: string }) {
         <IllustrativeBanner statement={run.statement} />
         <RunIdentity run={run} />
         <StatusNotice run={run} />
-        <PageSection icon={Calculator} title="Run" description="Immutable: the run moved once, from RUNNING to the status the server set (D-31 §5).">
+        <PageSection icon={Calculator} title="Run" description="Immutable: the run moved once, from RUNNING to the status the server set.">
           <dl className="grid grid-cols-[200px_1fr] gap-y-1 text-sm" data-testid="run-fields">
             <Field label="Run ID" testId="run-id">
               <Mono>{run.run_id}</Mono>

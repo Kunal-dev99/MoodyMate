@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import {
   API,
+  actorTitle,
   bearer,
   coreBanking,
   ensureActiveMapping,
@@ -163,12 +164,15 @@ test('FE-12.2: a clean import, then the extra-column import: data_steward acknow
 
   // 5. The alert now shows the reviewer and the comment, from the server, and stays reviewed.
   await expect(alert).toHaveAttribute('data-status', 'ACKNOWLEDGED')
-  await expect(alert.getByTestId('drift-reviewed-by')).toHaveText(reviewed.reviewed_by)
+  // The reviewer is the signed-in user: shown as "You", the raw actor kept in the tooltip (P-1).
+  await expect(alert.getByTestId('drift-reviewed-by')).toHaveText('You')
+  await expect(alert.getByTestId('drift-reviewed-by')).toHaveAttribute('title', actorTitle(reviewed.reviewed_by))
   await expect(alert.getByTestId('drift-review-comment')).toHaveText(comment)
   await expect(alert.getByTestId('drift-review-open')).toHaveCount(0)
   await page.reload()
   await expect(alert).toHaveAttribute('data-status', 'ACKNOWLEDGED')
-  await expect(alert.getByTestId('drift-reviewed-by')).toHaveText(`user:${me.user_id}`)
+  await expect(alert.getByTestId('drift-reviewed-by')).toHaveText('You')
+  await expect(alert.getByTestId('drift-reviewed-by')).toHaveAttribute('title', actorTitle(`user:${me.user_id}`))
   await expect(alert.getByTestId('drift-review-comment')).toHaveText(comment)
   if (process.env.RECONCILIATION_SCREENSHOT) await page.screenshot({ path: `${process.env.RECONCILIATION_SCREENSHOT}/drift.png`, fullPage: true })
 })

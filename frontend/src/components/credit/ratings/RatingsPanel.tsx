@@ -11,14 +11,15 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { ProposeRatingDialog } from './ProposeRatingDialog'
 import { RatingStatusPill } from './RatingStatusPill'
 import { canProposeRating, isProposer, type ObligorRating } from './ratings'
+import { formatTimestamp } from '@/lib/format'
+import { ActorLabel } from '@/components/common/ActorLabel'
 
 function Who({ actor, at, you, testId }: { actor: string | null; at: string | null; you: boolean; testId: string }) {
   if (!actor) return <span className="text-muted-foreground" data-testid={testId}>—</span>
   return (
     <div data-testid={testId}>
-      <span className="font-mono text-xs">{actor}</span>
-      {you && <span className="text-xs text-muted-foreground"> (you)</span>}
-      {at && <div className="font-mono text-xs text-muted-foreground">{new Date(at).toLocaleString()}</div>}
+      <ActorLabel actor={actor} you={you} className="text-xs" />
+      {at && <div className="font-mono text-xs text-muted-foreground">{formatTimestamp(at)}</div>}
     </div>
   )
 }
@@ -64,7 +65,7 @@ export function RatingHistory({ ratings, myUserId }: { ratings: readonly Obligor
               <RatingStatusPill status={r.status} />
               {r.status === 'IN_REVIEW' && <div className="mt-1 text-xs text-muted-foreground">Waiting for an approver who is not the proposer.</div>}
               {r.status === 'SUPERSEDED' && r.superseded_at && (
-                <div className="mt-1 font-mono text-xs text-muted-foreground">{new Date(r.superseded_at).toLocaleString()}</div>
+                <div className="mt-1 font-mono text-xs text-muted-foreground">{formatTimestamp(r.superseded_at)}</div>
               )}
             </TableCell>
             <TableCell>
@@ -116,7 +117,7 @@ export function RatingsPanel({ counterpartyId, counterpartyLabel, ratings }: { c
     <PageSection
       icon={Award}
       title={`Ratings (${history.length})`}
-      description="Obligor rating versions (D-39): proposed by a risk analyst, approved or rejected by a different approver. Versions are immutable; superseded and rejected ones are kept, never deleted. Grades are human judgements: nothing here suggests one."
+      description="Obligor rating versions: proposed by a risk analyst, approved or rejected by a different approver. Versions are immutable; superseded and rejected ones are kept, never deleted. Grades are human judgements: nothing here suggests one."
       headerRight={canProposeRating(has) ? <ProposeRatingDialog counterpartyId={counterpartyId} counterpartyLabel={counterpartyLabel} onProposed={onProposed} /> : undefined}
     >
       <div className="space-y-3" data-testid="ratings-panel" data-counterparty-id={counterpartyId}>

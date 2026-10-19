@@ -40,17 +40,17 @@ export function LabelBadges({
   return (
     <span className={cn('inline-flex flex-wrap items-center gap-1', className)}>
       {illustrative && (
-        <Badge variant="warning" data-testid="illustrative-badge" title="Illustrative prototype. Not a regulatory calculation (D-35).">
+        <Badge variant="warning" data-testid="illustrative-badge" title="Illustrative prototype. Not a regulatory calculation.">
           Illustrative
         </Badge>
       )}
       {provisional && (
-        <Badge variant="warning" data-testid="provisional-badge" title="Provisional: awaiting the client's own value (D-11).">
+        <Badge variant="warning" data-testid="provisional-badge" title="Provisional: awaiting the client's own value.">
           Provisional
         </Badge>
       )}
       {seeded && (
-        <Badge variant="outline" data-testid="seeded-badge" title="Activated by a tagged migration (D-32 §7), not by an approver.">
+        <Badge variant="outline" data-testid="seeded-badge" title="Activated by the platform seed, not by an approver.">
           Seeded
         </Badge>
       )}

@@ -21,13 +21,13 @@ import { ShownValue } from './ShownValue'
 import {
   NO_FILTERS,
   catalogueQuery,
-  importHref,
   instrumentHref,
   vocabularyEntry,
   type CatalogueFilters,
   type InstrumentPage,
   type InstrumentType,
 } from './domain'
+import { formatTimestamp } from '@/lib/format'
 
 const PAGE_SIZE = 50
 const selectClass = 'h-9 rounded-md border border-input bg-background px-2 text-sm'
@@ -59,7 +59,7 @@ function Vocabulary({ types }: { types: InstrumentType[] }) {
     <PageSection
       icon={BookOpen}
       title="Instrument type vocabulary"
-      description="Seeded by the platform until the client defines its own types. An instrument of another type is still projected, and modules warn on it (D-29 §5)."
+      description="Seeded by the platform until the client defines its own types. An instrument of another type is still projected, and modules warn on it."
     >
       {types.length === 0 ? (
         <p className="text-sm text-muted-foreground">No instrument types are seeded for your tenant.</p>
@@ -181,7 +181,7 @@ export function InstrumentCatalogue() {
         <Input
           aria-label="Currency"
           placeholder="e.g. EUR"
-          className="h-9 w-24 font-mono uppercase"
+          className="h-9 w-24 font-mono uppercase placeholder:normal-case"
           maxLength={3}
           value={draft.currency}
           onChange={(e) => setDraft({ ...draft, currency: e.target.value })}
@@ -275,6 +275,9 @@ export function InstrumentCatalogue() {
         />
       ) : (
         <>
+          <p className="mb-2 text-xs text-muted-foreground" data-testid="instrument-showing">
+            Showing {page.offset + 1}–{page.offset + page.items.length} of {page.total}
+          </p>
           <Table data-testid="instrument-table" data-total={page.total}>
             <TableHeader>
               <TableRow>
@@ -283,7 +286,6 @@ export function InstrumentCatalogue() {
                 <TableHead>Currency (latest)</TableHead>
                 <TableHead>Source</TableHead>
                 <TableHead className="text-right">Versions</TableHead>
-                <TableHead>Latest import</TableHead>
                 <TableHead>First seen</TableHead>
               </TableRow>
             </TableHeader>
@@ -302,11 +304,10 @@ export function InstrumentCatalogue() {
                           <MaskedValue value={i.business_key} />
                         </span>
                       )}
-                      <div className="font-mono text-xs text-muted-foreground">{i.instrument_id}</div>
                     </TableCell>
                     <TableCell className="text-sm">
                       <ShownValue value={i.instrument_type} />
-                      {vocab?.provisional && <ProvisionalBadge className="ml-2" />}
+                      {/* "Provisional / illustrative" is shown once, in the section header (P-6). */}
                       {typeCode !== null && !vocab && (
                         <Badge variant="outline" className="ml-2" data-testid="type-unknown">
                           Not in vocabulary
@@ -323,12 +324,7 @@ export function InstrumentCatalogue() {
                         {i.version_count} version{i.version_count === 1 ? '' : 's'}
                       </div>
                     </TableCell>
-                    <TableCell>
-                      <Link href={importHref(i.latest_import_id)} className="font-mono text-xs text-primary hover:underline" data-testid="instrument-latest-import">
-                        {i.latest_import_id.slice(0, 8)}…
-                      </Link>
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{new Date(i.created_at).toLocaleString()}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{formatTimestamp(i.created_at)}</TableCell>
                   </TableRow>
                 )
               })}
@@ -355,12 +351,18 @@ export function InstrumentCatalogue() {
       )
   }
 
+  // D-29 §3: 'current' is not defined; a calculation pins versions through a dataset snapshot.
+  // P-6: one "Provisional / illustrative" pill for the page, when any listed type is provisional.
+  const anyProvisional =
+    state.kind === 'ready' &&
+    state.page.items.some((i) => !isMasked(i.instrument_type) && vocabularyEntry(state.page.instrument_types, i.instrument_type)?.provisional)
   return (
     <div className="space-y-4">
       <PageSection
         icon={Landmark}
         title={state.kind === 'ready' ? `${state.page.total} instrument${state.page.total === 1 ? '' : 's'}` : 'Instruments'}
-        description="One row per instrument (tenant, source and business key). 'Current' is not defined: a calculation pins versions through a dataset snapshot (D-29 §3). Values are masked by classification."
+        description="One row per instrument (tenant, source and business key). 'Current' is not defined: a calculation pins versions through a dataset snapshot. Values are masked by classification."
+        headerRight={anyProvisional ? <ProvisionalBadge /> : undefined}
       >
         {filters}
         {body}

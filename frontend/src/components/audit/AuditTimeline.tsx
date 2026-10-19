@@ -12,6 +12,8 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cursorsFor, pageView, type Paging } from './paging'
+import { formatTimestamp } from '@/lib/format'
+import { ActorLabel } from '@/components/common/ActorLabel'
 
 type Page = Schemas['AuditEventPage']
 type Event = Schemas['AuditEventOut']
@@ -64,12 +66,12 @@ function EventRow({ event }: { event: Event }) {
           {event.resource_id ? ` ${event.resource_id}` : ''}
         </span>
         <span className="ml-auto text-xs text-muted-foreground">
-          {new Date(event.occurred_at).toLocaleString()}
+          {formatTimestamp(event.occurred_at)}
         </span>
       </div>
       <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
         <span>
-          actor <span className="font-mono text-foreground">{event.actor}</span>
+          actor <ActorLabel actor={event.actor} className="text-foreground" />
         </span>
         <span>
           correlation <span className="font-mono text-foreground" data-testid="correlation-id">{event.correlation_id ?? '—'}</span>

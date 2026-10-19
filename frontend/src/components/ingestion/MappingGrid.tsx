@@ -85,6 +85,29 @@ function Params({ row, set, disabled }: { row: DraftRule; set: (p: Partial<Param
   }
 }
 
+/** Plain-text form of a rule's transform parameters, for a reader who may not edit (P-9). */
+function paramsText(row: DraftRule): string | null {
+  const p = row.params
+  switch (TRANSFORMS[row.transform].params) {
+    case 'none':
+      return null
+    case 'decimal':
+      return `decimal “${p.decimal_sep}”, ${p.thousands_sep ? `group “${p.thousands_sep === ' ' ? 'space' : p.thousands_sep}”` : 'no grouping'}`
+    case 'scale':
+      return `×10^${p.power_of_ten}`
+    case 'date':
+      return p.format
+    case 'boolean':
+      return `true: ${p.true_values || '—'} · false: ${p.false_values || '—'}`
+    case 'table':
+      return `${p.table.split('\n').filter((l) => l.trim()).length} value pairs · unlisted: ${p.on_missing.toLowerCase()}`
+    case 'value':
+      return p.value || '—'
+  }
+}
+
+const readOnlyClass = 'text-xs'
+
 /**
  * The mapping workbench grid (FE-10.1): one row per rule, plus a "No rule yet" row for each
  * column of the selected import no rule reads. Edits change only the local draft; saving it
@@ -147,6 +170,10 @@ export function MappingGrid({
                 <TableCell>
                   {isConstant ? (
                     <span className="text-xs">Map</span>
+                  ) : !editable ? (
+                    <span className={readOnlyClass} data-testid="mapping-policy">
+                      {POLICY_LABEL[row.policy]}
+                    </span>
                   ) : (
                     <select
                       className={selectClass}
@@ -170,6 +197,11 @@ export function MappingGrid({
                 <TableCell>
                   {row.policy !== 'MAP' ? (
                     <span className="text-xs text-muted-foreground">{row.policy === 'PRESERVE' ? 'kept as it is' : '—'}</span>
+                  ) : !editable ? (
+                    <span className="font-mono text-xs" data-testid="mapping-target">
+                      {row.target_field || '—'}
+                      {target && <span className="font-sans text-muted-foreground"> · {target.data_type}</span>}
+                    </span>
                   ) : fields ? (
                     <select
                       className={selectClass}
@@ -198,6 +230,10 @@ export function MappingGrid({
                     <div className="grid gap-1">
                       {isConstant ? (
                         <span className="text-xs">Constant</span>
+                      ) : !editable ? (
+                        <span className={readOnlyClass} data-testid="mapping-transform">
+                          {TRANSFORMS[row.transform].label}
+                        </span>
                       ) : (
                         <select
                           className={selectClass}
@@ -214,12 +250,21 @@ export function MappingGrid({
                           ))}
                         </select>
                       )}
-                      <Params row={row} disabled={disabled} set={(p) => update(row.key, { params: { ...row.params, ...p } })} />
+                      {editable ? (
+                        <Params row={row} disabled={disabled} set={(p) => update(row.key, { params: { ...row.params, ...p } })} />
+                      ) : (
+                        paramsText(row) && <span className="text-xs text-muted-foreground">{paramsText(row)}</span>
+                      )}
                     </div>
                   )}
                 </TableCell>
                 <TableCell>
-                  {row.policy === 'MAP' && !isConstant ? (
+                  {row.policy === 'MAP' && !isConstant && !editable ? (
+                    <span className={readOnlyClass}>
+                      {NULL_LABEL[row.null_policy] ?? row.null_policy}
+                      {row.null_policy === 'USE_DEFAULT' && <span className="text-muted-foreground"> · default “{row.default_value}”</span>}
+                    </span>
+                  ) : row.policy === 'MAP' && !isConstant ? (
                     <div className="grid gap-1">
                       <select
                         className={selectClass}

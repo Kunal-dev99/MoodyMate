@@ -23,7 +23,7 @@ export function SnapshotMembers({ members, testId = 'snapshot-members' }: { memb
           <TableHead>Schema</TableHead>
           <TableHead>Import</TableHead>
           <TableHead>Pinned versions</TableHead>
-          <TableHead>Manifest SHA-256</TableHead>
+          <TableHead className="whitespace-nowrap">Manifest SHA-256</TableHead>
           <TableHead className="text-right">Accepted / held / rejected</TableHead>
           <TableHead>Reconciliation</TableHead>
         </TableRow>

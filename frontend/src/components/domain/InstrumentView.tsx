@@ -25,10 +25,14 @@ import {
   type InstrumentType,
   type InstrumentVersion,
 } from './domain'
+import { formatTimestamp } from '@/lib/format'
 
 type Ready = { detail: InstrumentDetail; types: InstrumentType[] }
 
-const CRUMBS = [{ label: 'Financial Domain', href: '/domain' }]
+const CRUMBS = [
+  { label: 'Financial Domain', href: '/domain' },
+  { label: 'Instruments', href: '/domain' },
+]
 
 function Field({ label, children, testId }: { label: string; children: ReactNode; testId?: string }) {
   return (
@@ -71,7 +75,7 @@ function Version({ version, types }: { version: InstrumentVersion; types: Instru
       <PageSection
         icon={GitBranch}
         title={`Version ${v.version}`}
-        description={`Projected ${new Date(v.projected_at).toLocaleString()}. Immutable: a later import of the same key adds a version.`}
+        description={`Projected ${formatTimestamp(v.projected_at)}. Immutable: a later import of the same key adds a version.`}
         headerRight={
           <Link href={importHref(v.import_id)} className="font-mono text-xs text-primary hover:underline" data-testid="version-import-link" data-import-id={v.import_id}>
             Import {v.import_id.slice(0, 8)} · row {v.source_ordinal}
@@ -88,7 +92,7 @@ function Version({ version, types }: { version: InstrumentVersion; types: Instru
                 <ShownValue value={v.currency} testId="version-currency" />
               </Field>
               <Field label="Notional" testId="version-notional-field">
-                <ShownValue value={v.notional} testId="version-notional" />
+                <ShownValue value={v.notional} testId="version-notional" money />
                 {!isMasked(v.notional) && v.notional !== null && !isMasked(v.currency) && v.currency && (
                   <span className="text-muted-foreground"> {v.currency}</span>
                 )}
@@ -99,11 +103,12 @@ function Version({ version, types }: { version: InstrumentVersion; types: Instru
                   <span className="text-muted-foreground"> {v.interest_rate_unit}</span>
                 )}
               </Field>
+              {/* Server code TYPE_NOT_PROJECTED: the pinned field is free text, so the value stays in the canonical record (P-3). */}
               <Field label="Maturity date">
                 <ShownValue
                   value={v.maturity_date}
                   testId="version-maturity-date"
-                  empty="— not projected (empty, or the pinned field is free text: TYPE_NOT_PROJECTED). The source value stays in the canonical record."
+                  empty="Not captured in instrument schema v1"
                 />
               </Field>
             </dl>
@@ -272,7 +277,7 @@ export function InstrumentView({ instrumentId }: { instrumentId: string }) {
         breadcrumbs={[...CRUMBS, { label: isMasked(key) ? detail.instrument_id.slice(0, 8) : key }]}
       />
       <div className="space-y-4 px-6 pb-6">
-        <PageSection icon={ListTree} title="Identity" description="Stable per tenant, source system and business key (D-29 §3).">
+        <PageSection icon={ListTree} title="Identity" description="Stable per tenant, source system and business key.">
           <dl className="grid grid-cols-[200px_1fr] gap-y-1 text-sm" data-testid="instrument-identity">
             <Field label="Instrument ID" testId="instrument-id">
               <Mono>{detail.instrument_id}</Mono>
@@ -286,7 +291,7 @@ export function InstrumentView({ instrumentId }: { instrumentId: string }) {
               </Link>
             </Field>
             <Field label="First seen">
-              <Mono>{new Date(detail.created_at).toLocaleString()}</Mono>
+              <Mono>{formatTimestamp(detail.created_at)}</Mono>
             </Field>
           </dl>
         </PageSection>
