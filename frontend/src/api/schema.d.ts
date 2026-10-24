@@ -685,8 +685,12 @@ export interface paths {
          * @description Project a validated import's accepted rows into immutable domain versions (D-29):
          *     one instrument version, position version or cash-flow event per canonical record, each
          *     keeping lineage to it. 409 `projection_unsupported` for another schema (or schema
-         *     version), 409 `not_validated` before validation (or for a FAILED import), 409
-         *     `domain_projection_disabled` while the switch is off; each refusal is audited DENIED.
+         *     version, or an instrument contract matching no projector by hash; also the typed-maturity
+         *     contract while INSTRUMENT_PROJECTOR_V2_ENABLED is off, D-57), 409 `not_validated` before
+         *     validation (or for a FAILED import), 409 `domain_projection_disabled` while the switch is
+         *     off; each refusal is audited DENIED. Position, cash-flow and credit-exposure rows are
+         *     linked to their identities in the same transaction while IDENTITY_LINKS_ENABLED is on
+         *     (D-58 §4).
          */
         post: operations["projectImport"];
         delete?: never;
@@ -2412,6 +2416,67 @@ export interface components {
              */
             code: "CONSTANT";
             params: components["schemas"]["ValueParams"];
+        };
+        /** ContextCurrency */
+        ContextCurrency: {
+            /**
+             * Basis
+             * @description Results are per currency; there is no FX and no cross-currency total.
+             * @constant
+             */
+            basis: "PER_CURRENCY_NO_FX";
+            /**
+             * Codes
+             * @description The ISO 4217 currencies of the run's outcome, sorted.
+             */
+            codes: string[];
+        };
+        /** ContextMethodology */
+        ContextMethodology: {
+            /** Engine Version */
+            engine_version: string;
+            /** Module Code */
+            module_code: string;
+            /** Module Version */
+            module_version: number;
+            /**
+             * Rule Versions
+             * @description The pinned rule set's members, by rule code.
+             */
+            rule_versions: components["schemas"]["ContextRuleVersion"][];
+        };
+        /** ContextRuleVersion */
+        ContextRuleVersion: {
+            /** Rule Code */
+            rule_code: string;
+            /**
+             * Rule Version Id
+             * Format: uuid
+             */
+            rule_version_id: string;
+            /** Version */
+            version: number;
+        };
+        /**
+         * ContextUnits
+         * @description What the figures of a result read are measured in.
+         */
+        ContextUnits: {
+            /**
+             * Amount
+             * @description Money: exact decimal text in the ISO 4217 currency of its row, never converted (no FX, D-35).
+             */
+            amount: string;
+            /**
+             * Days
+             * @description Calendar days after the reporting date.
+             */
+            days: string;
+            /**
+             * Ratio
+             * @description Ratios (lcr_hqla): a dimensionless fraction, 4 dp ROUND_HALF_EVEN; None when the module reports no ratio.
+             */
+            ratio: string | null;
         };
         /** ContractColumn */
         ContractColumn: {
@@ -4670,6 +4735,8 @@ export interface components {
         };
         /** LiquidityOut */
         LiquidityOut: {
+            /** @description D-56 §5: units, currency, as-of date, methodology pins, validation status and the D-35 statement, from the run's pins. */
+            context: components["schemas"]["ResultContext"];
             /**
              * Currencies
              * @description Per currency, no FX (D-35). Empty unless the run SUCCEEDED (with or without warnings).
@@ -4711,6 +4778,8 @@ export interface components {
             /** Statement */
             statement: string;
             status: components["schemas"]["CalculationRunStatus"];
+            /** @description D-56: the run's module version's status (MODULE_VALIDATION). Response wrapper only: never in the manifest or the result document. */
+            validation_status: components["schemas"]["ValidationStatus"];
         };
         /** LowerTransform */
         LowerTransform: {
@@ -5268,6 +5337,8 @@ export interface components {
             bucket_rule_version_id: string;
             /** Buckets */
             buckets: components["schemas"]["BucketOut"][];
+            /** @description D-56 §5: units, currency, as-of date, methodology pins, validation status and the D-35 statement, from the run's pins. */
+            context: components["schemas"]["ResultContext"];
             /**
              * Currencies
              * @description Per currency, no FX (D-35). Empty unless the run SUCCEEDED (with or without warnings).
@@ -5294,6 +5365,8 @@ export interface components {
             /** Statement */
             statement: string;
             status: components["schemas"]["CalculationRunStatus"];
+            /** @description D-56: the run's module version's status (MODULE_VALIDATION). Response wrapper only: never in the manifest or the result document. */
+            validation_status: components["schemas"]["ValidationStatus"];
         };
         /** Me */
         Me: {
@@ -5445,6 +5518,8 @@ export interface components {
              * @description The D-35 label: not regulatory, no vendor parity.
              */
             statement: string;
+            /** @description D-56: from the code constant MODULE_VALIDATION per (module code, version); ILLUSTRATIVE on every current version, PLANNED included. No API sets it. */
+            validation_status: components["schemas"]["ValidationStatus"];
             /** Version */
             version: number;
         };
@@ -6254,6 +6329,28 @@ export interface components {
          * @enum {string}
          */
         ReconciliationOutcome: "MATCHED" | "REVIEW_REQUIRED" | "BROKEN";
+        /**
+         * ResultContext
+         * @description D-56 §5: the context of a result read, built from the run's pins (manifest, module
+         *     version, outcome), never computed. Response wrapper only: not hashed.
+         */
+        ResultContext: {
+            /**
+             * As Of Date
+             * Format: date
+             * @description The run's pinned reporting_date.
+             */
+            as_of_date: string;
+            currency: components["schemas"]["ContextCurrency"];
+            methodology: components["schemas"]["ContextMethodology"];
+            /**
+             * Statement
+             * @description The D-35 label: not regulatory, no vendor parity.
+             */
+            statement: string;
+            units: components["schemas"]["ContextUnits"];
+            validation_status: components["schemas"]["ValidationStatus"];
+        };
         /** ResultItem */
         ResultItem: {
             /** Bucket Code */
@@ -6303,6 +6400,8 @@ export interface components {
         };
         /** ResultPage */
         ResultPage: {
+            /** @description D-56 §5: units, currency, as-of date, methodology pins, validation status and the D-35 statement, from the run's pins. */
+            context: components["schemas"]["ResultContext"];
             /**
              * Items
              * @description In run order.
@@ -6322,6 +6421,8 @@ export interface components {
             status: components["schemas"]["CalculationRunStatus"];
             /** Total */
             total: number;
+            /** @description D-56: the run's module version's status (MODULE_VALIDATION). Response wrapper only: never in the manifest or the result document. */
+            validation_status: components["schemas"]["ValidationStatus"];
         };
         /**
          * RetentionState
@@ -6715,6 +6816,8 @@ export interface components {
              * Format: uuid
              */
             assumption_set_id: string;
+            /** @description D-56 §5: units, currency, as-of date, methodology pins, validation status and the D-35 statement, from the run's pins. */
+            context: components["schemas"]["ResultContext"];
             /** Correlation Id */
             correlation_id: string | null;
             /** Created By */
@@ -6785,6 +6888,8 @@ export interface components {
              */
             statement: string;
             status: components["schemas"]["CalculationRunStatus"];
+            /** @description D-56: the run's module version's status (MODULE_VALIDATION). Response wrapper only: never in the manifest or the result document. */
+            validation_status: components["schemas"]["ValidationStatus"];
             /** Warning Count */
             warning_count: number;
             /** Warnings */
@@ -7014,6 +7119,8 @@ export interface components {
              */
             started_at: string;
             status: components["schemas"]["CalculationRunStatus"];
+            /** @description D-56: the run's module version's status (MODULE_VALIDATION). Response wrapper only: never in the manifest or the result document. */
+            validation_status: components["schemas"]["ValidationStatus"];
             /** Warning Count */
             warning_count: number;
         };
@@ -7061,6 +7168,11 @@ export interface components {
             baseline_run_id: string;
             /** Buckets */
             buckets: components["schemas"]["ComparisonBucket"][];
+            /**
+             * Context
+             * @description D-56 §5: units, currency, as-of date, methodology pins, validation status and the D-35 statement, from the baseline run's pins (every member run pins the same module, engine and rule versions).
+             */
+            context: components["schemas"]["ResultContext"];
             /** Currencies */
             currencies: components["schemas"]["ComparisonCurrency"][];
             /** Illustrative */
@@ -7096,6 +7208,8 @@ export interface components {
              */
             scenario_version_id: string;
             summary: components["schemas"]["ComparisonSummary"];
+            /** @description D-56: the compared module version's status (MODULE_VALIDATION). Response wrapper only. */
+            validation_status: components["schemas"]["ValidationStatus"];
             /** Version */
             version: number;
         };
@@ -8370,6 +8484,14 @@ export interface components {
          */
         ValidationSeverity: "INFO" | "WARNING" | "ERROR" | "BLOCKER";
         /**
+         * ValidationStatus
+         * @description D-56 §1: how far a module version's methodology has been validated. Every current module
+         *     version is ILLUSTRATIVE (consistent with `illustrative = true`). It is exposed in response
+         *     wrappers only, never in a manifest or result document (D-56 §4, hash stability).
+         * @enum {string}
+         */
+        ValidationStatus: "ILLUSTRATIVE" | "INTERNAL_VALIDATED" | "REGULATORY_VALIDATED";
+        /**
          * ValueParams
          * @description DEFAULT(value) and CONSTANT(value).
          */
@@ -8699,6 +8821,17 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RunDetail"];
+                };
+            };
+            /** @description rate_limited: this principal's bucket for the route is empty (D-53); retryable, audited DENIED, nothing written. */
+            429: {
+                headers: {
+                    /** @description Whole seconds until a request can be served again. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
             /** @description Client error (standard envelope) */
@@ -9629,6 +9762,17 @@ export interface operations {
                     "application/json": components["schemas"]["ImportDetail"];
                 };
             };
+            /** @description rate_limited: this principal's bucket for the route is empty (D-53); retryable, audited DENIED, nothing written. */
+            429: {
+                headers: {
+                    /** @description Whole seconds until a request can be served again. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
             /** @description Client error (standard envelope) */
             "4XX": {
                 headers: {
@@ -10007,6 +10151,17 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ImportDetail"];
+                };
+            };
+            /** @description rate_limited: this principal's bucket for the route is empty (D-53); retryable, audited DENIED, nothing written. */
+            429: {
+                headers: {
+                    /** @description Whole seconds until a request can be served again. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
             /** @description Client error (standard envelope) */
@@ -11300,6 +11455,17 @@ export interface operations {
                     "application/json": components["schemas"]["ScenarioRunOut"];
                 };
             };
+            /** @description rate_limited: this principal's bucket for the route is empty (D-53); retryable, audited DENIED, nothing written. */
+            429: {
+                headers: {
+                    /** @description Whole seconds until a request can be served again. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
             /** @description Client error (standard envelope) */
             "4XX": {
                 headers: {
@@ -11611,6 +11777,17 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ScenarioValidationOut"];
+                };
+            };
+            /** @description rate_limited: this principal's bucket for the route is empty (D-53); retryable, audited DENIED, nothing written. */
+            429: {
+                headers: {
+                    /** @description Whole seconds until a request can be served again. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
             /** @description Client error (standard envelope) */

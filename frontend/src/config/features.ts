@@ -132,3 +132,11 @@ export const STRESS_COMPARE_UI_ENABLED = STRESS_EXPLORER_UI_ENABLED && process.e
  * audited). Links are read-only here: the UI never writes one (D-58).
  */
 export const DOMAIN_LINKS_UI_ENABLED = DOMAIN_UI_ENABLED && process.env.NEXT_PUBLIC_DOMAIN_LINKS_UI !== 'off'
+
+/*
+ * Build-time server switch (FE-28.5), listed here for discoverability; no NEXT_PUBLIC_ value,
+ * nothing reaches the browser: NEXT_SECURITY_HEADERS=off at `next build` drops the security
+ * headers (CSP Report-Only, X-Frame-Options, nosniff, Referrer-Policy), restoring the pre-Phase-28
+ * responses exactly. See src/config/buildEnv.mjs. The FE-28.3 production-build guard
+ * (NEXT_PUBLIC_API_BASE_URL required) has no off switch: it is a release control.
+ */

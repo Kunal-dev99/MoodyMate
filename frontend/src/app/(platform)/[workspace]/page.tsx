@@ -10,8 +10,10 @@ export function generateStaticParams() {
 
 export const dynamicParams = false
 
-export default function WorkspacePage({ params }: { params: { workspace: string } }) {
-  const workspace = findWorkspace(params.workspace)
+// Next 15: route params arrive as a Promise in server components (FE-28.1).
+export default async function WorkspacePage({ params }: { params: Promise<{ workspace: string }> }) {
+  const { workspace: slug } = await params
+  const workspace = findWorkspace(slug)
   if (!workspace?.planned) notFound()
   return <PlannedWorkspace slug={workspace.slug} />
 }

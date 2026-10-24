@@ -57,6 +57,8 @@ jobs:
         run: pytest -m ws3 -v
       - name: OpenAPI drift check (D-05)
         run: python -m scripts.export_openapi --check
+      - name: Python dependency audit (BE-28.1, D-55 §4)
+        run: pip-audit --skip-editable --progress-spinner off
 
   frontend:
     runs-on: ubuntu-latest
@@ -80,8 +82,15 @@ jobs:
         run: npm run typecheck
       - name: Unit tests
         run: npm test
+      - name: Dependency audit gate (BE-28.1, D-55 §4; high/critical must be allowlisted)
+        run: |
+          npm audit --omit=dev --json > "$RUNNER_TEMP/audit.json" || true
+          python3 ../backend/scripts/check_audit_allowlist.py "$RUNNER_TEMP/audit.json" audit-allowlist.json
       - name: Build
         run: npm run build
+        env:
+          # FE-28.3: next build fails without it in production (D-55 §5).
+          NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
 
   e2e:
     # FE-6.2: Playwright smoke against the real stack (migrated, seeded DB; backend in
@@ -128,6 +137,9 @@ jobs:
       - name: Build frontend
         working-directory: frontend
         run: npm run build
+        env:
+          # FE-28.3; must match the backend port Playwright starts (E2E_API_PORT, default 8000).
+          NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
       - name: Playwright smoke
         working-directory: frontend
         run: npm run e2e

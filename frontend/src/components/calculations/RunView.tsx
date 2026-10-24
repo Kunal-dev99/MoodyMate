@@ -17,10 +17,12 @@ import { cn } from '@/lib/utils'
 import { IllustrativeBanner } from './IllustrativeBanner'
 import { LiquidityView } from './LiquidityView'
 import { ManifestPanel } from './ManifestPanel'
+import { ResultContextPanel } from './ResultContextPanel'
 import { MaturityLadderView } from './MaturityLadderView'
 import { RunIdentity } from './RunIdentity'
 import { RunStatusPill } from './RunStatusPill'
 import { StressedRunBadge } from './StressedRunBadge'
+import { ValidationStatusBadge } from './ValidationStatusBadge'
 import { POST_CHECK_TEXT, RUN_STATUS_STYLE, SEVERITY_VARIANT, WARNING_TEXT, hasResults, showsLiquidity, type RunDetail, type RunWarning } from './calculations'
 import { formatTimestamp } from '@/lib/format'
 import { useActorText } from '@/components/common/ActorLabel'
@@ -192,6 +194,8 @@ function Warnings({ warnings }: { warnings: RunWarning[] }) {
  * with the contributions drill-down to the instrument, the import and the source row.
  * FE-17.1: an `lcr_hqla` run shows the liquidity view in the ladder's place (unless
  * NEXT_PUBLIC_LIQUIDITY_UI=off, which restores the Phase 15 layout exactly).
+ * FE-30.1: the validation status (D-56) in the header and the Run fields, and the "Result
+ * context" panel; labels, so no switch (as the D-35 §3 statements).
  */
 export function RunView({ runId }: { runId: string }) {
   const actorText = useActorText()
@@ -231,7 +235,13 @@ export function RunView({ runId }: { runId: string }) {
           run.ended_at ? `, ended ${formatTimestamp(run.ended_at)}` : ''
         }.`}
         breadcrumbs={[...CRUMBS, { label: run.run_id.slice(0, 8) }]}
-        actions={<RunStatusPill status={run.status} testId="run-detail-status" />}
+        actions={
+          <span className="flex flex-wrap items-center gap-2">
+            {/* FE-30.1: the module version's validation status (D-56), next to the server's run status. */}
+            <ValidationStatusBadge status={run.validation_status} testId="run-detail-validation-status" />
+            <RunStatusPill status={run.status} testId="run-detail-status" />
+          </span>
+        }
       />
       <div className="space-y-4 px-6 pb-6" data-testid="run-detail" data-run-id={run.run_id} data-status={run.status}>
         <IllustrativeBanner statement={run.statement} />
@@ -253,6 +263,9 @@ export function RunView({ runId }: { runId: string }) {
               <Mono>
                 {run.module.code} v{run.module.version} · {run.module.module_version_id}
               </Mono>
+            </Field>
+            <Field label="Validation status">
+              <ValidationStatusBadge status={run.validation_status} testId="run-field-validation-status" />
             </Field>
             <Field label="Warnings" testId="run-warning-count">
               <Mono>{run.warning_count}</Mono>
@@ -283,6 +296,8 @@ export function RunView({ runId }: { runId: string }) {
             )}
           </dl>
         </PageSection>
+        {/* FE-30.1: the server's context block (D-56 §5), checked against this run's own pins. */}
+        <ResultContextPanel context={run.context} pins={run} source="run" />
         <Outcome run={run} />
         {showsLiquidity(run) ? <LiquidityView run={run} /> : <MaturityLadderView run={run} />}
         <Warnings warnings={run.warnings} />

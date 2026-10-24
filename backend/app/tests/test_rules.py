@@ -25,6 +25,11 @@ essential test (D-26), in four parts:
 5. Stress scenarios (Phase 24, BE-24.1 - BE-24.4; D-44, D-47), the same governed-change
    pattern: templates and static validation, exploration confirmation, maker-checker
    promotion, the 0026 triggers and the SCENARIOS_ENABLED switch (app/tests/scenario_kit.py).
+
+Phase 30 (BE-30.2, D-56), folded into part 1 (+0, validation_kit): GET /calculation-modules
+shows validation_status ILLUSTRATIVE on every module version, PLANNED included, for every
+role; MODULE_VALIDATION covers every module_version row; a non-ILLUSTRATIVE ValidationRecord
+without an approver, approved_on and evidence_ref raises.
 """
 
 import json
@@ -76,6 +81,7 @@ from app.tests.helpers import (
     validate_import,
 )
 from app.tests.scenario_kit import check_scenarios
+from app.tests.validation_kit import check_module_validation
 
 pytestmark = pytest.mark.db
 
@@ -328,6 +334,9 @@ def test_governed_rule_changes_and_pinning(api: TestClient, db: str, artifact_di
     assert set(direction["vocabulary"]) >= {"BOND", "DEPOSIT", "LOAN"}
     r = api.get(f"{RULES}/{uuid.uuid4()}", headers=analyst)
     assert (r.status_code, r.json().get("code")) == (404, "not_found"), r.text
+    # Phase 30 (BE-30.2, D-56): ILLUSTRATIVE on every module version, PLANNED included, for
+    # every role; an unapproved validated record raises (app/tests/validation_kit.py).
+    check_module_validation(api, db)
 
     # The kind list is closed in the database itself: no expression kind can be stored.
     module = sql(db, "SELECT id FROM calculation_module WHERE code = $1", MATURITY_LADDER)

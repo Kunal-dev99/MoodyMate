@@ -5,6 +5,7 @@ from typing import Any
 import asyncpg
 import pytest
 from fastapi.testclient import TestClient
+from httpx import Response
 
 from app.core.config import Settings
 from app.main import create_app
@@ -514,6 +515,13 @@ def api(db: str, artifact_dir: Path) -> Iterator[TestClient]:
     settings = Settings(ENV="test", DATABASE_URL=db, ARTIFACT_STORE_DIR=artifact_dir)
     with TestClient(create_app(settings)) as c:
         yield c
+
+
+def response(r: object) -> Response:
+    """Narrow a TestClient result. Starlette 1.x types TestClient against httpx2, so with
+    httpx installed its methods are untyped; at runtime they return an httpx Response."""
+    assert isinstance(r, Response), type(r)
+    return r
 
 
 def dev_token(client: TestClient, role: str) -> dict[str, str]:

@@ -2187,6 +2187,20 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
      - intended use, jurisdiction and reporting basis per module.
 
      Engineering does not invent any of these (user plan §16).
+- **Amendment (2026-10-24, Phase 30 build, auto-resolved):** §5 and §3 made precise.
+  - **§5 every result read (Q3, Q10).** "Every result read" includes
+    `GET /calculation-runs/{id}/results`. It carries `context` as well as `validation_status`,
+    built by the same `CalculationService.result_context(run)` from the same pins. So the
+    context reads are run detail, results, maturity ladder, LCR and comparison (the comparison
+    takes its baseline run's pins). The field is additive and unhashed; no migration and no
+    permission change. BE-30.3 is reworded to the five reads.
+  - **§3 display wording (Q11).** The UI labels for INTERNAL_VALIDATED ("Internal validation
+    recorded") and REGULATORY_VALIDATED ("Regulatory validation recorded") are PROVISIONAL
+    placeholders. No module reaches them today (§1, §2). Their final wording is part of the §3
+    hard stop: the client approves it together with the first `ValidationRecord` and the
+    approver model. The labels say that a record exists, never that a module meets a
+    regulation. They never appear without the D-35 statement, and never contain "compliant",
+    "certified" or "Moody's".
 
 ## D-57 Typed-maturity instrument contract and projector v2
 

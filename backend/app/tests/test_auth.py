@@ -18,8 +18,17 @@ from app.core.auth import PUBLIC_PATHS, undeclared_routes
 from app.core.config import Settings
 from app.core.tokens import OidcTokens
 from app.main import create_app
-from app.tests.conftest import dev_token, insert_user
-from app.tests.helpers import IMPORTS, SOURCES, cid, events, seeded_source_id, source_body, upload
+from app.tests.conftest import dev_token, insert_user, sql
+from app.tests.helpers import (
+    IMPORTS,
+    SOURCES,
+    cid,
+    events,
+    seeded_source_id,
+    source_body,
+    token_for,
+    upload,
+)
 
 ISSUER = "https://idp.test/realms/moodymate"
 AUDIENCE = "moodymate-api"
@@ -146,8 +155,65 @@ def test_oidc_tokens_are_validated(db: str) -> None:
         assert (r.status_code, r.json()["code"]) == (403, "account_disabled")
 
 
+# BE-28.3: no default bucket is anywhere near this; a bucket that never empties fails the test.
+RATE_LIMIT_CEILING = 100
+
+
+def _replays_until_refused(client: TestClient, steward: dict[str, str], source: str) -> int:
+    """Replays one idempotent upload until the POST /imports bucket refuses: the count."""
+    for n in range(1, RATE_LIMIT_CEILING + 1):
+        r = upload(client, steward, source, b"a\n1\n", key="rate-limit-1")
+        if r.status_code == 429:
+            return n
+        assert r.status_code in (200, 201), (n, r.text)
+    raise AssertionError(f"POST {IMPORTS} was never rate limited in {RATE_LIMIT_CEILING} calls")
+
+
+def _rate_limits_refuse_audit_and_switch_off(api: TestClient, db: str, artifact_dir: Any) -> None:
+    """BE-28.3: an exhausted per-principal, per-route bucket is a 429 `rate_limited` envelope
+    with Retry-After, audited DENIED, writes nothing; other principals and routes are unaffected;
+    RATE_LIMIT_ENABLED=false (test only) never refuses."""
+    source = seeded_source_id(db)
+    steward = dev_token(api, "data_steward")
+    allowed = _replays_until_refused(api, steward, source) - 1
+    assert allowed >= 1
+    jobs = sql(db, "SELECT count(*) AS n FROM import_job")[0]["n"]
+    correlation = cid()
+    r = upload(api, steward, source, b"a\n1\n", key="rate-limit-2", cid=correlation)
+    assert r.status_code == 429, r.text
+    body = r.json()
+    assert set(body) == {"code", "message", "details", "correlation_id", "retryable"}
+    assert (body["code"], body["retryable"], body["correlation_id"]) == (
+        "rate_limited",
+        True,
+        correlation,
+    )
+    assert int(r.headers["Retry-After"]) >= 1
+    assert sql(db, "SELECT count(*) AS n FROM import_job")[0]["n"] == jobs  # nothing written
+    [event] = events(db, correlation)
+    assert event["outcome"] == "DENIED", dict(event)
+    assert "rate_limited" in json.dumps(json.loads(event["details"])), dict(event)
+    # Per principal: another steward has a full bucket. Per route: other routes still answer.
+    other = token_for(db, "rate-limit-other", ("data_steward",))
+    assert upload(api, other, source, b"a\n1\n", key="rate-limit-3").status_code in (200, 201)
+    assert api.get("/api/v1/me", headers=steward).status_code == 200
+    assert api.get(IMPORTS, headers=steward).status_code == 200
+
+    # Switched off (local/test only): the same number of calls plus margin are all served.
+    off = Settings(
+        ENV="test", DATABASE_URL=db, ARTIFACT_STORE_DIR=artifact_dir, RATE_LIMIT_ENABLED=False
+    )
+    with TestClient(create_app(off)) as client:
+        steward = dev_token(client, "data_steward")
+        for n in range(allowed + 5):
+            r = upload(client, steward, source, b"a\n1\n", key="rate-limit-1")
+            assert r.status_code == 200, (n, r.text)
+
+
 @pytest.mark.db
-def test_missing_permission_is_403_with_a_denied_audit_event(api: TestClient, db: str) -> None:
+def test_missing_permission_is_403_with_a_denied_audit_event(
+    api: TestClient, db: str, artifact_dir: Any
+) -> None:
     def denied(role: str, method: str, path: str, permission: str, **kw: Any) -> None:
         correlation = cid()
         headers = {**dev_token(api, role), "X-Correlation-ID": correlation}
@@ -167,6 +233,7 @@ def test_missing_permission_is_403_with_a_denied_audit_event(api: TestClient, db
     assert r.status_code == 403 and r.json()["details"] == {"required_permission": "import:write"}
     [event] = events(db, correlation)
     assert (event["outcome"], event["action"]) == ("DENIED", f"POST {IMPORTS}")
+    _rate_limits_refuse_audit_and_switch_off(api, db, artifact_dir)
 
 
 def test_every_route_declares_a_permission_and_undeclared_routes_fail_closed() -> None:

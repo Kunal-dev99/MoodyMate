@@ -92,6 +92,7 @@ from app.tests.helpers import (
     validate_import,
     validated_instruments,
     validated_sample,
+    without_rate_limits,
 )
 from app.tests.identity_kit import (
     EXTRA_FLOWS,
@@ -264,6 +265,7 @@ def other_schema_import(api: TestClient, db: str, steward: dict[str, str]) -> st
 def test_domain_projection_catalogue_and_guards(
     api: TestClient, db: str, artifact_dir: Path
 ) -> None:
+    without_rate_limits(api)
     # --- 1. Seed: the WS3 matrix, the frozen copies, the instrument types (BE-14.2) ------------
     grants = sql(
         db,

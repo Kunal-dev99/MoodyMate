@@ -108,6 +108,12 @@ test('FE-16.1: the auditor browses the modules (PLANNED never ready) and the ass
   await expect(ladder).toHaveAttribute('data-status', 'AVAILABLE')
   await expect(ladder.getByTestId('module-implementation')).toHaveText('Available · illustrative prototype')
   await expect(ladder.getByTestId('illustrative-badge')).toBeVisible()
+  // FE-30.1 (D-56): every module version, PLANNED included, shows the server's validation status.
+  for (const m of modules.items)
+    await expect(page.locator(`[data-testid="registry-module"][data-module-version-id="${m.module_version_id}"]`).getByTestId('module-validation-status')).toHaveAttribute(
+      'data-validation-status',
+      m.validation_status,
+    )
   const planned = page.locator('[data-testid="registry-module"][data-status="PLANNED"]')
   for (const card of await planned.all()) {
     // FE-18.1: the shared PlannedModuleBadge, never the implementation pill.

@@ -36,6 +36,7 @@ const moduleVersion = (over: Partial<ModuleVersion> = {}): ModuleVersion => ({
   illustrative: true,
   provisional: true,
   statement: ILLUSTRATIVE_STATEMENT,
+  validation_status: 'ILLUSTRATIVE',
   created_at: '2026-10-17T00:00:00Z',
   input_contract: {
     schemas: [{ schema_code: 'cashflow_event', required: true, fields: ['amount'] }],

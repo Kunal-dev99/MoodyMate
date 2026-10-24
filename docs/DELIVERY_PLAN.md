@@ -3706,24 +3706,28 @@ planning change). Phases 28–35. Migrations from 0030. Phases 28–35 below; de
 
 ### Phase 28 — Security and demo credibility (Workstream A, P0)
 
-- [ ] **FE-28.1** Upgrade `next` 14.2.35 → **15.5.28** (the first release fixing the critical
+- [x] **FE-28.1** Upgrade `next` 14.2.35 → **15.5.28** (the first release fixing the critical
   RCE advisories GHSA-2464-fhr4-w9xw, GHSA-2xp9-vwfh-vxw4, GHSA-p293-qw3h-jr36, all ≤15.5.27),
   `react`/`react-dom` → 19, matching `@types/*` and `eslint-config-next`. Migrate Next 15
   breaking changes (async `params`/`searchParams` in server pages and layouts; `useParams` in
   client components unchanged). Done when: `npm ci`, typecheck, lint, vitest, `next build` and
   the full Playwright suite pass; `npm audit --omit=dev` shows no critical.
-- [ ] **FE-28.2** `docs/security/ADVISORIES.md`: every remaining advisory after FE-28.1 with
+  - *Evidence (2026-10-24):* next 15.5.28 + React 19 (`frontend/package.json`); tsc and lint clean, vitest 647 passed, `next build` passes; `npm audit --omit=dev`: 0 critical, 0 high (`docs/evidence/phase-28/npm-audit-omit-dev.json`); full Playwright run in CI on the PR.
+- [x] **FE-28.2** `docs/security/ADVISORIES.md`: every remaining advisory after FE-28.1 with
   severity, package path, exposure (runtime vs build-time), mitigation, owner and review date.
   Done when the file matches `npm audit --omit=dev --json` exactly.
-- [ ] **BE-28.1** CI dependency scanning: a `frontend` step `npm audit --omit=dev
+  - *Evidence (2026-10-24):* `docs/security/ADVISORIES.md` generated from the saved audit JSON (4 moderate, build-time Tailwind/PostCSS); owners UNASSIGNED (client hard stop).
+- [x] **BE-28.1** CI dependency scanning: a `frontend` step `npm audit --omit=dev
   --audit-level=high` that fails unless every finding is listed in an allowlist
   (`frontend/audit-allowlist.json`, GHSA ids + expiry); a `backend` step running `pip-audit`
   (new dev dependency) against the installed environment. Done when both steps run in CI and a
   deliberately unlisted advisory id would fail (unit-tested allowlist checker script).
-- [ ] **FE-28.3** Production-build guard: `next build` with `NODE_ENV=production` fails with a
+  - *Evidence (2026-10-24):* `.github/workflows/ci.yml`: npm audit gate via `backend/scripts/check_audit_allowlist.py` + `frontend/audit-allowlist.json` (empty), checker unit-tested in `test_committed_artifacts.py`; `pip-audit` step; local pip-audit: no known vulnerabilities after fastapi 0.162 / starlette 1.9 / pytest 9 / certifi upgrades.
+- [x] **FE-28.3** Production-build guard: `next build` with `NODE_ENV=production` fails with a
   clear message when `NEXT_PUBLIC_API_BASE_URL` is unset (CI and e2e set it); dev keeps
   `http://localhost:8000`. Done when a vitest/unit check covers the guard function.
-- [ ] **FE-28.4** Demo credibility (D-02 unaffected; demo pages only):
+  - *Evidence (2026-10-24):* `src/config/buildEnv.mjs` guard + `src/config/__tests__/buildEnv.test.ts`; `npm run build` without the variable exits 1, with it passes; CI sets it.
+- [x] **FE-28.4** Demo credibility (D-02 unaffected; demo pages only):
   - Agent demo (`components/advanced/AgentDemo.tsx`, `agentDemo.ts`): remove "Exact decimal
     arithmetic" and every "verified"/"re-running reproduces it exactly" claim; call the hash an
     "illustrative checksum (not a SHA-256 result fingerprint)"; banner "Illustrative mock:
@@ -3735,15 +3739,18 @@ planning change). Phases 28–35. Migrations from 0030. Phases 28–35 below; de
     outflows ≤ 0 and the UI shows "not computable"; same banner.
   - Done when vitest covers: zero denominator → null/"not computable", no "verified"/"exact"
     strings remain in either page (grep test), derived movement text equals computed values.
-- [ ] **BE-28.2** Security headers middleware: `X-Content-Type-Options: nosniff`,
+  - *Evidence (2026-10-24):* Agent demo and Liquidity Intelligence: no 'exact'/'verified' claims, illustrative banners, derived movement text, run-off column 'not applied', zero denominator -> null / 'not computable' (`agentDemo.test.ts`, `liquidityIntel.test.ts`).
+- [x] **BE-28.2** Security headers middleware: `X-Content-Type-Options: nosniff`,
   `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Cross-Origin-Opener-Policy:
   same-origin`, `Strict-Transport-Security` only when ENV is staging/production. Done when a
   test asserts the headers on `/api/v1/health` and that HSTS is absent in ENV=test.
-- [ ] **FE-28.5** Next.js `headers()`: CSP in **Report-Only** (default-src 'self'; connect-src
+  - *Evidence (2026-10-24):* `app/core/security_headers.py`; `test_config.py` asserts the headers on `/api/v1/health` and no HSTS in ENV=test.
+- [x] **FE-28.5** Next.js `headers()`: CSP in **Report-Only** (default-src 'self'; connect-src
   'self' + the API origin; frame-ancestors 'none'; …), `X-Frame-Options: DENY`, nosniff,
   Referrer-Policy. Enforcing CSP in production is a client decision (hard stop). Done when the
   build serves the headers (Playwright header assertion on one page).
-- [ ] **BE-28.3** Rate limits: in-process per-principal, per-route token bucket on
+  - *Evidence (2026-10-24):* `next.config.mjs` headers with Report-Only CSP; `e2e/security-headers.spec.ts`.
+- [x] **BE-28.3** Rate limits: in-process per-principal, per-route token bucket on
   `POST /imports`, `POST /imports/{id}/validate`, `GET /scenarios/{id}/versions/{v}/validation`,
   `POST /calculation-runs`, `POST /scenarios/{id}/run`. Settings `RATE_LIMIT_ENABLED` (default on;
   off allowed only in local/test), per-route capacity/refill with conservative defaults; 429
@@ -3752,6 +3759,7 @@ planning change). Phases 28–35. Migrations from 0030. Phases 28–35 below; de
   row, and ARCHITECTURE.md documents the limits. Test budget: fold into existing test functions
   (D-26: suite stays at 49).
 
+  - *Evidence (2026-10-24):* `app/core/ratelimit.py`; 429 + `Retry-After` + DENIED audit asserted in `test_auth.py`; documented in ARCHITECTURE.md; full backend suite 49 passed.
 ### Feature 06 overview (planning change, 2026-10-24)
 
 Status: **PROPOSED.** Phase 28 is building from the brief above (copied verbatim from the
@@ -3949,7 +3957,7 @@ Goal: every module documented from the code as built, every output labelled with
 status and context, and the API boundary cases tested. No methodology is invented or changed.
 The methodology items in D-56 §6 are client hard stops, not tasks.
 
-- [ ] **BE-30.1** `docs/methodology/{maturity_ladder,lcr_hqla,scenario_overlay}.md`. Each has
+- [x] **BE-30.1** `docs/methodology/{maturity_ladder,lcr_hqla,scenario_overlay}.md`. Each has
   these headings: intended use, status, formula, units, inputs, exclusions and warnings,
   assumptions (each seeded rule), rounding, limitations, open client decisions. Each cites
   file:line and rule codes.
@@ -3957,7 +3965,16 @@ The methodology items in D-56 §6 are client hard stops, not tasks.
     - the headings are present (grep);
     - the parameters equal the seeds in 0018/0020 (architect check);
     - "compliant", "certified" and "Moody's" appear only inside the D-35 negating statement.
-- [ ] **BE-30.2** `validation_status` (D-56): a code constant `MODULE_VALIDATION` per (module
+  - *Evidence (2026-10-24, architect-verified):* `grep -c "^## "` gives 10 in each of the three
+    files, and the ten headings are the ten listed. Seeds compared line by line:
+    `maturity_ladder.md:104-111` equals `0018_calculations.py:158-193` (B01-B08 bounds,
+    BOND/LOAN INFLOW and DEPOSIT OUTFLOW, EXCLUDE_WITH_WARNING); `lcr_hqla.md:114-121` equals
+    `0020_lcr_results.py:139-184` (BOND L1, haircut 0.0000, DEPOSIT 0.1000, LOAN 0.5000, 30 days,
+    cap 0.7500); `scenario_overlay.md:113-121` repeats the 0018 seeds. A case-insensitive grep
+    for `compliant|certif|moody` over `docs/methodology/` finds nothing. The strict `>` cap flag
+    is stated at `lcr_hqla.md:37-39` (`lcr_hqla.py:427`). LOW follow-ups are in the Phase 30
+    report.
+- [x] **BE-30.2** `validation_status` (D-56): a code constant `MODULE_VALIDATION` per (module
   code, version), all ILLUSTRATIVE. A non-ILLUSTRATIVE `ValidationRecord` without an approver,
   `approved_on` and `evidence_ref` fails at import. It is exposed in the module registry, run
   list and detail, result reads and comparison, in the response wrapper only.
@@ -3965,27 +3982,60 @@ The methodology items in D-56 §6 are client hard stops, not tasks.
     - the rules fold sees ILLUSTRATIVE on every module version, PLANNED included;
     - an unapproved validated record raises;
     - the calculations fold confirms the manifest and result-document key sets are the
-      Feature 03 sets, and a re-run of a run made before this phase reproduces both hashes.
-- [ ] **BE-30.3** A `context` block on every result read (run detail, maturity ladder, LCR,
-  comparison): `units`, `currency`, `as_of_date` (`reporting_date`), `methodology` (module
+      Feature 03 sets; the re-run (`rerun_of`) of the Feature 03 run reproduces both hashes,
+      and the original run's stored hashes re-verify. *(Reworded 2026-10-24, Phase 30 Q7,
+      auto-resolved: a fixed pre-phase golden hash cannot exist because the manifest pins
+      random snapshot and import UUIDs, D-31 §4.)*
+  - *Evidence (2026-10-24, architect-verified):* `app/rules/constants.py:108-156`
+    (`ValidationStatus`, `ValidationRecord.__post_init__`, `MODULE_VALIDATION` with five
+    entries, three PLANNED). `validation_kit.py:88-131` (`check_module_validation`, called at
+    `test_rules.py:339`): every role sees ILLUSTRATIVE on every module version with AVAILABLE
+    and PLANNED present, `MODULE_VALIDATION` equals the `module_version` rows, and missing or
+    empty approver/`approved_on`/`evidence_ref` raises for both validated statuses. Key sets:
+    `validation_kit.py:182-186` (manifest) and `:236-241` (result document, recomputed from
+    stored rows). Stored hashes re-verify: `check_stored_hashes` (`:189-241`, called at
+    `test_calculations.py:1050`). Re-run: `test_calculations.py:1287-1293`. Fix round:
+    `test_registry_snapshot_run_and_maturity_ladder` "1 passed"; rules + calculations "2 passed,
+    1 warning in 62.21s"; 49 collected.
+- [x] **BE-30.3** A `context` block on every result read (run detail, results, maturity ladder,
+  LCR, comparison): `units`, `currency`, `as_of_date` (`reporting_date`), `methodology` (module
   code and version, engine version, rule versions), `validation_status` and `statement`. It is
-  built from the pins, never computed.
-  - *Done-when:* the calculations fold checks that the block equals the run's pins on all four
+  built from the pins, never computed. *(Results read added 2026-10-24, Phase 30 Q3/Q10,
+  auto-resolved; D-56 amendment.)*
+  - *Done-when:* the calculations fold checks that the block equals the run's pins on all five
     reads.
-- [ ] **BE-30.4** API boundary cases, folded in with hand-computed values labelled
+  - *Evidence (2026-10-24, architect-verified):* `CalculationService.result_context`
+    (`calculations/service.py:2336-2371`) reads the manifest and outcome only; it is used at
+    `calculations/router.py:252-254, 289, 485, 553, 713` and `orchestration/service.py:1222-1223`
+    (baseline run). `check_context` (`validation_kit.py:169-186`, units frozen as literals at
+    `:66-78`) runs on POST run and ladder (`test_calculations.py:894-895`), run detail (:1041),
+    results (:1093, and the boundary run `validation_kit.py:488-489`), comparison (:1201-1210),
+    LCR (:1389) and the re-run (:1293). `openapi.json` `ResultPage.required` ends
+    `validation_status, context`; `export_openapi --check` "openapi.json is up to date".
+- [x] **BE-30.4** API boundary cases, folded in with hand-computed values labelled
   `ENGINEERING — awaiting domain-expert approval`:
   - an LCR ratio tie on each side of ROUND_HALF_EVEN;
   - inflows exactly at the 75% cap, and one minor unit above;
   - zero net outflows give JSON `ratio: null` with `LCR_DENOMINATOR_ZERO`;
   - `999999999999999999.99` stays exact through the ladder;
-  - a 3-dp `amount` is held at validation and never rounded.
+  - a 3-dp `amount` with a non-zero third decimal is held at validation and never rounded.
+    *(Reworded 2026-10-24, Phase 30 Q6, auto-resolved: `1.230` quantizes exactly and is
+    accepted as `1.23`.)*
   - *Done-when:* the five assertions pass. If the code disagrees, the engineer reports it; no
     formula is changed to pass (user plan §16).
-- [ ] **FE-30.1** `ValidationStatusBadge` ("Illustrative — not validated") and a "Result
+  - *Evidence (2026-10-24, architect-verified):* `validation_kit.py:250-346` (EUR 1.0000, USD
+    1.0002, GBP at cap `applied=False`, CHF one minor unit above `applied=True`, SEK `ratio`
+    null with `LCR_DENOMINATOR_ZERO`, each labelled ENGINEERING) checked at `:424-436`, called
+    at `test_calculations.py:1465`; ladder exactness and the 3-dp hold at `validation_kit.py:
+    483-538`, called at `test_calculations.py:1212`. The code agrees with every hand-computed
+    value (`lcr_hqla.py:426-435`); no formula changed. The test writer's deliberate break fails
+    at the new EUR assertion. Fix round: "2 passed".
+- [x] **FE-30.1** `ValidationStatusBadge` ("Illustrative — not validated") and a "Result
   context" panel on the module registry, the runs, the ladder, the LCR and the comparison.
   - *Done-when:*
     - a vitest checks that the badge map covers the enum;
     - a Playwright fold on a run detail sees the badge and the as-of date.
+  - *Evidence (2026-10-24, coordinator):* `npm run gen:api` regenerated `schema.d.ts` with `ResultPage.context`; `validation.test.ts` asserts the context block on five reads (run detail, results, ladder, LCR, comparison); `e2e/calculations.spec.ts:243-262` sees the badge and as-of date; tsc and lint clean, vitest 630 passed; backend 49 passed.
 
 *Test budget:* 49 → 49.
 *Reversibility:* additive response fields and docs only. Hashed documents are unchanged. Labels

@@ -11,8 +11,10 @@ import { MaskedValue, isMasked } from '@/components/common/MaskedValue'
 import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
 import { createLoader, type Loaded } from '@/components/common/load'
+import { ResultContextPanel } from '@/components/calculations/ResultContextPanel'
 import { RunIdentity } from '@/components/calculations/RunIdentity'
 import { RunStatusPill } from '@/components/calculations/RunStatusPill'
+import { ValidationStatusBadge } from '@/components/calculations/ValidationStatusBadge'
 import { hasResults, runHref, type RunDetail } from '@/components/calculations/calculations'
 import { ShownValue } from '@/components/domain/ShownValue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -509,6 +511,7 @@ const noFetch = () => new Promise<never>(() => undefined)
  * of net or cumulative deltas with a column per shock alone and one combined; the drill-down to
  * the changed parts and their source rows; and, side by side, the parent version's run on the
  * same baseline. Every figure is the server's, masked by the server (`MaskedValue`).
+ * FE-30.1: the validation status (D-56) beside the approval label, and the "Result context" panel.
  */
 export function ComparisonView({ scenarioId, scenarioRunId }: { scenarioId: string; scenarioRunId: string }) {
   const [state, setState] = useState<Loaded<ScenarioComparison>>({ kind: 'loading' })
@@ -573,6 +576,8 @@ export function ComparisonView({ scenarioId, scenarioRunId }: { scenarioId: stri
               Illustrative
             </Badge>
           )}
+          {/* FE-30.1: the compared module version's validation status (D-56). */}
+          <ValidationStatusBadge status={c.validation_status} testId="comparison-validation-status" />
           <span className="text-xs text-muted-foreground">
             {columns.length} compared {columns.length === 1 ? 'run' : 'runs'} · {c.members.length} member {c.members.length === 1 ? 'run' : 'runs'}
           </span>
@@ -581,6 +586,8 @@ export function ComparisonView({ scenarioId, scenarioRunId }: { scenarioId: stri
         <PageSection icon={Scale} title="Runs compared" description="The scenario run, its baseline and each member run, with the configuration versions they pin.">
           <ComparisonIdentity comparison={c} baseline={baseline} />
         </PageSection>
+        {/* FE-30.1: the comparison's context block (D-56 §5, from the baseline's pins), checked against the baseline run once it is read. */}
+        <ResultContextPanel context={c.context} pins={baseline.kind === 'ready' ? baseline.value : null} source="comparison" />
         <MissingMembers comparison={c} />
 
         <PageSection icon={FileText} title="Summary" description="Templated from the server's figures (deterministic, not AI). It cites clear figures only.">

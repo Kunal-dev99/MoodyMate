@@ -55,6 +55,7 @@ from app.tests.helpers import (
     instrument_mapping,
     sample,
     validate_import,
+    without_rate_limits,
 )
 
 MIGRATIONS = Path(__file__).resolve().parents[1] / "db" / "migrations" / "versions"
@@ -406,6 +407,7 @@ def test_engine_fixtures_invariant_and_no_floats() -> None:
 
 
 def test_validate_statuses_issues_and_identical_payloads(api: TestClient, db: str) -> None:
+    without_rate_limits(api)
     steward, approver = dev_token(api, "data_steward"), dev_token(api, "approver")
     early = import_sample(api, steward, db, sample("instrument.csv"))
     assert early["status"] == "MAPPING_REQUIRED"

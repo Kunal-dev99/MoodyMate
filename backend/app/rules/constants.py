@@ -9,6 +9,8 @@ templates or user code. A decimal parameter is a JSON string of exact decimal te
 JSON number.
 """
 
+from dataclasses import dataclass
+from datetime import date
 from enum import StrEnum
 from typing import Any
 
@@ -98,6 +100,62 @@ ILLUSTRATIVE_STATEMENT = (
     "is claimed."
 )
 RULES_SEED_TAG = "0018_calculations"
+
+
+# --- Phase 30: validation status (BE-30.2, D-56) ----------------------------------------------
+
+
+class ValidationStatus(StrEnum):
+    """D-56 §1: how far a module version's methodology has been validated. Every current module
+    version is ILLUSTRATIVE (consistent with `illustrative = true`). It is exposed in response
+    wrappers only, never in a manifest or result document (D-56 §4, hash stability)."""
+
+    ILLUSTRATIVE = "ILLUSTRATIVE"
+    INTERNAL_VALIDATED = "INTERNAL_VALIDATED"
+    REGULATORY_VALIDATED = "REGULATORY_VALIDATED"
+
+
+@dataclass(frozen=True)
+class ValidationRecord:
+    """D-56 §2-3: one (module code, version)'s validation status. A non-ILLUSTRATIVE record
+    must name an approver, `approved_on` and an `evidence_ref` (methodology doc version and
+    approved golden pack), or it fails at construction, so at import of this module. Adding
+    one, and deciding who may approve it, is a hard stop (D-56 §3)."""
+
+    status: ValidationStatus
+    approver: str | None = None
+    approved_on: date | None = None
+    evidence_ref: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.status is not ValidationStatus.ILLUSTRATIVE and not (
+            self.approver and self.approved_on and self.evidence_ref
+        ):
+            raise ValueError(
+                f"a {self.status.value} validation record needs an approver, approved_on and "
+                "an evidence_ref (D-56 §3)"
+            )
+
+
+_ILLUSTRATIVE = ValidationRecord(ValidationStatus.ILLUSTRATIVE)
+
+# D-56 §2: per (module code, version), AVAILABLE and PLANNED alike. No column and no API sets it
+# (module_version is immutable). A pair missing here reads as ILLUSTRATIVE (fail closed: a
+# validation is never claimed by default).
+MODULE_VALIDATION: dict[tuple[str, int], ValidationRecord] = {
+    ("maturity_ladder", 1): _ILLUSTRATIVE,
+    ("lcr_hqla", 1): _ILLUSTRATIVE,
+    ("alm_irrbb", 1): _ILLUSTRATIVE,  # PLANNED (0021)
+    ("collateral", 1): _ILLUSTRATIVE,  # PLANNED (0021)
+    ("capital", 1): _ILLUSTRATIVE,  # PLANNED (0021)
+}
+
+
+def validation_status_of(module_code: str, version: int) -> ValidationStatus:
+    """The validation status of a module version; ILLUSTRATIVE unless a record says otherwise."""
+    return MODULE_VALIDATION.get((module_code, version), _ILLUSTRATIVE).status
+
+
 # The assumption set a run pins in Feature 03 (D-32 §6): its ACTIVE version.
 BASELINE_ASSUMPTION_SET = "baseline"
 

@@ -7,6 +7,7 @@ import { api, call } from '@/api/client'
 import { Forbidden } from '@/components/auth/Forbidden'
 import { ModuleContracts, PlannedModuleBadge } from '@/components/calculations/PlannedModuleBadge'
 import { ImplementationPill } from '@/components/calculations/RunStatusPill'
+import { ValidationStatusBadge } from '@/components/calculations/ValidationStatusBadge'
 import { EmptyState } from '@/components/common/EmptyState'
 import { LoadFailed } from '@/components/common/LoadFailed'
 import { LoadingBlock } from '@/components/common/LoadingBlock'
@@ -72,6 +73,8 @@ export function ModuleCard({ module: m }: { module: ModuleVersion }) {
         </span>
         {planned ? <PlannedModuleBadge /> : <ImplementationPill status={m.implementation_status} />}
         <LabelBadges illustrative={m.illustrative} provisional={m.provisional} />
+        {/* FE-30.1: MODULE_VALIDATION per (code, version), PLANNED included (D-56). */}
+        <ValidationStatusBadge status={m.validation_status} testId="module-validation-status" />
       </div>
       {m.description && <p className="mt-1 text-sm text-muted-foreground">{m.description}</p>}
       {planned ? (

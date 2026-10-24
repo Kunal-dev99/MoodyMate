@@ -32,6 +32,7 @@ from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.calculations.constants import (
+    CREATE_RUN,
     CalculationRunStatus,
     CalculationWarningCode,
     HqlaExclusionReason,
@@ -52,6 +53,7 @@ from app.calculations.schemas import (
     LiquidityCurrency,
     LiquidityOut,
     MaturityLadderOut,
+    ResultContext,
     ResultItem,
     ResultPage,
     RunCreate,
@@ -84,6 +86,7 @@ from app.core.auth import require_permission
 from app.core.classification import UNCLASSIFIED, MaskedValue, mask_mapping
 from app.core.decimals import decimal_text
 from app.core.principal import Principal
+from app.core.ratelimit import RATE_LIMITED_RESPONSE, LimitedRoute, rate_limited
 from app.db.session import get_session
 from app.domain.constants import CashflowOrigin, DomainSchemaCode
 from app.governance.constants import Permission
@@ -94,6 +97,11 @@ from app.rules.constants import ILLUSTRATIVE_STATEMENT, CashflowDirection, HqlaL
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 CalcReader = Annotated[Principal, Depends(require_permission(Permission.CALC_READ))]
 CalcRunner = Annotated[Principal, Depends(require_permission(Permission.CALC_RUN))]
+# BE-28.3 (D-53): calc:run, then the route's rate-limit bucket.
+RateLimitedRunner = Annotated[
+    Principal,
+    Depends(rate_limited(LimitedRoute.CALCULATION_RUN, Permission.CALC_RUN, CREATE_RUN)),
+]
 
 router = APIRouter(tags=["calculations"])
 REPLAYED = "Idempotent-Replayed"
@@ -243,8 +251,14 @@ def _summary(row: RunRow) -> RunSummary:
         ended_at=r.ended_at,
         created_by=r.created_by,
         illustrative=True,
+        validation_status=CalculationService.validation_status(r),
         scenario=_scenario(row),
     )
+
+
+def _context(row: RunRow) -> ResultContext:
+    """D-56 §5 (BE-30.3): the run's context block, from its pins."""
+    return ResultContext.model_validate(CalculationService.result_context(row.run))
 
 
 def _detail(row: RunRow, manifest: dict[str, Any]) -> RunDetail:
@@ -279,6 +293,7 @@ def _detail(row: RunRow, manifest: dict[str, Any]) -> RunDetail:
         outcome=RunOutcome.model_validate(r.outcome) if r.outcome is not None else None,
         correlation_id=r.correlation_id,
         statement=ILLUSTRATIVE_STATEMENT,
+        context=_context(row),
     )
 
 
@@ -292,14 +307,15 @@ def _detail(row: RunRow, manifest: dict[str, Any]) -> RunDetail:
             "model": RunDetail,
             "description": "Idempotent replay: this key was used for the same request; the "
             "original run is returned (header Idempotent-Replayed: true).",
-        }
+        },
+        **RATE_LIMITED_RESPONSE,
     },
 )
 async def create_calculation_run(
     request: Request,
     response: Response,
     body: RunCreate | RunRerun,
-    principal: CalcRunner,
+    principal: RateLimitedRunner,
     session: SessionDep,
     idempotency_key: Annotated[
         str,
@@ -473,6 +489,8 @@ async def get_calculation_run_results(
         limit=limit,
         offset=offset,
         statement=ILLUSTRATIVE_STATEMENT,
+        validation_status=CalculationService.validation_status(view.run),
+        context=ResultContext.model_validate(CalculationService.result_context(view.run)),
     )
 
 
@@ -539,6 +557,8 @@ async def get_maturity_ladder(
         min_aggregate_count=view.min_aggregate_count,
         illustrative=True,
         statement=ILLUSTRATIVE_STATEMENT,
+        validation_status=CalculationService.validation_status(view.row.run),
+        context=_context(view.row),
     )
 
 
@@ -697,4 +717,6 @@ async def get_liquidity(
         prototype=True,
         illustrative=True,
         statement=ILLUSTRATIVE_STATEMENT,
+        validation_status=CalculationService.validation_status(view.row.run),
+        context=_context(view.row),
     )

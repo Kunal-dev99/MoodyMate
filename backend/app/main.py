@@ -19,6 +19,8 @@ from app.core.correlation import HEADER, CorrelationIdMiddleware
 from app.core.environment import DATA_CLASS_HEADER, DataClassHeaderMiddleware
 from app.core.errors import register_error_handlers
 from app.core.logging import configure_logging
+from app.core.ratelimit import RETRY_AFTER, RateLimiter, buckets_from
+from app.core.security_headers import HSTS_ENVS, SecurityHeadersMiddleware
 from app.core.tokens import build_verifier
 from app.db.session import Database
 
@@ -44,6 +46,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.token_verifier = build_verifier(settings)
     # D-15: write-once raw artifacts (created on first upload).
     app.state.artifact_store = FilesystemArtifactStore(settings.artifact_store_dir)
+    # D-53: one limiter per app (per process); None when RATE_LIMIT_ENABLED is off.
+    app.state.rate_limiter = (
+        RateLimiter(buckets_from(settings)) if settings.RATE_LIMIT_ENABLED else None
+    )
 
     register_error_handlers(app)
     app.include_router(build_api_router(settings))
@@ -58,9 +64,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_origins=settings.CORS_ORIGINS,
         allow_methods=["*"],
         allow_headers=["*"],
-        expose_headers=[HEADER, DATA_CLASS_HEADER],
+        expose_headers=[HEADER, DATA_CLASS_HEADER, RETRY_AFTER],
     )
     # Outermost (BE-6.1): every response carries it, including CORS preflights that the
     # CORS middleware answers itself and the 500 envelope from CorrelationIdMiddleware.
     app.add_middleware(DataClassHeaderMiddleware, data_class=settings.data_class)
+    # Outermost as well (BE-28.2, D-54): the same reach as X-Data-Class.
+    app.add_middleware(SecurityHeadersMiddleware, hsts=settings.ENV in HSTS_ENVS)
     return app
