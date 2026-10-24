@@ -246,3 +246,13 @@ No other hard stop arose:
 Files edited by the architect:
 - `/home/user/MoodyMate-wt/f06-p32/docs/DELIVERY_PLAN.md`: BE-32.1, BE-32.2, BE-32.3, BE-32.4 and FE-32.1 ticked, each with an evidence line. BE-32.4 and FE-32.1 also carry their pre-merge notes (the RETENTION rows; the regenerated `schema.d.ts`).
 - `/home/user/MoodyMate-wt/f06-p32/docs/DECISIONS.md`: a D-61 amendment (§3/§4 for Q3; §5 for Q4, Q10 and the MEDIUM 1 fix, which supersedes the Q5 note), dated 2026-10-24 and marked auto-resolved.
+
+## Coordinator merge (2026-10-24)
+
+- **Blocking items 1-3 done:** RETENTION.md rows applied with the Q2 edits (term values masked by their pinned field's classification; seeds for the default tenant only); `schema.d.ts` regenerated; the `conftest.py` `_TERMS_CLEANUP` hunk committed with `test_domain.py` and `terms_kit.py`.
+- **Build side effects reverted:** `frontend/tsconfig.json` and `frontend/next-env.d.ts` (scratch `distDir` paths).
+- **Master merged in** (Phases 29, 31 and the BE-31.3 follow-up): no conflicts. 0031's `down_revision` is already `0030`, the merged head, so no re-chain was needed. The round trip runs in the suite.
+- **Checks on the merged tree:**
+  - backend: ruff `All checks passed!`, format `176 files already formatted`, mypy `Success: no issues found in 176 source files`, `openapi.json is up to date`;
+  - full suite: `49 passed, 1 warning in 293.00s`; the BE-31.3 goldens still hold;
+  - frontend: `gen:api` gives no diff, tsc clean, `No ESLint warnings or errors`, vitest `750 passed (750)`.
