@@ -1,4 +1,5 @@
 import type { Schemas } from '@/api/client'
+import { mayDecide } from '@/lib/maker-checker'
 
 export type Proposal = Schemas['ProposalOut']
 export type ProposalStatus = Schemas['ProposalStatus']
@@ -22,7 +23,7 @@ export function canSubmit(p: Proposal, userId: string): boolean {
 
 /** The approver decides only on someone else's submitted proposal (maker-checker). */
 export function canDecide(p: Proposal, userId: string, mayApprove: boolean): boolean {
-  return mayApprove && p.status === 'SUBMITTED' && p.proposer_user_id !== userId
+  return mayDecide({ inReview: p.status === 'SUBMITTED', authorUserId: p.proposer_user_id, me: { user_id: userId }, mayApprove })
 }
 
 export function emptyField(): FieldIn {

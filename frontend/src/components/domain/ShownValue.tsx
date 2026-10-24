@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { MaskedValue, isMasked } from '@/components/common/MaskedValue'
+import { Masked } from '@/components/common/Masked'
 import { groupDecimal } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import type { DomainValue } from './domain'
@@ -25,21 +25,19 @@ export function ShownValue({
   testId?: string
   className?: string
 }) {
-  if (isMasked(value))
-    return (
-      <span data-testid={testId} data-masked="true">
-        <MaskedValue value={value} />
-      </span>
-    )
-  if (value === null || value === undefined)
-    return (
-      <span className="text-muted-foreground" data-testid={testId} data-empty="true">
-        {empty}
-      </span>
-    )
   return (
-    <span className={cn('font-mono', className)} data-testid={testId} data-value={money ? String(value) : undefined}>
-      {money && typeof value === 'string' ? groupDecimal(value) : value}
-    </span>
+    <Masked value={value} cell testId={testId}>
+      {(v) =>
+        v === null || v === undefined ? (
+          <span className="text-muted-foreground" data-testid={testId} data-empty="true">
+            {empty}
+          </span>
+        ) : (
+          <span className={cn('font-mono', className)} data-testid={testId} data-value={money ? String(v) : undefined}>
+            {money && typeof v === 'string' ? groupDecimal(v) : v}
+          </span>
+        )
+      }
+    </Masked>
   )
 }

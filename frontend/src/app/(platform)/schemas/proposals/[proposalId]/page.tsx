@@ -14,7 +14,7 @@ import { PageSection } from '@/components/common/PageSection'
 import { toastApiError } from '@/components/common/api-error-toast'
 import { ImpactPanel } from '@/components/schemas/ImpactPanel'
 import { ProposalStatusPill } from '@/components/schemas/ProposalStatusPill'
-import { StatusPill } from '@/components/schemas/StatusPill'
+import { SchemaStatusPill } from '@/components/schemas/StatusPill'
 import { canDecide, canSubmit, type Proposal } from '@/components/schemas/proposals'
 import { typeLabel } from '@/components/schemas/registry'
 import { Button } from '@/components/ui/button'
@@ -22,6 +22,7 @@ import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import { formatTimestamp } from '@/lib/format'
+import { isAuthorOf } from '@/lib/maker-checker'
 import { ActorLabel } from '@/components/common/ActorLabel'
 
 type State = { kind: 'loading' } | { kind: 'ready'; p: Proposal } | { kind: 'error'; status: number; cid: string | null }
@@ -74,7 +75,7 @@ export default function ProposalDetailPage() {
 
   const { p } = state
   const path = { proposal_id: p.id }
-  const mine = p.proposer_user_id === me.user_id
+  const mine = isAuthorOf(p.proposer_user_id, me)
   const submitAllowed = canSubmit(p, me.user_id)
   const decisionAllowed = canDecide(p, me.user_id, has('schema:approve'))
 
@@ -102,8 +103,8 @@ export default function ProposalDetailPage() {
             </dd>
             <dt className="text-muted-foreground">Versions</dt>
             <dd className="flex items-center gap-2">
-              v{p.base_version.version} <StatusPill status={p.base_version.status} /> → v{p.proposed_version.version}{' '}
-              <StatusPill status={p.proposed_version.status} />
+              v{p.base_version.version} <SchemaStatusPill status={p.base_version.status} /> → v{p.proposed_version.version}{' '}
+              <SchemaStatusPill status={p.proposed_version.status} />
             </dd>
             <dt className="text-muted-foreground">Proposed by</dt>
             <dd className="font-mono text-xs">

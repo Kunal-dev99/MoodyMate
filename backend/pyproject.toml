@@ -32,6 +32,8 @@ dev = [
     "types-openpyxl>=3.1,<3.2",
     # BE-28.1 (D-55 §4): CI audits the installed environment for known vulnerabilities.
     "pip-audit>=2.7,<3",
+    # BE-29.4 (D-52 §6): property tests, derandomised with a fixed max_examples (D-26 folds).
+    "hypothesis>=6.100,<7",
 ]
 
 [build-system]

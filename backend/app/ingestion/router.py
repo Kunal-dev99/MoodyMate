@@ -18,7 +18,7 @@ import uuid
 from collections.abc import AsyncGenerator, AsyncIterator
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Header, Query, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 from python_multipart.exceptions import MultipartParseError
@@ -27,16 +27,16 @@ from starlette.datastructures import UploadFile
 from starlette.formparsers import MultiPartException, MultiPartParser
 
 from app.core.auth import get_principal, require_permission
-from app.core.classification import MaskedValue, mask_mapping
+from app.core.classification import mask_mapping, mask_value
 from app.core.config import Settings
 from app.core.errors import ApiError
+from app.core.idempotency import idempotency_key_header, mark_replayed
 from app.core.principal import Principal
 from app.core.ratelimit import RATE_LIMITED_RESPONSE, LimitedRoute, rate_limited
-from app.core.routes import route_template
+from app.core.refusals import refuse_endpoint
 from app.db.session import get_session
 from app.domain.service import DomainService
 from app.governance.constants import Permission
-from app.governance.service import record_denial
 from app.ingestion.adapters import Limits
 from app.ingestion.constants import (
     ImportStatus,
@@ -131,17 +131,15 @@ async def ingestion_enabled(
     other denied request (BE-3.2). Declared after the permission, so a caller without it
     still gets 403."""
     if not request.app.state.settings.INGESTION_ENABLED:
-        endpoint = route_template(request)
-        await record_denial(
+        await refuse_endpoint(
+            request,
             session,
             principal,
-            f"{request.method} {endpoint}",
-            "endpoint",
-            endpoint,
-            "ingestion_disabled",
-        )
-        raise ApiError(
-            409, "ingestion_disabled", "Ingestion changes are switched off in this environment."
+            ApiError(
+                409,
+                "ingestion_disabled",
+                "Ingestion changes are switched off in this environment.",
+            ),
         )
 
 
@@ -523,14 +521,10 @@ async def create_import(
     _: IngestionEnabled,
     idempotency_key: Annotated[
         str,
-        Header(
-            alias="Idempotency-Key",
-            min_length=1,
-            max_length=255,
-            pattern=r"^[!-~]+$",
-            description="Unique per upload (per user). A retry with the same key and the "
+        idempotency_key_header(
+            "Unique per upload (per user). A retry with the same key and the "
             "same upload returns the original import; with a different upload, 409 "
-            "idempotency_conflict (D-21).",
+            "idempotency_conflict (D-21)."
         ),
     ],
 ) -> ImportDetail:
@@ -542,7 +536,7 @@ async def create_import(
     try:
         form, data, filename = await read_upload(request, limits)
     except _TooLarge:
-        await service.refuse(
+        await service.refuse_upload(
             ApiError(
                 413,
                 UploadRefusal.PAYLOAD_TOO_LARGE,
@@ -570,8 +564,7 @@ async def create_import(
         ),
     )
     if not created:
-        response.status_code = 200
-        response.headers["Idempotent-Replayed"] = "true"
+        mark_replayed(response)
     return _import_detail(job, await service.labels([job]), principal)
 
 
@@ -790,8 +783,7 @@ def _quarantine_item(
     classification (BE-9.3, D-20); extra cells by the source's default classification."""
     default = view.default_classification
     extras: list[QuarantineCell] = [
-        value if default in clear else MaskedValue(classification=default)
-        for value in record.extra_values
+        mask_value(value, default, clear) for value in record.extra_values
     ]
     return QuarantineItemOut(
         id=item.id,

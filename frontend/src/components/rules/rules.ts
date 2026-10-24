@@ -1,5 +1,7 @@
-import { ApiError, api, call, type Schemas } from '@/api/client'
-import type { Refusal } from '@/components/ingestion/mappings'
+import { api, call, type Schemas } from '@/api/client'
+import { COMMENT_MAX, commentProblem } from '@/lib/forms'
+import { isAuthorOf, makerCheckerGate, type MakerCheckerGate } from '@/lib/maker-checker'
+import { refusalOf, type Refusal } from '@/lib/refusal'
 
 /*
  * FE-16.2: governed rule changes (D-32 §1, §3). Propose a DRAFT from the ACTIVE version, submit
@@ -38,7 +40,7 @@ export const RULE_STATUS_STYLE: Record<RuleVersionStatus, { label: string; class
 
 /** The limits BE-16.1 enforces (backend rules.constants), mirrored for the cosmetic checks. */
 export const LIMITS = { maxBuckets: 50, maxMapEntries: 200, maxDecimalScale: 18, maxDays: 36_600, bucketCodeLength: 20 } as const
-export const COMMENT_MAX = 1000
+export { COMMENT_MAX }
 
 // --- decimal text, compared without parsing --------------------------------------------------
 
@@ -399,8 +401,7 @@ export const openVersions = (rule: Pick<RuleDetail, 'versions'>): RuleVersion[] 
   rule.versions.filter((v) => v.status === 'DRAFT' || v.status === 'IN_REVIEW').sort((a, b) => b.version - a.version)
 
 /** The signed-in user authored this version (a seeded version has no author user). */
-export const isAuthor = (v: Pick<RuleVersion, 'author_user_id'>, me: Pick<Me, 'user_id'>): boolean =>
-  v.author_user_id !== null && v.author_user_id === me.user_id
+export const isAuthor = (v: Pick<RuleVersion, 'author_user_id'>, me: Pick<Me, 'user_id'>): boolean => isAuthorOf(v.author_user_id, me)
 
 type Has = (permission: Permission) => boolean
 
@@ -417,22 +418,13 @@ export function canSubmit(rule: Pick<RuleDetail, 'change_enabled'>, v: Pick<Rule
  * (self-approval is not allowed, 409 `self_approval`), and only with `rule:approve` while rule
  * changes are switched on.
  */
-export type DecisionGate = 'allowed' | 'self_approval' | 'no_permission' | 'change_disabled' | 'not_in_review'
+export type DecisionGate = MakerCheckerGate
 
-export function decisionGate(rule: Pick<RuleDetail, 'change_enabled'>, v: Pick<RuleVersion, 'status' | 'author_user_id'>, me: Pick<Me, 'user_id'>, has: Has): DecisionGate {
-  if (v.status !== 'IN_REVIEW') return 'not_in_review'
-  if (isAuthor(v, me)) return 'self_approval'
-  if (!rule.change_enabled) return 'change_disabled'
-  if (!has('rule:approve')) return 'no_permission'
-  return 'allowed'
-}
+export const decisionGate = (rule: Pick<RuleDetail, 'change_enabled'>, v: Pick<RuleVersion, 'status' | 'author_user_id'>, me: Pick<Me, 'user_id'>, has: Has): DecisionGate =>
+  makerCheckerGate({ inReview: v.status === 'IN_REVIEW', authorUserId: v.author_user_id, me, mayApprove: has('rule:approve'), enabled: rule.change_enabled })
 
-export function commentProblem(comment: string): string | null {
-  const t = comment.trim()
-  if (!t) return 'A comment is required.'
-  if (t.length > COMMENT_MAX) return `At most ${COMMENT_MAX} characters.`
-  return null
-}
+/** Why a decision comment cannot be sent yet, or null: the shared check (FE-29.1). */
+export { commentProblem }
 
 export const proposeHref = (ruleId: string): string => `/domain/rules/${encodeURIComponent(ruleId)}/propose`
 export const ruleHref = (ruleId: string): string => `/domain/rules/${encodeURIComponent(ruleId)}`
@@ -454,17 +446,7 @@ export const RULE_REFUSAL_TITLES: Record<string, string> = {
   validation_error: 'The request was rejected',
 }
 
-export function ruleRefusal(err: unknown, fallback: string): Refusal {
-  if (err instanceof ApiError)
-    return {
-      title: RULE_REFUSAL_TITLES[err.envelope.code] ?? fallback,
-      status: err.status,
-      code: err.envelope.code,
-      message: err.envelope.message,
-      cid: err.correlationId,
-    }
-  return { title: fallback, status: null, code: 'unexpected_error', message: 'Something went wrong.', cid: null }
-}
+export const ruleRefusal = (err: unknown, fallback: string): Refusal => refusalOf(err, fallback, RULE_REFUSAL_TITLES)
 
 export const fetchRule = (ruleId: string) => (signal: AbortSignal) =>
   call(() => api.GET('/api/v1/rules/{rule_id}', { params: { path: { rule_id: ruleId } }, signal }))

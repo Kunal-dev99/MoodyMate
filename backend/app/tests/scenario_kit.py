@@ -32,10 +32,10 @@ import asyncpg
 import pytest
 from fastapi.testclient import TestClient
 
+from app.core.canonical import canonical_sha256
 from app.core.config import Settings
 from app.main import create_app
 from app.orchestration.constants import SCENARIO_STATEMENT, ApprovalLabel, ShockProblem
-from app.rules.service import canonical_sha256
 from app.tests.conftest import sql
 from app.tests.helpers import assert_denied, cid, events, token_for
 

@@ -1,4 +1,4 @@
-import { MaskedValue, isMasked } from '@/components/common/MaskedValue'
+import { Masked } from '@/components/common/Masked'
 import { deltaText, toneOf, type Shown } from './comparison'
 
 /**
@@ -6,15 +6,13 @@ import { deltaText, toneOf, type Shown } from './comparison'
  * (never a blank or a zero). `data-value` keeps the server's exact text.
  */
 export function DeltaValue({ value, testId = 'comparison-delta' }: { value: Shown; testId?: string }) {
-  if (isMasked(value))
-    return (
-      <span data-testid={testId} data-masked="true">
-        <MaskedValue value={value} />
-      </span>
-    )
   return (
-    <span className="font-mono" data-testid={testId} data-value={value} data-tone={toneOf(value)}>
-      {deltaText(value)}
-    </span>
+    <Masked value={value} cell testId={testId}>
+      {(v) => (
+        <span className="font-mono" data-testid={testId} data-value={v} data-tone={toneOf(v)}>
+          {deltaText(v)}
+        </span>
+      )}
+    </Masked>
   )
 }

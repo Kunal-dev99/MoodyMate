@@ -1,6 +1,6 @@
 import { ApiError, type Schemas } from '@/api/client'
 import type { ImportDetail, ImportStatus } from '@/components/ingestion/imports'
-import type { Refusal } from '@/components/ingestion/mappings'
+import { refusalOf, type Refusal } from '@/lib/refusal'
 import { CREDIT_DOMAIN_UI_ENABLED } from '@/config/features'
 
 /*
@@ -95,17 +95,7 @@ const PROJECTION_TITLES: Record<string, string> = {
   not_found: 'Import not found',
 }
 
-export function projectionRefusal(err: unknown, fallback = 'Could not project the import'): Refusal {
-  if (err instanceof ApiError)
-    return {
-      title: PROJECTION_TITLES[err.envelope.code] ?? fallback,
-      status: err.status,
-      code: err.envelope.code,
-      message: err.envelope.message,
-      cid: err.correlationId,
-    }
-  return { title: fallback, status: null, code: 'unexpected_error', message: 'Something went wrong.', cid: null }
-}
+export const projectionRefusal = (err: unknown, fallback = 'Could not project the import'): Refusal => refusalOf(err, fallback, PROJECTION_TITLES)
 
 /** The catalogue filters (GET /instruments query), empty strings meaning "any". */
 export interface CatalogueFilters {

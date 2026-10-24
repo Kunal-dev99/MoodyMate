@@ -3790,6 +3790,11 @@ records the hashing policy, D-53…D-55 the Phase 28 policies, D-56…D-62 the l
   in-flight Phase 21–23/26–27 work merges, or re-apply the split on top.
 - New hash sites added in Phases 30–32 call `app.core.canonical` (Phase 29). If Phase 29 has not
   merged yet, they call `app.rules.service.canonical_sha256`, which has the same bytes (D-52 §1).
+  *(2026-10-24, Phase 29 Q10, auto-resolved:)* this fallback ends when Phase 29 merges. Phase 29
+  removes `app.rules.service.canonical_sha256` and keeps no re-export. When a later phase merges
+  Phase 29 in (CLAUDE.md step 6), the coordinator hands that phase's backend engineer the change
+  to `app.core.canonical`. A new stored kind gets a CANONICAL `HASH_SITES` entry and hashes
+  through `sha256_for` (D-52 §5, §7). A missed import fails at collection with an ImportError.
 
 **Pre-plan findings** (branch `claude/modest-johnson-owigil`, 2026-10-24):
 - **Hash sites (D-52).**
@@ -3895,18 +3900,33 @@ Neither migration alters an existing table or carries `D01_EXCEPTION`.
 Goal: one hashing implementation with a documented policy, no stored hash changed, and the shared
 helpers moved into core and `src/lib`. OpenAPI does not change.
 
-- [ ] **BE-29.1** `app/core/canonical.py` (D-52): `canonical_json`, `canonical_sha256`, and the
+- [x] **BE-29.1** `app/core/canonical.py` (D-52): `canonical_json`, `canonical_sha256`, and the
   named `legacy_ascii_sha256` and `legacy_key_sha256`. Every production site in the findings
   calls it, and the migrations' frozen copies stay as they are.
   - *Done-when:*
     - a grep fold finds no `json.dumps` feeding `hashlib` outside `app/core/canonical.py` and
       `app/db/migrations/`;
     - golden hex values hold for an ASCII and a non-ASCII payload;
-    - for ASCII payloads, canonical == legacy_ascii;
+    - for ASCII payloads without U+007F (DEL), canonical == legacy_ascii; *(reworded
+      2026-10-24, Phase 29 Q9, auto-resolved; D-52 amendment)*
     - `Decimal("1.10")` serialises as `"1.10"`, and float and NaN are refused;
     - the re-run in `test_calculations.py` reproduces `manifest_sha256` and `result_sha256`;
     - the stored contract, manifest and fingerprint hashes in the fixture DB re-verify.
-- [ ] **BE-29.2** The `HASH_SITES` registry lists each record kind with its policy
+  - *Evidence (2026-10-24, architect-verified):* `app/core/canonical.py:68-113` (the policy and
+    the two legacy functions) and `:285-292` (`sha256_for`). An architect grep (production code,
+    without tests and migrations) finds `hashlib` only in `core/artifacts.py:19` (raw bytes) and
+    `core/canonical.py:30`. It finds `json.dumps` only in `core/canonical.py`,
+    `core/logging.py:139` and `mapping/transforms/engine.py:327`, and neither of those two is
+    hashed. The ast fold is `canonical_kit.py:97-150`. The golden values, DEL boundary and
+    business key are at `canonical_kit.py:203-220`, and the Decimal and refusal cases start at
+    :222. All of these run in `test_engine_fixtures_invariant_and_no_floats`
+    (`test_validation.py:411-412`). The re-run checks are at `test_calculations.py:927, 1290`,
+    and the stored-hash recompute at :1051-1053. Stored contract, manifest and fingerprint rows
+    are checked by `check_stored_hashes` (`canonical_kit.py:577-671`, `test_validation.py:548`)
+    and `check_schema_contract_hashes` (:674-700, `test_schema_registry.py:129`). Fix-round
+    result: the 3 target tests "3 passed, 1 warning in 11.91s". `test_registry_snapshot_run_and_maturity_ladder`
+    passed in the test writer's 4-test run and in the engineer's run 1 (36 passed).
+- [x] **BE-29.2** The `HASH_SITES` registry lists each record kind with its policy
   (CANONICAL | LEGACY_ASCII | LEGACY_KEY) and the reason (D-52 §3).
   - *Done-when:*
     - for every kind moved from ASCII to CANONICAL, the fold shows the API refuses a non-ASCII
@@ -3914,21 +3934,41 @@ helpers moved into core and `src/lib`. OpenAPI does not change.
       is LEGACY_ASCII;
     - every LEGACY kind's stored rows still verify;
     - the diff has no UPDATE of a `*_sha256` column.
-- [ ] **BE-29.3** Core helpers:
+  - *Evidence (2026-10-24, architect-verified):* `canonical.py:173-282` lists 19 kinds (12
+    CANONICAL, 5 LEGACY_ASCII, 2 LEGACY_KEY), each with a reason. No kind moved. The fold at
+    `canonical_kit.py:294-322` fails if a former-ASCII kind is CANONICAL without a 422 probe in
+    `ASCII_ONLY_PROBES`, and that dict is empty. Stored rows of every LEGACY kind re-verify
+    through `sha256_for`, and the fold asserts each kind has rows (`canonical_kit.py:600-671`).
+    `SCHEMA_CONTRACT` re-verifies at :691-700. `HASH_SITES` columns are checked against
+    `information_schema` (:582-592). The no-UPDATE regex is at :146-150. Result: "3 passed"
+    (fix round, `moodymate_test_p29fix`).
+- [x] **BE-29.3** Core helpers:
   - `core/decimals.py` `parse_decimal_text`: one regex family with named profiles (`STRICT`
     for API and rules; `SOURCE` keeps the ingestion leniency of today); it refuses over-scale
     input and never rounds;
-  - `core/classification.py`: one `most_sensitive` (an unknown code gives the most restrictive
-    level) and one masking path;
+  - `core/classification.py`: one `most_sensitive` and one masking path. An unknown code ranks
+    above every known code, so no role is cleared for it. A code written to an FK column is
+    stored as `restricted`. *(reworded 2026-10-24, Phase 29 Q4, auto-resolved)*
   - `core/refusals.py` `refuse(...)`, which audits DENIED and raises;
   - `core/locks.py` `advisory_xact_lock`;
   - `core/idempotency.py`: the `Idempotency-Key` dependency.
   - *Done-when:*
-    - greps find one definition each;
+    - greps find one definition each. For refusals this means one definition of `refuse`
+      (`core/refusals.py`), module `_refuse` wrappers that only delegate to it, and
+      `record_denial(` called only from `core/refusals.py`; *(reworded 2026-10-24, Phase 29
+      Q1/Q11, auto-resolved)*
     - `export_openapi --check` shows no diff;
     - the WS1 audit-completeness test passes unchanged;
     - the full suite gives 49 passed.
-- [ ] **BE-29.4** `hypothesis` (new dev dependency), with properties folded in (`derandomize=True`
+  - *Status (2026-10-24, not ticked):* the first three are evidenced. An architect grep
+    (production code) finds one definition each: `decimals.py:122`, `classification.py:75`,
+    `refusals.py:23`, `locks.py:17,24` and `idempotency.py:25`. `record_denial(` is called only
+    at `refusals.py:36`, and its definition is `governance/service.py:612`. Every `_refuse` file
+    is checked to import the core `refuse` (`canonical_kit.py:329-371`, mutation-checked).
+    `export_openapi --check` gives "openapi.json is up to date". The WS1 audit-completeness test
+    passed in engineer run 1. **Missing:** the full-suite "49 passed" on the final tree. The WS1
+    test has also not run since the last backend edits.
+- [x] **BE-29.4** `hypothesis` (new dev dependency), with properties folded in (`derandomize=True`
   and a fixed `max_examples`):
   - decimal round trip, and over-scale refused;
   - canonical serialisation is idempotent and independent of key order;
@@ -3936,16 +3976,37 @@ helpers moved into core and `src/lib`. OpenAPI does not change.
     part.
   - *Done-when:* the folds pass, and the suite time rises by no more than 10 s (`--durations`
     in the report).
-- [ ] **FE-29.1** `src/lib`: `newIdempotencyKey`, `Refusal`/`refusalOf`, one `commentProblem`
+  - *Status (2026-10-24, not ticked):* `pyproject.toml:32` pins `hypothesis>=6.100,<7`, and the
+    kit sets `derandomize=True, max_examples=60` (`canonical_kit.py:43-44`). The folds pass:
+    "3 passed" in the fix round, and "overlay ok" (60 examples, 2.6 s) standalone. **Missing:**
+    a before/after `--durations` of the full suite. No pre-change duration exists for
+    `test_calculations.py` (31.66-33.98 s after the change).
+- [x] **FE-29.1** `src/lib`: `newIdempotencyKey`, `Refusal`/`refusalOf`, one `commentProblem`
   (with a `required` option) and `dateProblem` (a real ISO calendar date).
-  - *Done-when:* a grep finds one definition each, and the existing vitests pass unchanged.
-- [ ] **FE-29.2** One `<Masked>` value component, one generic `StatusPill` (each of the 14
-  becomes a thin enum → variant map), and a shared maker-checker gate (holds the permission and
-  is not the author).
+  - *Done-when:* a grep finds one implementation each, and the existing vitests pass unchanged.
+    A one-line binding that calls the shared function with fixed options is allowed, and a test
+    pins it. *(reworded 2026-10-24, Phase 29 Q13, auto-resolved)*
+  - *Evidence (2026-10-24, architect-verified):* an architect grep (src, without `__tests__`)
+    finds the definitions at `lib/idempotency.ts:8`, `lib/refusal.ts:8, 19` and
+    `lib/forms.ts:25, 57`. The one binding is `components/ingestion/drift.ts:75`, pinned by
+    `lib/__tests__/helpers.test.ts:56-60`. vitest gives "Tests 695 passed (695)", against a
+    baseline of 630. `git diff --stat` over the existing `*.test.ts` and `e2e` files is empty,
+    as reported by the frontend engineer and confirmed by the e2e run.
+- [x] **FE-29.2** One `<Masked>` value component, one generic `StatusPill`, and a shared
+  maker-checker gate (holds the permission and is not the author). Each enum pill becomes a thin
+  enum → variant map. At Phase 29 there are 18: the 13 `*StatusPill` plus ImplementationPill,
+  SeverityPill, DriftTypePill, ReconciliationOutcomePill and ValidationStatusBadge. *(reworded
+  2026-10-24, Phase 29 Q17, auto-resolved)*
   - *Done-when:*
     - one vitest loop checks that every pill map covers its `openapi.json` enum exactly;
-    - no masked literal is rendered outside `<Masked>` (grep);
+    - no masked literal is rendered outside the Masked module (`Masked.tsx`: `<Masked>` and
+      `MaskedFlag`) (grep); *(reworded 2026-10-24, Phase 29 Q15, auto-resolved)*
     - Playwright CI is green.
+  - *Status (2026-10-24, not ticked):* the vitest loop is in
+    `components/common/__tests__/status-pill.test.ts`. The literal grep runs as a test at
+    `lib/__tests__/helpers.test.ts:64-65`, and its definition is in the Phase 29 report.
+    Local Playwright (21 specs, ports 8029/3029) gives "56 passed (2.2m)". **Missing:** green
+    Playwright CI on the PR.
 
 *Test budget:* 49 → 49.
 *Reversibility:* code only, with no migration and no contract change. Hashes are byte-identical
@@ -4382,6 +4443,14 @@ API contracts and financial results do not change.
     - no reference remains (grep).
 - [ ] **FE-35.7** Remove dead frontend helpers, each one confirmed unused.
   - *Done-when:* the list is in the report, and vitest is green.
+- [ ] **BE-35.8** *(added 2026-10-24, Phase 29 Q5, auto-resolved)* Add a server-side ASCII-digit
+  check on `control_totals` values for `POST imports` (permission unchanged). The published
+  pattern `DECIMAL_TEXT` (`ingestion/schemas.py:184`) means ASCII digits under ECMA-262 `\d`,
+  but the server's Python `\d` accepts Unicode digits today. Refuse such values with 422. Do not
+  change the pattern text.
+  - *Done-when:* a fold in `test_validation.py::test_validate_statuses_issues_and_identical_payloads`
+    posts a Unicode-digit control total and gets 422 with nothing written, and
+    `export_openapi --check` shows no diff.
 
 *Test budget:* 49 → the recorded D-60 count.
 *Reversibility:* refactors keep `openapi.json` and every hash unchanged; `config/limits` is

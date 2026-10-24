@@ -21,10 +21,9 @@ from app.core.auth import get_principal, require_permission
 from app.core.classification import mask_mapping
 from app.core.errors import ApiError
 from app.core.principal import Principal
-from app.core.routes import route_template
+from app.core.refusals import refuse_endpoint
 from app.db.session import get_session
 from app.governance.constants import Permission
-from app.governance.service import record_denial
 from app.mapping.constants import DRIFT_TRANSITIONS, DriftStatus, DriftType, Refusal
 from app.mapping.models import DataDriftEvent, FieldMapping, MappingValidation, MappingVersion
 from app.mapping.schemas import (
@@ -78,11 +77,7 @@ def _switch(setting: str, code: str, message: str) -> Callable[..., Awaitable[No
         session: SessionDep,
     ) -> None:
         if not getattr(request.app.state.settings, setting):
-            endpoint = route_template(request)
-            await record_denial(
-                session, principal, f"{request.method} {endpoint}", "endpoint", endpoint, code
-            )
-            raise ApiError(409, code, message)
+            await refuse_endpoint(request, session, principal, ApiError(409, code, message))
 
     return check
 

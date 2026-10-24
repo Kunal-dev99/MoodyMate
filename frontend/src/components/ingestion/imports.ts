@@ -130,11 +130,8 @@ export function buildImportFormData(d: ImportDraft, file: File, dataClass: DataC
   return toFormData(toImportFields(d, file, dataClass) as Record<string, unknown>)
 }
 
-/** A fresh `Idempotency-Key` for one upload attempt (1–255 visible ASCII). */
-export function newIdempotencyKey(): string {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
-  return `fe-${Date.now()}-${Math.random().toString(16).slice(2)}`
-}
+/** A fresh `Idempotency-Key` for one upload attempt: the shared one (FE-29.1). */
+export { newIdempotencyKey } from '@/lib/idempotency'
 
 /** D-21: an idempotent replay answers 200 with the original import; a new import 201. */
 export const isReplay = (response: Response): boolean => response.status === 200

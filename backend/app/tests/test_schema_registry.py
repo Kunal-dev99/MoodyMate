@@ -9,6 +9,7 @@ import asyncpg
 import pytest
 from fastapi.testclient import TestClient
 
+from app.tests.canonical_kit import check_schema_contract_hashes
 from app.tests.conftest import dev_token, sql
 from app.tests.helpers import PROPOSALS, cid, events, removal_proposal, token_for, version_id
 
@@ -122,3 +123,7 @@ def test_active_contracts_and_decided_proposals_are_immutable(api: TestClient, d
     ):
         with pytest.raises(IMMUTABLE, match="immutable"):
             sql(db, statement, uuid.UUID(open_one["id"]))
+
+    # Phase 29 (BE-29.1, D-52 §4): every stored contract hash, the applied one included,
+    # re-verifies under its policy, the service and the migrations' frozen copies.
+    check_schema_contract_hashes(db)

@@ -8,7 +8,7 @@ import { Forbidden } from '@/components/auth/Forbidden'
 import { EmptyState } from '@/components/common/EmptyState'
 import { LoadFailed } from '@/components/common/LoadFailed'
 import { LoadingBlock } from '@/components/common/LoadingBlock'
-import { MaskedValue, isMasked } from '@/components/common/MaskedValue'
+import { Masked, isMasked } from '@/components/common/Masked'
 import { PageSection } from '@/components/common/PageSection'
 import { createLoader, type Loaded } from '@/components/common/load'
 import { ShownValue } from '@/components/domain/ShownValue'
@@ -82,20 +82,20 @@ export function LcrRatio({ row, min }: { row: Pick<LcrCurrency, 'ratio'>; min: n
 
 /** Whether the inflow cap binds, as the server said (masked when the figures it compares are). */
 function CapApplied({ applied }: { applied: LcrCurrency['inflow_cap_applied'] }) {
-  if (isMasked(applied))
-    return (
-      <span data-testid="lcr-cap-applied" data-applied="masked" data-masked="true">
-        <MaskedValue value={applied} />
-      </span>
-    )
-  return applied ? (
-    <Badge variant="warning" data-testid="lcr-cap-applied" data-applied="true">
-      cap applied
-    </Badge>
-  ) : (
-    <span data-testid="lcr-cap-applied" data-applied="false">
-      cap not binding
-    </span>
+  return (
+    <Masked value={applied} cell testId="lcr-cap-applied" attrs={{ 'data-applied': 'masked' }}>
+      {(a) =>
+        a ? (
+          <Badge variant="warning" data-testid="lcr-cap-applied" data-applied="true">
+            cap applied
+          </Badge>
+        ) : (
+          <span data-testid="lcr-cap-applied" data-applied="false">
+            cap not binding
+          </span>
+        )
+      }
+    </Masked>
   )
 }
 
@@ -142,7 +142,7 @@ function AssetRow({ a }: { a: HqlaAsset }) {
         )}
         {isMasked(l.instrument_business_key) && (
           <span className="ml-1">
-            <MaskedValue value={l.instrument_business_key} />
+            <Masked value={l.instrument_business_key} />
           </span>
         )}
         <div className="text-muted-foreground">

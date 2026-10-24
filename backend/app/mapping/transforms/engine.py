@@ -29,6 +29,7 @@ from pydantic import (
     model_validator,
 )
 
+from app.core.decimals import SOURCE, DecimalTextError, DecimalTextProblem, parse_decimal_text
 from app.core.text import single_line
 from app.governance.constants import FieldType
 from app.mapping.constants import (
@@ -174,13 +175,12 @@ def _all_digits(text: str) -> bool:
 def plain_decimal(text: str) -> Decimal:
     """`[+-]digits[.digits]`: ASCII digits only, no exponent, no spaces, no NaN/Infinity,
     no underscores (all of which `Decimal()` itself would accept)."""
-    body = text[1:] if text[:1] in ("+", "-") else text
-    whole, dot, fraction = body.partition(".")
-    if not _all_digits(whole) or (dot and not _all_digits(fraction)):
-        raise ValueFailure("not_a_decimal")
-    if len(whole) + len(fraction) > MAX_DIGITS:
-        raise ValueFailure("too_many_digits")
-    return Decimal(text)  # exact: constructing from text never rounds
+    try:
+        return parse_decimal_text(text, SOURCE, max_digits=MAX_DIGITS)
+    except DecimalTextError as error:
+        if error.code is DecimalTextProblem.TOO_MANY_DIGITS:
+            raise ValueFailure("too_many_digits") from None
+        raise ValueFailure("not_a_decimal") from None
 
 
 def _ungroup(whole: str, sep: str) -> str:

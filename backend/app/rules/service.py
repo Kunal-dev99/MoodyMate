@@ -31,8 +31,6 @@ Every step and every refusal is audited (`rule.*`, refusals DENIED with their co
 writes of one rule are serialised by a transaction-scoped lock on the rule.
 """
 
-import hashlib
-import json
 import re
 import uuid
 from collections.abc import Mapping, Sequence
@@ -44,12 +42,20 @@ from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.calculations.modules import registered
-from app.core.decimals import decimal_text, exact_context
+from app.core.canonical import HashKind, sha256_for
+from app.core.decimals import (
+    STRICT,
+    DecimalTextError,
+    decimal_text,
+    exact_context,
+    parse_decimal_text,
+)
 from app.core.errors import ApiError
 from app.core.principal import Principal
+from app.core.refusals import refuse
 from app.domain.service import DomainService
 from app.governance.constants import ClassificationCode, ProposalDecision
-from app.governance.service import audit_by, record_denial
+from app.governance.service import audit_by
 from app.rules.constants import (
     ACTIVATE_RULE,
     APPROVE_RULE,
@@ -82,15 +88,9 @@ from app.rules.models import (
 from app.rules.repository import RulesRepository
 
 
-def canonical_sha256(value: object) -> str:
-    """SHA-256 of the canonical JSON of a value (sorted keys, no spaces)."""
-    text = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(text.encode()).hexdigest()
-
-
 def rule_set_sha256(version_ids: Sequence[uuid.UUID]) -> str:
     """The identity of a rule set: the hash of its sorted rule version ids (D-32 §4)."""
-    return canonical_sha256(sorted(str(v) for v in version_ids))
+    return sha256_for(HashKind.RULE_SET, sorted(str(v) for v in version_ids))
 
 
 # --- the closed parameter kinds (BE-16.1, D-32 §1): pure and value-free ------------------------
@@ -98,7 +98,6 @@ def rule_set_sha256(version_ids: Sequence[uuid.UUID]) -> str:
 P = ParameterProblem
 K = ParameterKind
 _BUCKET_KEYS = frozenset({"code", "label", "lower_exclusive", "upper_inclusive"})
-DECIMAL_TEXT = re.compile(r"^-?(0|[1-9][0-9]{0,29})(\.[0-9]{1,18})?$")
 BUCKET_CODE = re.compile(r"^[A-Z][A-Z0-9_]{0,19}$")
 ENUM_VALUE = re.compile(r"^[A-Z][A-Z0-9_]{0,49}$")
 # kind -> (required schema keys, the one parameter key)
@@ -157,9 +156,11 @@ def exact_json(value: Any) -> bool:
 
 
 def _decimal(value: Any) -> Decimal | None:
-    if isinstance(value, str) and DECIMAL_TEXT.match(value):
-        return Decimal(value)
-    return None
+    """STRICT decimal text (D-32 §1), or None."""
+    try:
+        return parse_decimal_text(value, STRICT)
+    except DecimalTextError:
+        return None
 
 
 def check_schema(schema: Any) -> list[Problem]:
@@ -558,10 +559,14 @@ class RulesService:
 
     async def _refuse(self, action: str, rule_id: uuid.UUID, error: ApiError) -> NoReturn:
         """Roll back, audit the refusal (DENIED, reason = the error code) and raise it."""
-        await record_denial(
-            self.session, self.principal, action, "rule_definition", str(rule_id), error.code
+        await refuse(
+            self.session,
+            self.principal,
+            error,
+            action=action,
+            resource_type="rule_definition",
+            resource_id=rule_id,
         )
-        raise error
 
     async def _locked(
         self, action: str, rule_id: uuid.UUID, enabled: bool
@@ -666,7 +671,7 @@ class RulesService:
         parameters = await self._checked(
             PROPOSE_RULE, definition, merge_patch(active.parameters, patch)
         )
-        sha = canonical_sha256(parameters)
+        sha = sha256_for(HashKind.RULE_PARAMETERS, parameters)
         if sha == active.parameters_sha256:
             await self._refuse(
                 PROPOSE_RULE,

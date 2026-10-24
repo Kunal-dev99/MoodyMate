@@ -19,10 +19,11 @@ scope comes from the principal (D-04): a foreign id is the same 404 as a random 
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, Path, Query, Request, Response
+from fastapi import APIRouter, Depends, Path, Query, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import require_any_permission, require_permission
+from app.core.idempotency import idempotency_key_header, mark_replayed
 from app.core.principal import Principal
 from app.core.ratelimit import RATE_LIMITED_RESPONSE, LimitedRoute, rate_limited
 from app.db.session import get_session
@@ -74,7 +75,6 @@ RateLimitedScenarioRunner = Annotated[
     Depends(rate_limited(LimitedRoute.SCENARIO_RUN, Permission.CALC_RUN, ScenarioRunAction.RUN)),
 ]
 VersionNumber = Annotated[int, Path(ge=1, le=1_000_000)]
-REPLAYED = "Idempotent-Replayed"
 
 router = APIRouter(tags=["scenarios"])
 
@@ -313,14 +313,10 @@ async def run_scenario(
     session: SessionDep,
     idempotency_key: Annotated[
         str,
-        Header(
-            alias="Idempotency-Key",
-            min_length=1,
-            max_length=255,
-            pattern=r"^[!-~]+$",
-            description="Unique per run request (per user). A retry with the same key and the "
+        idempotency_key_header(
+            "Unique per run request (per user). A retry with the same key and the "
             "same body returns the original scenario_run; with a different body, 409 "
-            "idempotency_conflict.",
+            "idempotency_conflict."
         ),
     ],
 ) -> ScenarioRunOut:
@@ -346,8 +342,7 @@ async def run_scenario(
         _calculations_enabled(request),
     )
     if not created:
-        response.status_code = 200
-        response.headers[REPLAYED] = "true"
+        mark_replayed(response)
     return row
 
 

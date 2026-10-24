@@ -3,8 +3,10 @@ import { toastApiError } from '@/components/common/api-error-toast'
 import { LIQUIDITY_UI_ENABLED } from '@/config/features'
 import { isMasked } from '@/components/common/MaskedValue'
 import { DOMAIN_SCHEMA_CODES, type DomainSchemaCode } from '@/components/domain/domain'
-import { newIdempotencyKey, type ImportSummary } from '@/components/ingestion/imports'
-import type { Refusal } from '@/components/ingestion/mappings'
+import type { ImportSummary } from '@/components/ingestion/imports'
+import { newIdempotencyKey } from '@/lib/idempotency'
+import { isIsoDate } from '@/lib/forms'
+import { refusalOf, type Refusal } from '@/lib/refusal'
 
 /*
  * FE-15.1/15.2: the Calculations workspace's pure helpers and the New-run panel's state
@@ -389,12 +391,8 @@ export function pinsPreview(mod: ModuleVersion, snapshot: Snapshot | null, repor
   return rows
 }
 
-/** A calendar date as the API takes it (YYYY-MM-DD, a real day). */
-export function isReportingDate(value: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
-  const d = new Date(`${value}T00:00:00Z`)
-  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value
-}
+/** A calendar date as the API takes it (YYYY-MM-DD, a real day): the shared check (FE-29.1). */
+export const isReportingDate = (value: string): boolean => isIsoDate(value)
 
 // --- the New-run panel: the state machine ----------------------------------------------------
 
@@ -544,20 +542,8 @@ export const RUN_REFUSAL_TITLES: Record<string, string> = {
   validation_error: 'The request was rejected',
 }
 
-function refusalWith(titles: Record<string, string>, err: unknown, fallback: string): Refusal {
-  if (err instanceof ApiError)
-    return {
-      title: titles[err.envelope.code] ?? fallback,
-      status: err.status,
-      code: err.envelope.code,
-      message: err.envelope.message,
-      cid: err.correlationId,
-    }
-  return { title: fallback, status: null, code: 'unexpected_error', message: 'Something went wrong.', cid: null }
-}
-
-export const snapshotRefusal = (err: unknown): Refusal => refusalWith(SNAPSHOT_REFUSAL_TITLES, err, 'Could not build the snapshot')
-export const runRefusal = (err: unknown): Refusal => refusalWith(RUN_REFUSAL_TITLES, err, 'Could not submit the run')
+export const snapshotRefusal = (err: unknown): Refusal => refusalOf(err, 'Could not build the snapshot', SNAPSHOT_REFUSAL_TITLES)
+export const runRefusal = (err: unknown): Refusal => refusalOf(err, 'Could not submit the run', RUN_REFUSAL_TITLES)
 
 /**
  * POST /dataset-snapshots with the picked imports: 201 a new snapshot, 200 the existing one

@@ -4,8 +4,6 @@ Identity resolution and user queries. Transactions are committed here, not in ro
 or repositories.
 """
 
-import hashlib
-import json
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -13,10 +11,12 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.canonical import HashKind, sha256_for
 from app.core.classification import UNCLASSIFIED, mask_mapping
 from app.core.correlation import get_correlation_id
 from app.core.errors import ApiError
 from app.core.principal import Principal
+from app.core.refusals import refuse
 from app.core.tokens import DevTokens, VerifiedIdentity
 from app.governance.constants import (
     COMPATIBILITY_RANK,
@@ -393,8 +393,7 @@ def contract_sha256(fields: list[FieldSpec]) -> str:
     algorithm; test_schema_registry keeps the two equal."""
     ordered = sorted(fields, key=lambda f: f.name)
     canonical = [{k: getattr(f, k) for k in CONTRACT_KEYS} for f in ordered]
-    payload = json.dumps(canonical, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(payload.encode()).hexdigest()
+    return sha256_for(HashKind.SCHEMA_CONTRACT, canonical)
 
 
 @dataclass(frozen=True)
@@ -859,15 +858,14 @@ class SchemaChangeService:
     async def submit(self, proposal_id: uuid.UUID, evidence: str | None) -> SchemaChangeProposal:
         proposal = await self._locked(proposal_id)
         if proposal.proposer_user_id != self.principal.user_id:
-            await record_denial(
+            await refuse(
                 self.session,
                 self.principal,
-                "schema_change.submit",
-                "schema_change_proposal",
-                str(proposal.id),
-                "not_proposer",
+                ApiError(403, "not_proposer", "Only the proposer can submit this proposal."),
+                action="schema_change.submit",
+                resource_type="schema_change_proposal",
+                resource_id=proposal.id,
             )
-            raise ApiError(403, "not_proposer", "Only the proposer can submit this proposal.")
         self._require_status(proposal, ProposalStatus.DRAFT)
         if proposal.impact is None:
             raise ApiError(
@@ -896,17 +894,16 @@ class SchemaChangeService:
         proposal = await self._locked(proposal_id)
         # Maker-checker (BE-5.3): the approver must be someone other than the proposer.
         if proposal.proposer_user_id == self.principal.user_id:
-            await record_denial(
+            await refuse(
                 self.session,
                 self.principal,
-                "schema_change.approve"
+                ApiError(403, "self_approval", "You cannot decide on your own proposal."),
+                action="schema_change.approve"
                 if decision == ProposalDecision.APPROVE
                 else "schema_change.reject",
-                "schema_change_proposal",
-                str(proposal.id),
-                "self_approval",
+                resource_type="schema_change_proposal",
+                resource_id=proposal.id,
             )
-            raise ApiError(403, "self_approval", "You cannot decide on your own proposal.")
         self._require_status(proposal, ProposalStatus.SUBMITTED)
         if decision == ProposalDecision.REJECT:
             if not comment:

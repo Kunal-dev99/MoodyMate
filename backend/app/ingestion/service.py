@@ -5,13 +5,11 @@ contracts. Bounded file import (BE-8.4, DI-02): one upload becomes an import job
 write-once raw artifact and one immutable `source_record` per row, synchronously (D-21).
 
 Every write is audited in the same transaction and committed here (D-10). Every refused
-write is audited too, as DENIED with its reason code (D-24 §4), through `record_denial`
+write is audited too, as DENIED with its reason code (D-24 §4), through `app.core.refusals.refuse`
 after a rollback. Target schemas are checked through the governance
 service, never its repository.
 """
 
-import hashlib
-import json
 import re
 import uuid
 from collections.abc import AsyncIterator, Iterable, Mapping, Sequence
@@ -26,16 +24,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
 from app.core.artifacts import ArtifactStore
+from app.core.canonical import HashKind, sha256_for, sha256_hex
+from app.core.classification import most_sensitive
 from app.core.correlation import get_correlation_id
+from app.core.decimals import SOURCE, DecimalTextError, parse_decimal_text
 from app.core.errors import ApiError
 from app.core.principal import Principal
+from app.core.refusals import refuse
 from app.governance.constants import ClassificationCode, FieldType
 from app.governance.service import (
     SchemaService,
     audit_by,
     effective_version,
     known_classifications,
-    record_denial,
 )
 from app.ingestion.adapters import (
     AdapterError,
@@ -131,8 +132,7 @@ def contract_sha256(
         "business_key_columns": sorted(business_key_columns),
         "control_total_columns": sorted(control_total_columns),
     }
-    text = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(text.encode()).hexdigest()
+    return sha256_for(HashKind.SOURCE_CONTRACT, payload)
 
 
 def spec_sha256(spec: ContractSpec) -> str:
@@ -206,15 +206,14 @@ class SourceService:
         self, action: str, resource_id: uuid.UUID | None, error: ApiError
     ) -> NoReturn:
         """Roll back, audit the refusal (DENIED, reason = the error code) and raise it."""
-        await record_denial(
+        await refuse(
             self.session,
             self.principal,
-            action,
-            "source_system",
-            str(resource_id) if resource_id else None,
-            error.code,
+            error,
+            action=action,
+            resource_type="source_system",
+            resource_id=resource_id,
         )
-        raise error
 
     async def _target_schema(
         self, schema_id: uuid.UUID, action: str, resource_id: uuid.UUID | None
@@ -502,18 +501,11 @@ def request_sha256(spec: UploadSpec, file_sha256: str) -> str:
     }
     if spec.retry_of_import_id is not None:  # only when set: earlier fingerprints still hold
         payload["retry_of_import_id"] = str(spec.retry_of_import_id)
-    text = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(text.encode()).hexdigest()
+    return sha256_for(HashKind.IMPORT_REQUEST, payload)
 
 
 def row_sha256(row: SourceRow) -> str:
-    text = json.dumps(
-        {"values": row.values, "extras": row.extras},
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    )
-    return hashlib.sha256(text.encode()).hexdigest()
+    return sha256_for(HashKind.SOURCE_ROW, {"values": row.values, "extras": row.extras})
 
 
 def _flags(row: SourceRow) -> list[dict[str, Any]]:
@@ -613,27 +605,30 @@ class ImportService:
 
     # --- writes -------------------------------------------------------------------------
 
-    async def refuse(
+    async def refuse_upload(self, error: ApiError) -> NoReturn:
+        """A refused upload the router detects (e.g. over the byte limit), audited DENIED."""
+        await self._refuse(error)
+
+    async def _refuse(
         self,
         error: ApiError,
         resource_id: uuid.UUID | None = None,
         action: str = CREATE_IMPORT,
     ) -> NoReturn:
         """Roll back, audit the refusal (DENIED, reason = the error code) and raise it."""
-        await record_denial(
+        await refuse(
             self.session,
             self.principal,
-            action,
-            "import_job",
-            str(resource_id) if resource_id else None,
-            error.code,
+            error,
+            action=action,
+            resource_type="import_job",
+            resource_id=resource_id,
         )
-        raise error
 
     async def create(self, spec: UploadSpec, policy: ImportPolicy) -> tuple[ImportJob, bool]:
         """The import and whether it was created now (False: an idempotent replay)."""
         if policy.data_class == "synthetic" and not spec.synthetic_attested:
-            await self.refuse(
+            await self._refuse(
                 ApiError(
                     422,
                     UploadRefusal.SYNTHETIC_ATTESTATION_REQUIRED,
@@ -641,7 +636,7 @@ class ImportService:
                     "synthetic (synthetic_attested=true).",
                 )
             )
-        file_sha = hashlib.sha256(spec.data).hexdigest()
+        file_sha = sha256_hex(spec.data)
         fingerprint = request_sha256(spec, file_sha)
         replay = await self._replay(spec.idempotency_key, fingerprint)
         if replay is not None:
@@ -660,17 +655,17 @@ class ImportService:
         try:
             source = await self.sources.get(spec.source_id)
         except ApiError as exc:
-            await self.refuse(exc)
+            await self._refuse(exc)
         profile = profile_of(source)
         contract = current_contract(profile.contracts)
         if contract is None:
-            await self.refuse(
+            await self._refuse(
                 ApiError(409, UploadRefusal.NO_CURRENT_CONTRACT, "The source has no contract.")
             )
         schema = await self.schemas.get_schema(contract.schema_id)
         version = effective_version(schema)
         if version is None:
-            await self.refuse(
+            await self._refuse(
                 ApiError(
                     409,
                     UploadRefusal.NO_ACTIVE_VERSION,
@@ -682,7 +677,7 @@ class ImportService:
             await self._check_retry(spec.retry_of_import_id, source.id)
         unknown = sorted(set(spec.control_totals or {}) - set(contract.control_total_columns))
         if unknown:
-            await self.refuse(
+            await self._refuse(
                 ApiError(
                     422,
                     UploadRefusal.UNKNOWN_CONTROL_TOTAL_COLUMN,
@@ -698,11 +693,11 @@ class ImportService:
                 parse_upload, spec.data, SourceFormat(profile.format), options, policy.limits
             )
         except AdapterError as exc:
-            await self.refuse(ApiError(exc.status_code, exc.code, exc.message, exc.details))
+            await self._refuse(ApiError(exc.status_code, exc.code, exc.message, exc.details))
         try:
             stored = await run_in_threadpool(policy.store.put, spec.data)
         except ApiError as exc:  # artifact_integrity_error: fail closed
-            await self.refuse(exc)
+            await self._refuse(exc)
 
         actor = self.principal.actor
         job = ImportJob(
@@ -855,7 +850,7 @@ class ImportService:
         source's baseline in the same transaction (BE-12.3), by the mapping module."""
         job = await self.repo.lock(import_id)
         if job is None:
-            await self.refuse(
+            await self._refuse(
                 ApiError(404, "not_found", "Import not found."), import_id, PROFILE_IMPORT
             )
         existing = await self.repo.snapshot(job.id)
@@ -863,7 +858,7 @@ class ImportService:
             await self.session.rollback()  # release the lock; nothing changed
             return existing
         if job.status != ImportStatus.RECEIVED:
-            await self.refuse(
+            await self._refuse(
                 ApiError(
                     409,
                     "invalid_status",
@@ -980,12 +975,12 @@ class ImportService:
         of the import it retries (D-20 §2). Refusals are audited DENIED."""
         job = await self.repo.lock(import_id)
         if job is None:
-            await self.refuse(
+            await self._refuse(
                 ApiError(404, "not_found", "Import not found."), import_id, VALIDATE_IMPORT
             )
         status = ImportStatus(job.status)
         if status in VALIDATED_STATUSES or await self.repo.manifest(job.id) is not None:
-            await self.refuse(
+            await self._refuse(
                 ApiError(
                     409,
                     "already_validated",
@@ -996,7 +991,7 @@ class ImportService:
                 VALIDATE_IMPORT,
             )
         if status not in (ImportStatus.RECEIVED, ImportStatus.MAPPING_REQUIRED):
-            await self.refuse(
+            await self._refuse(
                 ApiError(
                     409,
                     "invalid_status",
@@ -1013,7 +1008,7 @@ class ImportService:
             job.source_contract_id, job.schema_version_id
         )
         if usable is None:
-            await self.refuse(
+            await self._refuse(
                 ApiError(
                     409,
                     "mapping_required",
@@ -1026,7 +1021,7 @@ class ImportService:
             )
         profile = await self.repo.default_profile(DEFAULT_VALIDATION_PROFILE_CODE)
         if profile is None:
-            await self.refuse(
+            await self._refuse(
                 ApiError(409, "validation_profile_missing", "No validation profile exists."),
                 job.id,
                 VALIDATE_IMPORT,
@@ -1106,11 +1101,9 @@ class ImportService:
                 "rejected_records": validator.rejected,
                 "warnings": validator.warnings,
             },
-            "canonical_sha256": writer.canonical_sha256(),
+            "canonical_sha256": writer.dataset_sha256(),
         }
-        manifest_sha = hashlib.sha256(
-            json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest()
+        manifest_sha = sha256_for(HashKind.IMPORT_MANIFEST, manifest)
         self.repo.add(
             ImportManifest(
                 import_job_id=job.id,
@@ -1177,7 +1170,6 @@ class ImportService:
             Declared,
             ImportFigures,
             ReconciliationService,
-            most_sensitive,
         )
 
         columns = list(contract.control_total_columns)
@@ -1197,7 +1189,7 @@ class ImportService:
             {
                 c: ColumnMeta(
                     units.get(targets.get(c) or ""),
-                    most_sensitive(mapped.get(c, default), artifact.classification),
+                    most_sensitive([mapped.get(c, default), artifact.classification]),
                 )
                 for c in columns
             },
@@ -1209,9 +1201,9 @@ class ImportService:
         rows (QUARANTINED or FAILED). Absent and foreign imports look alike (D-04)."""
         original = await self.repo.fresh(original_id)
         if original is None:
-            await self.refuse(ApiError(404, "not_found", "The import to retry was not found."))
+            await self._refuse(ApiError(404, "not_found", "The import to retry was not found."))
         if original.source_system_id != source_id:
-            await self.refuse(
+            await self._refuse(
                 ApiError(
                     409,
                     UploadRefusal.RETRY_SOURCE_MISMATCH,
@@ -1220,7 +1212,7 @@ class ImportService:
                 )
             )
         if original.status not in RETRYABLE_IMPORT_STATUSES:
-            await self.refuse(
+            await self._refuse(
                 ApiError(
                     409,
                     UploadRefusal.RETRY_NOT_APPLICABLE,
@@ -1236,7 +1228,7 @@ class ImportService:
         if existing is None:
             return None
         if existing.request_sha256 != fingerprint:
-            await self.refuse(
+            await self._refuse(
                 ApiError(
                     409,
                     UploadRefusal.IDEMPOTENCY_CONFLICT,
@@ -1369,9 +1361,10 @@ class _ResultWriter:
             (QuarantineItem, items),
         ]
 
-    def canonical_sha256(self) -> str:
-        """The accepted payloads' hashes in file order, hashed: the dataset's identity."""
-        return hashlib.sha256("\n".join(self.hashes).encode()).hexdigest()
+    def dataset_sha256(self) -> str:
+        """The accepted payloads' hashes in file order, hashed: the dataset's identity (the
+        manifest's `canonical_sha256`)."""
+        return sha256_hex("\n".join(self.hashes).encode())
 
 
 # --- Phase 9: field profiling (BE-9.2, BE-9.3) --------------------------------------------------
@@ -1390,7 +1383,6 @@ _RATE = Decimal("0.0001")  # null rates: four decimal places, half-even
 _RATE_CONTEXT = Context(prec=28, rounding=ROUND_HALF_EVEN)
 
 _INTEGER = re.compile(r"[+-]?[0-9]+")
-_DECIMAL = re.compile(r"[+-]?([0-9]+)(?:\.([0-9]+))?")
 _TIMESTAMP = re.compile(
     r"[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}(?::[0-9]{2}(?:\.[0-9]{1,6})?)?"
     r"(?:Z|[+-][0-9]{2}:[0-9]{2})?"
@@ -1456,11 +1448,12 @@ def _timestamp(value: str) -> datetime | None:
 def _numeric(value: str) -> tuple[Decimal, int, int] | None:
     """Plain decimal text (no exponent, grouping or spaces) as (value, integer digits,
     scale), as NUMERIC counts them."""
-    match = _DECIMAL.fullmatch(value)
-    if match is None:
+    try:
+        number = parse_decimal_text(value, SOURCE)
+    except DecimalTextError:
         return None
-    whole, fraction = match.group(1), match.group(2) or ""
-    return Decimal(value), len(whole.lstrip("0")), len(fraction)
+    whole, _, fraction = value.lstrip("+-").partition(".")
+    return number, len(whole.lstrip("0")), len(fraction)
 
 
 def _rate(part: int, whole: int) -> str | None:
@@ -1636,8 +1629,7 @@ def profile_sha256(row_count: int, summary: dict[str, Any], columns: list[dict[s
         "summary": summary,
         "columns": columns,
     }
-    text = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(text.encode()).hexdigest()
+    return sha256_for(HashKind.DATA_PROFILE, payload)
 
 
 ProfileInput = tuple[Mapping[str, str], Sequence[str], Sequence[Mapping[str, Any]]]
@@ -1816,8 +1808,7 @@ class RowResult:
 
 def profile_rules_sha256(rules: Mapping[str, Mapping[str, str]]) -> str:
     """Content hash of a profile's rules. Migration 0015 holds a frozen copy."""
-    text = json.dumps(rules, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(text.encode()).hexdigest()
+    return sha256_for(HashKind.VALIDATION_PROFILE_RULES, rules)
 
 
 def profile_entries(
@@ -1923,12 +1914,11 @@ def business_key_sha256(values: Mapping[str, str], columns: Sequence[str]) -> st
     key = [(values.get(c) or "").strip() for c in columns]
     if not columns or not all(key):
         return None
-    return hashlib.sha256(json.dumps(key, ensure_ascii=False).encode()).hexdigest()
+    return sha256_for(HashKind.BUSINESS_KEY, key)
 
 
 def payload_sha256(payload: Mapping[str, str | None]) -> str:
-    text = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(text.encode()).hexdigest()
+    return sha256_for(HashKind.CANONICAL_PAYLOAD, payload)
 
 
 ValidatorInput = tuple[int, Mapping[str, str], Sequence[str], Sequence[Mapping[str, Any]]]
@@ -2262,15 +2252,14 @@ class QuarantineService:
         self.imports = ImportService(session, principal)
 
     async def _refuse(self, resource_id: uuid.UUID | None, error: ApiError) -> NoReturn:
-        await record_denial(
+        await refuse(
             self.session,
             self.principal,
-            DISPOSITION,
-            "quarantine_item",
-            str(resource_id) if resource_id else None,
-            error.code,
+            error,
+            action=DISPOSITION,
+            resource_type="quarantine_item",
+            resource_id=resource_id,
         )
-        raise error
 
     async def batch_view(
         self, batch_id: uuid.UUID, status: QuarantineStatus | None, limit: int, offset: int

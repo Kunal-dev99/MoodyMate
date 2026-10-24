@@ -47,16 +47,23 @@ from app.calculations.service import (
     LadderView,
     ScenarioMember,
     ScenarioRunSpec,
-    most_sensitive,
 )
-from app.core.classification import UNCLASSIFIED, MaskedValue
+from app.core.canonical import HashKind, sha256_for
+from app.core.classification import (
+    UNCLASSIFIED,
+    MaskedValue,
+    mask_value,
+    most_sensitive,
+    storable,
+)
 from app.core.correlation import get_correlation_id
 from app.core.decimals import decimal_text
 from app.core.errors import ApiError
 from app.core.principal import Principal
+from app.core.refusals import refuse
 from app.domain.service import DomainService
 from app.governance.constants import ClassificationCode, Permission, ProposalDecision
-from app.governance.service import audit_by, record_denial
+from app.governance.service import audit_by
 from app.orchestration.constants import (
     APPROVAL_LABELS,
     AUDIT_RUN_RESOURCE,
@@ -126,7 +133,7 @@ from app.orchestration.schemas import (
     TemplateOut,
     TemplatePage,
 )
-from app.rules.service import RulesService, canonical_sha256
+from app.rules.service import RulesService
 
 S = ScenarioVersionStatus
 R = ScenarioRefusal
@@ -259,15 +266,14 @@ class ScenarioService:
     ) -> NoReturn:
         """Roll back, audit the refusal (DENIED, reason = the error code) and raise it."""
         kind, resource_id = resource
-        await record_denial(
+        await refuse(
             self.session,
             self.principal,
-            action,
-            kind,
-            str(resource_id) if resource_id else None,
-            error.code,
+            error,
+            action=action,
+            resource_type=kind,
+            resource_id=resource_id,
         )
-        raise error
 
     @staticmethod
     def _disabled() -> ApiError:
@@ -805,15 +811,14 @@ class ScenarioRunService:
 
     async def _refuse(self, error: ApiError, resource: tuple[str, uuid.UUID | None]) -> NoReturn:
         kind, resource_id = resource
-        await record_denial(
+        await refuse(
             self.session,
             self.principal,
-            ScenarioRunAction.RUN.value,
-            kind,
-            str(resource_id) if resource_id else None,
-            error.code,
+            error,
+            action=ScenarioRunAction.RUN.value,
+            resource_type=kind,
+            resource_id=resource_id,
         )
-        raise error
 
     @staticmethod
     def _error(code: RR, message: str, details: dict[str, Any] | None = None) -> ApiError:
@@ -902,12 +907,13 @@ class ScenarioRunService:
     def _fingerprint(version: ScenarioVersion, baseline_run_id: uuid.UUID) -> str:
         """What a replay of the Idempotency-Key must repeat: the version (and its shocks) and
         the baseline."""
-        return canonical_sha256(
+        return sha256_for(
+            HashKind.SCENARIO_RUN_REQUEST,
             {
                 "scenario_version_id": str(version.id),
                 "shocks_sha256": version.shocks_sha256,
                 "baseline_run_id": str(baseline_run_id),
-            }
+            },
         )
 
     async def run(
@@ -1260,16 +1266,8 @@ class ScenarioRunService:
             key: str | MaskedValue | None = None
             if row.instrument is not None:
                 code = row.instrument_classes.get("instrument_id", UNCLASSIFIED)
-                key = (
-                    row.instrument.business_key
-                    if code in clear
-                    else MaskedValue(classification=code)
-                )
-            amount: str | MaskedValue = (
-                decimal_text(v.value)
-                if v.classification in clear
-                else MaskedValue(classification=v.classification)
-            )
+                key = mask_value(row.instrument.business_key, code, clear)
+            amount = mask_value(decimal_text(v.value), v.classification, clear)
             items.append(
                 ScenarioContributionOut(
                     scenario_contribution_id=v.id,
@@ -1335,7 +1333,7 @@ class _Table:
 
 
 def _shown(value: Decimal, code: str, clear: frozenset[str]) -> str | MaskedValue:
-    return decimal_text(value) if code in clear else MaskedValue(classification=code)
+    return mask_value(decimal_text(value), code, clear)
 
 
 def _first_negative(
@@ -1404,7 +1402,9 @@ def _comparison(
                     "outflows": {ch[3] for ch in changed if ch[2] == "OUTFLOW"},
                 }
                 by_direction["net_gap"] = by_direction["inflows"] | by_direction["outflows"]
-                changed_code = most_sensitive([ch[4] for ch in changed]) if changed else agg
+                changed_code = (
+                    storable(most_sensitive([ch[4] for ch in changed])) if changed else agg
+                )
                 figures: dict[str, ComparisonFigure] = {}
                 net_class = agg
                 for f in FIGURES:
@@ -1419,13 +1419,15 @@ def _comparison(
                     # a delta is masked when either side is.
                     delta = s_val[f] - b_val[f]
                     if f == "cumulative_gap":
-                        code = most_sensitive([b_code[f], s_code[f], net_class, carried[i] or agg])
+                        code = storable(
+                            most_sensitive([b_code[f], s_code[f], net_class, carried[i] or agg])
+                        )
                         carried[i] = code
                         masked = code not in clear
                     else:
                         few = 0 < len(by_direction[f]) < minimum
-                        code = most_sensitive(
-                            [b_code[f], s_code[f], *([changed_code] if few else [])]
+                        code = storable(
+                            most_sensitive([b_code[f], s_code[f], *([changed_code] if few else [])])
                         )
                         if f == "net_gap":
                             net_class = code
