@@ -37,6 +37,7 @@ from alembic.script import ScriptDirectory
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.core.canonical import canonical_sha256
 from app.core.config import Settings
 from app.domain import service as domain_service
 from app.domain.constants import (
@@ -100,6 +101,7 @@ from app.tests.helpers import (
 )
 from app.tests.identity_kit import (
     EXTRA_FLOWS,
+    GOLDEN_V1_RUN,
     IDENTITY_TABLES,
     KEEP,
     LINKS,
@@ -111,6 +113,7 @@ from app.tests.identity_kit import (
     identity_counts,
     links_of,
     reconcile,
+    run_document_by_key,
     run_outputs,
     schema_versions,
     typed_fields,
@@ -468,6 +471,12 @@ def test_domain_projection_catalogue_and_guards(
     }
     v1_run = start_run(api, reader, ladder).json()
     assert v1_run["result_sha256"], v1_run
+    # BE-31.3 (a): the run equals the golden captured on the pre-phase code (56dec79) once each
+    # row id is its stable key (result_sha256 hashes row ids, which differ per database).
+    v1_document = run_document_by_key(db, v1_run["run_id"])
+    assert v1_run["status"] == GOLDEN_V1_RUN["status"], v1_run
+    assert v1_document == GOLDEN_V1_RUN["document"]
+    assert canonical_sha256(v1_document) == GOLDEN_V1_RUN["canonical_sha256"]
     # The reconcile links the historical rows: each position to its instrument and its legal
     # entity (registered now, one per source and code), each cash flow to its instrument.
     first = reconcile(api, steward)
@@ -768,6 +777,15 @@ def test_domain_projection_catalogue_and_guards(
         api, reader, {**ladder, "dataset_snapshot_id": snapshot.json()["snapshot_id"]}
     ).json()
     assert typed_run["status"] == v1_run["status"], typed_run
+    # BE-31.3 (c): a repeat run over the same typed snapshot gives an equal result_sha256.
+    typed_rerun = start_run(
+        api, reader, {**ladder, "dataset_snapshot_id": snapshot.json()["snapshot_id"]}
+    ).json()
+    assert typed_rerun["run_id"] != typed_run["run_id"], typed_rerun
+    assert (typed_rerun["status"], typed_rerun["result_sha256"]) == (
+        typed_run["status"],
+        typed_run["result_sha256"],
+    )
     typed_outputs = run_outputs(db, typed_run["run_id"])
     assert typed_outputs == run_outputs(db, v1_run["run_id"])
     assert typed_outputs["contributions"] and typed_outputs["gap"]

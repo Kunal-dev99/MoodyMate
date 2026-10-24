@@ -4,6 +4,9 @@ test_ws1_verification.py (D-26: no new test function, budget 49 -> 49).
 - `GOLDEN_V1`: the v1 projection of the three synthetic samples (each summary, every
   `payload_sha256` by source ordinal), taken on the projector before Phase 31
   (app/tests/golden/domain_v1_projection.json). v1 behaviour must stay byte-identical (D-57 §1).
+- `GOLDEN_V1_RUN` / `run_document_by_key`: the v1 ladder run's result document with every row
+  id replaced by its stable key, captured on the pre-phase code (56dec79,
+  app/tests/golden/domain_v1_run.json), and its `canonical_sha256` (BE-31.3 (a)).
 - `typed_fields` / `publish_typed_instrument`: the typed-maturity contract (D-57 option B: v1
   with `maturity_date` DATE and `interest_rate` NUMERIC(11,6), nothing else) proposed through
   the existing governed path and approved by a second person.
@@ -16,13 +19,15 @@ test_ws1_verification.py (D-26: no new test function, budget 49 -> 49).
 
 import json
 import uuid
+from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import asyncpg
 import pytest
 from fastapi.testclient import TestClient
 
+from app.core.canonical import canonical_json
 from app.tests.conftest import dev_token, sql
 from app.tests.helpers import (
     INSTRUMENT_RULES,
@@ -45,6 +50,10 @@ RECONCILE = f"{LINKS}/reconcile"
 IDENTITY_TABLES = ("legal_entity", "domain_identity_link")
 GOLDEN_V1: dict[str, Any] = json.loads(
     (Path(__file__).resolve().parent / "golden" / "domain_v1_projection.json").read_text()
+)
+# BE-31.3 (a): the v1 ladder run captured on the pre-phase code (56dec79), by key.
+GOLDEN_V1_RUN: dict[str, Any] = json.loads(
+    (Path(__file__).resolve().parent / "golden" / "domain_v1_run.json").read_text()
 )
 KEEP = (
     "name",
@@ -349,3 +358,110 @@ def run_outputs(db: str, run_id: str) -> dict[str, list[Any]]:
             )
         ],
     }
+
+
+# A run's snapshot rows (instrument versions, cash flows) by row id, each with its business key.
+_SNAPSHOT_IMPORTS = (
+    "SELECT m.import_job_id FROM dataset_snapshot_member m JOIN calculation_run r"
+    " ON r.dataset_snapshot_id = m.dataset_snapshot_id WHERE r.id = $1"
+)
+_SNAPSHOT_KEYS = {
+    "instrument_version": "SELECT v.id, i.business_key AS key FROM instrument_version v"
+    f" JOIN instrument i ON i.id = v.instrument_id WHERE v.import_job_id IN ({_SNAPSHOT_IMPORTS})",
+    "cashflow_event": "SELECT id, business_key AS key FROM cashflow_event"
+    f" WHERE import_job_id IN ({_SNAPSHOT_IMPORTS})",
+}
+
+
+def run_document_by_key(db: str, run_id: str) -> dict[str, list[Any]]:
+    """A run's stored gap, contributions and warnings (by `sequence`, the fields D-31 §4
+    hashes) with every per-database row id replaced one-for-one by its stable key: an
+    instrument version by its instrument's business key, a cash flow by its business key, a
+    warning's entity by that entity's key. Rule version ids are kept: each must be a fixed
+    seed id (0018: uuid5 of its code and version, the same in every database). A key that
+    cannot be resolved, or one shared by two snapshot rows, fails; no raw id is kept. Decimals
+    are their canonical text (D-52 §1). Comparable across databases (BE-31.3 (a))."""
+    rid = uuid.UUID(run_id)
+    keys: dict[str, dict[str, str]] = {}
+    for kind, query in _SNAPSHOT_KEYS.items():
+        rows = sql(db, query, rid)
+        keys[kind] = {str(r["id"]): r["key"] for r in rows}
+        assert len(set(keys[kind].values())) == len(rows) > 0, f"{kind}: keys not unique"
+
+    def key(kind: str | None, row_id: Any) -> str | None:
+        if row_id is None:
+            return None
+        assert kind in keys and str(row_id) in keys[kind], f"no stable key for a {kind} row"
+        return keys[str(kind)][str(row_id)]
+
+    gap = sql(
+        db,
+        "SELECT sequence, currency, bucket_code, bucket_sequence, inflows, outflows, net_gap,"
+        " cumulative_gap, inflows_contractual, inflows_behavioural, outflows_contractual,"
+        " outflows_behavioural, contribution_count FROM liquidity_gap_result"
+        " WHERE calculation_run_id = $1 ORDER BY sequence",
+        rid,
+    )
+    contributions = []
+    rules: set[str] = set()
+    for c in sql(
+        db,
+        "SELECT sequence, code, value, unit, bucket_code, direction, origin,"
+        " days_after_reporting_date, rule_version_ids::text AS rules, cashflow_event_id,"
+        " instrument_version_id FROM intermediate_value WHERE calculation_run_id = $1"
+        " ORDER BY sequence",
+        rid,
+    ):
+        row = dict(c)
+        row["rule_version_ids"] = json.loads(row.pop("rules"))
+        rules.update(row["rule_version_ids"])
+        row["cashflow_event"] = key("cashflow_event", row.pop("cashflow_event_id"))
+        row["instrument"] = key("instrument_version", row.pop("instrument_version_id"))
+        contributions.append(row)
+    seeded = sql(
+        db,
+        "SELECT id::text AS id FROM rule_version WHERE id = ANY($1::uuid[])"
+        " AND seeded_by IS NOT NULL",
+        [uuid.UUID(r) for r in rules],
+    )
+    assert {r["id"] for r in seeded} == rules, "a rule version id that is not a fixed seed id"
+    warnings = []
+    for w in sql(
+        db,
+        "SELECT sequence, code, severity, entity_type, entity_id, details::text AS d"
+        " FROM calculation_warning WHERE calculation_run_id = $1 ORDER BY sequence",
+        rid,
+    ):
+        row = dict(w)
+        row["entity"] = key(row["entity_type"], row.pop("entity_id"))
+        details = json.loads(row.pop("d"), parse_float=Decimal)
+        if "instrument_version_id" in details:
+            details["instrument"] = key("instrument_version", details.pop("instrument_version_id"))
+        row["details"] = details
+        warnings.append(row)
+    document = json.loads(
+        canonical_json(
+            {
+                "liquidity_gap": [dict(g) for g in gap],
+                "contributions": contributions,
+                "warnings": warnings,
+            }
+        )
+    )
+
+    def no_row_id(value: Any) -> None:  # the whole document: only seeded rule ids remain
+        if isinstance(value, dict):
+            for item in value.values():
+                no_row_id(item)
+        elif isinstance(value, list):
+            for item in value:
+                no_row_id(item)
+        elif isinstance(value, str) and value not in rules:
+            try:
+                uuid.UUID(value)
+            except ValueError:
+                return
+            raise AssertionError("a row id left in the run document")
+
+    no_row_id(document)
+    return cast(dict[str, list[Any]], document)

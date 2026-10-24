@@ -2270,6 +2270,14 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
 
   Only `instrument_version_id` is stripped. Any other difference is a defect to raise again,
   not something to strip. BE-31.3's Done-when is reworded to match.
+- **Amendment (2026-10-24, Phase 31 merge, auto-resolved):** (a) refined. A literal
+  `result_sha256` cannot be a golden: D-31 §4 hashes row ids, which differ per database. (a) is
+  now: a run over the v1 snapshot gives a result document equal to a golden captured on the
+  pre-phase code (56dec79), after every row id is replaced by its stable business key
+  (instrument, cash flow, rule version, warning entity), and that document's
+  `canonical_sha256` equals the golden's. Rule version ids are fixed seed UUIDs (0018) and stay
+  as they are. Nothing is stripped here; (b) keeps its rule. Evidence: `test_domain.py`,
+  `identity_kit.run_document_by_key`, `golden/domain_v1_run.json`.
 
 ## D-58 Identity links rather than FK columns on append-only rows
 
