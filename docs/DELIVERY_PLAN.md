@@ -4139,13 +4139,14 @@ append-only links. v1 behaviour is unchanged.
     - finds the new version ACTIVE (`max + 1`) and v1 DEPRECATED;
     - finds the seeded v2 DRAFT's `content_sha256` unchanged;
     - and the e2e smoke diff still passes.
-  - *Not yet ticked (2026-10-24, architect):* the domain fold is evidenced at
+  - *Ticked 2026-10-24 (coordinator); architect note at build time:* the domain fold is evidenced at
     `test_domain.py:609-636` (frozen hash equals `INSTRUMENT_TYPED_MATURITY_SHA256`,
     `constants.py:467`; `approve_proposal` asserts BREAKING with the `core_instrument` MAPPING
     dependent and a second-person APPLIED, `identity_kit.py:121-147`; statuses
-    `{1: DEPRECATED, 2: DRAFT, max+1: ACTIVE}`; v2 DRAFT hash unchanged). **Missing:** the e2e
+    `{1: DEPRECATED, 2: DRAFT, max+1: ACTIVE}`; v2 DRAFT hash unchanged). **Was missing at build time:** the e2e
     smoke diff (`e2e/smoke.spec.ts`) was not run in this phase; only `counterparties.spec.ts`
     and `ws3-smoke.spec.ts` were. Tick when the CI Playwright run on the PR shows it passing.
+    **Closed:** the CI Playwright run on PR #42 (run 40072518086, e2e job green) includes `e2e/smoke.spec.ts`.
 - [x] **BE-31.3** Projector v2 (D-57 §2). The instrument spec is matched by **contract hash**.
   v1 imports use the frozen v1 spec (`projector_version` 1), typed imports record 2, and an
   unknown hash gives `projection_unsupported`. `INSTRUMENT_PROJECTOR_V2_ENABLED` switches it.
@@ -4213,13 +4214,14 @@ append-only links. v1 behaviour is unchanged.
     - the WS1 matrix gives 200 for `domain:read` holders and 403 for the others;
     - another tenant's id gives 404;
     - the docs are present (grep).
-  - *Not yet ticked (2026-10-24, architect):* evidenced: drift check `openapi.json is up to
+  - *Ticked 2026-10-24 (coordinator); architect note at build time:* evidenced: drift check `openapi.json is up to
     date` (rc=0); matrix `test_ws1_verification.py:268-275` (all five seeded roles hold
     `domain:read`, so 200 for all; printed rows 200 x5); another tenant's legal entity is the
-    404 of a random id :499, and its lists total 0 :455-459. **Missing:** `docs/DOMAIN_IDENTITY.md`
+    404 of a random id :499, and its lists total 0 :455-459. **Was missing at build time:** `docs/DOMAIN_IDENTITY.md`
     does not exist and `docs/RETENTION.md` has no `legal_entity` or `domain_identity_link` row
     (grep, 2026-10-24). Per Q3 the coordinator reviews the drafts, commits them, then runs the
     grep.
+    **Closed:** `docs/DOMAIN_IDENTITY.md` and the `legal_entity` and `domain_identity_link` RETENTION.md rows landed with PR #42 (grep: present).
 - [x] **FE-31.1** (owner of `navigation.ts`/`features.ts`, behind `NEXT_PUBLIC_DOMAIN_LINKS_UI`)
   - the instrument detail shows a typed maturity, or "Not stated (schema v1 free text)";
   - ~~the position, cash-flow and exposure details show the linked identity, or "Unresolved
@@ -4444,21 +4446,22 @@ supported size is measured.
 Goal: a locked, repeatable build from a clean checkout; structured logs; metrics; distinct
 liveness and readiness; and operating docs.
 
-- [ ] **BE-34.1** A `uv` lockfile (`backend/uv.lock`). CI runs ~~`uv sync --frozen --extra dev`~~
+- [x] **BE-34.1** A `uv` lockfile (`backend/uv.lock`). CI runs ~~`uv sync --frozen --extra dev`~~
   `uv sync --locked --extra dev`, and pip-audit reads the lock (the `uv export --locked` output,
   audited with `--no-deps`). Reworded 2026-10-24 (Q1, auto-resolved; D-62 amendment), because
   `--frozen` installs a stale lock without complaint and so cannot meet the Done-when.
   - *Done-when:* the CI install is ~~frozen~~ locked, and a deliberate pyproject/lock mismatch
     fails (evidence in the report).
-  - *Not yet ticked (2026-10-24, architect):* evidenced locally: `prometheus-client` 0.26.0 is
+  - *Ticked 2026-10-24 (coordinator); architect note at build time:* evidenced locally: `prometheus-client` 0.26.0 is
     in `uv.lock` (:880-881); `backend/Dockerfile:31` installs with `uv sync --locked --no-dev
     --no-install-project`; on a scratch copy with `six>=1.16` added, `uv lock --check` and
     `uv sync --locked` both exit 1 ("needs to be updated"), while `uv sync --frozen` exits 0 and
-    `import six` then fails; the worktree's `uv lock --check` exits 0. **Missing:**
+    `import six` then fails; the worktree's `uv lock --check` exits 0. **Was missing at build time:**
     `.github/workflows/ci.yml` still runs `pip install -e ".[dev]"` (:43, :122) and
     `pip-audit --skip-editable` (:61) (grep, 2026-10-24); there is no CI step that breaks a
     temp copy's pyproject and expects the locked install to fail (Q7); no CI log exists.
-- [ ] **BE-34.2** `backend/Dockerfile` (multi-stage, non-root, locked dependencies,
+    **Closed:** CI run 40077424225 on PR #45 (all four jobs green): the backend and e2e jobs install with `uv sync --locked --extra dev`; the lock-mismatch step on a temp copy and pip-audit on the `uv export --locked` output pass (backend job green).
+- [x] **BE-34.2** `backend/Dockerfile` (multi-stage, non-root, locked dependencies,
   `--proxy-headers` with `FORWARDED_ALLOW_IPS`) and `frontend/Dockerfile` (standalone,
   non-root, `NEXT_PUBLIC_API_BASE_URL` as a required build arg). `docker-compose.yml` gets a
   `prod` profile with a one-shot `alembic upgrade head`, and `.env.production.example` holds
@@ -4471,17 +4474,18 @@ liveness and readiness; and operating docs.
     - `alembic current` is the head;
     - the images run as non-root;
     - no secret is in an image (grep of `docker history`).
-  - *Not yet ticked (2026-10-24, architect):* evidenced in files only: `backend/Dockerfile`
+  - *Ticked 2026-10-24 (coordinator); architect note at build time:* evidenced in files only: `backend/Dockerfile`
     (multi-stage :20-33, `uv sync --locked` :31, uid/gid 10001 :34-37 and `USER 10001:10001`
     :50, `FORWARDED_ALLOW_IPS=127.0.0.1` :48, `--proxy-headers` :55, HEALTHCHECK on
     `/health/live` :53-54); `backend/.dockerignore` excludes `.env`, `.env.*`, `.venv` and
     `app/tests`; `frontend/Dockerfile` (FE-owned, Q9; required arg :23-29, `USER 1000:1000`
     :53). Without Docker, a copy of the image layout gave `alembic current` `0030 (head)`, live
-    and ready 200 with every check `ok`. **Missing:** no image has been built (no Docker
+    and ready 200 with every check `ok`. **Was missing at build time:** no image has been built (no Docker
     daemon here); `ci.yml` has no image job, non-root check or `docker history` grep;
     `docker-compose.yml` has no `prod` profile or one-shot migrate service (grep
     `profiles|prod|migrate`: no match); `.env.production.example` does not exist, and the root
     `.gitignore` would ignore it (Q10).
+    **Closed:** CI run 40077424225 on PR #45 (all four jobs green), `images` job: `migrate exit code: 0`, `alembic current: 0031 (head)`, `GET /api/v1/health/ready: 200` with every check ok, `api uid: 10001`, `frontend uid: 1000`, `published 9100: none`, `OK: no secret-like entry in docker history` for both images, `OK: compose prod is up, migrated, ready and non-root; metrics stay internal`.
 - [x] **BE-34.3** A structured JSON access log (`ACCESS_LOG_ENABLED`): correlation id, method,
   route template, status and duration. It never carries a query, body, header or token.
   - *Done-when:* the log fold shows a request with a bearer token, a sentinel query and a
@@ -4563,7 +4567,7 @@ liveness and readiness; and operating docs.
     failing reporter is swallowed), called from `correlation.py:63-68`; `ERROR_TRACKER_DSN` is
     a `SecretStr` (`config.py:172`) and only logs a value-free warning at startup
     (`error_tracker.py:39-42`). Runs: targeted `15 passed`; fix round `6 passed`.
-- [ ] **BE-34.7** `docs/ops/`: `BACKUP_RESTORE.md` (DB plus artifact store, with re-hash
+- [x] **BE-34.7** `docs/ops/`: `BACKUP_RESTORE.md` (DB plus artifact store, with re-hash
   verification and RPO/RTO placeholders), `MIGRATIONS.md`, `INCIDENT_RESPONSE.md`,
   `TRIGGERS.md` (every trigger by migration) and `API_COMPATIBILITY.md` (D-62 §6). Retention
   enforcement points to `RETENTION.md`, which stays PROVISIONAL.
@@ -4571,28 +4575,30 @@ liveness and readiness; and operating docs.
     - the `TRIGGERS.md` list equals the parsed `CREATE TRIGGER` set (committed-artifacts fold);
     - a restore has been exercised on a scratch DB copy, with the commands and output in
       `docs/evidence/phase-34/REPORT.md`.
-  - *Not yet ticked (2026-10-24, architect):* the check exists: `test_committed_artifacts.py:35`
+  - *Ticked 2026-10-24 (coordinator); architect note at build time:* the check exists: `test_committed_artifacts.py:35`
     calls `check_triggers_doc` (`observability_kit.py:282-332`), which runs each migration's
     `upgrade()` against a recording `op` and compares the (revision, trigger) set with the doc.
     Engineer-reported: the parser finds 177 pairs in 17 migrations, the same set as
     `pg_trigger` on a migrated scratch copy (diff SAME), and the draft table matches all 177
-    (with one row removed, False). **Missing:** `docs/ops/` does not exist (Glob, 2026-10-24),
+    (with one row removed, False). **Was missing at build time:** `docs/ops/` does not exist (Glob, 2026-10-24),
     so `test_committed_openapi_and_samples_are_current` fails with `FileNotFoundError` at
     `observability_kit.py:313`; `BACKUP_RESTORE.md`, `MIGRATIONS.md`, `INCIDENT_RESPONSE.md`
     and `API_COMPATIBILITY.md` are not written; no restore has been exercised.
-- [ ] **FE-34.1** `output: 'standalone'`, and a CI step proves that the image build fails without
+    **Closed:** `docs/ops/` holds TRIGGERS.md (186 triggers, generated by `backend/scripts/gen_triggers_doc.py`), BACKUP_RESTORE.md, MIGRATIONS.md, INCIDENT_RESPONSE.md and API_COMPATIBILITY.md; `test_committed_openapi_and_samples_are_current` passes (suite 49 passed); the restore exercise is in `docs/evidence/phase-34/REPORT.md`.
+- [x] **FE-34.1** `output: 'standalone'`, and a CI step proves that the image build fails without
   the API base-URL arg.
   - *Done-when:* the CI log shows the expected failure exit and a successful build with the arg.
-  - *Not yet ticked (2026-10-24, architect):* evidenced locally: `next.config.mjs:21-23`
+  - *Ticked 2026-10-24 (coordinator); architect note at build time:* evidenced locally: `next.config.mjs:21-23`
     (`output: 'standalone'` with `outputFileTracingRoot`; `NEXT_OUTPUT_STANDALONE=off` removes
     both, D-02); `frontend/Dockerfile:23-29` (the arg has no default and the build stops with
     exit 64 before `npm run build`); `frontend/scripts/check-image-build-arg.sh` (requires a
     non-zero exit and the arg message, then exit 0 and a non-root user, and prints both exit
     codes); `imageBuild.test.ts` `5 passed`; full vitest `741 passed`; a local `next build`
-    without the variable exits 1 and with it exits 0 with `standalone/server.js`. **Missing:**
+    without the variable exits 1 and with it exits 0 with `standalone/server.js`. **Was missing at build time:**
     `ci.yml` has no step that runs the script (grep `check-image-build-arg`: no match), and no
     CI log shows `exit code without the arg: <non-zero>` and `exit code with the arg: 0` (no
     Docker daemon here).
+    **Closed:** CI run 40077424225 on PR #45 (all four jobs green), `images` job: `exit code without the arg: 1` and `build arg NEXT_PUBLIC_API_BASE_URL is required`; the image built with the arg runs as `frontend uid: 1000`.
 
 *Test budget:* 49 → 49.
 *Reversibility:* metrics are off by default; the health routes are additive;
