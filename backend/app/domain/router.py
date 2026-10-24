@@ -27,6 +27,11 @@ The WS3 domain endpoints of Phase 14 (the Feature 03 endpoint table, D-34):
   identity_links_disabled to the reconcile (audited DENIED, nothing written). Links carry ids
   only; runs never read them.
 
+- Phase 32 (D-61): GET /currencies and GET /fx/consolidation-status (`domain:read`). FX
+  consolidation answers BLOCKED `fx_policy_not_approved`; there is no FX write route and no
+  conversion code. GET /instruments/{instrument_id} gains `effective_from`, `imported_at`,
+  `terms_typed` and `terms` per version and an optional `?effective_on=` business-date pick.
+
 Tenant scope comes from the principal (D-04): another tenant's id is the same 404 as a
 random one.
 """
@@ -35,7 +40,7 @@ import uuid
 from collections.abc import Mapping
 from datetime import date
 from decimal import Decimal
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -46,6 +51,8 @@ from app.core.idempotency import mark_replayed
 from app.core.principal import Principal
 from app.db.session import get_session
 from app.domain.constants import (
+    FX_CONSOLIDATION_REASON,
+    INSTRUMENT_RATE_TERMS_SHA256,
     RATING_CLASSIFICATIONS,
     RESOLVER_VERSION,
     CreditVocabularyKind,
@@ -75,6 +82,9 @@ from app.domain.schemas import (
     CreditExposureVersionOut,
     CreditVocabularyEntryOut,
     CreditVocabularyList,
+    CurrencyList,
+    CurrencyOut,
+    FxConsolidationStatusOut,
     IdentityLinkKindCount,
     IdentityLinkOut,
     IdentityLinkPage,
@@ -82,6 +92,7 @@ from app.domain.schemas import (
     InstrumentDetail,
     InstrumentPage,
     InstrumentSummary,
+    InstrumentTermsOut,
     InstrumentTypeOut,
     InstrumentVersionOut,
     LegalEntityDetail,
@@ -96,15 +107,18 @@ from app.domain.schemas import (
     Value,
 )
 from app.domain.service import (
+    TERM_VALUES,
     AttributeView,
     CounterpartyRow,
     DomainService,
     ExposureRow,
     InstrumentRow,
+    InstrumentView,
     LegalEntityRow,
     ProjectionView,
     RatingRow,
     SchemaPins,
+    TermView,
 )
 from app.governance.constants import FieldType, Permission
 from app.ingestion.constants import ImportStatus
@@ -179,7 +193,8 @@ async def project_import(
     one instrument version, position version or cash-flow event per canonical record, each
     keeping lineage to it. 409 `projection_unsupported` for another schema (or schema
     version, or an instrument contract matching no projector by hash; also the typed-maturity
-    contract while INSTRUMENT_PROJECTOR_V2_ENABLED is off, D-57), 409 `not_validated` before
+    contract while INSTRUMENT_PROJECTOR_V2_ENABLED is off, D-57, and the rate-terms contract
+    while INSTRUMENT_TERMS_PROJECTION_ENABLED is off, D-61), 409 `not_validated` before
     validation (or for a FAILED import), 409 `domain_projection_disabled` while the switch is
     off; each refusal is audited DENIED. Position, cash-flow and credit-exposure rows are
     linked to their identities in the same transaction while IDENTITY_LINKS_ENABLED is on
@@ -191,6 +206,7 @@ async def project_import(
         settings.CREDIT_PROJECTION_ENABLED,
         settings.INSTRUMENT_PROJECTOR_V2_ENABLED,
         settings.IDENTITY_LINKS_ENABLED,
+        settings.INSTRUMENT_TERMS_PROJECTION_ENABLED,
     )
     if not created:
         mark_replayed(response)
@@ -349,12 +365,65 @@ def _cash_flow(event: CashflowEvent, pins: SchemaPins, clear: frozenset[str]) ->
     )
 
 
+# Output key -> the INSTRUMENT_RATE_TERMS field it is projected from (D-61 §1; masking).
+_TERM_FIELDS = {name: name for name in TERM_VALUES}
+
+
+def _terms(
+    terms: TermView | None, pins: SchemaPins, schema_version_id: uuid.UUID, clear: frozenset[str]
+) -> InstrumentTermsOut | None:
+    if terms is None:
+        return None
+    shown = _shown(
+        {k: terms.values.get(k) for k in _TERM_FIELDS},
+        _TERM_FIELDS,
+        pins,
+        schema_version_id,
+        clear,
+    )
+    spread = pins.fields.get(schema_version_id, {}).get("spread")
+    return InstrumentTermsOut(
+        term_version_id=terms.term_version_id,
+        rate_unit=spread.unit if spread else None,
+        unknown_fields=terms.unknown_fields,
+        provisional=True,
+        created_at=terms.created_at,
+        **shown,
+    )
+
+
+def _terms_typed(pins: SchemaPins, schema_version_id: uuid.UUID) -> bool:
+    """The pinned version is the published rate-terms contract, matched by contract hash as
+    projector v3 matches it (INSTRUMENT_RATE_TERMS, D-61 §1, D-57 §3)."""
+    return pins.hashes.get(schema_version_id) == INSTRUMENT_RATE_TERMS_SHA256
+
+
+def _effective_from(
+    v: InstrumentVersion, view: InstrumentView, pins: SchemaPins, clear: frozenset[str]
+) -> Value | None:
+    """The version's business-effective date, masked by its schema field (D-61 §5); null when
+    the pinned contract has no such field (v1 and typed-maturity reads are unchanged)."""
+    if "effective_from" not in pins.fields.get(v.schema_version_id, {}):
+        return None
+    return cast(
+        Value | None,
+        _shown(
+            {"effective_from": view.effective_from.get(v.id)},
+            {"effective_from": "effective_from"},
+            pins,
+            v.schema_version_id,
+            clear,
+        )["effective_from"],
+    )
+
+
 def _version(
     v: InstrumentVersion,
     attributes: list[AttributeView],
     cash_flows: list[CashFlowOut],
     pins: SchemaPins,
     clear: frozenset[str],
+    view: InstrumentView,
 ) -> InstrumentVersionOut:
     shown = _shown(
         {
@@ -404,6 +473,10 @@ def _version(
         instrument_type_known=v.instrument_type_id is not None,
         interest_rate_unit=rate.unit if rate else None,
         maturity_typed=_maturity_typed(pins, v.schema_version_id),
+        effective_from=_effective_from(v, view, pins, clear),
+        imported_at=view.imported_at[v.import_job_id],
+        terms_typed=_terms_typed(pins, v.schema_version_id),
+        terms=_terms(view.terms.get(v.id), pins, v.schema_version_id, clear),
         attributes=attribute_out,
         cash_flows=cash_flows,
         **shown,
@@ -420,11 +493,21 @@ def _maturity_typed(pins: SchemaPins, schema_version_id: uuid.UUID) -> bool:
     "/instruments/{instrument_id}", response_model=InstrumentDetail, operation_id="getInstrument"
 )
 async def get_instrument(
-    instrument_id: uuid.UUID, principal: DomainReader, session: SessionDep
+    instrument_id: uuid.UUID,
+    principal: DomainReader,
+    session: SessionDep,
+    effective_on: Annotated[
+        date | None,
+        Query(
+            description="A business date (D-61 §5): `effective_version_id` names the version "
+            "with the latest `effective_from` on or before it, not the latest import."
+        ),
+    ] = None,
 ) -> InstrumentDetail:
     """One instrument: every version (oldest first) with its attributes, import, source row
-    ordinal, canonical record and the cash flows naming its business key."""
-    view = await DomainService(session, principal).instrument(instrument_id)
+    ordinal, canonical record, rate terms, business-effective date beside its import time, and
+    the cash flows naming its business key."""
+    view = await DomainService(session, principal).instrument(instrument_id, effective_on)
     clear = principal.clear_classifications
     row = view.row
     cash_flows = [_cash_flow(e, view.pins, clear) for e in view.cash_flows]
@@ -444,9 +527,11 @@ async def get_instrument(
         source_code=row.source_code,
         created_at=row.instrument.created_at,
         versions=[
-            _version(v, view.attributes.get(v.id, []), cash_flows, view.pins, clear)
+            _version(v, view.attributes.get(v.id, []), cash_flows, view.pins, clear, view)
             for v in row.versions
         ],
+        effective_on=effective_on,
+        effective_version_id=view.effective_version_id,
     )
 
 
@@ -1083,4 +1168,43 @@ async def reconcile_identity_links(
         ],
         reconciled_at=view.reconciled_at,
         reconciled_by=view.reconciled_by,
+    )
+
+
+# --- Phase 32: currency reference and FX consolidation status (BE-32.4, D-61 §6) ------------
+# Read only. There is no FX write route: observations are append-only and nothing calculates
+# from currency or FX.
+
+
+@router.get("/currencies", response_model=CurrencyList, operation_id="listCurrencies")
+async def list_currencies(principal: DomainReader, session: SessionDep) -> CurrencyList:
+    """The caller's tenant's currency reference: a tagged PROVISIONAL seed (`0031_currencies`,
+    D-61 §6) of the codes the synthetic samples use. Reference only: no conversion."""
+    rows = await DomainService(session, principal).currencies()
+    return CurrencyList(
+        items=[
+            CurrencyOut(
+                code=r.code, name=r.name, minor_units=r.minor_units, provisional=r.provisional
+            )
+            for r in rows
+        ]
+    )
+
+
+@router.get(
+    "/fx/consolidation-status",
+    response_model=FxConsolidationStatusOut,
+    operation_id="getFxConsolidationStatus",
+)
+async def get_fx_consolidation_status(
+    principal: DomainReader, session: SessionDep
+) -> FxConsolidationStatusOut:
+    """FX consolidation is BLOCKED (`fx_policy_not_approved`, D-61 §6) until a client-approved
+    rate source, rate types, reporting currency and conversion method exist. The count is of
+    the tenant's stored observations, none of which any calculation reads."""
+    view = await DomainService(session, principal).fx_consolidation_status()
+    return FxConsolidationStatusOut(
+        status="BLOCKED",
+        reason_code=FX_CONSOLIDATION_REASON,
+        observation_count=view.observation_count,
     )

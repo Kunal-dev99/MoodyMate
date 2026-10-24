@@ -138,6 +138,11 @@ class Settings(BaseSettings):
     # POST /identity-links/reconcile. Off: no new links, and the reconcile answers 409
     # identity_links_disabled (audited DENIED); existing links stay readable.
     IDENTITY_LINKS_ENABLED: bool = True
+    # Phase 32 (FC-01, D-61 §1-2, D-02): projector v3 for the rate-terms instrument contract
+    # (matched by contract hash), which also writes the `instrument_term_version` rows. Off
+    # answers 409 projection_unsupported for rate-terms imports (audited DENIED); v1 and
+    # typed-maturity imports are unaffected, and existing term rows stay readable.
+    INSTRUMENT_TERMS_PROJECTION_ENABLED: bool = True
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
 
     # Phase 28 (BE-28.3, D-53): in-process token buckets per (tenant, principal, route) on the

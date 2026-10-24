@@ -11,6 +11,7 @@ Feature 03 specs are unchanged. Credit frozen copies live in migration 0022.
 
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Final
 
 from app.ingestion.constants import ImportStatus
 
@@ -70,6 +71,16 @@ class CreditVocabularyKind(StrEnum):
     CREDIT_SEGMENT = "credit_segment"
     FACILITY_TYPE = "facility_type"
     COLLATERAL_TYPE = "collateral_type"
+
+
+class TermVocabularyKind(StrEnum):
+    """The seeded PROVISIONAL `instrument_term_vocabulary` kinds (D-61 §3, migration 0031; tag
+    `0031_term_vocabulary`). No reference index is seeded."""
+
+    RATE_TYPE = "RATE_TYPE"
+    DAY_COUNT = "DAY_COUNT"
+    FREQUENCY = "FREQUENCY"
+    LIFECYCLE_STATE = "LIFECYCLE_STATE"
 
 
 class ObligorRatingStatus(StrEnum):
@@ -196,6 +207,9 @@ class Column:
     # Feature 04 (D-37 §3): a credit vocabulary the value is checked against but kept as
     # given; a value outside it is counted UNKNOWN_VALUE (modules map it, never silently).
     credit_vocabulary: CreditVocabularyKind | None = None
+    # Phase 32 (D-61 §3): a term vocabulary the value is checked against but kept as given; a
+    # value outside it is counted UNKNOWN_VALUE and named in the term row's `unknown_fields`.
+    term_vocabulary: TermVocabularyKind | None = None
 
 
 @dataclass(frozen=True)
@@ -223,11 +237,17 @@ class ProjectionSpec:
     # Phase 31 (projector v2, D-57): fields whose absence is counted (`missing_values` in the
     # summary). Empty for every projector 1 spec, whose summary is unchanged.
     missing_counted: frozenset[str] = frozenset()
+    # Phase 32 (projector v3, D-61 §2): the rate-terms fields, projected into the
+    # `instrument_term_version` side table (one row per consistent version). Empty for every
+    # projector 1 and 2 spec, whose rows and summary are unchanged.
+    term_columns: tuple[Column, ...] = ()
 
     @property
     def mapped_fields(self) -> frozenset[str]:
         keys = {self.business_key, *([self.instrument_key] if self.instrument_key else [])}
-        return frozenset(keys | {c.field for c in self.columns})
+        return frozenset(
+            keys | {c.field for c in self.columns} | {c.field for c in self.term_columns}
+        )
 
 
 PROJECTION_SPECS: dict[DomainSchemaCode, ProjectionSpec] = {
@@ -509,3 +529,151 @@ IDENTITY_SOURCE_SCHEMAS: dict[DomainSchemaCode, IdentitySourceKind] = {
     DomainSchemaCode.CASHFLOW_EVENT: IdentitySourceKind.CASHFLOW_EVENT,
     DomainSchemaCode.CREDIT_EXPOSURE: IdentitySourceKind.CREDIT_EXPOSURE,
 }
+
+
+# --- Phase 32: rate terms, effective dating, currency and FX reference (D-61) ---------------
+# CHECK-constrained by migration 0031 (frozen copies there, kept equal by the Phase 32 folds).
+
+
+class TermNote(StrEnum):
+    """Value-free projection counts of the rate-terms projector (D-61 §3, §4)."""
+
+    # FIXED with a reference index, FLOATING with no reset frequency, or floor > cap: no term
+    # row is written; the instrument version still is (D-29 §2), and the values stay in the
+    # canonical record.
+    TERMS_INCONSISTENT = "TERMS_INCONSISTENT"
+    # A term value outside its seeded PROVISIONAL vocabulary: kept as given text, counted in
+    # the summary's `unknown_values` and named in the row's `unknown_fields` (D-29 §5).
+    UNKNOWN_VALUE = "UNKNOWN_VALUE"
+
+
+class RateType(StrEnum):
+    """The two seeded RATE_TYPE codes the consistency rules name (D-61 §3-4)."""
+
+    FIXED = "FIXED"
+    FLOATING = "FLOATING"
+
+
+class ConsolidationStatus(StrEnum):
+    """D-61 §6: FX consolidation is blocked until a client-approved rate source, rate types,
+    reporting currency and conversion method exist (client hard stop)."""
+
+    BLOCKED = "BLOCKED"
+
+
+FX_CONSOLIDATION_REASON: Final = "fx_policy_not_approved"
+TERM_VOCABULARY_SEED_TAG = "0031_term_vocabulary"
+CURRENCY_SEED_TAG = "0031_currencies"
+
+# D-61 §3: (vocabulary, code) -> name, seeded PROVISIONAL / ILLUSTRATIVE for the default tenant
+# by 0031 (a frozen copy there). Frequencies are ISO-8601 periods. No reference index.
+SEEDED_TERM_VOCABULARY: dict[tuple[TermVocabularyKind, str], str] = {
+    (TermVocabularyKind.RATE_TYPE, "FIXED"): "Fixed rate",
+    (TermVocabularyKind.RATE_TYPE, "FLOATING"): "Floating rate",
+    (TermVocabularyKind.DAY_COUNT, "ACT_360"): "Actual/360",
+    (TermVocabularyKind.DAY_COUNT, "ACT_365F"): "Actual/365 Fixed",
+    (TermVocabularyKind.DAY_COUNT, "30_360"): "30/360",
+    (TermVocabularyKind.DAY_COUNT, "ACT_ACT"): "Actual/Actual",
+    (TermVocabularyKind.FREQUENCY, "P1M"): "Monthly",
+    (TermVocabularyKind.FREQUENCY, "P3M"): "Quarterly",
+    (TermVocabularyKind.FREQUENCY, "P6M"): "Semi-annual",
+    (TermVocabularyKind.FREQUENCY, "P1Y"): "Annual",
+    (TermVocabularyKind.LIFECYCLE_STATE, "ACTIVE"): "Active",
+    (TermVocabularyKind.LIFECYCLE_STATE, "MATURED"): "Matured",
+    (TermVocabularyKind.LIFECYCLE_STATE, "PREPAID"): "Prepaid",
+    (TermVocabularyKind.LIFECYCLE_STATE, "RESTRUCTURED"): "Restructured",
+    (TermVocabularyKind.LIFECYCLE_STATE, "DEFAULTED"): "Defaulted",
+}
+# D-61 §6: the ISO 4217 codes the synthetic samples use, seeded PROVISIONAL for the default
+# tenant by 0031 (a frozen copy there): code -> (name, minor units). Reference only: nothing
+# converts between them.
+SEEDED_CURRENCIES: dict[str, tuple[str, int]] = {
+    "CHF": ("Swiss franc", 2),
+    "EUR": ("Euro", 2),
+    "GBP": ("Pound sterling", 2),
+    "USD": ("US dollar", 2),
+}
+
+# INSTRUMENT_RATE_TERMS (D-61 §1, published as D-57 §3): the typed-maturity contract with
+# eleven optional fields appended. FROZEN: the fields in order, as the proposal body's
+# `fields`. Proposed through the governed path only (never by a migration or the default seed).
+INSTRUMENT_RATE_TERMS: tuple[dict[str, object], ...] = (
+    *INSTRUMENT_TYPED_MATURITY,
+    _typed_field(
+        "rate_type", "STRING", False, "internal", description="FIXED or FLOATING (PROVISIONAL)."
+    ),
+    _typed_field(
+        "reference_index", "STRING", False, "internal", description="As given; none is seeded."
+    ),
+    _typed_field("spread", "DECIMAL", False, "internal", unit="percent", precision=11, scale=6),
+    _typed_field(
+        "reset_frequency", "STRING", False, "internal", description="ISO-8601 period, e.g. P3M."
+    ),
+    _typed_field("next_reset_date", "DATE", False, "internal"),
+    _typed_field("cap_rate", "DECIMAL", False, "internal", unit="percent", precision=11, scale=6),
+    _typed_field("floor_rate", "DECIMAL", False, "internal", unit="percent", precision=11, scale=6),
+    _typed_field(
+        "day_count", "STRING", False, "internal", description="ACT_360, ACT_365F, 30_360, ACT_ACT."
+    ),
+    _typed_field("payment_frequency", "STRING", False, "internal", description="ISO-8601 period."),
+    _typed_field(
+        "effective_from", "DATE", False, "internal", description="Business effective date."
+    ),
+    _typed_field(
+        "lifecycle_state",
+        "STRING",
+        False,
+        "internal",
+        description="ACTIVE, MATURED, PREPAID, RESTRUCTURED or DEFAULTED.",
+    ),
+)
+# contract_sha256(INSTRUMENT_RATE_TERMS), frozen (a test recomputes it).
+INSTRUMENT_RATE_TERMS_SHA256 = "be741da6027db34cb839773557fc119def118dacc2b05ae5978a97877111f749"
+INSTRUMENT_RATE_TERMS_TITLE = (
+    "Rate terms, effective date and lifecycle (INSTRUMENT_RATE_TERMS, D-61)"
+)
+
+PROJECTOR_V3 = 3
+# The rate-terms fields, as `instrument_term_version` columns (same names). STRING vocabulary
+# fields are kept as given (never NULLed for an unknown value).
+TERM_COLUMNS: tuple[Column, ...] = (
+    Column("rate_type", "rate_type", ColumnKind.TEXT, term_vocabulary=TermVocabularyKind.RATE_TYPE),
+    Column("reference_index", "reference_index", ColumnKind.TEXT),
+    Column("spread", "spread", ColumnKind.DECIMAL),
+    Column(
+        "reset_frequency",
+        "reset_frequency",
+        ColumnKind.TEXT,
+        term_vocabulary=TermVocabularyKind.FREQUENCY,
+    ),
+    Column("next_reset_date", "next_reset_date", ColumnKind.DATE),
+    Column("cap_rate", "cap_rate", ColumnKind.DECIMAL),
+    Column("floor_rate", "floor_rate", ColumnKind.DECIMAL),
+    Column("day_count", "day_count", ColumnKind.TEXT, term_vocabulary=TermVocabularyKind.DAY_COUNT),
+    Column(
+        "payment_frequency",
+        "payment_frequency",
+        ColumnKind.TEXT,
+        term_vocabulary=TermVocabularyKind.FREQUENCY,
+    ),
+    Column("effective_from", "effective_from", ColumnKind.DATE),
+    Column(
+        "lifecycle_state",
+        "lifecycle_state",
+        ColumnKind.TEXT,
+        term_vocabulary=TermVocabularyKind.LIFECYCLE_STATE,
+    ),
+)
+# Projector v3 (D-61 §1-2): projector v2's instrument columns and counts unchanged, plus one
+# `instrument_term_version` row per version whose terms are consistent.
+INSTRUMENT_SPEC_V3 = ProjectionSpec(
+    DomainSchemaCode.INSTRUMENT,
+    business_key="instrument_id",
+    instrument_key=None,
+    columns=INSTRUMENT_SPEC_V2.columns,
+    schema_versions=frozenset(),  # matched by contract hash only
+    attributes=True,
+    missing_counted=INSTRUMENT_SPEC_V2.missing_counted,
+    term_columns=TERM_COLUMNS,
+)
+INSTRUMENT_SPECS_BY_HASH[INSTRUMENT_RATE_TERMS_SHA256] = (PROJECTOR_V3, INSTRUMENT_SPEC_V3)

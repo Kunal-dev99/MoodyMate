@@ -2387,6 +2387,24 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
      in the result `context`. There is no conversion code. **The rate source, rate types,
      reporting currency and conversion method are a client hard stop.**
   7. Bond attributes and deposit classes are deferred (client).
+- **Amendment (2026-10-24, Phase 32 build, auto-resolved):** §3, §4 and §5 made precise.
+  - **§3/§4 (Q3).** An inconsistent record's term values, unknown ones included, are counted
+    only as `TERMS_INCONSISTENT`, never as `UNKNOWN_VALUE`. Under §4 no term row is written, so
+    none of its values is "kept as text" as a term value. Each rate-terms record lands in
+    exactly one count: a term row (its unknown fields counted in `unknown_values` and named in
+    `unknown_fields`) or `TERMS_INCONSISTENT` (its values stay in the canonical record, reached
+    through lineage, D-29 §4). `ProjectionSummary.terms_inconsistent` says so.
+  - **§5 (Q4, Q10; review MEDIUM 1).** `effective_from` is stored on the term row only.
+    - A version with no term row (`TERMS_INCONSISTENT`) reads `effective_from: null` and is
+      never an `?effective_on=` candidate. Its stated date stays in the canonical record; it is
+      not typed at read time.
+    - Fail closed (D-04, D-33): `effective_version_id` is null whenever any version on the
+      rate-terms contract has no term row, or has an `effective_from` the caller is not cleared
+      for, because either date could change the pick. Another version is never picked silently.
+      This is stricter than skipping such versions and supersedes the Q5 note of the same day.
+    - The pick only names a version. The `versions` list is never filtered or reordered, and
+      no "current" is defined. The business date of a version with inconsistent terms joins the
+      client's business-date item (D-29 §3).
 
 ## D-62 Deployment and observability surfaces
 

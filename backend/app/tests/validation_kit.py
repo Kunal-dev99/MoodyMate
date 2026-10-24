@@ -62,7 +62,11 @@ F03_MANIFEST_KEYS = {
     "assumption_set",
     "labels",
 }
-CONTEXT_KEYS = {"units", "currency", "as_of_date", "methodology", "validation_status", "statement"}
+# Phase 32 (BE-32.4, D-61 §6): `consolidation` is BLOCKED on every result read.
+CONTEXT_KEYS = {
+    "units", "currency", "as_of_date", "methodology", "validation_status", "statement",
+    "consolidation",
+}  # fmt: skip
 # Frozen per module code: the exact `context.units` strings, quoted verbatim in the units
 # section of docs/methodology/{maturity_ladder,lcr_hqla,scenario_overlay}.md (a comparison
 # reads its baseline run's module, maturity_ladder).
@@ -163,6 +167,7 @@ def expected_context(detail: Mapping[str, Any]) -> dict[str, Any]:
         },
         "validation_status": ILLUSTRATIVE,
         "statement": ILLUSTRATIVE_STATEMENT,
+        "consolidation": "BLOCKED",
     }
 
 

@@ -35,6 +35,7 @@ const RULE_B = { rule_code: 'maturity_buckets', rule_version_id: '22222222-2222-
 
 const context = (over: Partial<ResultContext> = {}): ResultContext => ({
   as_of_date: '2026-12-31',
+  consolidation: 'BLOCKED',
   currency: { basis: 'PER_CURRENCY_NO_FX', codes: ['EUR', 'USD'] },
   methodology: { module_code: 'maturity_ladder', module_version: 1, engine_version: 'mm-calc 1.0', rule_versions: [RULE_A, RULE_B] },
   units: { amount: 'exact decimal text in the row currency', days: 'calendar days after the reporting date', ratio: null },
@@ -96,7 +97,8 @@ describe('validation status follows the API enum (FE-30.1, D-56)', () => {
     for (const name of ['ModuleVersionOut', 'RunSummary', 'RunDetail', 'MaturityLadderOut', 'LiquidityOut', 'ScenarioComparisonOut', 'ResultPage'])
       expect(schema(name).required, name).toContain('validation_status')
     for (const name of ['RunDetail', 'ResultPage', 'MaturityLadderOut', 'LiquidityOut', 'ScenarioComparisonOut']) expect(schema(name).required, name).toContain('context')
-    expect([...schema('ResultContext').required].sort()).toEqual(['as_of_date', 'currency', 'methodology', 'statement', 'units', 'validation_status'])
+    // BE-32.4 (D-61 §6) adds `consolidation: "BLOCKED"` to the block.
+    expect([...schema('ResultContext').required].sort()).toEqual(['as_of_date', 'consolidation', 'currency', 'methodology', 'statement', 'units', 'validation_status'])
   })
 })
 

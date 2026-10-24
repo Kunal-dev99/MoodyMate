@@ -3056,6 +3056,61 @@
         "title": "CsvDelimiter",
         "type": "string"
       },
+      "CurrencyList": {
+        "properties": {
+          "items": {
+            "description": "The caller's tenant's currencies, by code.",
+            "items": {
+              "$ref": "#/components/schemas/CurrencyOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "CurrencyList",
+        "type": "object"
+      },
+      "CurrencyOut": {
+        "properties": {
+          "code": {
+            "description": "ISO 4217 alphabetic code.",
+            "title": "Code",
+            "type": "string"
+          },
+          "minor_units": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO 4217 minor units (decimal places).",
+            "title": "Minor Units"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "provisional": {
+            "description": "A tagged PROVISIONAL seed (`0031_currencies`, D-61 \u00a76, D-11).",
+            "title": "Provisional",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "minor_units",
+          "provisional"
+        ],
+        "title": "CurrencyOut",
+        "type": "object"
+      },
       "DataClass": {
         "description": "D-14/D-16 \u00a75: the class of data an import was uploaded as (the environment's).",
         "enum": [
@@ -4023,6 +4078,35 @@
           "selector"
         ],
         "title": "FundingUnavailableShock",
+        "type": "object"
+      },
+      "FxConsolidationStatusOut": {
+        "description": "D-61 \u00a76: FX consolidation is blocked. There is no conversion code and no FX write route;\nthe rate source, rate types, reporting currency and conversion method are a client\ndecision.",
+        "properties": {
+          "observation_count": {
+            "description": "FX rate observations stored for the caller's tenant (append-only; none are used by any calculation).",
+            "title": "Observation Count",
+            "type": "integer"
+          },
+          "reason_code": {
+            "const": "fx_policy_not_approved",
+            "description": "`fx_policy_not_approved`: no approved rate source or conversion policy.",
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "status": {
+            "const": "BLOCKED",
+            "description": "Always BLOCKED until a client-approved FX policy exists.",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "reason_code",
+          "observation_count"
+        ],
+        "title": "FxConsolidationStatusOut",
         "type": "object"
       },
       "HealthResponse": {
@@ -5459,6 +5543,32 @@
             "title": "Created At",
             "type": "string"
           },
+          "effective_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The `?effective_on=` business date asked for, echoed; null without it.",
+            "title": "Effective On"
+          },
+          "effective_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "With `?effective_on=`: the version with the latest `effective_from` on or before that date, picked by business date, not by import order (ties: the higher version). Only versions whose `effective_from` the caller is cleared for take part; a version with no term row (TERMS_INCONSISTENT) shows a null `effective_from` and is not a candidate. Null without the parameter, when no version is effective by then, or when the pick cannot be determined (fail closed): some version of the rate-terms contract (`terms_typed`) has no term row or an `effective_from` the caller is not cleared for, either of which could change the pick. This is a read aid only: runs pin snapshots (D-30) and no 'current' is defined (D-61 \u00a75).",
+            "title": "Effective Version Id"
+          },
           "instrument_id": {
             "format": "uuid",
             "title": "Instrument Id",
@@ -5488,7 +5598,9 @@
           "source_id",
           "source_code",
           "created_at",
-          "versions"
+          "versions",
+          "effective_on",
+          "effective_version_id"
         ],
         "title": "InstrumentDetail",
         "type": "object"
@@ -5626,6 +5738,215 @@
         "title": "InstrumentSummary",
         "type": "object"
       },
+      "InstrumentTermsOut": {
+        "description": "D-61 \u00a71-\u00a74: the typed rate terms of one instrument version (its `instrument_term_version`\nrow, written only when the terms are consistent). Values are masked by the classification\nof the schema field they were projected from. Vocabulary values not in the seeded\nPROVISIONAL vocabularies are kept as given text and named in `unknown_fields`.",
+        "properties": {
+          "cap_rate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Exact decimal text (11,6), in `rate_unit`.",
+            "title": "Cap Rate"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "day_count": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ACT_360, ACT_365F, 30_360 or ACT_ACT, or as given.",
+            "title": "Day Count"
+          },
+          "floor_rate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Exact decimal text (11,6), in `rate_unit`.",
+            "title": "Floor Rate"
+          },
+          "lifecycle_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ACTIVE, MATURED, PREPAID, RESTRUCTURED or DEFAULTED, or as given.",
+            "title": "Lifecycle State"
+          },
+          "next_reset_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO date.",
+            "title": "Next Reset Date"
+          },
+          "payment_frequency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO-8601 period, or as given.",
+            "title": "Payment Frequency"
+          },
+          "provisional": {
+            "description": "The term vocabularies are PROVISIONAL seeds (D-61 \u00a73, D-11).",
+            "title": "Provisional",
+            "type": "boolean"
+          },
+          "rate_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "FIXED or FLOATING (PROVISIONAL), or as given.",
+            "title": "Rate Type"
+          },
+          "rate_unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The unit of `spread`, `cap_rate` and `floor_rate` from the pinned schema.",
+            "title": "Rate Unit"
+          },
+          "reference_index": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "As given: no reference index is seeded (D-61 \u00a73).",
+            "title": "Reference Index"
+          },
+          "reset_frequency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO-8601 period (P1M, P3M, P6M, P1Y).",
+            "title": "Reset Frequency"
+          },
+          "spread": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Exact decimal text (11,6), in `rate_unit`.",
+            "title": "Spread"
+          },
+          "term_version_id": {
+            "format": "uuid",
+            "title": "Term Version Id",
+            "type": "string"
+          },
+          "unknown_fields": {
+            "description": "Term fields whose value is not in the seeded vocabulary (kept as text, counted UNKNOWN_VALUE). Field names only, never values.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Unknown Fields",
+            "type": "array"
+          }
+        },
+        "required": [
+          "term_version_id",
+          "rate_type",
+          "reference_index",
+          "spread",
+          "reset_frequency",
+          "next_reset_date",
+          "cap_rate",
+          "floor_rate",
+          "day_count",
+          "payment_frequency",
+          "lifecycle_state",
+          "rate_unit",
+          "unknown_fields",
+          "provisional",
+          "created_at"
+        ],
+        "title": "InstrumentTermsOut",
+        "type": "object"
+      },
       "InstrumentTypeOut": {
         "properties": {
           "code": {
@@ -5687,10 +6008,31 @@
             ],
             "title": "Currency"
           },
+          "effective_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The business date the version is effective from (ISO date, D-61 \u00a75), kept apart from `imported_at`; empty when the pinned contract has no such field. Null, too, for a version with no term row (TERMS_INCONSISTENT: `terms_typed` true, `terms` null), whose date is not stored: it is not an `?effective_on=` candidate, and the pick is then undetermined (`effective_version_id` null, fail closed).",
+            "title": "Effective From"
+          },
           "import_id": {
             "description": "The import this version was projected from.",
             "format": "uuid",
             "title": "Import Id",
+            "type": "string"
+          },
+          "imported_at": {
+            "description": "When the import this version came from was created (system time).",
+            "format": "date-time",
+            "title": "Imported At",
             "type": "string"
           },
           "instrument_type": {
@@ -5815,6 +6157,22 @@
             "title": "Source Record Id",
             "type": "string"
           },
+          "terms": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InstrumentTermsOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The typed rate terms; null when the contract has none or the terms were inconsistent (TERMS_INCONSISTENT: FIXED with an index, FLOATING with no reset, or floor > cap)."
+          },
+          "terms_typed": {
+            "description": "The pinned schema version is the INSTRUMENT_RATE_TERMS contract (projector v3, D-61 \u00a71).",
+            "title": "Terms Typed",
+            "type": "boolean"
+          },
           "version": {
             "title": "Version",
             "type": "integer"
@@ -5845,6 +6203,10 @@
           "interest_rate_unit",
           "maturity_date",
           "maturity_typed",
+          "effective_from",
+          "imported_at",
+          "terms_typed",
+          "terms",
           "attributes",
           "cash_flows"
         ],
@@ -9191,6 +9553,30 @@
             "title": "Rows Projected",
             "type": "integer"
           },
+          "term_rows": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Projector 3 only (the rate-terms instrument contract, D-61): the `instrument_term_version` rows written, one per version whose terms are consistent. Absent for projectors 1 and 2, whose summaries are unchanged.",
+            "title": "Term Rows"
+          },
+          "terms_inconsistent": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Projector 3 only: TERMS_INCONSISTENT, the records whose terms are inconsistent (FIXED with a reference index, FLOATING with no reset frequency, or floor > cap). Their instrument version is written; no term row is (D-61 \u00a74). Those records' term values, unknown ones included, are not counted in `unknown_values` and stay in the canonical record.",
+            "title": "Terms Inconsistent"
+          },
           "type_not_projected": {
             "additionalProperties": {
               "type": "integer"
@@ -10004,6 +10390,12 @@
             "title": "As Of Date",
             "type": "string"
           },
+          "consolidation": {
+            "const": "BLOCKED",
+            "description": "D-61 \u00a76 (Phase 32): FX consolidation is blocked until an approved rate source and conversion policy exist; results are per currency only.",
+            "title": "Consolidation",
+            "type": "string"
+          },
           "currency": {
             "$ref": "#/components/schemas/ContextCurrency"
           },
@@ -10028,7 +10420,8 @@
           "as_of_date",
           "methodology",
           "validation_status",
-          "statement"
+          "statement",
+          "consolidation"
         ],
         "title": "ResultContext",
         "type": "object"
@@ -16625,6 +17018,53 @@
         ]
       }
     },
+    "/api/v1/currencies": {
+      "get": {
+        "description": "The caller's tenant's currency reference: a tagged PROVISIONAL seed (`0031_currencies`,\nD-61 \u00a76) of the codes the synthetic samples use. Reference only: no conversion.",
+        "operationId": "listCurrencies",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrencyList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Currencies",
+        "tags": [
+          "domain"
+        ]
+      }
+    },
     "/api/v1/dataset-snapshots": {
       "get": {
         "description": "The caller's tenant's snapshots, newest first.",
@@ -16983,6 +17423,53 @@
         "summary": "Review Drift Event",
         "tags": [
           "mapping"
+        ]
+      }
+    },
+    "/api/v1/fx/consolidation-status": {
+      "get": {
+        "description": "FX consolidation is BLOCKED (`fx_policy_not_approved`, D-61 \u00a76) until a client-approved\nrate source, rate types, reporting currency and conversion method exist. The count is of\nthe tenant's stored observations, none of which any calculation reads.",
+        "operationId": "getFxConsolidationStatus",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FxConsolidationStatusOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Fx Consolidation Status",
+        "tags": [
+          "domain"
         ]
       }
     },
@@ -17935,7 +18422,7 @@
         ]
       },
       "post": {
-        "description": "Project a validated import's accepted rows into immutable domain versions (D-29):\none instrument version, position version or cash-flow event per canonical record, each\nkeeping lineage to it. 409 `projection_unsupported` for another schema (or schema\nversion, or an instrument contract matching no projector by hash; also the typed-maturity\ncontract while INSTRUMENT_PROJECTOR_V2_ENABLED is off, D-57), 409 `not_validated` before\nvalidation (or for a FAILED import), 409 `domain_projection_disabled` while the switch is\noff; each refusal is audited DENIED. Position, cash-flow and credit-exposure rows are\nlinked to their identities in the same transaction while IDENTITY_LINKS_ENABLED is on\n(D-58 \u00a74).",
+        "description": "Project a validated import's accepted rows into immutable domain versions (D-29):\none instrument version, position version or cash-flow event per canonical record, each\nkeeping lineage to it. 409 `projection_unsupported` for another schema (or schema\nversion, or an instrument contract matching no projector by hash; also the typed-maturity\ncontract while INSTRUMENT_PROJECTOR_V2_ENABLED is off, D-57, and the rate-terms contract\nwhile INSTRUMENT_TERMS_PROJECTION_ENABLED is off, D-61), 409 `not_validated` before\nvalidation (or for a FAILED import), 409 `domain_projection_disabled` while the switch is\noff; each refusal is audited DENIED. Position, cash-flow and credit-exposure rows are\nlinked to their identities in the same transaction while IDENTITY_LINKS_ENABLED is on\n(D-58 \u00a74).",
         "operationId": "projectImport",
         "parameters": [
           {
@@ -18287,7 +18774,7 @@
     },
     "/api/v1/instruments/{instrument_id}": {
       "get": {
-        "description": "One instrument: every version (oldest first) with its attributes, import, source row\nordinal, canonical record and the cash flows naming its business key.",
+        "description": "One instrument: every version (oldest first) with its attributes, import, source row\nordinal, canonical record, rate terms, business-effective date beside its import time, and\nthe cash flows naming its business key.",
         "operationId": "getInstrument",
         "parameters": [
           {
@@ -18298,6 +18785,25 @@
               "format": "uuid",
               "title": "Instrument Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "A business date (D-61 \u00a75): `effective_version_id` names the version with the latest `effective_from` on or before it, not the latest import.",
+            "in": "query",
+            "name": "effective_on",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A business date (D-61 \u00a75): `effective_version_id` names the version with the latest `effective_from` on or before it, not the latest import.",
+              "title": "Effective On"
             }
           }
         ],
