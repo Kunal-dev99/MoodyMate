@@ -2055,7 +2055,7 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
 
 ## D-52 Canonical JSON hashing policy and legacy compatibility
 
-- **Status:** proposed (Feature 06, 2026-10-24)
+- **Status:** accepted (user, 2026-10-24; D-63) (Feature 06, proposed 2026-10-24)
 - **Context:** hashes are built in about 14 places with three different settings. Seven sites
   use `ensure_ascii=False` (sorted, compact). Five use the default `ensure_ascii=True`: the
   source contract, the import fingerprint, the import manifest, the profile rules and the schema
@@ -2116,7 +2116,7 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
 
 ## D-53 Rate limits on expensive endpoints
 
-- **Status:** proposed (Feature 06, 2026-10-24; Phase 28 brief BE-28.3)
+- **Status:** accepted (user, 2026-10-24; D-63) (Feature 06, proposed 2026-10-24; Phase 28 brief BE-28.3)
 - **Decision (proposed):**
   1. **Scope.** `POST imports`, `POST imports/{id}/validate`, `GET scenarios/{id}/versions/{v}/
      validation`, `POST calculation-runs` and `POST scenarios/{id}/run`.
@@ -2139,7 +2139,7 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
 
 ## D-54 Security headers and CSP rollout
 
-- **Status:** proposed (Feature 06, 2026-10-24; Phase 28 brief BE-28.2, FE-28.5). §5 is a
+- **Status:** accepted (user, 2026-10-24; D-63) (Feature 06, proposed 2026-10-24; Phase 28 brief BE-28.2, FE-28.5). §5 is a
   **hard stop**.
 - **Decision (proposed):**
   1. **Backend middleware**, on every response including error envelopes:
@@ -2160,7 +2160,7 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
 
 ## D-55 Next.js 15.5.28 / React 19 upgrade and the dependency-advisory policy
 
-- **Status:** proposed (Feature 06, 2026-10-24; Phase 28 brief FE-28.1, FE-28.2, BE-28.1,
+- **Status:** accepted (user, 2026-10-24; D-63) (Feature 06, proposed 2026-10-24; Phase 28 brief FE-28.1, FE-28.2, BE-28.1,
   FE-28.3). §4 owners are a **hard stop**.
 - **Decision (proposed):**
   1. **Pins.** `next` and `eslint-config-next` are pinned exactly at 15.5.28. `react` and
@@ -2190,7 +2190,7 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
 
 ## D-56 Calculation validation-status taxonomy
 
-- **Status:** proposed (Feature 06, 2026-10-24). §3 and §6 are **hard stops**.
+- **Status:** accepted (user, 2026-10-24; D-63) (Feature 06, proposed 2026-10-24). §3 and §6 are **hard stops**.
 - **Decision (proposed):**
   1. **The values** are `ILLUSTRATIVE | INTERNAL_VALIDATED | REGULATORY_VALIDATED`. Every
      current module version is ILLUSTRATIVE, consistent with `illustrative = true`.
@@ -2235,7 +2235,7 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
 
 ## D-57 Typed-maturity instrument contract and projector v2
 
-- **Status:** proposed (Feature 06, 2026-10-24)
+- **Status:** accepted (user, 2026-10-24; D-63) (Feature 06, proposed 2026-10-24)
 - **Context:**
   - The seeded `instrument` v2 DRAFT is the BE-4.3/FE-4.2 diff fixture. Besides DATE maturity
     and scale-6 interest_rate, it removes `legacy_book_code`, requires `product_family` and adds
@@ -2293,7 +2293,7 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
 
 ## D-58 Identity links rather than FK columns on append-only rows
 
-- **Status:** proposed (Feature 06, 2026-10-24)
+- **Status:** accepted (user, 2026-10-24; D-63) (Feature 06, proposed 2026-10-24)
 - **Context:** domain rows are append-only (D-29 §6). An FK column would need UPDATEs on
   history, which are refused, or leave history NULL. Cross-references resolve by business key
   per snapshot (D-30 §4).
@@ -2331,7 +2331,7 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
 
 ## D-59 Background execution compatible with the existing run contract
 
-- **Status:** proposed (Feature 06, 2026-10-24)
+- **Status:** accepted (user, 2026-10-24; D-63) (Feature 06, proposed 2026-10-24)
 - **Decision (proposed):**
   1. **Pool.** A bounded process pool (`CALC_WORKERS`, `CALC_WORKER_QUEUE_MAX`) runs the pure
      module `run()`. Pins, DB reads and writes stay in the API process. The switch is
@@ -2402,7 +2402,7 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
 
 ## D-60 Test budget after Feature 06 (amends D-26)
 
-- **Status:** proposed (Feature 06, 2026-10-24).
+- **Status:** accepted (user, 2026-10-24; D-63) (Feature 06, proposed 2026-10-24).
   - Removing the under-50 cap is **user-authorised** by the uploaded hardening plan §11
     (Workstream G: "Remove the arbitrary test-function cap or use parametrized cases so failures
     are isolated and parallelizable").
@@ -2422,7 +2422,7 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
 
 ## D-61 Rate terms, effective dating, lifecycle vocabulary and currency/FX reference
 
-- **Status:** proposed (Feature 06, 2026-10-24). §6 is a **hard stop**.
+- **Status:** accepted (user, 2026-10-24; D-63) (Feature 06, proposed 2026-10-24). §6 is a **hard stop**.
 - **Decision (proposed):**
   1. **Contract.** `INSTRUMENT_RATE_TERMS` is the typed-maturity contract plus optional fields:
      `rate_type`, `reference_index`, `spread`, `reset_frequency`, `next_reset_date`,
@@ -2469,7 +2469,7 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
 
 ## D-62 Deployment and observability surfaces
 
-- **Status:** proposed (Feature 06, 2026-10-24). §4 is a **hard stop**.
+- **Status:** accepted (user, 2026-10-24; D-63) (Feature 06, proposed 2026-10-24). §4 is a **hard stop**.
 - **Decision (proposed):**
   1. **Health.**
      - `GET /api/v1/health/live` does no I/O.
@@ -2531,3 +2531,53 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
 
 
 **Coordinator ruling (2026-10-24), D-57:** option B adopted (auto-resolved, safer default). The seeded instrument v2 DRAFT stays the Phase 4 diff fixture; Phase 31 proposes a code-frozen contract (v1 + `maturity_date` DATE + `interest_rate` 11,6) through the existing governed path, published per tenant at runtime, never by migration or default seed.
+
+## D-63 User rulings on the Feature 06 hard stops
+
+- **Status:** active (user, 2026-10-24: "accept all recommendations").
+- **Context:** the end-of-phase reports for Phases 28 to 34 listed items for the user. The
+  coordinator put each one to the user with options and a recommendation, and the user accepted
+  every recommendation. The client-owned items stay open and are listed in §8.
+- **Decision:**
+  1. **D-52 to D-62 are accepted as built,** with their amendments to date. Each keeps its
+     off switch (D-02). D-56 §3 (promotion of a validation status, and who may approve it) and
+     §6 (client-owned methodology) stay hard stops. **D-62 §1:** `GET /api/v1/health/live` and
+     `GET /api/v1/health/ready` stay public (`PUBLIC_PATHS`). They return only fixed check
+     names and ok/fail, and a load balancer cannot log in.
+  2. **FX (D-61 §6):** no default is chosen. Consolidation stays BLOCKED
+     (`fx_policy_not_approved`) until the client chooses the rate source, rate types,
+     reporting currency and conversion method. That policy will then be built as governed,
+     versioned methodology data with maker-checker approval (the D-32 pattern), with an
+     audited observation write route.
+  3. **Error tracker (D-62 §4):** none for the pilot. Operations rely on the JSON logs and
+     correlation ids, and `ERROR_TRACKER_DSN` stays unset. When client data is involved, a
+     self-hosted Sentry-compatible tracker (Sentry or GlitchTip) is the preferred next step,
+     behind `ERROR_TRACKER_DSN`, after a new decision.
+  4. **Frontend advisories (D-55 §4):** the four moderate build-time Tailwind 3 toolchain
+     advisories in `docs/security/ADVISORIES.md` are owned by the **frontend lead** (role).
+     They are accepted until the Tailwind 4 upgrade, and reviewed by the date in the register
+     (2026-11-23).
+  5. **Production security settings.**
+     - **CSP (D-54):** stays Content-Security-Policy-Report-Only in production for 2 to 4 weeks.
+       The reports are reviewed, then enforcement is a separate, recorded step.
+     - **Rate limits (D-53):** the current defaults are kept for the pilot: burst 5 and 10 per
+       minute on imports, validation, scenario validation and calculation runs; burst 3 and 5
+       per minute on scenario runs. They are tuned from real usage. A shared limit store
+       (D-53 §5) is still needed before more than one API instance.
+  6. **Methodology (D-56):** every module stays ILLUSTRATIVE until SME review. No module is
+     promoted to INTERNAL_VALIDATED or REGULATORY_VALIDATED, and no approver is named yet.
+  7. **The sweeper's cross-tenant read** (the D-04 amendment, Phase 33 Q9) is kept as a named
+     exception: it is a system job that no request can reach, and its guarded update makes
+     one terminal move per run.
+  8. **Client-owned, open before production:**
+     - the supported size and concurrency (D-59 §7);
+     - RPO/RTO targets (`docs/ops/BACKUP_RESTORE.md`) and the proxy addresses
+       (`FORWARDED_ALLOW_IPS`);
+     - the S3-compatible host and bucket, and whether a shared bucket needs per-tenant prefixes;
+     - the source order for a legal-entity code sent by two sources. The accepted approach is
+       a fixed source priority list supplied by the client; until then the key stays
+       `LINK_AMBIGUOUS` (D-58);
+     - retention periods (`docs/RETENTION.md` stays PROVISIONAL);
+     - the FX policy (§2) and the methodology inputs (D-56 §6).
+- **Reversibility:** each ruling is a setting or a status. A later decision can change any of
+  them.
