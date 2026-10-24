@@ -29,10 +29,13 @@ from app.db.session import Database, get_session
 from app.governance.constants import AuditOutcome, ClassificationCode
 from app.governance.service import AccountDenied, IdentityService, audit, audit_by
 
-# Deliberately unauthenticated endpoints. Adding to this set is a security decision.
+# Deliberately unauthenticated endpoints. Adding to this set is a security decision
+# (the health probes are recorded in D-62 §1).
 PUBLIC_PATHS = frozenset(
     {
         "/api/v1/health",
+        "/api/v1/health/live",  # D-62 §1 (BE-34.5)
+        "/api/v1/health/ready",  # D-62 §1 (BE-34.5)
         "/api/v1/auth/config",
         "/api/v1/dev/personas",
         "/api/v1/dev/sessions",

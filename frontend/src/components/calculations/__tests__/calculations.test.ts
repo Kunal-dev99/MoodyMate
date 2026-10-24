@@ -207,6 +207,7 @@ const run = (over: Partial<RunDetail> = {}): RunDetail => ({
   validation_status: 'ILLUSTRATIVE',
   context: {
     as_of_date: '2026-12-31',
+    consolidation: 'BLOCKED',
     currency: { basis: 'PER_CURRENCY_NO_FX', codes: [] },
     methodology: { module_code: 'maturity_ladder', module_version: 1, engine_version: '1', rule_versions: [] },
     units: { amount: 'exact decimal text', days: 'calendar days after the reporting date', ratio: null },

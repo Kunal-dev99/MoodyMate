@@ -139,7 +139,7 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, default=str)
 
 
-def configure_logging(level: str = "INFO") -> None:
+def configure_logging(level: str = "INFO", access_log: bool = False) -> None:
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(JsonFormatter())
     root = logging.getLogger()
@@ -149,6 +149,9 @@ def configure_logging(level: str = "INFO") -> None:
         lg = logging.getLogger(name)
         lg.handlers[:] = []
         lg.propagate = True
+    # BE-34.3 (D-62 §3): with the structured access log on, uvicorn's own access line (the
+    # raw path with its query string) is dropped; off restores it.
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING if access_log else logging.NOTSET)
     # python-multipart's warnings quote positions and byte values of the request body
     # (BE-8.6: no upload content in logs); its errors carry none.
     logging.getLogger("python_multipart").setLevel(logging.ERROR)

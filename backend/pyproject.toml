@@ -19,6 +19,8 @@ dependencies = [
     "defusedxml>=0.7,<0.8",
     # BE-8.4: multipart uploads (POST /imports).
     "python-multipart>=0.0.20,<0.1",
+    # BE-34.4 (D-62 §2): Prometheus metrics, served on an internal listener only.
+    "prometheus-client>=0.21,<1",
 ]
 
 [project.optional-dependencies]

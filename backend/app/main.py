@@ -23,8 +23,11 @@ from app.core.auth import enforce_declared_permission
 from app.core.config import Settings, get_settings
 from app.core.correlation import HEADER, CorrelationIdMiddleware
 from app.core.environment import DATA_CLASS_HEADER, DataClassHeaderMiddleware
+from app.core.error_tracker import configure_error_tracker
 from app.core.errors import register_error_handlers
 from app.core.logging import configure_logging
+from app.core.metrics import MetricsListener, bind_pool
+from app.core.observability import RequestObservabilityMiddleware
 from app.core.ratelimit import RETRY_AFTER, RateLimiter, buckets_from
 from app.core.security_headers import HSTS_ENVS, SecurityHeadersMiddleware
 from app.core.tokens import build_verifier
@@ -33,13 +36,15 @@ from app.db.session import Database
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
-    configure_logging(settings.LOG_LEVEL)
+    configure_logging(settings.LOG_LEVEL, access_log=settings.ACCESS_LOG_ENABLED)
+    configure_error_tracker(settings.ERROR_TRACKER_DSN is not None)  # BE-34.6: a no-op
     # BE-33.4: pool settings (SQLAlchemy's defaults) and the statement timeout.
     db = Database(
         settings.DATABASE_URL,
         server_settings=settings.server_settings,
         **settings.engine_options,
     )
+    bind_pool(db.pool_stats)  # BE-34.4: the pool series read this app's pool
     # BE-33.1: where module runs execute (inline, or the bounded worker pool).
     executor = RunExecutor.from_settings(settings)
     # BE-33.5: the list cursors' signing key (D-59 §6).
@@ -47,6 +52,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        # BE-34.4 (D-62 §2): metrics only on the internal listener, never on this app.
+        listener = MetricsListener(settings) if settings.METRICS_ENABLED else None
+        if listener is not None:
+            await listener.start()
         # BE-33.3: the periodic sweeper of stale RUNNING runs (first pass after an interval).
         sweeper = asyncio.create_task(
             run_sweeper(
@@ -62,6 +71,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             with contextlib.suppress(asyncio.CancelledError):
                 await sweeper
             await executor.aclose()  # background runs end (or are ended), workers stop
+            if listener is not None:
+                await listener.stop()
             await db.dispose()
 
     app = FastAPI(
@@ -76,6 +87,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # D-15: write-once raw artifacts (created on first upload); BE-33.6: filesystem or s3.
     app.state.artifact_store = build_artifact_store(settings)
     app.state.run_executor = executor
+    # BE-34.5: the readiness `workers` check asks a pool; inline needs no entry (D-62 §1).
+    app.state.workers = executor if executor.pooled else None
     # D-53: one limiter per app (per process); None when RATE_LIMIT_ENABLED is off.
     app.state.rate_limiter = (
         RateLimiter(buckets_from(settings)) if settings.RATE_LIMIT_ENABLED else None
@@ -108,4 +121,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(DataClassHeaderMiddleware, data_class=settings.data_class)
     # Outermost as well (BE-28.2, D-54): the same reach as X-Data-Class.
     app.add_middleware(SecurityHeadersMiddleware, hsts=settings.ENV in HSTS_ENVS)
+    # The very outermost (BE-34.3/34.4): it times and logs every answer, preflights and the
+    # 500 envelope included, and reads the correlation id from the response header.
+    app.add_middleware(
+        RequestObservabilityMiddleware,
+        access_log=settings.ACCESS_LOG_ENABLED,
+    )
     return app

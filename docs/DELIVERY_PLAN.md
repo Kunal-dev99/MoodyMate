@@ -4161,13 +4161,17 @@ append-only links. v1 behaviour is unchanged.
     - ~~a ladder run over a typed-instrument snapshot gives the same `result_sha256` as over the
       v1 one~~ reworded 2026-10-24 (Q2, auto-resolved; D-57 amendment), because contributions
       carry `instrument_version_id`, which D-31 §4 hashes:
-      - (a) a run over the v1 snapshot still gives the same `result_sha256` as its pre-phase
-        golden;
+      - (a) a run over the v1 snapshot gives a result document equal to a golden captured on
+        the pre-phase code, after every row id is replaced by its stable business key
+        (instrument, cash flow, rule version, warning entity), and that document's
+        `canonical_sha256` equals the golden's. A literal `result_sha256` can't be a golden,
+        because D-31 §4 hashes row ids, which differ per database. Reworded 2026-10-24,
+        auto-resolved;
       - (b) a typed-snapshot run and a v1-snapshot run give result documents that are equal
         once only `instrument_version_id` is removed from each contribution, with the same
         number of contributions;
       - (c) repeating the run over the same typed snapshot gives an equal `result_sha256`.
-  - *Not yet ticked (2026-10-24, architect):* evidenced in `test_domain.py`: v1 golden summary
+  - *Ticked 2026-10-24 (evidence below):* evidenced in `test_domain.py`: v1 golden summary
     and every `payload_sha256` (`golden_check` :383, `identity_kit.py:72-87`; golden captured
     from the unchanged projector); `TYPE_NOT_PROJECTED` 25 :480; held dates
     `{2030-02-30, 2030-13-01, n/a}` :659-666 and never projected :706; `2030-06-30` stored as
@@ -4175,11 +4179,10 @@ append-only links. v1 behaviour is unchanged.
     `missing_values == {"maturity_date": 1}` :693 (absent from v1, :414); 6 dp exact :709-711;
     matched by hash, not number :637-649 and via the API :676-687; switch off 409 audited DENIED
     :668-675; (b) `run_outputs` equal with instrument version ids replaced by business key
-    :719-741 (`identity_kit.py:311-339`). **Missing:** (c) no repeat run over the typed snapshot
-    is asserted; (a) there is no pre-phase golden of a run's `result_sha256` (the test shows the
-    v1 run's hash equal before and after reconcile, :476-477, which is BE-31.4's check). Test
-    writer: assert (c); for (a), add the golden or send the wording back to the
-    decision-resolver (run hashes depend on per-database row ids).
+    :719-741 (`identity_kit.py:311-339`). (c) repeat typed-snapshot run with equal `result_sha256` :743-751; (a) the v1 run
+    equals `GOLDEN_V1_RUN` by key (status, document, `canonical_sha256` `4bf2ffb6…dfd03`)
+    :437-442 (`identity_kit.py:363-467`, `golden/domain_v1_run.json`, captured on 56dec79);
+    before/after-reconcile equality :485-486 kept. Nothing missing.
 - [x] **BE-31.4** Identity links (D-58). The projection step links its own rows, and
   `POST identity-links/reconcile` links historical rows. Exactly one identity in the tenant
   gives a link. Zero or several give no link and are counted (`LINK_UNRESOLVED`,
@@ -4253,7 +4256,7 @@ Goal: fixed and floating rate terms, business-effective dates and a lifecycle st
 currency reference and an FX observation store exist, and FX consolidation is explicitly
 blocked. There is no conversion code.
 
-- [ ] **BE-32.1** Migration 0031 (D-61): `instrument_term_version` (one row per
+- [x] **BE-32.1** Migration 0031 (D-61): `instrument_term_version` (one row per
   `instrument_version`, append-only), `instrument_term_vocabulary` (RATE_TYPE, DAY_COUNT,
   FREQUENCY and LIFECYCLE_STATE seeded PROVISIONAL; no reference indices seeded), `currency`
   (the codes the synthetic samples use, PROVISIONAL), and `fx_rate_observation` (append-only,
@@ -4264,7 +4267,22 @@ blocked. There is no conversion code.
     - the downgrade refuses while non-seed rows exist;
     - every seed row is tagged;
     - existing shapes are unchanged.
-- [ ] **BE-32.2** `INSTRUMENT_RATE_TERMS` contract: the typed-maturity contract plus optional
+  - *Evidence (2026-10-24, architect-verified):* `0031_rate_terms_currency_fx.py`: append-only
+    and no-truncate triggers on all four tables (0017's `domain_append_only`) :119-125; the
+    three consistency CHECKs :240-250; same-tenant and same-projection insert check :102-116;
+    tagged PROVISIONAL seeds, default tenant only :259-325; downgrade guard :342-359.
+    `test_ws1_verification.py` (`test_migration_round_trip_and_downgrade_guards`): seed tagged
+    and PROVISIONAL, vocabularies exactly D-61 §3, currencies CHF/EUR/GBP/USD :1107, :1146
+    (`terms_kit.py:252-267`); UPDATE, DELETE and TRUNCATE refused on the vocabulary, currency
+    and FX tables :1108, :1125 (`terms_kit.py:270-282`) and on `instrument_term_version`
+    (`test_domain.py:948`); downgrade refused with an unseeded currency and again with an FX
+    observation, revision and counts unchanged :1112-1124; round trip with the shapes of the
+    existing domain, credit and identity tables equal on both sides and the seed restored
+    :1127-1149. `test_domain.py:322-333`: 0031's frozen copies equal the code. CLI round trip
+    on scratch `moodymate_scratch_p32` (dropped): `Running downgrade 0031 -> 0030` / `Running
+    upgrade 0030 -> 0031` / `0031 (head)`; seed tags `0031_term_vocabulary | 15`,
+    `0031_currencies | 4`. After the fix round: `1 passed` (`moodymate_test_p32fix`).
+- [x] **BE-32.2** `INSTRUMENT_RATE_TERMS` contract: the typed-maturity contract plus optional
   `rate_type`, `reference_index`, `spread` (11,6), `reset_frequency`, `next_reset_date`,
   `cap_rate`, `floor_rate`, `day_count`, `payment_frequency`, `effective_from` and
   `lifecycle_state`. It is published as in D-57 §3, and projector v3 matches it by hash.
@@ -4275,12 +4293,33 @@ blocked. There is no conversion code.
       `TERMS_INCONSISTENT`, while the `instrument_version` is still written;
     - an unknown vocabulary value is kept as text and counted `UNKNOWN_VALUE`;
     - the BE-31.3 goldens still hold.
-- [ ] **BE-32.3** Effective dating: reads show `effective_from` (the business date) and
+  - *Evidence (2026-10-24, architect-verified):* `test_domain.py` part 6: the contract is the
+    typed-maturity contract plus the 11 optional fields with the plan's types, its hash frozen
+    as `be741da6…f749` (`constants.py:631`; `terms_kit.py:178-197`) :825; `_spec` matches
+    projector v3 by hash and typed maturity stays on v2 :826-836; published ADDITIVE with a
+    second-person approval, new version ACTIVE and typed maturity DEPRECATED :837-846
+    (`terms_kit.py:200-220`); switched off, 409 `projection_unsupported`, audited DENIED,
+    nothing written :853-862; 6 instrument versions written, `terms_inconsistent == 3`,
+    `unknown_values == {"day_count": 1}`, term rows for RT-FIX, RT-FLT and RT-UNK only
+    :869-875; terms typed in SQL (exact Decimal, DATE, no float; `terms_kit.py:237-249`) and in
+    the read (`EXPECTED_TERMS`, `terms_kit.py:143-170`) :880-898; `ACT_364` kept as text and
+    named in `unknown_fields` :896; the v1 golden still holds (`golden_check` :422) and the
+    projector 2 summary key set is unchanged :817-821. Runs: domain `1 passed` after the fix
+    round; targeted `9 passed` (`moodymate_test_p32b`).
+- [x] **BE-32.3** Effective dating: reads show `effective_from` (the business date) and
   `imported_at` side by side. An optional `?effective_on=` read picks by business date, not by
   import order. Snapshots and runs are unchanged (D-30).
   - *Done-when:* the domain fold covers a later import with an earlier `effective_from`, and
     the snapshot pins are unchanged.
-- [ ] **BE-32.4** `GET currencies` and `GET fx/consolidation-status`, which answers
+  - *Evidence (2026-10-24, architect-verified):* `test_domain.py`: a snapshot pinned before the
+    later import :903-906; RT-FIX's later version shows `imported_at` later and
+    `effective_from` earlier (2025-06-01) :911-915; `?effective_on=` 2026-06-30 picks v1,
+    2025-12-31 picks v2, 2025-01-01 picks none :916-922; RT-FLT's later, inconsistent version
+    reads `effective_from` null and the pick is null on three dates (fail closed, review MEDIUM 1
+    fix, D-61 amendment) :923-932; the pinned snapshot reads back identical :933.
+    `service.py:1131-1161` (`_effective_version`). Mutation: restoring the pre-fix skip fails
+    `test_domain.py:932` (`1 failed`).
+- [x] **BE-32.4** `GET currencies` and `GET fx/consolidation-status`, which answers
   `{status: "BLOCKED", reason_code: "fx_policy_not_approved", observation_count}`. The
   result-read `context` gains `consolidation: "BLOCKED"`. Then the `openapi.json` export and
   `RETENTION.md` rows.
@@ -4289,13 +4328,37 @@ blocked. There is no conversion code.
     - there is no write route for FX (route-list grep);
     - there is no conversion arithmetic in `app/calculations/` (grep);
     - the drift check passes.
-- [ ] **FE-32.1** (`NEXT_PUBLIC_INSTRUMENT_TERMS_UI`) A contract-terms panel with PROVISIONAL
+  - *Evidence (2026-10-24, architect-verified):* `test_ws1_verification.py:290-296`: both
+    routes `domain:read`, 200 for all five roles; no mutating route under fx or currencies
+    :297-303, and the `openapi.json` path list is `/api/v1/currencies ['get']`,
+    `/api/v1/fx/consolidation-status ['get']`; isolation :490-493. `test_domain.py:341`
+    (`calculations_have_no_fx_arithmetic`, `terms_kit.py:289-299`) and the CLI grep of
+    `app/calculations/` (no matches); status exactly `{BLOCKED, fx_policy_not_approved, 0}`
+    and `context.consolidation == "BLOCKED"` on the results and ladder reads :939-946. Routes
+    `domain/router.py:1179-1210` (`DomainReader`), tenant filter `repository.py:435-449`. Drift
+    check after the fix-round re-export: `openapi.json is up to date` (rc=0). **Not in the
+    Done-when and still open:** the `RETENTION.md` rows named in the task text (pre-merge item
+    in `docs/evidence/phase-32/REPORT.md`).
+- [x] **FE-32.1** (`NEXT_PUBLIC_INSTRUMENT_TERMS_UI`) A contract-terms panel with PROVISIONAL
   badges, a versions table with "Effective from" and "Imported at", and on the ladder and LCR
   pages the notice "Per-currency results only; FX consolidation is blocked until an approved
   rate source and conversion policy exist".
   - *Done-when:*
     - vitests cover fixed, floating, absent and unknown terms;
     - a Playwright fold shows the notice on an LCR run.
+  - *Evidence (2026-10-24, architect-verified):* `terms.test.ts`: fixed :108-122, floating
+    :124-134, absent (not in the contract; not written) :136-154, unknown :156-170, masked
+    :172-179; versions table, with the not-written Effective-from text (Q15) :183-211; notice
+    :215-241; switch off restores the Phase 31 panel and summary, nav unchanged :307-325.
+    `e2e/liquidity.spec.ts:123-128`, inside the approver LCR test at :105: the read's
+    `context.consolidation` is BLOCKED, the notice text exact, `data-consolidation` BLOCKED,
+    the context row BLOCKED; ladder fold `e2e/calculations.spec.ts:261-262`. Runs: vitest
+    full `750 passed` (before the fix round), the four targeted files `135 passed` after it;
+    tsc and lint clean; build exit 0; Playwright (`moodymate_test_p32fe`, ports 8032/3032)
+    `8 passed (34.1s)`, after the fix round `liquidity.spec.ts` `3 passed (15.5s)`
+    (`moodymate_test_p32fefix`). **Pre-merge:** `src/api/schema.d.ts` lacks the fix round's
+    three description changes, so CI's `gen:api` diff (`ci.yml:78`) fails until it is
+    regenerated.
 
 *Test budget:* 49 → 49.
 *Reversibility:*
@@ -4459,10 +4522,20 @@ supported size is measured.
 Goal: a locked, repeatable build from a clean checkout; structured logs; metrics; distinct
 liveness and readiness; and operating docs.
 
-- [ ] **BE-34.1** A `uv` lockfile (`backend/uv.lock`). CI runs `uv sync --frozen --extra dev`,
-  and pip-audit reads the lock.
-  - *Done-when:* the CI install is frozen, and a deliberate pyproject/lock mismatch fails
-    (evidence in the report).
+- [ ] **BE-34.1** A `uv` lockfile (`backend/uv.lock`). CI runs ~~`uv sync --frozen --extra dev`~~
+  `uv sync --locked --extra dev`, and pip-audit reads the lock (the `uv export --locked` output,
+  audited with `--no-deps`). Reworded 2026-10-24 (Q1, auto-resolved; D-62 amendment), because
+  `--frozen` installs a stale lock without complaint and so cannot meet the Done-when.
+  - *Done-when:* the CI install is ~~frozen~~ locked, and a deliberate pyproject/lock mismatch
+    fails (evidence in the report).
+  - *Not yet ticked (2026-10-24, architect):* evidenced locally: `prometheus-client` 0.26.0 is
+    in `uv.lock` (:880-881); `backend/Dockerfile:31` installs with `uv sync --locked --no-dev
+    --no-install-project`; on a scratch copy with `six>=1.16` added, `uv lock --check` and
+    `uv sync --locked` both exit 1 ("needs to be updated"), while `uv sync --frozen` exits 0 and
+    `import six` then fails; the worktree's `uv lock --check` exits 0. **Missing:**
+    `.github/workflows/ci.yml` still runs `pip install -e ".[dev]"` (:43, :122) and
+    `pip-audit --skip-editable` (:61) (grep, 2026-10-24); there is no CI step that breaks a
+    temp copy's pyproject and expects the locked install to fail (Q7); no CI log exists.
 - [ ] **BE-34.2** `backend/Dockerfile` (multi-stage, non-root, locked dependencies,
   `--proxy-headers` with `FORWARDED_ALLOW_IPS`) and `frontend/Dockerfile` (standalone,
   non-root, `NEXT_PUBLIC_API_BASE_URL` as a required build arg). `docker-compose.yml` gets a
@@ -4472,16 +4545,41 @@ liveness and readiness; and operating docs.
   auto-resolved; D-59 amendment)*.
   - *Done-when:*
     - a CI job builds both images from a clean checkout;
-    - compose `prod` reaches `/health/ready` 200 and frontend `/` 200;
+    - compose `prod` reaches `/health/ready` 200 and frontend `/` ~~200~~ 200 after following
+      redirects (`curl -L`; `/` answers 307 to `/dashboard`). Reworded 2026-10-24 (Q11,
+      auto-resolved); the image HEALTHCHECK stays on `/login`;
     - `alembic current` is the head;
     - the images run as non-root;
     - no secret is in an image (grep of `docker history`).
-- [ ] **BE-34.3** A structured JSON access log (`ACCESS_LOG_ENABLED`): correlation id, method,
+  - *Not yet ticked (2026-10-24, architect):* evidenced in files only: `backend/Dockerfile`
+    (multi-stage :20-33, `uv sync --locked` :31, uid/gid 10001 :34-37 and `USER 10001:10001`
+    :50, `FORWARDED_ALLOW_IPS=127.0.0.1` :48, `--proxy-headers` :55, HEALTHCHECK on
+    `/health/live` :53-54); `backend/.dockerignore` excludes `.env`, `.env.*`, `.venv` and
+    `app/tests`; `frontend/Dockerfile` (FE-owned, Q9; required arg :23-29, `USER 1000:1000`
+    :53). Without Docker, a copy of the image layout gave `alembic current` `0030 (head)`, live
+    and ready 200 with every check `ok`. **Missing:** no image has been built (no Docker
+    daemon here); `ci.yml` has no image job, non-root check or `docker history` grep;
+    `docker-compose.yml` has no `prod` profile or one-shot migrate service (grep
+    `profiles|prod|migrate`: no match); `.env.production.example` does not exist, and the root
+    `.gitignore` would ignore it (Q10).
+- [x] **BE-34.3** A structured JSON access log (`ACCESS_LOG_ENABLED`): correlation id, method,
   route template, status and duration. It never carries a query, body, header or token.
   - *Done-when:* the log fold shows a request with a bearer token, a sentinel query and a
     sentinel body gives one line with those fields and no sentinel, and the correlation id
     equals the response header.
-- [ ] **BE-34.4** Prometheus metrics (D-62 §2; `prometheus-client`) on an internal listener
+  - *Evidence (2026-10-24, architect-verified):* `test_config.py:263`
+    (`test_logs_never_carry_tokens_or_secrets`) calls `check_access_log`
+    (`observability_kit.py:105-136`): a POST with a bearer token, a sentinel query, body and
+    header and a UUID in the path gives exactly one access line (:119) with the five fields
+    (:121), `correlation_id` equal to the `X-Correlation-ID` response header (:122), the full
+    template `/api/v1/imports/{import_id}/validate` (:123-127) and a numeric `duration_ms`
+    (:128); no sentinel, token, path id or header name appears in any captured line
+    (:129-131); `ACCESS_LOG_ENABLED=false` gives no access line (:133-136). Implementation:
+    `app/core/observability.py:44-90` (outermost, `main.py:89-92`; the id is read from the
+    response header :57-64), `config.py:162` (default true). Runs: backend-engineer targeted
+    `15 passed`; fix round `1 failed, 6 passed` (the one failure is BE-34.7's missing doc). The
+    first run's route without the `/api/v1` prefix was fixed before these runs.
+- [x] **BE-34.4** Prometheus metrics (D-62 §2; `prometheus-client`) on an internal listener
   (`METRICS_ENABLED`, default off; optional `METRICS_TOKEN`). The series cover request latency
   and errors, run duration and status, worker queue and busy, import failures by reason code,
   DB pool use and process memory. No tenant, principal or id label is used.
@@ -4490,7 +4588,25 @@ liveness and readiness; and operating docs.
     - the series appear after a run and a failed import;
     - no UUID appears in the output;
     - the token is enforced when set.
-- [ ] **BE-34.5** `GET health/live` (no I/O) and `GET health/ready` (DB within 2 s, migration
+  - *Evidence (2026-10-24, architect-verified):* `test_config.py:181`
+    (`test_responses_carry_the_envelope_correlation_id_and_data_class`) calls
+    `check_metrics_are_internal_and_token_gated` (`observability_kit.py:197-216`):
+    `METRICS_ENABLED` defaults to False (:202); the public app gives 404 for `/metrics`,
+    `/api/v1/metrics` and `/api/metrics` with metrics off and on (:203-206); with
+    `METRICS_TOKEN` set, no token, a wrong token and a token without `Bearer` each give 401
+    with no series and `WWW-Authenticate: Bearer` (:209-212), the right token 200 (:213-214).
+    `test_calculations.py:1542-1546` (`test_registry_snapshot_run_and_maturity_ladder`, step
+    5d): after its runs and a refused upload (422 `csv_malformed`),
+    `check_metrics_after_a_run_and_a_failed_import` (:219-238) finds all nine D-62 §2 families
+    (:228-229), no tenant, principal or id label (:230-232), the failure under
+    `reason_code="csv_malformed"` (:233-236), runs counted (:237) and no UUID (:238).
+    Implementation: `app/core/metrics.py` (internal listener only, :230-296; constant-time
+    `hmac.compare_digest` :211-216; 401 with `www-authenticate: Bearer` :244-246); hooks at
+    `calculations/service.py:1567`, :1575 and `ingestion/service.py:211`, :623, :1067. Runs:
+    the calculations test failed once at 07:13 (no import-failure sample while the hook was
+    being edited), then `1 passed` at 07:15; fix round `6 passed` with the WWW-Authenticate
+    assertion.
+- [x] **BE-34.5** `GET health/live` (no I/O) and `GET health/ready` (DB within 2 s, migration
   head, artifact store, workers) give 200 or 503 with value-free check names. Both are added to
   `PUBLIC_PATHS` (D-62 §1).
   - *Done-when:*
@@ -4498,10 +4614,35 @@ liveness and readiness; and operating docs.
     - a head mismatch gives 503;
     - no DSN, host or version string appears;
     - the auth test's public-path set equals D-62's.
-- [ ] **BE-34.6** Error-tracker hook: `report_exception(exc, correlation_id)` defaults to a
+  - *Evidence (2026-10-24, architect-verified):* `test_config.py:180` calls
+    `check_health_with_the_database_down` (`observability_kit.py:149-170`): with the DB
+    unreachable, ready gives 503 in under 5 s with exactly `status` and the four check names,
+    `database: fail` and values only `ok`/`fail` (:152-159); live gives 200 `{"status": "ok"}`
+    while `app.state.db` is a stub that fails on any use (:160-166); neither body contains the
+    DSN, host, `postgresql`, `asyncpg` or the version (:167-170).
+    `test_ws1_verification.py:1064` (below 0030: 503 `migrations: fail`, `database: ok`) and
+    :1071 (back at head: 200, every check `ok`), with no revision string in the body
+    (`observability_kit.py:173-186`). `test_auth.py:243-250` asserts `PUBLIC_PATHS` equals the
+    previous four plus `/api/v1/health/live` and `/api/v1/health/ready` (`core/auth.py:34-43`),
+    as D-62 §1 states; `/api/v1/health` is unchanged (`health.py:30-41`). Implementation:
+    `app/core/readiness.py` (2 s bound :30, :54; heads equal :91; value-free warning :98-100),
+    `app/api/v1/health.py:44-99` (503 declared with `ReadinessResponse`, :87-92). Runs:
+    targeted `15 passed`; fix round `6 passed` (test_config, test_auth, ws1 included).
+- [x] **BE-34.6** Error-tracker hook: `report_exception(exc, correlation_id)` defaults to a
   no-op behind `ERROR_TRACKER_DSN`. No vendor SDK is added (hard stop).
   - *Done-when:* a fake reporter receives only the correlation id and the exception class, and
     no vendor import exists (grep).
+  - *Evidence (2026-10-24, architect-verified):* `test_config.py:174-177`: an unhandled
+    `RuntimeError` on `/_test/boom` reaches a fake reporter exactly once with exactly two
+    values, the correlation id `corr-test-2` and the class (`observability_kit.py:244-264`);
+    `check_no_vendor_error_tracker` (:267-277) greps `app/` (tests excluded) and
+    `pyproject.toml` for ten vendor SDKs and asserts the default `report_exception` returns
+    None. Architect grep (2026-10-24): no vendor `import`/`from` under `backend/`, and
+    `pyproject.toml` adds only `prometheus-client` (:22-23). Implementation:
+    `app/core/error_tracker.py:21-49` (the reporter gets `(correlation_id, type(exc))`; a
+    failing reporter is swallowed), called from `correlation.py:63-68`; `ERROR_TRACKER_DSN` is
+    a `SecretStr` (`config.py:172`) and only logs a value-free warning at startup
+    (`error_tracker.py:39-42`). Runs: targeted `15 passed`; fix round `6 passed`.
 - [ ] **BE-34.7** `docs/ops/`: `BACKUP_RESTORE.md` (DB plus artifact store, with re-hash
   verification and RPO/RTO placeholders), `MIGRATIONS.md`, `INCIDENT_RESPONSE.md`,
   `TRIGGERS.md` (every trigger by migration) and `API_COMPATIBILITY.md` (D-62 §6). Retention
@@ -4510,9 +4651,28 @@ liveness and readiness; and operating docs.
     - the `TRIGGERS.md` list equals the parsed `CREATE TRIGGER` set (committed-artifacts fold);
     - a restore has been exercised on a scratch DB copy, with the commands and output in
       `docs/evidence/phase-34/REPORT.md`.
+  - *Not yet ticked (2026-10-24, architect):* the check exists: `test_committed_artifacts.py:35`
+    calls `check_triggers_doc` (`observability_kit.py:282-332`), which runs each migration's
+    `upgrade()` against a recording `op` and compares the (revision, trigger) set with the doc.
+    Engineer-reported: the parser finds 177 pairs in 17 migrations, the same set as
+    `pg_trigger` on a migrated scratch copy (diff SAME), and the draft table matches all 177
+    (with one row removed, False). **Missing:** `docs/ops/` does not exist (Glob, 2026-10-24),
+    so `test_committed_openapi_and_samples_are_current` fails with `FileNotFoundError` at
+    `observability_kit.py:313`; `BACKUP_RESTORE.md`, `MIGRATIONS.md`, `INCIDENT_RESPONSE.md`
+    and `API_COMPATIBILITY.md` are not written; no restore has been exercised.
 - [ ] **FE-34.1** `output: 'standalone'`, and a CI step proves that the image build fails without
   the API base-URL arg.
   - *Done-when:* the CI log shows the expected failure exit and a successful build with the arg.
+  - *Not yet ticked (2026-10-24, architect):* evidenced locally: `next.config.mjs:21-23`
+    (`output: 'standalone'` with `outputFileTracingRoot`; `NEXT_OUTPUT_STANDALONE=off` removes
+    both, D-02); `frontend/Dockerfile:23-29` (the arg has no default and the build stops with
+    exit 64 before `npm run build`); `frontend/scripts/check-image-build-arg.sh` (requires a
+    non-zero exit and the arg message, then exit 0 and a non-root user, and prints both exit
+    codes); `imageBuild.test.ts` `5 passed`; full vitest `741 passed`; a local `next build`
+    without the variable exits 1 and with it exits 0 with `standalone/server.js`. **Missing:**
+    `ci.yml` has no step that runs the script (grep `check-image-build-arg`: no match), and no
+    CI log shows `exit code without the arg: <non-zero>` and `exit code with the arg: 0` (no
+    Docker daemon here).
 
 *Test budget:* 49 → 49.
 *Reversibility:* metrics are off by default; the health routes are additive;

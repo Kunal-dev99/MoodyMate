@@ -18,6 +18,8 @@ import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { IllustrativeBanner } from './IllustrativeBanner'
 import { ResultContextPanel } from './ResultContextPanel'
+import { INSTRUMENT_TERMS_UI_ENABLED } from '@/config/features'
+import { FxConsolidationNotice } from './FxConsolidationNotice'
 import { RunIdentity } from './RunIdentity'
 import { followsRun } from './polling'
 import { ResultsPending } from './RunPolling'
@@ -415,6 +417,8 @@ export function LiquidityView({ run }: { run: RunDetail }) {
         <IllustrativeBanner statement={liquidity?.statement ?? run.statement} compact />
         {/* FE-30.1: the LCR read's own context block (D-56 §5), checked against the run's pins. */}
         {liquidity && <ResultContextPanel context={liquidity.context} pins={run} source="liquidity" compact />}
+        {/* FE-32.1 (D-61 §6): per-currency only, FX consolidation blocked; off, the Phase 31 view exactly. */}
+        {INSTRUMENT_TERMS_UI_ENABLED && <FxConsolidationNotice consolidation={liquidity?.context.consolidation} source="liquidity" />}
         <LcrPrototypeNotice limitations={liquidity?.limitations ?? []} />
         {body}
       </div>

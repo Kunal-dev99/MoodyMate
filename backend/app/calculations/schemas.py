@@ -206,6 +206,10 @@ class ResultContext(BaseModel):
     methodology: ContextMethodology
     validation_status: ValidationStatus
     statement: str = Field(description="The D-35 label: not regulatory, no vendor parity.")
+    consolidation: Literal["BLOCKED"] = Field(
+        description="D-61 §6 (Phase 32): FX consolidation is blocked until an approved rate "
+        "source and conversion policy exist; results are per currency only."
+    )
 
 
 class RunSummary(BaseModel):

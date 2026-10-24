@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { BookOpenCheck, Info } from 'lucide-react'
 import { PageSection } from '@/components/common/PageSection'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { INSTRUMENT_TERMS_UI_ENABLED } from '@/config/features'
 import { cn } from '@/lib/utils'
 import { ValidationStatusBadge } from './ValidationStatusBadge'
 import { CONTEXT_FIELD_TEXT, CURRENCY_BASIS_TEXT, contextMismatches, type ContextPins, type ResultContext } from './validation'
@@ -62,6 +63,13 @@ function ContextFields({ context: c }: { context: ResultContext }) {
           {CURRENCY_BASIS_TEXT[c.currency.basis] ?? c.currency.basis}
         </span>
       </Item>
+      {/* FE-32.1 (D-61 §6): the server's consolidation value as sent; off, the Phase 31 panel exactly. */}
+      {INSTRUMENT_TERMS_UI_ENABLED && c.consolidation && (
+        <Item label="FX consolidation" testId="context-consolidation">
+          <span className="font-mono">{c.consolidation}</span>
+          <span className="ml-2 text-muted-foreground">No approved rate source or conversion policy</span>
+        </Item>
+      )}
       <Item label="Amounts" testId="context-units-amount">
         {c.units.amount}
       </Item>

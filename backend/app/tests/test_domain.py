@@ -37,6 +37,7 @@ from alembic.script import ScriptDirectory
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.core.canonical import canonical_sha256
 from app.core.config import Settings
 from app.domain import service as domain_service
 from app.domain.constants import (
@@ -59,8 +60,10 @@ from app.domain.constants import (
 from app.governance.constants import WS3_ROLE_PERMISSIONS, FieldType
 from app.governance.service import FieldSpec, contract_sha256
 from app.main import create_app
+from app.tests import terms_kit
 from app.tests.conftest import (
     _CALC_CLEANUP,
+    _TERMS_CLEANUP,
     alembic_config,
     clean,
     clear_identity_links,
@@ -73,6 +76,8 @@ from app.tests.helpers import (
     IMPORTS,
     INSTRUMENTS,
     MAPPINGS,
+    RUNS,
+    SNAPSHOTS,
     SOURCES,
     activate_version,
     assert_denied,
@@ -96,6 +101,7 @@ from app.tests.helpers import (
 )
 from app.tests.identity_kit import (
     EXTRA_FLOWS,
+    GOLDEN_V1_RUN,
     IDENTITY_TABLES,
     KEEP,
     LINKS,
@@ -107,12 +113,32 @@ from app.tests.identity_kit import (
     identity_counts,
     links_of,
     reconcile,
+    run_document_by_key,
     run_outputs,
     schema_versions,
     typed_fields,
     typed_import,
     typed_source,
     without_written,
+)
+from app.tests.terms_kit import (
+    CONSISTENT,
+    CURRENCIES,
+    EXPECTED_TERMS,
+    FX_STATUS,
+    INCONSISTENT,
+    LATER_CSV,
+    RATE_TERMS_CSV,
+    RATE_TERMS_RULES,
+    SAMPLE_CURRENCIES,
+    TERM_VOCABULARIES,
+    calculations_have_no_fx_arithmetic,
+    check_rate_terms_contract,
+    check_stored_terms,
+    check_terms_append_only,
+    publish_rate_terms,
+    term_counts,
+    term_rows,
 )
 
 pytestmark = pytest.mark.db
@@ -296,12 +322,26 @@ def test_domain_projection_catalogue_and_guards(
     assert m0017.ORIGINS == tuple(c.value for c in CashflowOrigin)
     assert m0017.FIELD_TYPES == tuple(c.value for c in FieldType)
     assert set(m0017.PROJECTABLE) == {s.value for s in PROJECTABLE_STATUSES}
+    # BE-32.1: 0031's frozen copies equal the code and the plan (D-61 §3, §6).
+    m0031 = migration("0031_rate_terms_currency_fx")
+    assert m0031.VOCABULARY_KINDS == tuple(k.value for k in terms_kit.c("TermVocabularyKind"))
+    assert (m0031.VOCABULARY_TAG, m0031.CURRENCY_TAG) == (
+        terms_kit.c("TERM_VOCABULARY_SEED_TAG"),
+        terms_kit.c("CURRENCY_SEED_TAG"),
+    )
+    frozen_vocabulary: dict[str, set[str]] = {}
+    for kind, code, _ in m0031.VOCABULARY:
+        frozen_vocabulary.setdefault(kind, set()).add(code)
+    assert frozen_vocabulary == TERM_VOCABULARIES
+    assert {code for code, _, _ in m0031.CURRENCIES} == SAMPLE_CURRENCIES
     types = sql(db, "SELECT code, name, provisional, seeded_by FROM instrument_type ORDER BY code")
     assert {t["code"]: t["name"] for t in types} == SEEDED_INSTRUMENT_TYPES
     assert all(t["provisional"] and t["seeded_by"] == DOMAIN_SEED_TAG for t in types)
     # No float in the projector's pure parts (as BE-11.2).
     for part in domain_service.PROJECTOR_PARTS:
         assert "float" not in inspect.getsource(getattr(domain_service, part)), part
+    # BE-32.4 (D-61 §6): no conversion arithmetic in app/calculations/ (the grep).
+    assert calculations_have_no_fx_arithmetic() == []
     # A defect on the typed path never carries the value (in the message or a cause).
     for kind in (ColumnKind.DATE, ColumnKind.DECIMAL):
         with pytest.raises(ValueError) as defect:
@@ -431,6 +471,12 @@ def test_domain_projection_catalogue_and_guards(
     }
     v1_run = start_run(api, reader, ladder).json()
     assert v1_run["result_sha256"], v1_run
+    # BE-31.3 (a): the run equals the golden captured on the pre-phase code (56dec79) once each
+    # row id is its stable key (result_sha256 hashes row ids, which differ per database).
+    v1_document = run_document_by_key(db, v1_run["run_id"])
+    assert v1_run["status"] == GOLDEN_V1_RUN["status"], v1_run
+    assert v1_document == GOLDEN_V1_RUN["document"]
+    assert canonical_sha256(v1_document) == GOLDEN_V1_RUN["canonical_sha256"]
     # The reconcile links the historical rows: each position to its instrument and its legal
     # entity (registered now, one per source and code), each cash flow to its instrument.
     first = reconcile(api, steward)
@@ -731,6 +777,15 @@ def test_domain_projection_catalogue_and_guards(
         api, reader, {**ladder, "dataset_snapshot_id": snapshot.json()["snapshot_id"]}
     ).json()
     assert typed_run["status"] == v1_run["status"], typed_run
+    # BE-31.3 (c): a repeat run over the same typed snapshot gives an equal result_sha256.
+    typed_rerun = start_run(
+        api, reader, {**ladder, "dataset_snapshot_id": snapshot.json()["snapshot_id"]}
+    ).json()
+    assert typed_rerun["run_id"] != typed_run["run_id"], typed_rerun
+    assert (typed_rerun["status"], typed_rerun["result_sha256"]) == (
+        typed_run["status"],
+        typed_run["result_sha256"],
+    )
     typed_outputs = run_outputs(db, typed_run["run_id"])
     assert typed_outputs == run_outputs(db, v1_run["run_id"])
     assert typed_outputs["contributions"] and typed_outputs["gap"]
@@ -777,10 +832,143 @@ def test_domain_projection_catalogue_and_guards(
         assert link_pair["linked_now_ambiguous"] == link_pair["linked"] > 0, link_pair
     assert pairs[("POSITION_VERSION", "LEGAL_ENTITY")]["linked_now_ambiguous"] == 0
     assert without_written(reconcile(api, steward)) == without_written(third)
-    # Part 4 checks 0017's own refusal: the runs and links (each guarded by its own
+    # BE-32.2: the BE-31.3 v2 summary is unchanged by Phase 32 (no term keys on projector 2).
+    assert set(body["summary"]) == {
+        "records", "rows_projected", "new_identities", "attribute_values",
+        "type_not_projected", "unknown_values", "canonical_only_fields", "missing_values",
+    }  # fmt: skip
+
+    # --- 6. Phase 32: rate terms (BE-32.2), effective dating (BE-32.3), FX status (BE-32.4) -
+    # The frozen contract (typed maturity + eleven optional terms), matched by hash.
+    check_rate_terms_contract()
+    terms_hash = terms_kit.c("INSTRUMENT_RATE_TERMS_SHA256")
+    projector_v3 = terms_kit.c("PROJECTOR_V3")
+    for content, matched in (
+        (terms_hash, (projector_v3, terms_kit.c("INSTRUMENT_SPEC_V3"))),
+        (INSTRUMENT_TYPED_MATURITY_SHA256, (PROJECTOR_V2, INSTRUMENT_SPEC_V2)),
+    ):
+        pins = domain_service.SchemaPins({}, {vid: typed_version}, {}, {vid: content})
+        found = domain_service.DomainService._spec(
+            DomainSchemaCode.INSTRUMENT, vid, typed_version, pins
+        )
+        assert found == matched, content
+    publish_rate_terms(api, steward, approver, db)
+    versions_terms = schema_versions(db)
+    terms_version = max(versions_after) + 1
+    assert {n: v["status"] for n, v in versions_terms.items()} == {
+        1: "DEPRECATED",
+        2: "DRAFT",
+        typed_version: "DEPRECATED",
+        terms_version: "ACTIVE",
+    }
+    assert versions_terms[terms_version]["content_sha256"] == terms_hash
+    terms_source = typed_source(api, db, steward, code="rate_terms_instruments")
+    rated = typed_import(
+        api, db, steward, approver, terms_source, RATE_TERMS_CSV, rules=RATE_TERMS_RULES
+    )
+    assert rated["status"] == "COMPLETED", rated
+    assert rated["manifest"]["quality"]["accepted_records"] == 6, rated["manifest"]
+    # Switched off (reversibility): projection_unsupported, audited DENIED, nothing written.
+    unchanged = {**domain_counts(db), **term_counts(db)}
+    state.settings = links_on.model_copy(update={"INSTRUMENT_TERMS_PROJECTION_ENABLED": False})
+    c = cid()
+    r = project(api, steward, rated["id"], **{"X-Correlation-ID": c})
+    state.settings = links_on
+    assert (r.status_code, r.json()["code"]) == (409, "projection_unsupported"), r.text
+    assert r.json()["details"]["projector_version"] == projector_v3
+    denied(db, c, "projection_unsupported")
+    assert {**domain_counts(db), **term_counts(db)} == unchanged
+    r = project(api, steward, rated["id"])
+    assert r.status_code == 201, r.text
+    body = no_float(r.text)
+    assert (body["schema_version"], body["projector_version"]) == (terms_version, projector_v3)
+    # Every instrument_version is written; the three inconsistent ones have no term row and
+    # are counted; the unknown day count is kept as text and counted.
+    assert body["summary"]["records"] == body["summary"]["rows_projected"] == 6
+    assert body["summary"]["terms_inconsistent"] == len(INCONSISTENT)
+    assert body["summary"]["unknown_values"] == {"day_count": 1}
+    assert count(db, "instrument_version", uuid.UUID(rated["id"])) == 6
+    stored_terms = term_rows(db, rated["id"])
+    assert set(stored_terms) == set(CONSISTENT)
+    check_stored_terms(stored_terms)
+    keys = {
+        r["business_key"]: r["id"]
+        for r in sql(db, "SELECT id, business_key FROM instrument WHERE business_key LIKE 'RT-%'")
+    }
+    shown_terms = {}
+    for key, instrument_id in keys.items():
+        detail = no_float(api.get(f"{INSTRUMENTS}/{instrument_id}", headers=steward).text)
+        [v] = detail["versions"]
+        assert v["terms_typed"] is True, (key, v)
+        assert v["imported_at"] and (detail["effective_on"], detail["effective_version_id"]) == (
+            None,
+            None,
+        )
+        shown_terms[key] = v
+        if key in INCONSISTENT:
+            assert v["terms"] is None and v["effective_from"] is None, key
+            continue
+        assert v["effective_from"] == "2026-01-01", (key, v)
+        terms = v["terms"]
+        assert {f: terms[f] for f in EXPECTED_TERMS[key]} == EXPECTED_TERMS[key], key
+        assert terms["unknown_fields"] == (["day_count"] if key == "RT-UNK" else []), key
+        assert terms["provisional"] is True and terms["rate_unit"] == "percent", key
+    assert shown_terms["RT-FIX"]["interest_rate"] == "7.250000"
+    # Instruments without the contract show no terms (the typed-maturity TM-1, untyped).
+    [tm1] = api.get(f"{INSTRUMENTS}/{stored['TM-1']['id']}", headers=steward).json()["versions"]
+    assert (tm1["terms_typed"], tm1["terms"], tm1["effective_from"]) == (False, None, None)
+    # BE-32.3: a snapshot pinned before a later import with an earlier effective_from.
+    pinned = make_snapshot(api, reader, [rated["id"]])
+    assert pinned.status_code == 201, pinned.text
+    pinned_path = f"{SNAPSHOTS}/{pinned.json()['snapshot_id']}"
+    pinned_before = api.get(pinned_path, headers=reader).json()
+    later = typed_import(api, db, steward, approver, terms_source, LATER_CSV)
+    r = project(api, steward, later["id"])
+    assert r.status_code == 201 and r.json()["summary"]["terms_inconsistent"] == 1, r.text
+    assert set(term_rows(db, later["id"])) == {"RT-FIX"}
+    fixed = f"{INSTRUMENTS}/{keys['RT-FIX']}"
+    first_v, later_v = api.get(fixed, headers=steward).json()["versions"]
+    assert (first_v["version"], later_v["version"]) == (1, 2)
+    assert (first_v["effective_from"], later_v["effective_from"]) == ("2026-01-01", "2025-06-01")
+    assert later_v["imported_at"] > first_v["imported_at"]  # imported later, effective earlier
+    for effective_on, picked in (
+        ("2026-06-30", first_v["version_id"]),  # by business date: v1, not the later import
+        ("2025-12-31", later_v["version_id"]),
+        ("2025-01-01", None),
+    ):
+        got = api.get(fixed, params={"effective_on": effective_on}, headers=reader).json()
+        assert (got["effective_on"], got["effective_version_id"]) == (effective_on, picked)
+    # Fail closed: RT-FLT's later version is effective from 2026-03-01, but floor > cap writes
+    # no term row, so its date is not stored. It is no candidate, and no pick is made rather
+    # than v1 (effective 2026-01-01) silently.
+    floating = f"{INSTRUMENTS}/{keys['RT-FLT']}"
+    flt_v1, flt_v2 = api.get(floating, headers=steward).json()["versions"]
+    assert (flt_v1["effective_from"], flt_v1["terms"] is not None) == ("2026-01-01", True)
+    assert (flt_v2["terms_typed"], flt_v2["terms"], flt_v2["effective_from"]) == (True, None, None)
+    for effective_on in ("2026-06-30", "2026-02-01", "2025-01-01"):
+        got = api.get(floating, params={"effective_on": effective_on}, headers=reader).json()
+        assert (got["effective_on"], got["effective_version_id"]) == (effective_on, None)
+    assert api.get(pinned_path, headers=reader).json() == pinned_before  # D-30
+    # BE-32.4: currencies (tagged PROVISIONAL seed) and FX consolidation BLOCKED.
+    listed = api.get(CURRENCIES, headers=reader).json()["items"]
+    assert {i["code"] for i in listed} == SAMPLE_CURRENCIES and all(
+        i["provisional"] for i in listed
+    )
+    assert api.get(FX_STATUS, headers=reader).json() == {
+        "status": "BLOCKED",
+        "reason_code": "fx_policy_not_approved",
+        "observation_count": 0,
+    }
+    for read in ("results", "maturity-ladder"):
+        ctx = api.get(f"{RUNS}/{v1_run['run_id']}/{read}", headers=reader).json()["context"]
+        assert ctx["consolidation"] == "BLOCKED", read
+    # The term rows are append-only too (the seeded 0031 tables are checked in the WS1 test).
+    check_terms_append_only(db, ("instrument_term_version",))
+    # Part 4 checks 0017's own refusal: the runs, links and terms (each guarded by its own
     # migration's downgrade) go first.
     script(db, _CALC_CLEANUP)
     clear_identity_links(db)
+    script(db, _TERMS_CLEANUP)
 
     # --- 4. Guards (BE-14.2) -----------------------------------------------------------------
     for table in DOMAIN_TABLES:

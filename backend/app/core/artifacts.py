@@ -68,6 +68,11 @@ class ArtifactStore(ABC):
     def get(self, ref: str) -> bytes:
         """The object's bytes, after re-verifying its hash."""
 
+    @abstractmethod
+    def ready(self) -> bool:
+        """Whether the store can take a `put` now (BE-34.5 readiness). Writes nothing, and
+        never raises: any failure is `False`."""
+
 
 def _checked(ref: str) -> str:
     """The ref, when well-formed; else `malformed_ref` (nothing outside the store is named)."""
@@ -96,6 +101,19 @@ class FilesystemArtifactStore(ArtifactStore):
 
     def get(self, ref: str) -> bytes:
         return self._verified(ref)
+
+    def ready(self) -> bool:
+        """The root is a writable directory, or (created on first upload) does not exist yet
+        under a writable directory."""
+        try:
+            path = self.root
+            while not path.exists():
+                if path.parent == path:
+                    return False
+                path = path.parent
+            return path.is_dir() and os.access(path, os.W_OK | os.X_OK)
+        except OSError:
+            return False
 
     def put(self, data: bytes) -> StoredArtifact:
         sha = hashlib.sha256(data).hexdigest()
@@ -140,6 +158,8 @@ class S3Client(Protocol):
     def get_object(self, *, Bucket: str, Key: str, **kwargs: Any) -> Any: ...  # noqa: N803
 
     def head_object(self, *, Bucket: str, Key: str, **kwargs: Any) -> Any: ...  # noqa: N803
+
+    def head_bucket(self, *, Bucket: str, **kwargs: Any) -> Any: ...  # noqa: N803
 
 
 class ArtifactStoreUnavailable(ApiError):
@@ -216,6 +236,15 @@ class S3ArtifactStore(ArtifactStore):
     def get(self, ref: str) -> bytes:
         return self._verified(ref)
 
+    def ready(self) -> bool:
+        """The bucket answers (HeadBucket; BE-34.5 readiness). Writes nothing; any failure,
+        including missing access, is `False`, and nothing from the answer is kept."""
+        try:
+            self._client.head_bucket(Bucket=self.bucket)
+        except Exception:  # noqa: BLE001
+            return False
+        return True
+
     def put(self, data: bytes) -> StoredArtifact:
         sha = hashlib.sha256(data).hexdigest()
         ref = ref_for(sha)
@@ -240,7 +269,7 @@ def _boto3_client(settings: Settings) -> S3Client:  # pragma: no cover - needs t
     """A boto3 S3 client from the settings (the `s3` extra). Credentials: the access key pair
     when set, else boto3's default chain. botocore's own debug logs are kept off."""
     try:
-        import boto3  # type: ignore[import-not-found, unused-ignore]
+        import boto3  # type: ignore[import-not-found, import-untyped, unused-ignore]
     except ImportError:
         raise RuntimeError(
             "ARTIFACT_STORE_KIND=s3 needs boto3: install the backend's `s3` extra"

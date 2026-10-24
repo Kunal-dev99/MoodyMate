@@ -47,6 +47,7 @@ from app.calculations.modules.base import (
     PinnedRule,
     RegisteredModule,
 )
+from app.core import metrics
 from app.core.config import ExecutionMode, Settings
 
 logger = logging.getLogger("app.calculations.executor")
@@ -164,6 +165,7 @@ class RunExecutor:
     _free: deque[_Slot] = field(default_factory=deque)
     _waiters: deque["asyncio.Future[_Slot]"] = field(default_factory=deque)
     _tasks: set["asyncio.Task[None]"] = field(default_factory=set)
+    _closing: bool = False
 
     def __post_init__(self) -> None:
         if self.pooled:
@@ -192,6 +194,14 @@ class RunExecutor:
     @property
     def admitted(self) -> int:
         return self._admitted
+
+    def ready(self) -> bool:
+        """The readiness `workers` check (BE-34.5): the pool takes runs until it shuts down.
+        A full queue is not "not ready": that run is refused with 503 `workers_busy`."""
+        return not self._closing
+
+    def _queue_changed(self) -> None:
+        metrics.set_worker_queue(len(self._waiters))  # BE-34.4: runs waiting for a worker
 
     # --- admission (503 workers_busy) ------------------------------------------------------
 
@@ -264,6 +274,7 @@ class RunExecutor:
             return self._free.popleft()
         waiter: asyncio.Future[_Slot] = asyncio.get_running_loop().create_future()
         self._waiters.append(waiter)
+        self._queue_changed()
         try:
             # shield: a timeout must not cancel a waiter that was just handed a slot.
             return await asyncio.wait_for(asyncio.shield(waiter), self._remaining(deadline))
@@ -274,6 +285,7 @@ class RunExecutor:
                 waiter.cancel()
                 with contextlib.suppress(ValueError):
                     self._waiters.remove(waiter)
+                self._queue_changed()
             if isinstance(exc, TimeoutError):
                 raise WorkerTimeout() from None
             raise
@@ -283,7 +295,9 @@ class RunExecutor:
             waiter = self._waiters.popleft()
             if not waiter.done():
                 waiter.set_result(slot)
+                self._queue_changed()
                 return
+        self._queue_changed()
         self._free.append(slot)
 
     # --- background runs (Prefer: respond-async) -----------------------------------------
@@ -301,6 +315,7 @@ class RunExecutor:
     async def aclose(self, grace: int = SHUTDOWN_GRACE_SECONDS) -> None:
         """Wait up to `grace` seconds for background runs, cancel the rest (each ends FAILED
         with ENGINE_ERROR as it unwinds), then stop every worker."""
+        self._closing = True
         tasks = list(self._tasks)
         if tasks:
             _, pending = await asyncio.wait(tasks, timeout=grace)

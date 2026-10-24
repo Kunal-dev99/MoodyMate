@@ -162,6 +162,11 @@ class Settings(BaseSettings):
     # POST /identity-links/reconcile. Off: no new links, and the reconcile answers 409
     # identity_links_disabled (audited DENIED); existing links stay readable.
     IDENTITY_LINKS_ENABLED: bool = True
+    # Phase 32 (FC-01, D-61 §1-2, D-02): projector v3 for the rate-terms instrument contract
+    # (matched by contract hash), which also writes the `instrument_term_version` rows. Off
+    # answers 409 projection_unsupported for rate-terms imports (audited DENIED); v1 and
+    # typed-maturity imports are unaffected, and existing term rows stay readable.
+    INSTRUMENT_TERMS_PROJECTION_ENABLED: bool = True
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
 
     # Phase 33 (BE-33.4, D-59 §6): the API's connection pool, at SQLAlchemy's defaults, and
@@ -193,6 +198,21 @@ class Settings(BaseSettings):
     RATE_LIMIT_CALCULATION_RUN_PER_MINUTE: int = 10
     RATE_LIMIT_SCENARIO_RUN_BURST: int = 3
     RATE_LIMIT_SCENARIO_RUN_PER_MINUTE: int = 5
+
+    # Phase 34 (DG-04, D-62 §3): one structured JSON access line per request (correlation id,
+    # method, route template, status, duration; never a query, body, header or token). Off
+    # restores uvicorn's own access log, the pre-Phase-34 behaviour.
+    ACCESS_LOG_ENABLED: bool = True
+    # Phase 34 (D-62 §2): Prometheus metrics on an internal listener only (never mounted on
+    # the public app). Off by default. METRICS_TOKEN, when set, is the bearer the listener
+    # requires. The listener binds METRICS_HOST:METRICS_PORT; one per API process.
+    METRICS_ENABLED: bool = False
+    METRICS_HOST: str = "127.0.0.1"
+    METRICS_PORT: int = 9100
+    METRICS_TOKEN: SecretStr | None = None
+    # Phase 34 (D-62 §4): the error tracker's DSN. No vendor adapter exists (client hard
+    # stop), so reports stay a no-op whatever this holds; it is a secret (D-50 §2).
+    ERROR_TRACKER_DSN: SecretStr | None = None
 
     # D-15: root of the write-once raw artifact store. Required outside local/test (D-13)
     # when ARTIFACT_STORE_KIND=filesystem; must be absolute and outside the repository. Pair
@@ -406,6 +426,10 @@ class Settings(BaseSettings):
                 raise ValueError(f"{name} must be a finite decimal of at least 0")
         if self.DRIFT_NULL_RATE_THRESHOLD > 1:
             raise ValueError("DRIFT_NULL_RATE_THRESHOLD must be at most 1")
+        if not 1 <= self.METRICS_PORT <= 65535:
+            raise ValueError("METRICS_PORT must be between 1 and 65535")
+        if self.METRICS_TOKEN is not None and not self.METRICS_TOKEN.get_secret_value():
+            raise ValueError("METRICS_TOKEN must not be empty (unset it for no token)")
         # D-53 §1: every bucket holds at least one request and refills.
         rate_limits = [n for n in type(self).model_fields if n.endswith(RATE_LIMIT_SUFFIXES)]
         for name in ("CALC_MIN_AGGREGATE_COUNT", "CALC_RUN_STALE_SECONDS", *rate_limits):
@@ -436,6 +460,14 @@ class Settings(BaseSettings):
     def dev_sessions_enabled(self) -> bool:
         """The dev sign-in endpoints exist only in dev mode (itself local/test only)."""
         return self.AUTH_MODE == "dev" and self.ENV in LOCAL_ENVS
+
+
+def secret_text(value: SecretStr | str | None) -> str | None:
+    """A secret setting's text (None when unset). A plain str is accepted as well, for
+    settings built with `model_copy`, which does not validate."""
+    if value is None:
+        return None
+    return value.get_secret_value() if isinstance(value, SecretStr) else value
 
 
 @lru_cache

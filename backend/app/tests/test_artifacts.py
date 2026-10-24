@@ -31,6 +31,7 @@ class FakeS3Client:
 
     def __init__(self) -> None:
         self.objects: dict[tuple[str, str], bytes] = {}
+        self.missing_buckets: set[str] = set()
 
     def put_object(self, *, Bucket: str, Key: str, Body: Any, **kw: Any) -> dict[str, Any]:  # noqa: N803
         data = Body if isinstance(Body, bytes) else Body.read()
@@ -49,6 +50,11 @@ class FakeS3Client:
         if (Bucket, Key) not in self.objects:
             raise self.exceptions.NoSuchKey(Key)
         return {"ContentLength": len(self.objects[(Bucket, Key)])}
+
+    def head_bucket(self, *, Bucket: str, **_: Any) -> dict[str, Any]:  # noqa: N803
+        if Bucket in self.missing_buckets:
+            raise self.exceptions.ClientError("NotFound")
+        return {}
 
     def delete_object(self, **_: Any) -> None:
         raise AssertionError("an artifact store never deletes (D-15)")
@@ -106,7 +112,11 @@ def test_artifact_store_is_write_once_and_detects_tampering(tmp_path: Path) -> N
             s3_remove,
         ),
     ]
+    s3.missing_buckets.add(bucket)  # an unreachable or forbidden bucket is not ready
+    assert not S3ArtifactStore(client=s3, bucket=bucket).ready()
+    s3.missing_buckets.clear()
     for kind, store, objects, tamper, stored, remove in stores:
+        assert store.ready(), kind  # BE-34.5: the readiness check of either kind
         data = b"ILLUSTRATIVE / SYNTHETIC,1\n"
         first, second = store.put(data), store.put(data)
         assert first.ref == second.ref and (first.created, second.created) == (True, False), kind

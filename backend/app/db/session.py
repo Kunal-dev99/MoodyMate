@@ -47,6 +47,20 @@ class Database:
         except Exception:  # noqa: BLE001 - any failure means unreachable
             return False
 
+    async def migration_revisions(self) -> frozenset[str]:
+        """The revisions `alembic_version` records (BE-34.5 readiness). Raises when the
+        database is unreachable; an absent table (never migrated) gives an empty set."""
+        async with self.engine.connect() as conn:
+            exists = await conn.scalar(text("SELECT to_regclass('alembic_version') IS NOT NULL"))
+            if not exists:
+                return frozenset()
+            rows = await conn.scalars(text("SELECT version_num FROM alembic_version"))
+            return frozenset(str(r) for r in rows)
+
+    def pool_stats(self) -> Any:
+        """The engine's connection pool (read by the metrics' pool series)."""
+        return self.engine.sync_engine.pool
+
     async def dispose(self) -> None:
         await self.engine.dispose()
 

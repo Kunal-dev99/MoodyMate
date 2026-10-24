@@ -28,6 +28,13 @@ system and code (`provisional`; its attributes are deferred to the client), and
 credit-exposure version to the one instrument, counterparty or legal entity of the tenant its
 text key names. No column is added to any existing table (D-58 §1).
 
+Phase 32 (BE-32.1, D-61), migration 0031: `instrument_term_version`, the typed rate terms,
+business-effective date and lifecycle state of one instrument version (a side table, so the
+`instrument_version` shape stays frozen; written only when the terms are consistent, which
+CHECKs repeat), the seeded PROVISIONAL `instrument_term_vocabulary`, the seeded PROVISIONAL
+`currency` reference, and `fx_rate_observation` (append-only, no write route; nothing
+calculates from it: FX consolidation is BLOCKED, D-61 §6).
+
 Every table carries `tenant_id` and is read through `ScopedRepository` (D-04). All of them
 are append-only: UPDATE, DELETE and TRUNCATE raise (DB triggers). Insert triggers check that
 a row is in the tenant of the import, source, identity or projection it names, and that a
@@ -48,6 +55,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     Numeric,
@@ -70,6 +78,8 @@ from app.domain.constants import (
     IdentitySourceKind,
     IdentityTargetKind,
     ObligorRatingStatus,
+    RateType,
+    TermVocabularyKind,
 )
 from app.governance.constants import FieldType
 
@@ -510,3 +520,124 @@ class DomainIdentityLink(ScopedModel, Base):
     target_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     method: Mapped[str] = mapped_column(String(30), nullable=False)
     resolver_version: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+# --- Phase 32: rate terms, currency and FX reference (BE-32.1, D-61), migration 0031 ---------
+
+FIXED, FLOATING = RateType.FIXED.value, RateType.FLOATING.value
+
+
+class InstrumentTermVersion(ScopedModel, Base):
+    """The typed rate terms of one instrument version (D-61 §1-§2), projected by projector v3
+    from the INSTRUMENT_RATE_TERMS contract: at most one row per version, written in the same
+    transaction and only when the terms are consistent (D-61 §4, also CHECKed here). Vocabulary
+    fields are kept as given; those outside the seeded vocabulary are named, never valued, in
+    `unknown_fields`. `effective_from` is the business date, kept apart from the import time
+    (D-61 §5). Rates are exact NUMERIC in the pinned field's unit. Append-only; the insert
+    trigger checks the version is of the row's tenant and projection."""
+
+    __tablename__ = "instrument_term_version"
+    __table_args__ = (
+        CheckConstraint(
+            f"rate_type IS DISTINCT FROM '{FIXED}' OR reference_index IS NULL",
+            name="fixed_without_index",
+        ),
+        CheckConstraint(
+            f"rate_type IS DISTINCT FROM '{FLOATING}' OR reset_frequency IS NOT NULL",
+            name="floating_with_reset",
+        ),
+        CheckConstraint(
+            "floor_rate IS NULL OR cap_rate IS NULL OR floor_rate <= cap_rate", name="floor_cap"
+        ),
+        CheckConstraint("jsonb_typeof(unknown_fields) = 'array'", name="unknown_fields"),
+    )
+
+    tenant_id: Mapped[uuid.UUID] = _tenant()
+    instrument_version_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("instrument_version.id"), unique=True, nullable=False
+    )
+    domain_projection_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("domain_projection.id"), nullable=False
+    )
+    rate_type: Mapped[str | None] = mapped_column(String)
+    reference_index: Mapped[str | None] = mapped_column(String)
+    spread: Mapped[Decimal | None] = mapped_column(Numeric(asdecimal=True))
+    reset_frequency: Mapped[str | None] = mapped_column(String)
+    next_reset_date: Mapped[date | None] = mapped_column(Date)
+    cap_rate: Mapped[Decimal | None] = mapped_column(Numeric(asdecimal=True))
+    floor_rate: Mapped[Decimal | None] = mapped_column(Numeric(asdecimal=True))
+    day_count: Mapped[str | None] = mapped_column(String)
+    payment_frequency: Mapped[str | None] = mapped_column(String)
+    effective_from: Mapped[date | None] = mapped_column(Date)
+    lifecycle_state: Mapped[str | None] = mapped_column(String)
+    unknown_fields: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+
+
+class InstrumentTermVocabulary(ScopedModel, Base):
+    """The seeded PROVISIONAL term vocabularies (D-61 §3): rate types, day counts, ISO-8601
+    frequencies and lifecycle states. No reference index is seeded. Append-only."""
+
+    __tablename__ = "instrument_term_vocabulary"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "vocabulary", "code"),
+        CheckConstraint(_in("vocabulary", TermVocabularyKind), name="vocabulary"),
+        CheckConstraint("code ~ '^[A-Z0-9][A-Z0-9_]*$'", name="code"),
+    )
+
+    tenant_id: Mapped[uuid.UUID] = _tenant()
+    vocabulary: Mapped[str] = mapped_column(String(30), nullable=False)
+    code: Mapped[str] = mapped_column(String(50), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(1000))
+    provisional: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    seeded_by: Mapped[str | None] = mapped_column(String(100))
+
+
+class Currency(ScopedModel, Base):
+    """The currency reference (D-61 §6): a tagged PROVISIONAL seed of the ISO 4217 codes the
+    synthetic samples use. Reference only: nothing converts between currencies. Append-only."""
+
+    __tablename__ = "currency"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "code"),
+        CheckConstraint(f"code {CURRENCY}", name="code"),
+        CheckConstraint("minor_units IS NULL OR minor_units BETWEEN 0 AND 4", name="minor_units"),
+    )
+
+    tenant_id: Mapped[uuid.UUID] = _tenant()
+    code: Mapped[str] = mapped_column(String(3), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    minor_units: Mapped[int | None] = mapped_column(Integer)
+    provisional: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    seeded_by: Mapped[str | None] = mapped_column(String(100))
+
+
+class FxRateObservation(ScopedModel, Base):
+    """One observed FX rate (D-61 §6): units of `quote_currency` per one `base_currency` on
+    `observed_on`, both currencies of the tenant's reference. Append-only, with no write route
+    and no reader in any calculation: consolidation is BLOCKED until the client approves a
+    rate source, rate types, reporting currency and conversion method."""
+
+    __tablename__ = "fx_rate_observation"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "base_currency"],
+            ["currency.tenant_id", "currency.code"],
+            name="fk_fx_rate_observation_base_currency_currency",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "quote_currency"],
+            ["currency.tenant_id", "currency.code"],
+            name="fk_fx_rate_observation_quote_currency_currency",
+        ),
+        CheckConstraint("base_currency <> quote_currency", name="pair"),
+        CheckConstraint("rate > 0", name="rate"),
+    )
+
+    tenant_id: Mapped[uuid.UUID] = _tenant()
+    base_currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    quote_currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    rate: Mapped[Decimal] = mapped_column(Numeric(asdecimal=True), nullable=False)
+    observed_on: Mapped[date] = mapped_column(Date, nullable=False)
+    source_label: Mapped[str | None] = mapped_column(String(200))
+    provisional: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)

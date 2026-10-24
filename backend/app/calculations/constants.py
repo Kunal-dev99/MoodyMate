@@ -187,6 +187,7 @@ AGGREGATE_CLASSIFICATION = ClassificationCode.INTERNAL.value
 # Labels of what a result read's figures are measured in, as the engine computes them: they
 # describe the code as built (decimals.py, the module implementations) and change nothing.
 CONTEXT_CURRENCY_BASIS = "PER_CURRENCY_NO_FX"
+CONTEXT_CONSOLIDATION = "BLOCKED"  # D-61 §6: no FX consolidation (BE-32.4)
 CONTEXT_AMOUNT_UNIT = "Exact decimal, in the ISO 4217 currency of its row (no FX conversion)"
 CONTEXT_DAYS_UNIT = "Calendar days after the reporting date"
 # Per module code: only lcr_hqla reports a ratio; every other module reads None.

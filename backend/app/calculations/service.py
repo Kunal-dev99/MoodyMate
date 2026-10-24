@@ -49,6 +49,7 @@ documents keep exactly their Feature 03 key sets.
 import asyncio
 import contextlib
 import logging
+import time
 import uuid
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -64,6 +65,7 @@ from app.calculations import scenario_overlay
 from app.calculations.constants import (
     AGGREGATE_CLASSIFICATION,
     CONTEXT_AMOUNT_UNIT,
+    CONTEXT_CONSOLIDATION,
     CONTEXT_CURRENCY_BASIS,
     CONTEXT_DAYS_UNIT,
     CONTEXT_RATIO_UNITS,
@@ -125,6 +127,7 @@ from app.calculations.repository import (
     SnapshotRepository,
     StaleRunRepository,
 )
+from app.core import metrics
 from app.core.canonical import HashKind, sha256_for
 from app.core.classification import most_sensitive, storable
 from app.core.correlation import correlation_id_var, get_correlation_id
@@ -1651,13 +1654,17 @@ class CalculationService:
         if respond_async:  # D-59 §2: answered RUNNING; executed by the background task
             self.executor.spawn(self._in_background(state, held.hand_off()))
             return await self.get(state.run_id), True
-        try:
-            await self._execute(state)
-        except BaseException as exc:  # the engine's own failure: recorded, never silent
-            await self._record_failure(state.run_id, state.counts, exc)
-            if not isinstance(exc, Exception):
-                raise  # cancellation and interpreter exits go on, once the run is ended
-        return await self.get(state.run_id), True
+        started = time.perf_counter()
+        with metrics.run_executing():  # BE-34.4: busy while it executes
+            try:
+                await self._execute(state)
+            except BaseException as exc:  # the engine's own failure: recorded, never silent
+                await self._record_failure(state.run_id, state.counts, exc)
+                if not isinstance(exc, Exception):
+                    raise  # cancellation and interpreter exits go on, once the run is ended
+        out = await self.get(state.run_id)
+        metrics.observe_run(out.run.status, time.perf_counter() - started)
+        return out, True
 
     async def _in_background(self, state: _Run, admission: Admission) -> None:
         """A respond-async run (BE-33.2): executed in its own session, as the synchronous path
@@ -1666,12 +1673,16 @@ class CalculationService:
         try:
             async with AsyncSession(self.session.bind, expire_on_commit=False) as session:
                 service = CalculationService(session, self.principal, self.executor)
-                try:
-                    await service._execute(state)
-                except BaseException as exc:
-                    await service._record_failure(state.run_id, state.counts, exc)
-                    if not isinstance(exc, Exception):
-                        raise
+                started = time.perf_counter()
+                with metrics.run_executing():  # BE-34.4: busy while it executes
+                    try:
+                        await service._execute(state)
+                    except BaseException as exc:
+                        await service._record_failure(state.run_id, state.counts, exc)
+                        if not isinstance(exc, Exception):
+                            raise
+                done = await service.get(state.run_id)
+                metrics.observe_run(done.run.status, time.perf_counter() - started)
         except Exception as exc:  # recorded where possible; never re-raised into the loop
             logger.warning(
                 "calculation_background_error",
@@ -2522,6 +2533,7 @@ class CalculationService:
             },
             "validation_status": validation_status_of(module["code"], module["version"]).value,
             "statement": manifest["labels"]["statement"],
+            "consolidation": CONTEXT_CONSOLIDATION,
         }
 
     async def _run(self, run_id: uuid.UUID) -> CalculationRun:

@@ -260,6 +260,8 @@ test('FE-15.2: the run shows its manifest, warnings and ladder; a bucket total e
   await expect(ladderContext.getByTestId('context-as-of-date')).toHaveText(ladder.context.as_of_date)
   await expect(ladderContext.getByTestId('context-validation-status')).toHaveAttribute('data-validation-status', ladder.context.validation_status)
   await expect(page.getByTestId('maturity-ladder').getByTestId('identity-validation-status')).toHaveText('Illustrative — not validated')
+  // FE-32.1 (D-61 §6): the ladder too says per-currency only, FX consolidation blocked.
+  await expect(page.getByTestId('maturity-ladder').getByTestId('fx-consolidation-notice')).toHaveAttribute('data-consolidation', ladder.context.consolidation)
   // The blocks equal the run's pins, so no disagreement is flagged.
   await expect(page.getByTestId('context-mismatch')).toHaveCount(0)
 

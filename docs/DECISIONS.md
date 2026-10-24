@@ -2282,6 +2282,14 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
 
   Only `instrument_version_id` is stripped. Any other difference is a defect to raise again,
   not something to strip. BE-31.3's Done-when is reworded to match.
+- **Amendment (2026-10-24, Phase 31 merge, auto-resolved):** (a) refined. A literal
+  `result_sha256` cannot be a golden: D-31 §4 hashes row ids, which differ per database. (a) is
+  now: a run over the v1 snapshot gives a result document equal to a golden captured on the
+  pre-phase code (56dec79), after every row id is replaced by its stable business key
+  (instrument, cash flow, rule version, warning entity), and that document's
+  `canonical_sha256` equals the golden's. Rule version ids are fixed seed UUIDs (0018) and stay
+  as they are. Nothing is stripped here; (b) keeps its rule. Evidence: `test_domain.py`,
+  `identity_kit.run_document_by_key`, `golden/domain_v1_run.json`.
 
 ## D-58 Identity links rather than FK columns on append-only rows
 
@@ -2440,6 +2448,24 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
      in the result `context`. There is no conversion code. **The rate source, rate types,
      reporting currency and conversion method are a client hard stop.**
   7. Bond attributes and deposit classes are deferred (client).
+- **Amendment (2026-10-24, Phase 32 build, auto-resolved):** §3, §4 and §5 made precise.
+  - **§3/§4 (Q3).** An inconsistent record's term values, unknown ones included, are counted
+    only as `TERMS_INCONSISTENT`, never as `UNKNOWN_VALUE`. Under §4 no term row is written, so
+    none of its values is "kept as text" as a term value. Each rate-terms record lands in
+    exactly one count: a term row (its unknown fields counted in `unknown_values` and named in
+    `unknown_fields`) or `TERMS_INCONSISTENT` (its values stay in the canonical record, reached
+    through lineage, D-29 §4). `ProjectionSummary.terms_inconsistent` says so.
+  - **§5 (Q4, Q10; review MEDIUM 1).** `effective_from` is stored on the term row only.
+    - A version with no term row (`TERMS_INCONSISTENT`) reads `effective_from: null` and is
+      never an `?effective_on=` candidate. Its stated date stays in the canonical record; it is
+      not typed at read time.
+    - Fail closed (D-04, D-33): `effective_version_id` is null whenever any version on the
+      rate-terms contract has no term row, or has an `effective_from` the caller is not cleared
+      for, because either date could change the pick. Another version is never picked silently.
+      This is stricter than skipping such versions and supersedes the Q5 note of the same day.
+    - The pick only names a version. The `versions` list is never filtered or reordered, and
+      no "current" is defined. The business date of a version with inconsistent terms joins the
+      client's business-date item (D-29 §3).
 
 ## D-62 Deployment and observability surfaces
 
@@ -2467,6 +2493,41 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
      - `/api/v1` changes are additive only, gated by the OpenAPI drift check.
      - A deprecation gets `Deprecation`/`Sunset` headers and an entry here.
      - A breaking change needs a new version path.
+- **Amendment (2026-10-24, Phase 34 build, auto-resolved):** §1, §2 and §5 made precise. The
+  status stays **proposed**: no ruling here is user approval, and acceptance of D-62 (with the
+  two `PUBLIC_PATHS` entries in §1) goes to the user in the end-of-phase message, next to the
+  §4 hard stop.
+  - **§5 locked, not frozen, CI installs (Q1).** "Frozen CI installs" means the CI install
+    matches the lock exactly. The flag that does this is `uv sync --locked`, which fails when
+    `uv.lock` is out of date with `pyproject.toml`; `--frozen` skips that check and installs a
+    stale lock without complaint. So CI installs with `uv sync --locked --extra dev` (backend
+    and e2e jobs), and pip-audit reads the lock:
+    `uv export --locked --no-hashes --format requirements-txt -o "$RUNNER_TEMP/req.txt"`, then
+    `pip-audit -r "$RUNNER_TEMP/req.txt" --no-deps --progress-spinner off`. The backend image
+    uses `--locked` as well. BE-34.1 is reworded to match.
+  - **§1 and §2 sub-choices (Q3).**
+    - (a) A 503 from `/health/ready` returns `ReadinessResponse` (a probe result with
+      value-free check names), not the D-07 envelope. OpenAPI declares that model for the 503.
+    - (b) The counters record in memory whatever `METRICS_ENABLED` holds; nothing is exposed
+      while the listener is off. Every label is bounded: route template, method, status class,
+      run status or reason code. A path no route serves is the fixed label `unmatched`, never
+      the raw path. (As built, the HTTP series label the status code, not the class:
+      `metrics.py:174-180`. The codes come from the app, not the client, so the set is still
+      bounded; the Phase 34 report lists this for confirmation.)
+    - (c) A `METRICS_HOST:METRICS_PORT` that cannot be bound stops startup (fail-closed
+      configuration, as D-13).
+    - (d) Metrics are per process. The backend image runs one uvicorn process; a multi-process
+      setup needs one listener port per process. Prometheus multiprocess mode is out of scope,
+      and the ops docs record this.
+    - (e) The `workers` check is `ok` for inline execution. When D-59 pool mode lands (Phase
+      33), the pool sets `app.state.workers` with a `ready()` and calls
+      `metrics.set_worker_queue()`.
+  - **§2 token failures (Q6).** On the internal metrics listener a missing, wrong or
+    non-`Bearer` `METRICS_TOKEN` gets the same 401 with `WWW-Authenticate: Bearer` and a
+    value-free body, so a caller cannot tell which case failed. 401, not 403, because no role or
+    permission is involved (§2; D-53 §2 keeps the two apart). The compare is constant-time
+    (`hmac.compare_digest`) and the token is never logged (§3, D-50 §3). With `METRICS_TOKEN`
+    unset, the listener is guarded only by being internal.
 
 
 **Coordinator ruling (2026-10-24), D-57:** option B adopted (auto-resolved, safer default). The seeded instrument v2 DRAFT stays the Phase 4 diff fixture; Phase 31 proposes a code-frozen contract (v1 + `maturity_date` DATE + `interest_rate` 11,6) through the existing governed path, published per tenant at runtime, never by migration or default seed.

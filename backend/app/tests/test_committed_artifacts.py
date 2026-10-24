@@ -11,6 +11,7 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 from openapi_spec_validator import validate
 
+from app.tests.observability_kit import check_triggers_doc
 from scripts import check_audit_allowlist, export_openapi
 from scripts.make_synthetic_samples import OUT, build
 
@@ -42,6 +43,8 @@ def test_committed_openapi_and_samples_are_current() -> None:
     assert additive_problems(spec, narrowed) == [
         "/components/schemas/SnapshotCreate/required: new required request field note"
     ]
+    # BE-34.7: docs/ops/TRIGGERS.md lists every trigger a migration creates, by migration.
+    check_triggers_doc()
 
 
 BASE_OPENAPI = export_openapi.OUT.with_name("openapi.base.json")

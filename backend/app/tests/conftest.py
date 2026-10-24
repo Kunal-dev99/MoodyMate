@@ -398,8 +398,37 @@ def clear_identity_links(url: str) -> None:
         pass  # below 0030: nothing to clear
 
 
+# Phase 32 (0031, D-61): term rows reference instrument versions and projections, FX
+# observations the currency reference. Append-only (TRUNCATE included), so their user
+# triggers are lifted for this one transaction; removed before the domain rows. The tagged
+# vocabulary and currency seed stays.
+_TERM_TABLES = (
+    "instrument_term_version",
+    "fx_rate_observation",
+    "instrument_term_vocabulary",
+    "currency",
+)
+_TERMS_CLEANUP = "\n".join(
+    [
+        "BEGIN;",
+        *(f"ALTER TABLE {t} DISABLE TRIGGER USER;" for t in _TERM_TABLES),
+        *(
+            f"DELETE FROM {t}"
+            + (
+                " WHERE seeded_by IS NULL;"
+                if t in ("instrument_term_vocabulary", "currency")
+                else ";"
+            )
+            for t in _TERM_TABLES
+        ),
+        *(f"ALTER TABLE {t} ENABLE TRIGGER USER;" for t in _TERM_TABLES),
+        "COMMIT;",
+    ]
+)
+
 # Deletes everything that is not seed data (D-11), children first.
 _CLEANUP = [
+    _TERMS_CLEANUP,
     _IDENTITY_CLEANUP,
     _SCENARIO_RUN_CLEANUP,
     _SCENARIO_CLEANUP,
@@ -461,6 +490,7 @@ def script(url: str, statements: str) -> None:
 def clean(url: str) -> None:
     for statement in _CLEANUP:
         if statement in (
+            _TERMS_CLEANUP,
             _IDENTITY_CLEANUP,
             _SCENARIO_RUN_CLEANUP,
             _SCENARIO_CLEANUP,
