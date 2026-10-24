@@ -23,6 +23,7 @@ from starlette.routing import BaseRoute, Host, Mount
 
 from app.core.errors import ApiError
 from app.core.principal import Principal
+from app.core.routes import ServedRoute, route_template, served_route, served_routes
 from app.core.tokens import InvalidToken, ProviderUnavailable, TokenExpired
 from app.db.session import Database, get_session
 from app.governance.constants import AuditOutcome, ClassificationCode
@@ -152,8 +153,7 @@ def require_permission(permission: str) -> PrincipalDependency:
         if permission != AUTHENTICATED and not alternatives & set(principal.permissions):
             # BE-3.2: denied requests are audited, in their own session so that nothing
             # else pending in the request's session is committed by a refusal.
-            route = request.scope.get("route")
-            endpoint = getattr(route, "path", request.url.path)
+            endpoint = route_template(request)
             async with _audit_session(request, session) as audit_session:
                 audit_by(
                     audit_session,
@@ -190,7 +190,10 @@ def _walk(dependant: Dependant) -> Iterator[Dependant]:
         yield from _walk(sub)
 
 
-def declared_permission(route: APIRoute) -> str | None:
+def declared_permission(route: ServedRoute) -> str | None:
+    """The permission a served route declares, anywhere in its dependency tree."""
+    if route.dependant is None:
+        return None
     for dep in _walk(route.dependant):
         permission = getattr(dep.call, PERMISSION_ATTR, None)
         if permission:
@@ -231,29 +234,29 @@ def undeclared_routes(app: FastAPI) -> list[str]:
     cannot see inside a mount, and websockets need their own authorization design.
     """
     found: list[str] = []
-    for route in app.routes:
-        path = getattr(route, "path", "")
+    for route in served_routes(app):  # flattened through included routers
+        path = route.path
         if path in PUBLIC_PATHS:
             continue
-        if isinstance(route, APIRoute):
+        if route.is_api_route:
             if _template_may_match_api(path) and declared_permission(route) is None:
                 found.append(f"{','.join(sorted(route.methods))} {path}")
-        elif _may_serve_api(route, path):
-            found.append(f"{type(route).__name__} {path or '/'}")
+        elif _may_serve_api(route.route, path):
+            found.append(f"{type(route.route).__name__} {path or '/'}")
     return sorted(found)
 
 
 async def enforce_declared_permission(request: Request) -> None:
     """App-level guard: an /api/v1 route that forgot to declare a permission is denied,
     even if it was attached to the app directly rather than through the API router."""
-    route = request.scope.get("route")
     # Decide on the REQUEST path: a catch-all template ("/{full_path:path}") can serve
     # /api/v1/* without its own path starting with /api/v1 (BE-2.16).
-    if (
-        not isinstance(route, APIRoute)
-        or not request.url.path.startswith("/api/v1")
-        or route.path in PUBLIC_PATHS
+    if not isinstance(request.scope.get("route"), APIRoute) or not request.url.path.startswith(
+        "/api/v1"
     ):
         return
-    if declared_permission(route) is None:
+    served = served_route(request)  # None would mean an unresolvable route: deny (D-04)
+    if served is not None and served.path in PUBLIC_PATHS:
+        return
+    if served is None or declared_permission(served) is None:
         raise ApiError(403, "permission_not_declared", "This endpoint is not available.")

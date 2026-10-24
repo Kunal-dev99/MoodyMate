@@ -18,6 +18,7 @@ from starlette.requests import Request
 
 from app.core.errors import ApiError
 from app.core.principal import Principal
+from app.core.routes import route_template
 
 
 async def refuse(
@@ -48,8 +49,7 @@ async def refuse_endpoint(
     request: Request, session: AsyncSession, principal: Principal, error: ApiError
 ) -> NoReturn:
     """A route-level refusal (a write switch is off), audited like a denied request."""
-    route = request.scope.get("route")
-    endpoint: str = getattr(route, "path", request.url.path)
+    endpoint = route_template(request)  # the served template (FastAPI 0.162 lazy routers, D-04)
     await refuse(
         session,
         principal,

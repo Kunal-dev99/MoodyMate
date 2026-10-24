@@ -14,7 +14,7 @@ from app.core.tokens import DevTokens
 from app.governance.constants import DEFAULT_TENANT_ID, DEV_ISSUER, FieldType
 from app.ingestion.adapters import AdapterOptions, Limits, parse_upload
 from app.ingestion.constants import SourceFormat
-from app.tests.conftest import dev_token, insert_user, sql
+from app.tests.conftest import dev_token, insert_user, response, sql
 
 IMPORTS = "/api/v1/imports"
 SOURCES = "/api/v1/sources"
@@ -153,6 +153,13 @@ def source_for(api: TestClient, db: str, steward: dict[str, str], fmt: str) -> s
     return str(r.json()["id"])
 
 
+def without_rate_limits(client: TestClient) -> None:
+    """BE-28.3 (Q10 ruling): for a test function that calls a rate-limited route more often
+    than a bucket holds. Its app then runs as RATE_LIMIT_ENABLED=false does (local/test only):
+    create_app builds no limiter."""
+    client.app.state.rate_limiter = None  # type: ignore[attr-defined]
+
+
 # --- imports -----------------------------------------------------------------------------------
 
 
@@ -174,11 +181,13 @@ def upload(
     extra = {"Idempotency-Key": key or uuid.uuid4().hex}
     if cid:
         extra["X-Correlation-ID"] = cid
-    return api.post(
-        IMPORTS,
-        data=form,
-        files={"file": (filename, data, "application/octet-stream")},
-        headers={**headers, **extra},
+    return response(
+        api.post(
+            IMPORTS,
+            data=form,
+            files={"file": (filename, data, "application/octet-stream")},
+            headers={**headers, **extra},
+        )
     )
 
 
@@ -292,7 +301,7 @@ def instrument_mapping(
 def validate_import(
     api: TestClient, headers: dict[str, str], import_id: str, **kw: Any
 ) -> Response:
-    return api.post(f"{IMPORTS}/{import_id}/validate", headers={**headers, **kw})
+    return response(api.post(f"{IMPORTS}/{import_id}/validate", headers={**headers, **kw}))
 
 
 # --- Phase 14: projection into the WS3 domain (D-29) ------------------------------------------
@@ -301,7 +310,7 @@ INSTRUMENTS = "/api/v1/instruments"
 
 
 def project(api: TestClient, headers: dict[str, str], import_id: str, **kw: Any) -> Response:
-    return api.post(f"{IMPORTS}/{import_id}/projection", headers={**headers, **kw})
+    return response(api.post(f"{IMPORTS}/{import_id}/projection", headers={**headers, **kw}))
 
 
 def validated_instruments(
@@ -422,7 +431,7 @@ def module_version_id(
 def make_snapshot(
     api: TestClient, headers: dict[str, str], import_ids: list[str], **kw: Any
 ) -> Response:
-    return api.post(SNAPSHOTS, json={"import_ids": import_ids}, headers={**headers, **kw})
+    return response(api.post(SNAPSHOTS, json={"import_ids": import_ids}, headers={**headers, **kw}))
 
 
 def start_run(
@@ -433,7 +442,7 @@ def start_run(
     **kw: Any,
 ) -> Response:
     extra = {"Idempotency-Key": key or uuid.uuid4().hex}
-    return api.post(RUNS, json=body, headers={**headers, **extra, **kw})
+    return response(api.post(RUNS, json=body, headers={**headers, **extra, **kw}))
 
 
 def blocked_run(api: TestClient, import_id: str) -> dict[str, Any]:

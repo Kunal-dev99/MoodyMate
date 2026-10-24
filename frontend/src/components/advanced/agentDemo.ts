@@ -2,9 +2,22 @@
  * Demo mode for the Agentic Stress-Test Explorer: a mock agent (no external AI call) and a
  * deterministic in-browser maturity-ladder overlay on a fixed ILLUSTRATIVE / SYNTHETIC cash-flow
  * set. It previews the Phase 25-27 workflow (run against baseline, compare by bucket, explain)
- * until the real engine and agent ship. Amounts are integer hundredths of ₹ lakh: no floats in
- * the arithmetic. The baseline reproduces the design doc's §5 worked example.
+ * until the real engine and agent ship. This is browser arithmetic on synthetic data, not the
+ * calculation engine. Amounts are integer hundredths of ₹ lakh. The baseline reproduces the design
+ * doc's §5 worked example.
  */
+
+/** Shown on both demo pages (FE-28.4): the numbers on them do not come from the calculation engine. */
+export const DEMO_BANNER = 'Illustrative mock: browser arithmetic on synthetic data, not the calculation engine'
+
+/** Label for the per-run hash: a DJB2 string hash, not the backend's SHA-256 result fingerprint. */
+export const CHECKSUM_LABEL = 'illustrative checksum (not a SHA-256 result fingerprint)'
+
+/** Zero guard for every ratio on the demo pages: null when the denominator is 0 or not finite. */
+export function ratio(num: number, den: number): number | null {
+  if (den === 0 || !Number.isFinite(den) || !Number.isFinite(num)) return null
+  return num / den
+}
 
 export type TemplateCode = 'DELAYED_INFLOWS' | 'DEPOSIT_WITHDRAWAL' | 'FUNDING_UNAVAILABLE'
 export type FieldKey = 'fraction' | 'days'
@@ -89,7 +102,7 @@ export function money(n: number): string {
 export const signed = (n: number) => (n === 0 ? '0.00' : `${n > 0 ? '+' : ''}${money(n)}`)
 
 const bucketOf = (day: number) => BUCKETS.findIndex((b) => day <= b.hi)
-/** pct has at most two decimals (validated), so the basis-point product is exact. */
+/** pct has at most two decimals (validated); the share is rounded to the nearest hundredth. */
 const share = (amt: number, pct: number) => Math.round((amt * Math.round(pct * 100)) / 10000)
 
 export function applyShocks(shocks: DemoShock[]): Flow[] {
@@ -139,7 +152,8 @@ export function ladder(flows: Flow[]): LadderRow[] {
 
 export const BASELINE = ladder(applyShocks([]))
 
-export function fingerprint(rows: LadderRow[]): string {
+/** Illustrative checksum of a ladder (DJB2 over its JSON). Not a SHA-256 result fingerprint. */
+export function checksum(rows: LadderRow[]): string {
   const s = JSON.stringify(rows)
   let h = 5381
   for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0

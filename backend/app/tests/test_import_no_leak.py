@@ -100,7 +100,11 @@ def test_no_sentinel_in_logs_error_bodies_or_audit(
     db: str, tmp_path: Path, caplog: pytest.LogCaptureFixture, capfd: pytest.CaptureFixture[str]
 ) -> None:
     settings = Settings(
-        ENV="test", DATABASE_URL=db, ARTIFACT_STORE_DIR=tmp_path / "artifacts", LOG_LEVEL="DEBUG"
+        ENV="test",
+        DATABASE_URL=db,
+        ARTIFACT_STORE_DIR=tmp_path / "artifacts",
+        LOG_LEVEL="DEBUG",
+        RATE_LIMIT_ENABLED=False,  # BE-28.3: more uploads than one bucket holds
     )
     bodies: list[str] = []
     correlations: list[str] = []

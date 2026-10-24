@@ -169,6 +169,7 @@ from app.tests.helpers import (
     start_run,
     upload,
     validate_import,
+    without_rate_limits,
 )
 from app.tests.lcr_kit import (
     LCR_OUTPUT_TABLES,
@@ -409,6 +410,7 @@ def cashflow_csv(rows: Sequence[tuple[Any, ...]], reporting: date) -> bytes:
 def test_registry_snapshot_run_and_maturity_ladder(
     api: TestClient, db: str, artifact_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    without_rate_limits(api)
     # --- 1. The registry seed (BE-15.1) --------------------------------------------------------
     m18 = migration("0018_calculations")
     m21 = migration("0021_planned_modules")

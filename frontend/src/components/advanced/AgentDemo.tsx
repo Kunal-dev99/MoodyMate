@@ -1,8 +1,9 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Bot, FileSearch, History, Play, ShieldCheck, Sparkles } from 'lucide-react'
+import { AlertTriangle, Bot, FileSearch, History, Play, ShieldCheck, Sparkles } from 'lucide-react'
 import { PageSection } from '@/components/common/PageSection'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -11,7 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import {
-  BASELINE, BUCKETS, EXAMPLES, TEMPLATES, applyShocks, describe, fingerprint, ladder, money, parseField, problems, propose, signed,
+  BASELINE, BUCKETS, CHECKSUM_LABEL, DEMO_BANNER, EXAMPLES, TEMPLATES, applyShocks, checksum, describe, ladder, money, parseField, problems, propose, ratio, signed,
   type DemoShock, type FieldKey, type LadderRow, type Proposal,
 } from './agentDemo'
 
@@ -26,7 +27,8 @@ interface RunResult {
   shocks: DemoShock[]
   stressed: LadderRow[]
   perShock: LadderRow[][]
-  fp: string
+  /** Illustrative checksum (DJB2), not a SHA-256 result fingerprint. */
+  checksum: string
 }
 
 const deltaClass = (n: number) => (n > 0 ? 'text-success font-semibold' : n < 0 ? 'text-danger font-semibold' : 'text-muted-foreground')
@@ -98,10 +100,10 @@ export function AgentDemo() {
     if (current.status === 'PROPOSED') log(`Analyst confirmed v${current.n} for exploration`)
     const stressed = ladder(applyShocks(current.shocks))
     const perShock = current.shocks.map((s) => ladder(applyShocks([s])))
-    const fp = fingerprint(stressed)
+    const sum = checksum(stressed)
     setVersions((vs) => [...vs.slice(0, -1), { ...current, status: 'RUN' }])
-    setRun({ version: current.n, shocks: current.shocks, stressed, perShock, fp })
-    log(`Run complete for v${current.n} against baseline snapshot SNAP-2026-12-20 · fingerprint ${fp}`)
+    setRun({ version: current.n, shocks: current.shocks, stressed, perShock, checksum: sum })
+    log(`Mock run computed in the browser for v${current.n} against synthetic baseline SNAP-2026-12-20 · ${CHECKSUM_LABEL} ${sum}`)
     setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
   }
 
@@ -109,6 +111,10 @@ export function AgentDemo() {
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
+      <Alert variant="warning" className="lg:col-span-2" data-testid="demo-banner">
+        <AlertTriangle className="h-4 w-4" />
+        <AlertDescription>{DEMO_BANNER}</AlertDescription>
+      </Alert>
       <div className="min-w-0 space-y-4">
         <PageSection icon={Bot} title="1. Ask the agent" description="Describe the stress in plain English. The agent maps it to the approved templates only: delayed loan repayments, deposit withdrawals, funding unavailable." accent="primary">
           <Textarea id="agent-request" data-testid="agent-request" value={request} onChange={(e) => setRequest(e.target.value)} rows={3} />
@@ -197,7 +203,7 @@ export function AgentDemo() {
         </div>
 
         <div ref={resultsRef}>
-          <PageSection title="3. Baseline vs stress by time bucket" description="The original data is never changed. The engine applies the shocks to a scenario copy and recalculates the maturity ladder. ₹ lakh, one currency.">
+          <PageSection title="3. Baseline vs stress by time bucket" description="The synthetic data is never changed. This mock applies the shocks to a scenario copy in the browser and recalculates the maturity ladder; the calculation engine is not called. ₹ lakh, one currency.">
             {run ? <Results run={run} /> : <p className="text-sm text-muted-foreground">Confirm a scenario to run it.</p>}
           </PageSection>
         </div>
@@ -224,8 +230,8 @@ export function AgentDemo() {
                     <br />
                     <span className="text-xs text-muted-foreground">{v.origin}</span>
                   </span>
-                  <Badge variant={v.status === 'RUN' ? 'success' : v.status === 'CONFIRMED' ? 'info' : 'warning'}>
-                    {v.status === 'RUN' ? 'Run complete' : v.status === 'CONFIRMED' ? 'Confirmed' : 'Proposed'}
+                  <Badge variant={v.status === 'RUN' ? 'secondary' : v.status === 'CONFIRMED' ? 'info' : 'warning'}>
+                    {v.status === 'RUN' ? 'Mock run (browser)' : v.status === 'CONFIRMED' ? 'Confirmed' : 'Proposed'}
                   </Badge>
                 </li>
               ))}
@@ -253,7 +259,7 @@ export function AgentDemo() {
             <li>Bounds: 0 &lt; share ≤ 100%, delay 1–3650 days</li>
             <li>The agent has no database write access</li>
             <li>The analyst confirms every run; shared use needs an approver who is not the author</li>
-            <li>Exact decimal arithmetic and a result fingerprint per run</li>
+            <li>This mock: integer arithmetic in the browser on synthetic data, with an {CHECKSUM_LABEL} per run</li>
           </ul>
         </PageSection>
       </aside>
@@ -332,7 +338,7 @@ function Results({ run }: { run: RunResult }) {
         </div>
       </div>
       <p className="font-mono text-xs text-muted-foreground">
-        Scenario v{run.version} · baseline snapshot SNAP-2026-12-20 · maturity ladder v1 · result fingerprint {run.fp} · re-running reproduces it exactly
+        Scenario v{run.version} · synthetic baseline SNAP-2026-12-20 · maturity ladder v1 · {CHECKSUM_LABEL} {run.checksum}
       </p>
     </div>
   )
@@ -352,9 +358,9 @@ function Chart({ stressed }: { stressed: LadderRow[] }) {
   const W = 720, H = 230, pl = 56, pr = 10, pt = 12, pb = 36
   const vals = stressed.flatMap((r, i) => [r.net, BASELINE[i].net])
   const mx = Math.max(...vals, 0), mn = Math.min(...vals, 0)
-  const span = mx - mn || 1
-  const y = (v: number) => pt + ((mx - v) / span) * (H - pt - pb)
-  const gw = (W - pl - pr) / stressed.length
+  // Zero guard: an all-zero ladder (span 0) draws every bar on the axis instead of dividing by zero.
+  const y = (v: number) => pt + (ratio(mx - v, mx - mn) ?? 0) * (H - pt - pb)
+  const gw = (W - pl - pr) / Math.max(1, stressed.length)
   const bw = Math.min(28, gw / 3)
   const ticks = [mx, Math.round((mx + mn) / 2), mn]
   return (
@@ -430,14 +436,14 @@ function Explanation({ run, onAdapt }: { run: RunResult; onAdapt: (label: string
         ))}
       </ul>
       <div>
-        <p className="text-xs text-muted-foreground">Evidence: the cash flows the engine changed (scenario copy only; source records untouched)</p>
+        <p className="text-xs text-muted-foreground">Evidence: the synthetic cash flows this mock changed (scenario copy only; source records untouched)</p>
         <ul className="mt-1 space-y-0.5 pl-4 font-mono text-xs text-muted-foreground">
           {changed.map((f) => (
             <li key={f.id}>{f.id} · {f.desc} · {f.effects.map((e) => `shock ${e.shock + 1}: ${e.text}`).join('; ')}</li>
           ))}
         </ul>
       </div>
-      <p className="text-xs text-muted-foreground">Every figure is read from run fingerprint {run.fp}. The agent did not compute any number.</p>
+      <p className="text-xs text-muted-foreground">Every figure comes from the browser arithmetic above ({CHECKSUM_LABEL} {run.checksum}). The mock agent did not compute any number.</p>
       {adapts.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
           <span className="text-xs text-muted-foreground">Adapt:</span>
