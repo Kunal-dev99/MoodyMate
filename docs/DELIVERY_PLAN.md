@@ -4161,13 +4161,17 @@ append-only links. v1 behaviour is unchanged.
     - ~~a ladder run over a typed-instrument snapshot gives the same `result_sha256` as over the
       v1 one~~ reworded 2026-10-24 (Q2, auto-resolved; D-57 amendment), because contributions
       carry `instrument_version_id`, which D-31 §4 hashes:
-      - (a) a run over the v1 snapshot still gives the same `result_sha256` as its pre-phase
-        golden;
+      - (a) a run over the v1 snapshot gives a result document equal to a golden captured on
+        the pre-phase code, after every row id is replaced by its stable business key
+        (instrument, cash flow, rule version, warning entity), and that document's
+        `canonical_sha256` equals the golden's. A literal `result_sha256` can't be a golden,
+        because D-31 §4 hashes row ids, which differ per database. Reworded 2026-10-24,
+        auto-resolved;
       - (b) a typed-snapshot run and a v1-snapshot run give result documents that are equal
         once only `instrument_version_id` is removed from each contribution, with the same
         number of contributions;
       - (c) repeating the run over the same typed snapshot gives an equal `result_sha256`.
-  - *Not yet ticked (2026-10-24, architect):* evidenced in `test_domain.py`: v1 golden summary
+  - *Ticked 2026-10-24 (evidence below):* evidenced in `test_domain.py`: v1 golden summary
     and every `payload_sha256` (`golden_check` :383, `identity_kit.py:72-87`; golden captured
     from the unchanged projector); `TYPE_NOT_PROJECTED` 25 :480; held dates
     `{2030-02-30, 2030-13-01, n/a}` :659-666 and never projected :706; `2030-06-30` stored as
@@ -4175,11 +4179,10 @@ append-only links. v1 behaviour is unchanged.
     `missing_values == {"maturity_date": 1}` :693 (absent from v1, :414); 6 dp exact :709-711;
     matched by hash, not number :637-649 and via the API :676-687; switch off 409 audited DENIED
     :668-675; (b) `run_outputs` equal with instrument version ids replaced by business key
-    :719-741 (`identity_kit.py:311-339`). **Missing:** (c) no repeat run over the typed snapshot
-    is asserted; (a) there is no pre-phase golden of a run's `result_sha256` (the test shows the
-    v1 run's hash equal before and after reconcile, :476-477, which is BE-31.4's check). Test
-    writer: assert (c); for (a), add the golden or send the wording back to the
-    decision-resolver (run hashes depend on per-database row ids).
+    :719-741 (`identity_kit.py:311-339`). (c) repeat typed-snapshot run with equal `result_sha256` :743-751; (a) the v1 run
+    equals `GOLDEN_V1_RUN` by key (status, document, `canonical_sha256` `4bf2ffb6…dfd03`)
+    :437-442 (`identity_kit.py:363-467`, `golden/domain_v1_run.json`, captured on 56dec79);
+    before/after-reconcile equality :485-486 kept. Nothing missing.
 - [x] **BE-31.4** Identity links (D-58). The projection step links its own rows, and
   `POST identity-links/reconcile` links historical rows. Exactly one identity in the tenant
   gives a link. Zero or several give no link and are counted (`LINK_UNRESOLVED`,
