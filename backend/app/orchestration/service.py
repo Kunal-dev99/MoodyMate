@@ -1217,6 +1217,10 @@ class ScenarioRunService:
             min_aggregate_count=min_aggregate_count,
             illustrative=True,
             labels=LABELS,
+            # D-56 §4-5 (BE-30.2, BE-30.3): from the baseline run's pins; every member run pins
+            # the same module, engine and rule versions (D-45 §1).
+            validation_status=self.calc.validation_status(baseline.row.run),
+            context=self.calc.result_context(baseline.row.run),
         )
 
     async def contributions(

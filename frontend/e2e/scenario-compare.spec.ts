@@ -122,6 +122,11 @@ test('FE-25.2: as data_steward, a bucket\'s net delta equals the difference of t
   await expect(page.getByTestId('comparison-reporting-date')).toHaveText(REPORTING_DATE)
   await expect(page.getByTestId('comparison-baseline-link')).toHaveAttribute('href', `/calculations/runs/${baseline!.run_id}`)
   await expect(page.getByTestId('summary-not-ai')).toBeVisible()
+  // FE-30.1 (D-56): the compared module version's status and the comparison's context block.
+  await expect(page.getByTestId('comparison-validation-status')).toHaveAttribute('data-validation-status', comparison.validation_status)
+  const compareContext = page.locator('[data-testid="result-context"][data-source="comparison"]')
+  await expect(compareContext.getByTestId('context-as-of-date')).toHaveText(comparison.context.as_of_date)
+  await expect(compareContext.getByTestId('context-module')).toHaveText(`${comparison.context.methodology.module_code} v${comparison.context.methodology.module_version}`)
   for (const m of comparison.members) await expect(page.locator(`[data-testid="comparison-member"][data-run-id="${m.calculation_run_id}"]`)).toHaveAttribute('data-status', m.status)
 
   // 3. A combined cell whose net delta is clear and non-zero, checked against both ladders.

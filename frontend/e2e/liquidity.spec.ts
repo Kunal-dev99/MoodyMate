@@ -112,6 +112,12 @@ test('FE-17.1: the approver sees HQLA components, outflows, capped inflows and t
   const view = page.getByTestId('liquidity')
   await expect(view.getByTestId('lcr-currency')).toHaveCount(liquidity.currencies.length)
   await expect(view.getByTestId('lcr-min-aggregate-count')).toHaveText(String(liquidity.min_aggregate_count))
+  // FE-30.1 (D-56): the LCR read's own context block, with the ratio unit, and no mismatch with the run's pins.
+  const lcrContext = view.locator('[data-testid="result-context"][data-source="liquidity"]')
+  await expect(lcrContext.getByTestId('context-as-of-date')).toHaveText(liquidity.context.as_of_date)
+  await expect(lcrContext.getByTestId('context-validation-status')).toHaveText('Illustrative — not validated')
+  if (liquidity.context.units.ratio !== null) await expect(lcrContext.getByTestId('context-units-ratio')).toHaveText(liquidity.context.units.ratio)
+  await expect(view.getByTestId('context-mismatch')).toHaveCount(0)
 
   let checkedTotals = 0
   for (const c of liquidity.currencies) {

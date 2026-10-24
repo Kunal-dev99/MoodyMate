@@ -31,7 +31,7 @@ from app.calculations.constants import (
 from app.core.classification import MaskedValue
 from app.domain.constants import CashflowOrigin, DomainSchemaCode
 from app.reconciliation.constants import ReconciliationOutcome
-from app.rules.constants import CashflowDirection, HqlaLevel
+from app.rules.constants import CashflowDirection, HqlaLevel, ValidationStatus
 
 Value = str | MaskedValue
 
@@ -150,6 +150,57 @@ class RunScenarioRef(BaseModel):
     baseline_run_id: uuid.UUID
 
 
+# --- Phase 30: result context (BE-30.3, D-56 §5) -----------------------------------------------
+
+
+class ContextUnits(BaseModel):
+    """What the figures of a result read are measured in."""
+
+    amount: str = Field(
+        description="Money: exact decimal text in the ISO 4217 currency of its row, never "
+        "converted (no FX, D-35)."
+    )
+    ratio: str | None = Field(
+        description="Ratios (lcr_hqla): a dimensionless fraction, 4 dp ROUND_HALF_EVEN; None "
+        "when the module reports no ratio."
+    )
+    days: str = Field(description="Calendar days after the reporting date.")
+
+
+class ContextCurrency(BaseModel):
+    basis: Literal["PER_CURRENCY_NO_FX"] = Field(
+        description="Results are per currency; there is no FX and no cross-currency total."
+    )
+    codes: list[str] = Field(description="The ISO 4217 currencies of the run's outcome, sorted.")
+
+
+class ContextRuleVersion(BaseModel):
+    rule_code: str
+    rule_version_id: uuid.UUID
+    version: int
+
+
+class ContextMethodology(BaseModel):
+    module_code: str
+    module_version: int
+    engine_version: str
+    rule_versions: list[ContextRuleVersion] = Field(
+        description="The pinned rule set's members, by rule code."
+    )
+
+
+class ResultContext(BaseModel):
+    """D-56 §5: the context of a result read, built from the run's pins (manifest, module
+    version, outcome), never computed. Response wrapper only: not hashed."""
+
+    units: ContextUnits
+    currency: ContextCurrency
+    as_of_date: date = Field(description="The run's pinned reporting_date.")
+    methodology: ContextMethodology
+    validation_status: ValidationStatus
+    statement: str = Field(description="The D-35 label: not regulatory, no vendor parity.")
+
+
 class RunSummary(BaseModel):
     run_id: uuid.UUID
     status: CalculationRunStatus
@@ -175,6 +226,10 @@ class RunSummary(BaseModel):
     ended_at: datetime | None
     created_by: str
     illustrative: bool = Field(description="Always true in Feature 03 (D-35).")
+    validation_status: ValidationStatus = Field(
+        description="D-56: the run's module version's status (MODULE_VALIDATION). Response "
+        "wrapper only: never in the manifest or the result document."
+    )
     scenario: RunScenarioRef | None = Field(
         default=None, description="Stressed runs only (Phase 25); null otherwise."
     )
@@ -360,6 +415,10 @@ class RunDetail(RunSummary):
     outcome: RunOutcome | None = Field(description="Set when the run ends.")
     correlation_id: str | None
     statement: str = Field(description="The D-35 label: not regulatory, no vendor parity.")
+    context: ResultContext = Field(
+        description="D-56 §5: units, currency, as-of date, methodology pins, validation status "
+        "and the D-35 statement, from the run's pins."
+    )
 
 
 # --- results and the maturity ladder (BE-15.5) --------------------------------------------------
@@ -406,6 +465,14 @@ class ResultPage(BaseModel):
     limit: int
     offset: int
     statement: str
+    validation_status: ValidationStatus = Field(
+        description="D-56: the run's module version's status (MODULE_VALIDATION). Response "
+        "wrapper only: never in the manifest or the result document."
+    )
+    context: ResultContext = Field(
+        description="D-56 §5: units, currency, as-of date, methodology pins, validation status "
+        "and the D-35 statement, from the run's pins."
+    )
 
 
 class BucketOut(BaseModel):
@@ -465,6 +532,14 @@ class MaturityLadderOut(BaseModel):
     )
     illustrative: bool
     statement: str
+    validation_status: ValidationStatus = Field(
+        description="D-56: the run's module version's status (MODULE_VALIDATION). Response "
+        "wrapper only: never in the manifest or the result document."
+    )
+    context: ResultContext = Field(
+        description="D-56 §5: units, currency, as-of date, methodology pins, validation status "
+        "and the D-35 statement, from the run's pins."
+    )
 
 
 # --- liquidity: the lcr_hqla read (BE-17.3) -----------------------------------------------------
@@ -565,3 +640,11 @@ class LiquidityOut(BaseModel):
     prototype: bool = Field(description="Always true: an illustrative LCR/HQLA prototype.")
     illustrative: bool
     statement: str
+    validation_status: ValidationStatus = Field(
+        description="D-56: the run's module version's status (MODULE_VALIDATION). Response "
+        "wrapper only: never in the manifest or the result document."
+    )
+    context: ResultContext = Field(
+        description="D-56 §5: units, currency, as-of date, methodology pins, validation status "
+        "and the D-35 statement, from the run's pins."
+    )
