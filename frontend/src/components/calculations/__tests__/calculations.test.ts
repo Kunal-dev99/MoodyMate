@@ -110,6 +110,7 @@ const moduleVersion = (over: Partial<ModuleVersion> = {}): ModuleVersion => ({
   illustrative: true,
   provisional: true,
   statement: ILLUSTRATIVE_STATEMENT,
+  validation_status: 'ILLUSTRATIVE',
   created_at: '2026-10-17T00:00:00Z',
   input_contract: {
     schemas: [
@@ -198,6 +199,15 @@ const run = (over: Partial<RunDetail> = {}): RunDetail => ({
   warnings: [],
   input_refs: [],
   outcome: null,
+  validation_status: 'ILLUSTRATIVE',
+  context: {
+    as_of_date: '2026-12-31',
+    currency: { basis: 'PER_CURRENCY_NO_FX', codes: [] },
+    methodology: { module_code: 'maturity_ladder', module_version: 1, engine_version: '1', rule_versions: [] },
+    units: { amount: 'exact decimal text', days: 'calendar days after the reporting date', ratio: null },
+    validation_status: 'ILLUSTRATIVE',
+    statement: ILLUSTRATIVE_STATEMENT,
+  },
   manifest: {
     manifest_version: 1,
     reporting_date: '2026-12-31',

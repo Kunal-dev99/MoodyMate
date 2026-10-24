@@ -84,6 +84,7 @@ const PLANNED: ModuleVersion = {
   provisional: true,
   illustrative: true,
   statement: 'Illustrative prototype. Not a regulatory calculation; no parity with any vendor system is claimed.',
+  validation_status: 'ILLUSTRATIVE',
   created_at: '2026-10-17T10:00:00Z',
 }
 
@@ -170,6 +171,9 @@ describe('modules: AVAILABLE and PLANNED are shown apart, PLANNED never as ready
     expect(html).toMatchSnapshot()
     expect(html).toContain('data-status="PLANNED"')
     expect(html).toContain('not production-ready')
+    // FE-30.1 (D-56): a PLANNED version carries its validation status too, ILLUSTRATIVE like every current one.
+    expect(html).toContain('data-testid="module-validation-status" data-validation-status="ILLUSTRATIVE"')
+    expect(html).toContain('Illustrative — not validated')
     expect(html).not.toMatch(/Runnable now|Available|module-runnable|Engine/)
   })
 

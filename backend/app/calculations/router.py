@@ -52,6 +52,7 @@ from app.calculations.schemas import (
     LiquidityCurrency,
     LiquidityOut,
     MaturityLadderOut,
+    ResultContext,
     ResultItem,
     ResultPage,
     RunCreate,
@@ -243,8 +244,14 @@ def _summary(row: RunRow) -> RunSummary:
         ended_at=r.ended_at,
         created_by=r.created_by,
         illustrative=True,
+        validation_status=CalculationService.validation_status(r),
         scenario=_scenario(row),
     )
+
+
+def _context(row: RunRow) -> ResultContext:
+    """D-56 §5 (BE-30.3): the run's context block, from its pins."""
+    return ResultContext.model_validate(CalculationService.result_context(row.run))
 
 
 def _detail(row: RunRow, manifest: dict[str, Any]) -> RunDetail:
@@ -279,6 +286,7 @@ def _detail(row: RunRow, manifest: dict[str, Any]) -> RunDetail:
         outcome=RunOutcome.model_validate(r.outcome) if r.outcome is not None else None,
         correlation_id=r.correlation_id,
         statement=ILLUSTRATIVE_STATEMENT,
+        context=_context(row),
     )
 
 
@@ -473,6 +481,8 @@ async def get_calculation_run_results(
         limit=limit,
         offset=offset,
         statement=ILLUSTRATIVE_STATEMENT,
+        validation_status=CalculationService.validation_status(view.run),
+        context=ResultContext.model_validate(CalculationService.result_context(view.run)),
     )
 
 
@@ -539,6 +549,8 @@ async def get_maturity_ladder(
         min_aggregate_count=view.min_aggregate_count,
         illustrative=True,
         statement=ILLUSTRATIVE_STATEMENT,
+        validation_status=CalculationService.validation_status(view.row.run),
+        context=_context(view.row),
     )
 
 
@@ -697,4 +709,6 @@ async def get_liquidity(
         prototype=True,
         illustrative=True,
         statement=ILLUSTRATIVE_STATEMENT,
+        validation_status=CalculationService.validation_status(view.row.run),
+        context=_context(view.row),
     )

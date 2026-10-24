@@ -169,3 +169,12 @@ MANIFEST_VERSION = 1
 # D-33 option A: aggregates (bucket and currency totals, gaps) are internal; per-input
 # contributions carry the most sensitive classification among the fields they read.
 AGGREGATE_CLASSIFICATION = ClassificationCode.INTERNAL.value
+
+# --- Phase 30: the result context's units (BE-30.3, D-56 §5) ---------------------------------
+# Labels of what a result read's figures are measured in, as the engine computes them: they
+# describe the code as built (decimals.py, the module implementations) and change nothing.
+CONTEXT_CURRENCY_BASIS = "PER_CURRENCY_NO_FX"
+CONTEXT_AMOUNT_UNIT = "Exact decimal, in the ISO 4217 currency of its row (no FX conversion)"
+CONTEXT_DAYS_UNIT = "Calendar days after the reporting date"
+# Per module code: only lcr_hqla reports a ratio; every other module reads None.
+CONTEXT_RATIO_UNITS = {"lcr_hqla": "Dimensionless fraction, 4 dp ROUND_HALF_EVEN"}

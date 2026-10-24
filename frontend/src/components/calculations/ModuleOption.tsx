@@ -1,6 +1,7 @@
 import { cn } from '@/lib/utils'
 import { ModuleContracts, PlannedModuleBadge } from './PlannedModuleBadge'
 import { ImplementationPill } from './RunStatusPill'
+import { ValidationStatusBadge } from './ValidationStatusBadge'
 import { PLANNED_MODULE_REASON, isSelectable, type ModuleVersion } from './calculations'
 
 /**
@@ -55,6 +56,8 @@ export function ModuleOption({
               {m.code} v{m.version} · engine {m.engine_version}
             </span>
             {selectable ? <ImplementationPill status={m.implementation_status} /> : <PlannedModuleBadge />}
+            {/* FE-30.1: the version's validation status (D-56), as in the module registry. */}
+            <ValidationStatusBadge status={m.validation_status} testId="module-validation-status" />
             {selectable && !m.runnable && (
               <span className="text-xs text-destructive" data-testid="module-not-runnable">
                 Not runnable now: a rule has no ACTIVE version or no baseline assumption set is ACTIVE (the server answers 409 module_not_available).

@@ -3949,7 +3949,7 @@ Goal: every module documented from the code as built, every output labelled with
 status and context, and the API boundary cases tested. No methodology is invented or changed.
 The methodology items in D-56 §6 are client hard stops, not tasks.
 
-- [ ] **BE-30.1** `docs/methodology/{maturity_ladder,lcr_hqla,scenario_overlay}.md`. Each has
+- [x] **BE-30.1** `docs/methodology/{maturity_ladder,lcr_hqla,scenario_overlay}.md`. Each has
   these headings: intended use, status, formula, units, inputs, exclusions and warnings,
   assumptions (each seeded rule), rounding, limitations, open client decisions. Each cites
   file:line and rule codes.
@@ -3957,7 +3957,16 @@ The methodology items in D-56 §6 are client hard stops, not tasks.
     - the headings are present (grep);
     - the parameters equal the seeds in 0018/0020 (architect check);
     - "compliant", "certified" and "Moody's" appear only inside the D-35 negating statement.
-- [ ] **BE-30.2** `validation_status` (D-56): a code constant `MODULE_VALIDATION` per (module
+  - *Evidence (2026-10-24, architect-verified):* `grep -c "^## "` gives 10 in each of the three
+    files, and the ten headings are the ten listed. Seeds compared line by line:
+    `maturity_ladder.md:104-111` equals `0018_calculations.py:158-193` (B01-B08 bounds,
+    BOND/LOAN INFLOW and DEPOSIT OUTFLOW, EXCLUDE_WITH_WARNING); `lcr_hqla.md:114-121` equals
+    `0020_lcr_results.py:139-184` (BOND L1, haircut 0.0000, DEPOSIT 0.1000, LOAN 0.5000, 30 days,
+    cap 0.7500); `scenario_overlay.md:113-121` repeats the 0018 seeds. A case-insensitive grep
+    for `compliant|certif|moody` over `docs/methodology/` finds nothing. The strict `>` cap flag
+    is stated at `lcr_hqla.md:37-39` (`lcr_hqla.py:427`). LOW follow-ups are in the Phase 30
+    report.
+- [x] **BE-30.2** `validation_status` (D-56): a code constant `MODULE_VALIDATION` per (module
   code, version), all ILLUSTRATIVE. A non-ILLUSTRATIVE `ValidationRecord` without an approver,
   `approved_on` and `evidence_ref` fails at import. It is exposed in the module registry, run
   list and detail, result reads and comparison, in the response wrapper only.
@@ -3965,27 +3974,60 @@ The methodology items in D-56 §6 are client hard stops, not tasks.
     - the rules fold sees ILLUSTRATIVE on every module version, PLANNED included;
     - an unapproved validated record raises;
     - the calculations fold confirms the manifest and result-document key sets are the
-      Feature 03 sets, and a re-run of a run made before this phase reproduces both hashes.
-- [ ] **BE-30.3** A `context` block on every result read (run detail, maturity ladder, LCR,
-  comparison): `units`, `currency`, `as_of_date` (`reporting_date`), `methodology` (module
+      Feature 03 sets; the re-run (`rerun_of`) of the Feature 03 run reproduces both hashes,
+      and the original run's stored hashes re-verify. *(Reworded 2026-10-24, Phase 30 Q7,
+      auto-resolved: a fixed pre-phase golden hash cannot exist because the manifest pins
+      random snapshot and import UUIDs, D-31 §4.)*
+  - *Evidence (2026-10-24, architect-verified):* `app/rules/constants.py:108-156`
+    (`ValidationStatus`, `ValidationRecord.__post_init__`, `MODULE_VALIDATION` with five
+    entries, three PLANNED). `validation_kit.py:88-131` (`check_module_validation`, called at
+    `test_rules.py:339`): every role sees ILLUSTRATIVE on every module version with AVAILABLE
+    and PLANNED present, `MODULE_VALIDATION` equals the `module_version` rows, and missing or
+    empty approver/`approved_on`/`evidence_ref` raises for both validated statuses. Key sets:
+    `validation_kit.py:182-186` (manifest) and `:236-241` (result document, recomputed from
+    stored rows). Stored hashes re-verify: `check_stored_hashes` (`:189-241`, called at
+    `test_calculations.py:1050`). Re-run: `test_calculations.py:1287-1293`. Fix round:
+    `test_registry_snapshot_run_and_maturity_ladder` "1 passed"; rules + calculations "2 passed,
+    1 warning in 62.21s"; 49 collected.
+- [x] **BE-30.3** A `context` block on every result read (run detail, results, maturity ladder,
+  LCR, comparison): `units`, `currency`, `as_of_date` (`reporting_date`), `methodology` (module
   code and version, engine version, rule versions), `validation_status` and `statement`. It is
-  built from the pins, never computed.
-  - *Done-when:* the calculations fold checks that the block equals the run's pins on all four
+  built from the pins, never computed. *(Results read added 2026-10-24, Phase 30 Q3/Q10,
+  auto-resolved; D-56 amendment.)*
+  - *Done-when:* the calculations fold checks that the block equals the run's pins on all five
     reads.
-- [ ] **BE-30.4** API boundary cases, folded in with hand-computed values labelled
+  - *Evidence (2026-10-24, architect-verified):* `CalculationService.result_context`
+    (`calculations/service.py:2336-2371`) reads the manifest and outcome only; it is used at
+    `calculations/router.py:252-254, 289, 485, 553, 713` and `orchestration/service.py:1222-1223`
+    (baseline run). `check_context` (`validation_kit.py:169-186`, units frozen as literals at
+    `:66-78`) runs on POST run and ladder (`test_calculations.py:894-895`), run detail (:1041),
+    results (:1093, and the boundary run `validation_kit.py:488-489`), comparison (:1201-1210),
+    LCR (:1389) and the re-run (:1293). `openapi.json` `ResultPage.required` ends
+    `validation_status, context`; `export_openapi --check` "openapi.json is up to date".
+- [x] **BE-30.4** API boundary cases, folded in with hand-computed values labelled
   `ENGINEERING — awaiting domain-expert approval`:
   - an LCR ratio tie on each side of ROUND_HALF_EVEN;
   - inflows exactly at the 75% cap, and one minor unit above;
   - zero net outflows give JSON `ratio: null` with `LCR_DENOMINATOR_ZERO`;
   - `999999999999999999.99` stays exact through the ladder;
-  - a 3-dp `amount` is held at validation and never rounded.
+  - a 3-dp `amount` with a non-zero third decimal is held at validation and never rounded.
+    *(Reworded 2026-10-24, Phase 30 Q6, auto-resolved: `1.230` quantizes exactly and is
+    accepted as `1.23`.)*
   - *Done-when:* the five assertions pass. If the code disagrees, the engineer reports it; no
     formula is changed to pass (user plan §16).
-- [ ] **FE-30.1** `ValidationStatusBadge` ("Illustrative — not validated") and a "Result
+  - *Evidence (2026-10-24, architect-verified):* `validation_kit.py:250-346` (EUR 1.0000, USD
+    1.0002, GBP at cap `applied=False`, CHF one minor unit above `applied=True`, SEK `ratio`
+    null with `LCR_DENOMINATOR_ZERO`, each labelled ENGINEERING) checked at `:424-436`, called
+    at `test_calculations.py:1465`; ladder exactness and the 3-dp hold at `validation_kit.py:
+    483-538`, called at `test_calculations.py:1212`. The code agrees with every hand-computed
+    value (`lcr_hqla.py:426-435`); no formula changed. The test writer's deliberate break fails
+    at the new EUR assertion. Fix round: "2 passed".
+- [x] **FE-30.1** `ValidationStatusBadge` ("Illustrative — not validated") and a "Result
   context" panel on the module registry, the runs, the ladder, the LCR and the comparison.
   - *Done-when:*
     - a vitest checks that the badge map covers the enum;
     - a Playwright fold on a run detail sees the badge and the as-of date.
+  - *Evidence (2026-10-24, coordinator):* `npm run gen:api` regenerated `schema.d.ts` with `ResultPage.context`; `validation.test.ts` asserts the context block on five reads (run detail, results, ladder, LCR, comparison); `e2e/calculations.spec.ts:243-262` sees the badge and as-of date; tsc and lint clean, vitest 630 passed; backend 49 passed.
 
 *Test budget:* 49 → 49.
 *Reversibility:* additive response fields and docs only. Hashed documents are unchanged. Labels

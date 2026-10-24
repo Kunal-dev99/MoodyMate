@@ -41,6 +41,7 @@ from app.rules.constants import (
     ILLUSTRATIVE_STATEMENT,
     ImplementationStatus,
     RuleCategory,
+    validation_status_of,
 )
 from app.rules.constants import RuleVersionStatus as Status
 from app.rules.models import AssumptionSet, RuleVersion
@@ -140,6 +141,7 @@ def _module(view: ModuleView) -> ModuleVersionOut:
         assumption_set=assumption_set_pin(view.assumption_set) if view.assumption_set else None,
         provisional=v.provisional,
         illustrative=v.illustrative,
+        validation_status=validation_status_of(m.code, v.version),
         statement=ILLUSTRATIVE_STATEMENT,
         created_at=v.created_at,
     )

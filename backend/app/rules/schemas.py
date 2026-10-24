@@ -19,7 +19,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.calculations.constants import CalculationRunStatus
 from app.core.text import SafeMultilineText
 from app.governance.constants import ProposalDecision
-from app.rules.constants import ImplementationStatus, RuleCategory, RuleVersionStatus
+from app.rules.constants import (
+    ImplementationStatus,
+    RuleCategory,
+    RuleVersionStatus,
+    ValidationStatus,
+)
 
 
 class SchemaRequirement(BaseModel):
@@ -112,6 +117,10 @@ class ModuleVersionOut(BaseModel):
     assumption_set: AssumptionSetPin | None
     provisional: bool
     illustrative: bool
+    validation_status: ValidationStatus = Field(
+        description="D-56: from the code constant MODULE_VALIDATION per (module code, version); "
+        "ILLUSTRATIVE on every current version, PLANNED included. No API sets it."
+    )
     statement: str = Field(description="The D-35 label: not regulatory, no vendor parity.")
     created_at: datetime
 
