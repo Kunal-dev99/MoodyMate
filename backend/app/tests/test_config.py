@@ -15,7 +15,16 @@ from pydantic import ValidationError
 from app.core.config import IMPORT_HARD_LIMITS, REPO_ROOT, Settings, get_settings
 from app.core.logging import REDACTED, JsonFormatter, Sensitive
 from app.main import create_app
+from app.tests.observability_kit import (
+    check_access_log,
+    check_health_with_the_database_down,
+    check_metrics_are_internal_and_token_gated,
+    check_no_vendor_error_tracker,
+    check_reporter_got_only_class_and_correlation,
+    fake_reporter,
+)
 
+DOWN_DSN = "postgresql+asyncpg://x:y@127.0.0.1:1/none"  # an unreachable database
 OIDC: dict[str, Any] = {
     "AUTH_MODE": "oidc",
     "OIDC_ISSUER": "https://idp.example",
@@ -123,7 +132,7 @@ def test_settings_fail_closed(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_responses_carry_the_envelope_correlation_id_and_data_class() -> None:
-    app = create_app(Settings(ENV="test", DATABASE_URL="postgresql+asyncpg://x:y@127.0.0.1:1/none"))
+    app = create_app(Settings(ENV="test", DATABASE_URL=DOWN_DSN))
 
     @app.get("/_test/boom")
     async def boom() -> None:
@@ -161,6 +170,15 @@ def test_responses_carry_the_envelope_correlation_id_and_data_class() -> None:
     assert (
         "INJECTED" not in r.headers["X-Correlation-ID"] and len(r.headers["X-Correlation-ID"]) == 36
     )
+    # BE-34.6: the 500 reaches the error-tracker hook with only the class and correlation id.
+    with fake_reporter() as calls:
+        assert c.get("/_test/boom", headers={"X-Correlation-ID": "corr-test-2"}).status_code == 500
+    check_reporter_got_only_class_and_correlation(calls, RuntimeError, "corr-test-2")
+    check_no_vendor_error_tracker()
+    # BE-34.5: DB down -> live 200, ready 503 `database: fail`, value-free. BE-34.4: metrics
+    # are on the internal listener only, token-gated when METRICS_TOKEN is set.
+    check_health_with_the_database_down(c, DOWN_DSN)
+    check_metrics_are_internal_and_token_gated(app.state.settings)
     preflight = c.options(
         "/api/v1/me",
         headers={"Origin": "http://localhost:3000", "Access-Control-Request-Method": "GET"},
@@ -240,3 +258,6 @@ def test_logs_never_carry_tokens_or_secrets() -> None:
     assert record["extra"]["payload"]["client_secret"] == REDACTED
     assert record["extra"]["monkey"] == "visible"  # words merely containing "key" are kept
     assert "correlation_id" in record
+
+    # BE-34.3: one JSON access line per request; never a query, body, header or token.
+    check_access_log(lambda **kw: create_app(Settings(ENV="test", DATABASE_URL=DOWN_DSN, **kw)))

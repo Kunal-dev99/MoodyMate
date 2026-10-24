@@ -1,0 +1,16 @@
+# FE-34.1: keep the image build context to source only. Local env files (secrets), build output
+# and installed modules never enter the image; npm ci installs from the lockfile.
+.env
+.env.*
+node_modules
+.next
+.next-*
+out
+coverage
+playwright-report
+test-results
+e2e
+*.tsbuildinfo
+npm-debug.log*
+Dockerfile
+.dockerignore

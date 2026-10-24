@@ -242,6 +242,8 @@ def test_every_route_declares_a_permission_and_undeclared_routes_fail_closed() -
     # Changing this set is a security decision: update the test deliberately.
     assert PUBLIC_PATHS == {
         "/api/v1/health",
+        "/api/v1/health/live",  # D-62 §1 (BE-34.5)
+        "/api/v1/health/ready",  # D-62 §1 (BE-34.5)
         "/api/v1/auth/config",
         "/api/v1/dev/personas",
         "/api/v1/dev/sessions",

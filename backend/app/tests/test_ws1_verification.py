@@ -72,6 +72,7 @@ from app.tests.identity_kit import (
     identity_shape,
     projected_legal_entity,
 )
+from app.tests.observability_kit import check_ready_reports_the_migration_head
 from app.tests.scenario_kit import SCENARIOS, create_scenario
 from app.tests.terms_kit import (
     CURRENCIES,
@@ -1091,12 +1092,14 @@ def test_migration_round_trip_and_downgrade_guards(api: TestClient, db: str) -> 
     try:
         command.downgrade(alembic_config(db), m0030.down_revision)
         assert revision() == m0030.down_revision
+        check_ready_reports_the_migration_head(api, at_head=False)  # BE-34.5: head mismatch
         for table in IDENTITY_TABLES:
             assert sql(db, "SELECT to_regclass($1) AS t", table)[0]["t"] is None, table
         assert identity_shape(db, existing) == frozen
     finally:
         command.upgrade(alembic_config(db), "head")
     assert revision() == head and identity_shape(db, existing) == frozen
+    check_ready_reports_the_migration_head(api, at_head=True)
 
     # BE-32.1 (D-61): 0031's seed is tagged and PROVISIONAL, its seeded tables refuse UPDATE,
     # DELETE and TRUNCATE; its downgrade refuses while a non-seed row exists (one transaction:

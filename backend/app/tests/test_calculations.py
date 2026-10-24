@@ -176,6 +176,7 @@ from app.tests.lcr_kit import (
     POSITION_COLUMNS,
     position_csv,
 )
+from app.tests.observability_kit import check_metrics_after_a_run_and_a_failed_import
 from app.tests.scenario_run_kit import (
     OVERLAY_GOLDEN,
     SCENARIO_OUTPUT_TABLES,
@@ -1537,6 +1538,12 @@ def test_registry_snapshot_run_and_maturity_ladder(
             f: Decimal(want[f]) for f in LCR_FIGURES
         }, cur["currency"]
         assert (cur["ratio"], cur["warnings"]) == (want["ratio"], want["warnings"])
+
+    # --- 5d. Phase 34 (BE-34.4): after these runs and one failed import, the internal metrics
+    # listener carries every D-62 §2 series, the failure under its reason code, and no id label.
+    failed = upload(api, steward, instrument_source["id"], b'instrument_id,b\n1,"2"x\n')
+    assert (failed.status_code, failed.json()["code"]) == (422, "csv_malformed"), failed.text
+    check_metrics_after_a_run_and_a_failed_import(api, "csv_malformed")
 
     # --- 6. Guards (BE-15.1, BE-15.2) ----------------------------------------------------------
     bucket_version = uuid.UUID(seeded_versions[MATURITY_BUCKETS])

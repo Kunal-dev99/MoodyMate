@@ -3,6 +3,21 @@
 #
 #   docker compose up -d db
 #   createdb -h localhost -U moodymate -T moodymate_dev moodymate_<feature>   # D-03 copy
+#
+# `prod` profile (BE-34.2, D-62 §5): the backend and frontend images, a one-shot
+# `alembic upgrade head` that must exit 0 before the API starts, and an internal-only metrics
+# network. Nothing secret is in this file. Runtime settings come from an env file that is
+# never committed: copy .env.production.example to .env.production, or point
+# MOODYMATE_ENV_FILE at the file your secret store renders. NEXT_PUBLIC_API_BASE_URL is
+# required, because Next inlines it into the client bundle at build time.
+#
+#   export NEXT_PUBLIC_API_BASE_URL=https://api.example.test
+#   docker compose --profile prod up -d --build --wait
+#   curl -fsS http://localhost:8000/api/v1/health/ready
+#   curl -fsS -L -o /dev/null -w '%{http_code}\n' http://localhost:3000/   # 200 (/ -> /dashboard)
+#
+# With a managed database, DATABASE_URL in the env file points at it and the local `db`
+# service (development credentials only) is not needed.
 services:
   db:
     image: postgres:16
@@ -21,5 +36,74 @@ services:
       timeout: 3s
       retries: 10
 
+  # prod: one-shot migration with the backend image (D-62 §5). The API starts only after it
+  # exits 0, so the API never serves an unmigrated schema.
+  migrate:
+    profiles: [prod]
+    image: moodymate-backend:${MOODYMATE_IMAGE_TAG:-local}
+    build:
+      context: ./backend
+    command: ["alembic", "upgrade", "head"]
+    env_file:
+      - path: ${MOODYMATE_ENV_FILE:-.env.production}
+        required: true
+    depends_on:
+      db:
+        condition: service_healthy
+        required: false   # a managed database (DATABASE_URL) needs no local `db`
+    restart: "no"
+
+  api:
+    profiles: [prod]
+    image: moodymate-backend:${MOODYMATE_IMAGE_TAG:-local}
+    pull_policy: never   # the image `migrate` builds; never pulled
+    env_file:
+      - path: ${MOODYMATE_ENV_FILE:-.env.production}
+        required: true
+    environment:
+      # D-62 §2: with METRICS_ENABLED=true the listener binds only this container's address
+      # on the internal `metrics` network (the `api-metrics` alias), not the published
+      # network, and port 9100 is never published. A scraper joins `metrics` to read it.
+      METRICS_HOST: api-metrics
+      METRICS_PORT: "9100"
+      ARTIFACT_STORE_DIR: /var/lib/moodymate/artifacts
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "${MOODYMATE_API_PORT:-8000}:8000"
+    volumes:
+      # D-15 write-once artifact store. Back it up with the database (docs/ops/BACKUP_RESTORE.md).
+      - artifacts:/var/lib/moodymate/artifacts
+    networks:
+      default: {}
+      metrics:
+        aliases: [api-metrics]
+    restart: unless-stopped
+
+  frontend:
+    profiles: [prod]
+    image: moodymate-frontend:${MOODYMATE_IMAGE_TAG:-local}
+    build:
+      context: ./frontend
+      args:
+        # Required (FE-34.1): frontend/Dockerfile stops the build when it is empty. It is a
+        # public origin, not a secret. Not `${...:?}`: compose interpolates every service for
+        # every command, so that would break `docker compose up -d db` for development.
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-}
+        OIDC_ISSUER: ${OIDC_ISSUER:-}
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${MOODYMATE_WEB_PORT:-3000}:3000"
+    restart: unless-stopped
+
+networks:
+  # prod: internal only (no route out, nothing published). Only the API and a scraper join it.
+  metrics:
+    internal: true
+
 volumes:
   pgdata:
+  artifacts:
