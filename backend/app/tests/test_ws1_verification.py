@@ -53,6 +53,16 @@ from app.tests.helpers import (
     upload,
     validated_sample,
 )
+from app.tests.identity_kit import (
+    IDENTITY_TABLES,
+    LEGAL_ENTITIES,
+    LINKS,
+    RECONCILE,
+    check_identity_append_only,
+    identity_counts,
+    identity_shape,
+    projected_legal_entity,
+)
 from app.tests.scenario_kit import SCENARIOS, create_scenario
 
 # BE-18.3: every test here (matrix, isolation, audit, round trip) is in the WS3 suite too.
@@ -176,6 +186,8 @@ def test_route_by_role_authorization_matrix(api: TestClient, db: str) -> None:
     # Phase 19: both credit samples projected, so the counterparty and exposure reads by id
     # answer 2xx.
     credit = projected_credit(api, db, steward, dev_token(api, "approver"))
+    # Phase 31: the position sample projected, so GET /legal-entities/{id} answers 2xx.
+    legal_entity_id = projected_legal_entity(api, db, steward, dev_token(api, "approver"))
     ids = {
         "schema_id": str(schema_id(db, "instrument")),
         "proposal_id": proposal["id"],
@@ -198,6 +210,7 @@ def test_route_by_role_authorization_matrix(api: TestClient, db: str) -> None:
         ]["assumption_set"]["assumption_set_id"],
         # Phase 24: GET /scenarios/{scenario_id}
         "scenario_id": create_scenario(api, analyst)["scenario_id"],
+        "legal_entity_id": legal_entity_id,  # Phase 31: GET /legal-entities/{id}
     }
     tokens = {role: dev_token(api, role) for role in ROLES}
     failures = []
@@ -252,17 +265,25 @@ def test_route_by_role_authorization_matrix(api: TestClient, db: str) -> None:
         "GET /api/v1/counterparties/{counterparty_id}",
         "GET /api/v1/credit-exposures",
         "GET /api/v1/credit-exposures/{exposure_id}",
+        # BE-31.5: the legal entity and identity-link reads (domain:read).
+        "GET /api/v1/legal-entities",
+        "GET /api/v1/legal-entities/{legal_entity_id}",
+        "GET /api/v1/identity-links",
     ):
         [row] = [r for r in WS1_MATRIX if r["route"] == route]
         assert row["permission"] == "domain:read"
         assert all(row[role] == 200 for role in ROLES), row
-    [projection] = [
-        r for r in WS1_MATRIX if r["route"] == "POST /api/v1/imports/{import_id}/projection"
-    ]
-    assert projection["permission"] == "domain:project"
-    assert {role: projection[role] for role in ROLES} == {
-        role: 200 if role == "data_steward" else 403 for role in ROLES
-    }
+    # BE-31.4: the reconcile is domain:project like the projection: 200 (idempotent) for
+    # data_steward only, 403 for the others.
+    for route in (
+        "POST /api/v1/imports/{import_id}/projection",
+        "POST /api/v1/identity-links/reconcile",
+    ):
+        [projection] = [r for r in WS1_MATRIX if r["route"] == route]
+        assert projection["permission"] == "domain:project", route
+        assert {role: projection[role] for role in ROLES} == {
+            role: 200 if role == "data_steward" else 403 for role in ROLES
+        }, projection
     # BE-15.5: every calculation read is 2xx for every seeded role (calc:read, and rule:read
     # for the module registry); BE-15.3/15.4: the two writes are calc:run, risk_analyst only
     # (its empty body is a 422, everyone else a 403).
@@ -397,6 +418,9 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
         api, dev_token(api, "risk_analyst"), here_credit["counterparty_id"]
     )
     here_scenario = create_scenario(api, dev_token(api, "risk_analyst"))["scenario_id"]  # P24
+    # Phase 31: a legal entity (the position sample projected) and this tenant's links.
+    here_legal_entity = projected_legal_entity(api, db, steward, dev_token(api, "approver"))
+    [here_link] = sql(db, "SELECT source_row_id FROM domain_identity_link LIMIT 1")
 
     other_tenant = insert_tenant(db, f"other-{uuid.uuid4().hex[:6]}")
     outsider = token_for(
@@ -428,6 +452,9 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
         SCENARIOS,  # Phase 24: the shared library, and this tenant's DRAFT by status
         f"{SCENARIOS}?status=DRAFT",
         "/api/v1/scenario-runs",  # Phase 25
+        LEGAL_ENTITIES,  # Phase 31 (BE-31.5): identities and links are per tenant
+        LINKS,
+        f"{LINKS}?source_id={here_link['source_row_id']}",
     ):
         assert api.get(path, headers=outsider).json()["total"] == 0, path
     # Phase 19: the credit vocabularies are seeded for this tenant only.
@@ -468,6 +495,8 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
             f"{COUNTERPARTIES}/{uuid.uuid4()}",
         ),
         (f"{EXPOSURES}/{here_credit['exposure_id']}", f"{EXPOSURES}/{uuid.uuid4()}"),
+        # Phase 31 (BE-31.5): another tenant's legal entity is the 404 of an absent one.
+        (f"{LEGAL_ENTITIES}/{here_legal_entity}", f"{LEGAL_ENTITIES}/{uuid.uuid4()}"),
         # Phase 20: this tenant's rating, and the counterparty's history through its detail.
         (f"{RATINGS}/{here_rating['rating_id']}", f"{RATINGS}/{uuid.uuid4()}"),
         # Phase 16: this tenant's seeded rule.
@@ -741,6 +770,8 @@ AUDITED = {
     "POST /api/v1/scenarios/{scenario_id}/versions/{version}/close": "scenario.close",
     # Phase 25 (BE-25.3): runs and their refusals share the action (D-24 §4).
     "POST /api/v1/scenarios/{scenario_id}/run": "scenario.run",
+    # Phase 31 (BE-31.4, D-58 §4): the identity-link reconcile.
+    "POST /api/v1/identity-links/reconcile": "identity_link.reconcile",
 }
 
 
@@ -985,6 +1016,8 @@ def test_every_mutating_route_is_listed_and_emits_an_audit_event(api: TestClient
         f"/api/v1/drift-events/{added['id']}/review",
         {"outcome": "ACKNOWLEDGED", "comment": "Expected: a new optional column."},
     )
+    # Phase 31 (BE-31.4): the reconcile (data_steward, domain:project) is audited.
+    call("POST /api/v1/identity-links/reconcile", steward, RECONCILE)
     # Every listed route was exercised here: listing a route without driving it fails.
     assert called == set(AUDITED)
 
@@ -999,6 +1032,38 @@ def test_migration_round_trip_and_downgrade_guards(api: TestClient, db: str) -> 
 
     def revision() -> str:
         return str(sql(db, "SELECT version_num FROM alembic_version")[0]["version_num"])
+
+    # BE-31.1 (D-58 §2): 0030 refuses its downgrade while legal_entity or domain_identity_link
+    # has a row (in one transaction: nothing changes); without rows 0030 -> previous -> 0030
+    # round-trips, and the existing domain and credit tables (columns, constraints, triggers)
+    # are byte-for-byte the same on both sides (the frozen-copy check, as BE-25.1). The
+    # append-only guards are checked on real rows before.
+    m0030 = ScriptDirectory.from_config(Config("alembic.ini")).get_revision("0030")
+    assert m0030 is not None and isinstance(m0030.down_revision, str)
+    projected_legal_entity(api, db, dev_token(api, "data_steward"), dev_token(api, "approver"))
+    check_identity_append_only(db)
+    existing = (
+        "domain_projection", "instrument", "instrument_version", "position", "position_version",
+        "cashflow_event", "instrument_type", "instrument_attribute_definition",
+        "instrument_attribute_value", "counterparty", "counterparty_version", "credit_exposure",
+        "credit_exposure_version",
+    )  # fmt: skip
+    frozen = identity_shape(db, existing)
+    kept_identity = identity_counts(db)
+    assert kept_identity["legal_entity"] > 0 and kept_identity["domain_identity_link"] > 0
+    with pytest.raises(Exception, match="this downgrade is refused"):
+        command.downgrade(alembic_config(db), m0030.down_revision)
+    assert revision() == head and identity_counts(db) == kept_identity
+    clean(db)
+    try:
+        command.downgrade(alembic_config(db), m0030.down_revision)
+        assert revision() == m0030.down_revision
+        for table in IDENTITY_TABLES:
+            assert sql(db, "SELECT to_regclass($1) AS t", table)[0]["t"] is None, table
+        assert identity_shape(db, existing) == frozen
+    finally:
+        command.upgrade(alembic_config(db), "head")
+    assert revision() == head and identity_shape(db, existing) == frozen
 
     # BE-24.1: previous head -> 0026 -> previous head -> 0026. The downgrade refuses while a
     # scenario exists (in one transaction: nothing changes); the tagged seed

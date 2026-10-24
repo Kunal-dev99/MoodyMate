@@ -22,6 +22,12 @@ PROVISIONAL `credit_vocabulary`.
 Phase 20 (BE-20.1, D-39), migration 0023: `obligor_rating`, one immutable version per rating
 proposal, lifecycle-guarded (not append-only: its status and decision fields move once).
 
+Phase 31 (BE-31.1, D-58), migration 0030: `legal_entity`, a stable identity per tenant, source
+system and code (`provisional`; its attributes are deferred to the client), and
+`domain_identity_link`, one append-only link from a position version, cash-flow event or
+credit-exposure version to the one instrument, counterparty or legal entity of the tenant its
+text key names. No column is added to any existing table (D-58 §1).
+
 Every table carries `tenant_id` and is read through `ScopedRepository` (D-04). All of them
 are append-only: UPDATE, DELETE and TRUNCATE raise (DB triggers). Insert triggers check that
 a row is in the tenant of the import, source, identity or projection it names, and that a
@@ -60,6 +66,9 @@ from app.domain.constants import (
     CashflowType,
     CreditVocabularyKind,
     DomainSchemaCode,
+    IdentityLinkMethod,
+    IdentitySourceKind,
+    IdentityTargetKind,
     ObligorRatingStatus,
 )
 from app.governance.constants import FieldType
@@ -453,3 +462,51 @@ class ObligorRating(ScopedModel, Base):
     superseded_by_rating_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("obligor_rating.id")
     )
+
+
+# --- Phase 31: legal entities and identity links (BE-31.1, D-58), migration 0030 ------------
+
+
+class LegalEntity(ScopedModel, Base):
+    """A legal entity identity (D-58 §2): one per tenant, source system and code (a position's
+    `legal_entity_ref`). Always `provisional`: attributes and the source-of-truth rule wait
+    for the client (Data Model §11). Append-only; the source is of the same tenant (trigger)."""
+
+    __tablename__ = "legal_entity"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "source_system_id", "code"),
+        CheckConstraint("char_length(code) >= 1", name="code"),
+    )
+
+    tenant_id: Mapped[uuid.UUID] = _tenant()
+    source_system_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("source_system.id"), index=True, nullable=False
+    )
+    code: Mapped[str] = mapped_column(String, nullable=False)
+    provisional: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
+class DomainIdentityLink(ScopedModel, Base):
+    """One link from an append-only domain row to the identity its text key names (D-58 §2):
+    written only when exactly one identity of the tenant has the key (D-58 §3), never
+    changed. `UNIQUE (source_kind, source_row_id, target_kind)`. Insert trigger: both ends are
+    rows of the link's tenant, the pair is one D-58 allows, and the target's key is the source
+    row's key. Append-only (UPDATE, DELETE and TRUNCATE raise). Links carry ids only."""
+
+    __tablename__ = "domain_identity_link"
+    __table_args__ = (
+        UniqueConstraint("source_kind", "source_row_id", "target_kind"),
+        CheckConstraint(_in("source_kind", IdentitySourceKind), name="source_kind"),
+        CheckConstraint(_in("target_kind", IdentityTargetKind), name="target_kind"),
+        CheckConstraint(_in("method", IdentityLinkMethod), name="method"),
+        CheckConstraint("resolver_version >= 1", name="resolver_version"),
+        Index("ix_domain_identity_link_target", "target_kind", "target_id"),
+    )
+
+    tenant_id: Mapped[uuid.UUID] = _tenant()
+    source_kind: Mapped[str] = mapped_column(String(30), nullable=False)
+    source_row_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    target_kind: Mapped[str] = mapped_column(String(30), nullable=False)
+    target_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    method: Mapped[str] = mapped_column(String(30), nullable=False)
+    resolver_version: Mapped[int] = mapped_column(Integer, nullable=False)

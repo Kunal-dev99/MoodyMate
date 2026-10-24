@@ -133,7 +133,7 @@ from app.rules.constants import (
     RuleVersionStatus,
 )
 from app.rules.service import canonical_sha256, check_parameters, check_schema, exact_json
-from app.tests.conftest import alembic_config, clean, dev_token, sql
+from app.tests.conftest import _IDENTITY_CLEANUP, alembic_config, clean, dev_token, script, sql
 from app.tests.helpers import (
     IMPORTS,
     MAPPINGS,
@@ -1602,7 +1602,8 @@ def test_registry_snapshot_run_and_maturity_ladder(
     # Without them, head -> 0017 -> head.
     check_scenario_append_only(db)  # BE-25.1: scenario_run refuses UPDATE, DELETE, TRUNCATE
     head = str(ScriptDirectory.from_config(Config("alembic.ini")).get_current_head())
-    assert sql(db, "SELECT version_num FROM alembic_version")[0]["version_num"] == head == "0027"
+    # Phase 31: head is 0030 or later (0030's own refusal is tested in the WS1 round trip).
+    assert sql(db, "SELECT version_num FROM alembic_version")[0]["version_num"] == head
     # BE-25.1: 0027 refuses its downgrade while any of its four tables has a row (nothing
     # changes); without them 0027 -> 0026 -> 0027 round-trips, and intermediate_value (its
     # columns, constraints and triggers) is byte-for-byte the same on both sides (frozen copy).
@@ -1617,6 +1618,7 @@ def test_registry_snapshot_run_and_maturity_ladder(
     assert sql(db, "SELECT version_num FROM alembic_version")[0]["version_num"] == head
     assert calc_counts(db) == before
     clear_scenario_runs(db)
+    script(db, _IDENTITY_CLEANUP)  # Phase 31: 0030 refuses its downgrade while links exist
     try:
         command.downgrade(alembic_config(db), "0026")
         assert intermediate_value_shape(db) == frozen

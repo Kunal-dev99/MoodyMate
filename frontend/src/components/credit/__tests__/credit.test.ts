@@ -209,7 +209,11 @@ describe('placeholders relabelled (FE-19.1)', () => {
 
 describe('credit reversibility (FE-19.1, D-02)', () => {
   // FE-20.1: these assert the Phase 19 tab strip, which NEXT_PUBLIC_RATINGS_UI=off restores exactly.
-  beforeEach(() => vi.stubEnv('NEXT_PUBLIC_RATINGS_UI', 'off'))
+  // FE-31.1: these assert the Phase 30 tab strip and domain entry, which NEXT_PUBLIC_DOMAIN_LINKS_UI=off restores exactly.
+  beforeEach(() => {
+    vi.stubEnv('NEXT_PUBLIC_RATINGS_UI', 'off')
+    vi.stubEnv('NEXT_PUBLIC_DOMAIN_LINKS_UI', 'off')
+  })
   afterEach(() => {
     vi.unstubAllEnvs()
     vi.resetModules()

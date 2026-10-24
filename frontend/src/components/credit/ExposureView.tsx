@@ -13,6 +13,9 @@ import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
 import { createLoader, type Loaded } from '@/components/common/load'
 import { Badge } from '@/components/ui/badge'
+import { LinkedIdentity, useSourceLinks } from '@/components/domain/IdentityParts'
+import { linkStateOf, type LinkState } from '@/components/domain/identity'
+import { DOMAIN_LINKS_UI_ENABLED } from '@/config/features'
 import { CreditValueCell } from './CreditValueCell'
 import { CREDIT_CRUMBS, Field, ImportRowLink, Lineage, Mono, NotInVocabulary } from './CreditParts'
 import { EXPOSURE_PARAM_PREFIX, counterpartiesHref, keyText, type ExposureDetail, type ExposureVersion } from './credit'
@@ -28,7 +31,7 @@ function Amount({ value, currency, testId }: { value: ExposureVersion['drawn_amo
   )
 }
 
-function Version({ v }: { v: ExposureVersion }) {
+function Version({ v, link }: { v: ExposureVersion; link: LinkState }) {
   const key = v.counterparty_key
   return (
     <div data-testid="exposure-version" data-version={v.version} data-version-id={v.version_id} data-import-id={v.import_id}>
@@ -52,6 +55,12 @@ function Version({ v }: { v: ExposureVersion }) {
                 </Link>
               )}
             </Field>
+            {/* FE-31.1 (D-58): the version's link to a counterparty; absent while NEXT_PUBLIC_DOMAIN_LINKS_UI=off (Phase 30). */}
+            {DOMAIN_LINKS_UI_ENABLED && (
+              <Field label="Linked identity" testId="version-linked-identity-field">
+                <LinkedIdentity state={link} testId="version-linked-identity" />
+              </Field>
+            )}
             <Field label="Instrument key">
               <CreditValueCell value={v.instrument_key} empty="— (optional; not read by v1 modules)" />
             </Field>
@@ -128,6 +137,13 @@ const fetchExposure = (id: string) => (signal: AbortSignal) =>
 export function ExposureView({ exposureId }: { exposureId: string }) {
   const [state, setState] = useState<Loaded<ExposureDetail>>({ kind: 'loading' })
   const loader = useMemo(() => createLoader(fetchExposure(exposureId), setState, 'Could not load the credit exposure'), [exposureId])
+  // FE-31.1 (D-58): each version row's link to a counterparty, read once the versions are known.
+  const links = useSourceLinks(
+    DOMAIN_LINKS_UI_ENABLED && state.kind === 'ready',
+    'CREDIT_EXPOSURE',
+    'COUNTERPARTY',
+    state.kind === 'ready' ? state.value.versions.map((v) => v.version_id) : [],
+  )
 
   useEffect(() => {
     loader.load()
@@ -183,7 +199,7 @@ export function ExposureView({ exposureId }: { exposureId: string }) {
           </dl>
         </PageSection>
         {detail.versions.map((v) => (
-          <Version key={v.version_id} v={v} />
+          <Version key={v.version_id} v={v} link={linkStateOf(links, v.version_id)} />
         ))}
       </div>
     </>

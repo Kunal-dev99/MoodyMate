@@ -47,6 +47,8 @@ WS3_PREFIXES = (
     "/counterparties",  # Phase 19: the credit reads are WS3 domain routes
     "/credit-",
     "/obligor-ratings",  # Phase 20: the rating reads and the approval POST
+    "/legal-entities",  # Phase 31: the legal entity reads and the identity links (D-58)
+    "/identity-links",
 )
 
 
@@ -371,8 +373,33 @@ _SCENARIO_CLEANUP = "\n".join(
     ]
 )
 
+# Phase 31 (0030, D-58): identity links reference domain and credit rows by id, legal
+# entities their source system. Append-only (TRUNCATE included), so their user triggers are
+# lifted for this one transaction; removed before the domain and credit rows.
+_IDENTITY_TABLES = ("domain_identity_link", "legal_entity")
+_IDENTITY_CLEANUP = "\n".join(
+    [
+        "BEGIN;",
+        *(f"ALTER TABLE {t} DISABLE TRIGGER USER;" for t in _IDENTITY_TABLES),
+        *(f"DELETE FROM {t};" for t in _IDENTITY_TABLES),
+        *(f"ALTER TABLE {t} ENABLE TRIGGER USER;" for t in _IDENTITY_TABLES),
+        "COMMIT;",
+    ]
+)
+
+
+def clear_identity_links(url: str) -> None:
+    """Phase 31: remove every legal entity and identity link (so 0030's downgrade, which
+    refuses while they exist, can pass in a test that downgrades past it)."""
+    try:
+        script(url, _IDENTITY_CLEANUP)
+    except (asyncpg.UndefinedTableError, asyncpg.UndefinedObjectError):
+        pass  # below 0030: nothing to clear
+
+
 # Deletes everything that is not seed data (D-11), children first.
 _CLEANUP = [
+    _IDENTITY_CLEANUP,
     _SCENARIO_RUN_CLEANUP,
     _SCENARIO_CLEANUP,
     _RATING_CLEANUP,
@@ -433,6 +460,7 @@ def script(url: str, statements: str) -> None:
 def clean(url: str) -> None:
     for statement in _CLEANUP:
         if statement in (
+            _IDENTITY_CLEANUP,
             _SCENARIO_RUN_CLEANUP,
             _SCENARIO_CLEANUP,
             _RATING_CLEANUP,

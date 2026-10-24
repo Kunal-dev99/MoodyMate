@@ -23,22 +23,33 @@ import importlib.util
 import inspect
 import json
 import uuid
+from datetime import date
+from decimal import Decimal
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import Any, cast
 
 import asyncpg
 import pytest
 from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.core.config import Settings
 from app.domain import service as domain_service
 from app.domain.constants import (
     DOMAIN_SEED_TAG,
+    INSTRUMENT_SPEC_V2,
+    INSTRUMENT_TYPED_MATURITY,
+    INSTRUMENT_TYPED_MATURITY_SHA256,
+    INSTRUMENT_TYPED_MATURITY_TITLE,
+    INSTRUMENT_V1_SHA256,
     PROJECTABLE_STATUSES,
+    PROJECTION_SPECS,
+    PROJECTOR_V2,
+    PROJECTOR_VERSION,
     SEEDED_INSTRUMENT_TYPES,
     CashflowOrigin,
     CashflowType,
@@ -46,26 +57,61 @@ from app.domain.constants import (
     DomainSchemaCode,
 )
 from app.governance.constants import WS3_ROLE_PERMISSIONS, FieldType
+from app.governance.service import FieldSpec, contract_sha256
 from app.main import create_app
-from app.tests.conftest import alembic_config, clean, dev_token, insert_tenant, sql
+from app.tests.conftest import (
+    _CALC_CLEANUP,
+    alembic_config,
+    clean,
+    clear_identity_links,
+    dev_token,
+    insert_tenant,
+    script,
+    sql,
+)
 from app.tests.helpers import (
     IMPORTS,
     INSTRUMENTS,
     MAPPINGS,
     SOURCES,
     activate_version,
+    assert_denied,
     cid,
     contract_body,
     events,
+    make_snapshot,
+    module_version_id,
     project,
     sample,
     sample_rules,
+    schema_id,
     seeded_source_id,
     source_body,
+    start_run,
     upload,
     validate_import,
     validated_instruments,
     validated_sample,
+)
+from app.tests.identity_kit import (
+    EXTRA_FLOWS,
+    IDENTITY_TABLES,
+    KEEP,
+    LINKS,
+    RECONCILE,
+    TYPED_EDGE_CSV,
+    approve_proposal,
+    counts_by_pair,
+    golden_check,
+    identity_counts,
+    links_of,
+    reconcile,
+    run_outputs,
+    schema_versions,
+    typed_fields,
+    typed_import,
+    typed_source,
+    without_written,
 )
 
 pytestmark = pytest.mark.db
@@ -308,6 +354,11 @@ def test_domain_projection_catalogue_and_guards(
         assert switched.get(INSTRUMENTS, headers=reader).json()["total"] == 0
     assert domain_counts(db) == {**dict.fromkeys(DOMAIN_TABLES, 0), "instrument_type": 3}
 
+    # BE-31.4 (D-58 §4, ruling Q11): with IDENTITY_LINKS_ENABLED off the projections write no
+    # legal entity and no link, and their summaries are unchanged (the golden below).
+    state = cast(FastAPI, api.app).state
+    links_on = state.settings
+    state.settings = links_on.model_copy(update={"IDENTITY_LINKS_ENABLED": False})
     projections = {}
     for code, imported in imports.items():
         import_id = uuid.UUID(imported["id"])
@@ -327,6 +378,9 @@ def test_domain_projection_catalogue_and_guards(
             1,
             1,
         )
+        # BE-31.3: v1 is byte-identical to the golden taken before Phase 31 (projector 1, the
+        # summary with TYPE_NOT_PROJECTED, every payload_sha256 by ordinal).
+        golden_check(db, code, body)
         # Conservation: one row per accepted record.
         assert body["projected_count"] == body["accepted_count"] == accepted
         assert body["summary"]["records"] == body["summary"]["rows_projected"] == accepted
@@ -355,6 +409,72 @@ def test_domain_projection_catalogue_and_guards(
         )
         assert unresolved[0]["n"] == 0, code
         projections[code] = body
+    assert identity_counts(db) == dict.fromkeys(IDENTITY_TABLES, 0)
+    assert projections["position"]["summary"]["new_identities"] == 25
+    assert "missing_values" not in projections["instrument"]["summary"]  # v1 (ruling Q9)
+    # Switched off, the reconcile is a 409, audited DENIED, and writes nothing.
+    c = cid()
+    r = api.post(RECONCILE, headers={**steward, "X-Correlation-ID": c})
+    assert (r.status_code, r.json()["code"]) == (409, "identity_links_disabled"), r.text
+    assert_denied(db, c, "identity_links_disabled", action="identity_link.reconcile")
+    assert identity_counts(db) == dict.fromkeys(IDENTITY_TABLES, 0)
+    state.settings = links_on
+    # A fixture ladder run (v1 instruments + the cash flows) before any link exists.
+    snapshot = make_snapshot(api, reader, [instruments["id"], imports["cashflow_event"]["id"]])
+    assert snapshot.status_code == 201, snapshot.text
+    ladder = {
+        "dataset_snapshot_id": snapshot.json()["snapshot_id"],
+        "module_version_id": module_version_id(api, reader),
+        "reporting_date": "2026-12-31",
+    }
+    v1_run = start_run(api, reader, ladder).json()
+    assert v1_run["result_sha256"], v1_run
+    # The reconcile links the historical rows: each position to its instrument and its legal
+    # entity (registered now, one per source and code), each cash flow to its instrument.
+    first = reconcile(api, steward)
+    expected_links = {
+        "POSITION_VERSION": sql(
+            db,
+            "SELECT v.id AS row, 'INSTRUMENT' AS kind, i.id AS target FROM position_version v"
+            " JOIN instrument i ON i.business_key = v.instrument_key UNION ALL"
+            " SELECT v.id, 'LEGAL_ENTITY', e.id FROM position_version v"
+            " JOIN position p ON p.id = v.position_id JOIN legal_entity e"
+            " ON e.source_system_id = p.source_system_id AND e.code = v.legal_entity_ref",
+        ),
+        "CASHFLOW_EVENT": sql(
+            db,
+            "SELECT e.id AS row, 'INSTRUMENT' AS kind, i.id AS target FROM cashflow_event e"
+            " JOIN instrument i ON i.business_key = e.instrument_key",
+        ),
+    }
+    refs = sql(db, "SELECT DISTINCT legal_entity_ref FROM position_version")
+    assert identity_counts(db)["legal_entity"] == len(refs) > 0
+    for link_kind, link_rows in expected_links.items():
+        assert len(link_rows) == {"POSITION_VERSION": 50, "CASHFLOW_EVENT": 25}[link_kind]
+        assert links_of(db, link_kind) == {
+            (r["row"], r["kind"]): r["target"] for r in link_rows
+        }, link_kind
+    pairs = counts_by_pair(first)
+    for (source_kind, target_kind), n in {
+        ("POSITION_VERSION", "INSTRUMENT"): 25,
+        ("POSITION_VERSION", "LEGAL_ENTITY"): 25,
+        ("CASHFLOW_EVENT", "INSTRUMENT"): 25,
+        ("CREDIT_EXPOSURE", "COUNTERPARTY"): 0,
+    }.items():
+        link_pair = pairs[(source_kind, target_kind)]
+        assert (link_pair["rows"], link_pair["linked"], link_pair["links_written"]) == (n, n, n)
+    assert first["links_written"] == 75 == identity_counts(db)["domain_identity_link"]
+    [row] = sql(db, "SELECT id FROM position_version ORDER BY id LIMIT 1")
+    link_page = api.get(LINKS, params={"source_id": str(row["id"])}, headers=reader).json()
+    assert {i["target_kind"] for i in link_page["items"]} == {"INSTRUMENT", "LEGAL_ENTITY"}
+    # Idempotent: a second reconcile writes nothing and returns the same counts.
+    kept = identity_counts(db)
+    second = reconcile(api, steward)
+    assert second["links_written"] == 0 and without_written(second) == without_written(first)
+    assert identity_counts(db) == kept
+    # Runs never read links: the same run after the reconcile has the same result_sha256.
+    rerun = start_run(api, reader, ladder).json()
+    assert (rerun["status"], rerun["result_sha256"]) == (v1_run["status"], v1_run["result_sha256"])
     summary = projections["instrument"]["summary"]
     # instrument v1 maturity_date is free text: never parsed, counted, kept in the record.
     assert summary["type_not_projected"] == {"maturity_date": 25}
@@ -393,6 +513,15 @@ def test_domain_projection_catalogue_and_guards(
     source_id = str(instruments["source_id"])
     own_flows = same_source_cash_flows(api, db, steward, approver, source_id)
     assert project(api, steward, own_flows).status_code == 201
+    # BE-31.4 (D-58 §4): with the switch on, the projection links its own rows.
+    own_links = sql(
+        db,
+        "SELECT count(*) AS n FROM domain_identity_link l JOIN cashflow_event e"
+        " ON e.id = l.source_row_id WHERE e.import_job_id = $1",
+        uuid.UUID(own_flows),
+    )
+    assert own_links[0]["n"] == 25
+    assert identity_counts(db)["domain_identity_link"] == kept["domain_identity_link"] + 25
 
     # --- 3. The catalogue (BE-14.4) ----------------------------------------------------------
     page = no_float(api.get(INSTRUMENTS, params={"limit": 200}, headers=reader).text)
@@ -476,6 +605,181 @@ def test_domain_projection_catalogue_and_guards(
         assert json.loads(chain["raw"])["instrument_id"] == key
         assert chain["notional"] == v["notional"]  # exact text, not rounded
 
+    # --- 5. Phase 31: typed maturity (BE-31.2, BE-31.3) and ambiguous keys (BE-31.4) --------
+    # The frozen contract: its hash is the code's (ruling Q10), and it is instrument v1 with
+    # exactly `maturity_date` DATE and `interest_rate` (11,6).
+    frozen = [
+        FieldSpec(**dict[str, Any]({k: f[k] for k in KEEP})) for f in INSTRUMENT_TYPED_MATURITY
+    ]
+    assert contract_sha256(frozen) == INSTRUMENT_TYPED_MATURITY_SHA256
+    by_name = sorted(INSTRUMENT_TYPED_MATURITY, key=lambda f: str(f["name"]))
+    assert sorted(
+        typed_fields(api, steward, schema_id(db, "instrument")), key=lambda f: f["name"]
+    ) == [{k: f[k] for k in KEEP} for f in by_name]
+    versions_before = schema_versions(db)
+    assert {n: v["status"] for n, v in versions_before.items()} == {1: "ACTIVE", 2: "DRAFT"}
+    assert versions_before[1]["content_sha256"] == INSTRUMENT_V1_SHA256
+    # Published only through the governed path: BREAKING with the mapping a dependent, a
+    # second person approves; the new version is ACTIVE at max + 1, v1 DEPRECATED, and the
+    # seeded v2 DRAFT is untouched.
+    approve_proposal(
+        api, steward, approver, db, list(INSTRUMENT_TYPED_MATURITY), INSTRUMENT_TYPED_MATURITY_TITLE
+    )
+    versions_after = schema_versions(db)
+    typed_version = max(versions_before) + 1
+    assert {n: v["status"] for n, v in versions_after.items()} == {
+        1: "DEPRECATED",
+        2: "DRAFT",
+        typed_version: "ACTIVE",
+    }
+    assert versions_after[typed_version]["content_sha256"] == INSTRUMENT_TYPED_MATURITY_SHA256
+    assert versions_after[2]["content_sha256"] == versions_before[2]["content_sha256"]
+    # Matched by contract hash, not by number (D-57 §2): the same number with another hash is
+    # unsupported, and the v1 contract under a new number is projector 1 again.
+    vid = versions_after[typed_version]["id"]
+    for content, matched in (
+        (INSTRUMENT_TYPED_MATURITY_SHA256, (PROJECTOR_V2, INSTRUMENT_SPEC_V2)),
+        ("f" * 64, None),
+        (INSTRUMENT_V1_SHA256, (PROJECTOR_VERSION, PROJECTION_SPECS[DomainSchemaCode.INSTRUMENT])),
+    ):
+        pins = domain_service.SchemaPins({}, {vid: typed_version}, {}, {vid: content})
+        found = domain_service.DomainService._spec(
+            DomainSchemaCode.INSTRUMENT, vid, typed_version, pins
+        )
+        assert found == matched, content
+    # A second instrument source: the sample under the typed contract (its mapping made
+    # ACTIVE against it), then the edge cases: one good DATE, three bad dates held by
+    # validation, a missing maturity, rates at exactly 6 dp.
+    typed = typed_source(api, db, steward)
+    typed_sample = typed_import(api, db, steward, approver, typed, sample("instrument.csv"))
+    assert typed_sample["status"] == "COMPLETED", typed_sample
+    edge = typed_import(api, db, steward, approver, typed, TYPED_EDGE_CSV)
+    assert edge["schema_version_id"] == str(vid), edge
+    assert edge["manifest"]["quality"]["accepted_records"] == 2, edge["manifest"]
+    held = sql(
+        db,
+        "SELECT DISTINCT r.raw_values ->> 'maturity_date' AS v FROM validation_issue i"
+        " JOIN source_record r ON r.id = i.source_record_id"
+        " WHERE i.import_job_id = $1 AND i.field = 'maturity_date'",
+        uuid.UUID(edge["id"]),
+    )
+    assert {h["v"] for h in held} == {"2030-02-30", "2030-13-01", "n/a"}
+    unchanged = domain_counts(db)
+    # Projector v2 switched off: projection_unsupported, audited DENIED, nothing written.
+    state.settings = links_on.model_copy(update={"INSTRUMENT_PROJECTOR_V2_ENABLED": False})
+    c = cid()
+    r = project(api, steward, edge["id"], **{"X-Correlation-ID": c})
+    state.settings = links_on
+    assert (r.status_code, r.json()["code"]) == (409, "projection_unsupported"), r.text
+    assert r.json()["details"]["projector_version"] == PROJECTOR_V2
+    denied(db, c, "projection_unsupported")
+    # The same version number with a different hash in the code: projection_unsupported.
+    with pytest.MonkeyPatch.context() as patched:
+        patched.setattr(
+            domain_service,
+            "INSTRUMENT_SPECS_BY_HASH",
+            {"f" * 64: (PROJECTOR_V2, INSTRUMENT_SPEC_V2)},
+        )
+        c = cid()
+        r = project(api, steward, edge["id"], **{"X-Correlation-ID": c})
+    assert (r.status_code, r.json()["code"]) == (409, "projection_unsupported"), r.text
+    assert r.json()["details"]["schema_version"] == typed_version
+    denied(db, c, "projection_unsupported")
+    assert domain_counts(db) == unchanged
+    r = project(api, steward, edge["id"])
+    assert r.status_code == 201, r.text
+    body = no_float(r.text)
+    assert (body["schema_version"], body["projector_version"]) == (typed_version, PROJECTOR_V2)
+    assert body["summary"]["missing_values"] == {"maturity_date": 1}  # ruling Q9
+    assert body["summary"]["type_not_projected"] == {}
+    assert body["summary"]["records"] == body["summary"]["rows_projected"] == 2
+    stored = {
+        r["business_key"]: r
+        for r in sql(
+            db,
+            "SELECT i.id, i.business_key, v.maturity_date, v.interest_rate"
+            " FROM instrument_version v"
+            " JOIN instrument i ON i.id = v.instrument_id WHERE v.import_job_id = $1",
+            uuid.UUID(edge["id"]),
+        )
+    }
+    assert set(stored) == {"TM-1", "TM-5"}  # TM-2, TM-3 and TM-4 never projected
+    assert stored["TM-1"]["maturity_date"] == date(2030, 6, 30)
+    assert stored["TM-5"]["maturity_date"] is None  # missing: NULL, and counted above
+    rates = {k: v["interest_rate"] for k, v in stored.items()}
+    assert rates == {"TM-1": Decimal("2.123456"), "TM-5": Decimal("0.000001")}
+    assert {k: str(v) for k, v in rates.items()} == {"TM-1": "2.123456", "TM-5": "0.000001"}
+    [typed_shown] = api.get(f"{INSTRUMENTS}/{stored['TM-1']['id']}", headers=steward).json()[
+        "versions"
+    ]
+    assert (typed_shown["maturity_date"], typed_shown["interest_rate"]) == (
+        "2030-06-30",
+        "2.123456",
+    )
+    # A ladder run over a typed-instrument snapshot (the sample under the typed contract)
+    # gives the same result as over the v1 one: the same status and outputs. Its
+    # result_sha256 differs by the instrument version ids alone, which D-31 §4 hashes (an
+    # open question on the Done-when's wording).
+    r = project(api, steward, typed_sample["id"])
+    assert r.status_code == 201 and r.json()["projector_version"] == PROJECTOR_V2, r.text
+    assert r.json()["summary"]["missing_values"] == {}
+    snapshot = make_snapshot(api, reader, [typed_sample["id"], imports["cashflow_event"]["id"]])
+    assert snapshot.status_code == 201, snapshot.text
+    typed_run = start_run(
+        api, reader, {**ladder, "dataset_snapshot_id": snapshot.json()["snapshot_id"]}
+    ).json()
+    assert typed_run["status"] == v1_run["status"], typed_run
+    typed_outputs = run_outputs(db, typed_run["run_id"])
+    assert typed_outputs == run_outputs(db, v1_run["run_id"])
+    assert typed_outputs["contributions"] and typed_outputs["gap"]
+    versions_used = sql(
+        db,
+        "SELECT DISTINCT v.import_job_id FROM intermediate_value c JOIN instrument_version v"
+        " ON v.id = c.instrument_version_id WHERE c.calculation_run_id = $1",
+        uuid.UUID(typed_run["run_id"]),
+    )
+    assert [str(v["import_job_id"]) for v in versions_used] == [typed_sample["id"]]
+    # The sample's instrument keys are now on two source systems: existing links are kept
+    # (linked_now_ambiguous); a new cash flow naming such a key is LINK_AMBIGUOUS, one naming
+    # no instrument LINK_UNRESOLVED, and neither is linked.
+    kept = identity_counts(db)
+    r = upload(api, steward, str(imports["cashflow_event"]["source_id"]), EXTRA_FLOWS)
+    assert r.status_code == 201, r.text
+    extra = validate_import(api, steward, r.json()["id"]).json()
+    assert extra["status"] == "COMPLETED", extra
+    c = cid()
+    assert project(api, steward, extra["id"], **{"X-Correlation-ID": c}).status_code == 201
+    [event] = events(db, c)
+    details = json.loads(event["details"])
+    assert (details["links_written"], details["links_ambiguous"], details["links_unresolved"]) == (
+        0,
+        1,
+        1,
+    )
+    third = reconcile(api, steward)
+    assert third["links_written"] == 0 and identity_counts(db) == kept
+    pairs = counts_by_pair(third)
+    flow_pair = pairs[("CASHFLOW_EVENT", "INSTRUMENT")]
+    assert (
+        flow_pair["rows"],
+        flow_pair["linked"],
+        flow_pair["ambiguous"],
+        flow_pair["unresolved"],
+    ) == (
+        52,
+        50,
+        1,
+        1,
+    )
+    for link_pair in (flow_pair, pairs[("POSITION_VERSION", "INSTRUMENT")]):
+        assert link_pair["linked_now_ambiguous"] == link_pair["linked"] > 0, link_pair
+    assert pairs[("POSITION_VERSION", "LEGAL_ENTITY")]["linked_now_ambiguous"] == 0
+    assert without_written(reconcile(api, steward)) == without_written(third)
+    # Part 4 checks 0017's own refusal: the runs and links (each guarded by its own
+    # migration's downgrade) go first.
+    script(db, _CALC_CLEANUP)
+    clear_identity_links(db)
+
     # --- 4. Guards (BE-14.2) -----------------------------------------------------------------
     for table in DOMAIN_TABLES:
         [row] = sql(db, f"SELECT * FROM {table} ORDER BY id LIMIT 1")
@@ -539,7 +843,7 @@ def test_domain_projection_catalogue_and_guards(
     assert head == str(ScriptDirectory.from_config(Config("alembic.ini")).get_current_head())
     before = domain_counts(db)
     try:
-        with pytest.raises(Exception, match="this downgrade is refused"):
+        with pytest.raises(Exception, match="domain projections or domain rows exist"):
             command.downgrade(alembic_config(db), "0016")
         assert sql(db, "SELECT version_num FROM alembic_version")[0]["version_num"] == head
         assert domain_counts(db) == before

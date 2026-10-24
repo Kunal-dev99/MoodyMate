@@ -30,6 +30,21 @@ The catalogue reads (instruments; Feature 04: credit vocabularies, counterpartie
 exposures, BE-19.5) are tenant-scoped; values are masked by the router from the
 classification of each value's schema field, in the schema version the row pins.
 
+Phase 31 (BE-31.2 - BE-31.5, D-57, D-58):
+
+- The `instrument` spec is matched by the pinned version's contract hash: the seeded v1
+  contract is projector 1 (byte-identical summary and rows), the frozen typed-maturity
+  contract (INSTRUMENT_TYPED_MATURITY) projector 2, which projects `maturity_date` as a DATE
+  and counts a missing one (`missing_values`); any other contract is `projection_unsupported`,
+  and so are typed imports while INSTRUMENT_PROJECTOR_V2_ENABLED is off (audited DENIED).
+- Identity links (D-58): with IDENTITY_LINKS_ENABLED on, projecting positions, cash flows or
+  credit exposures registers each new position (source, `legal_entity_ref`) as a legal entity
+  and links each row to the one instrument, counterparty or legal entity of the tenant its key
+  names; zero or several give no link and are counted (audit details only).
+  `reconcile_identity_links` does the same for the tenant's historical rows (idempotent,
+  audited `identity_link.reconcile`; 409 identity_links_disabled while the switch is off).
+  Links are never changed; runs never read them.
+
 Phase 20 (BE-20.2, BE-20.3, D-39): the obligor rating workflow.
 
 - `propose_rating`: a new immutable version, written IN_REVIEW, audited
@@ -51,7 +66,7 @@ import uuid
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, NoReturn
 
@@ -64,15 +79,25 @@ from app.core.principal import Principal
 from app.db.base import Base
 from app.domain.constants import (
     CREDIT_SCHEMA_CODES,
+    IDENTITY_LINK_TARGETS,
+    IDENTITY_SOURCE_SCHEMAS,
+    INSTRUMENT_SPECS_BY_HASH,
     INSTRUMENT_TYPE_FIELD,
+    LEGAL_ENTITY_FIELD,
     PROJECT_IMPORT,
     PROJECTABLE_STATUSES,
     PROJECTION_SPECS,
+    PROJECTOR_V2,
     PROJECTOR_VERSION,
     RATING_CLASSIFICATIONS,
+    RECONCILE_IDENTITY_LINKS,
+    RESOLVER_VERSION,
     ColumnKind,
     CreditVocabularyKind,
     DomainSchemaCode,
+    IdentityLinkRefusal,
+    IdentitySourceKind,
+    IdentityTargetKind,
     ObligorRatingAction,
     ObligorRatingRefusal,
     ObligorRatingStatus,
@@ -86,12 +111,14 @@ from app.domain.models import (
     CreditExposure,
     CreditExposureVersion,
     CreditVocabulary,
+    DomainIdentityLink,
     DomainProjection,
     Instrument,
     InstrumentAttributeDefinition,
     InstrumentAttributeValue,
     InstrumentType,
     InstrumentVersion,
+    LegalEntity,
     ObligorRating,
     PositionVersion,
 )
@@ -101,7 +128,11 @@ from app.domain.repository import (
     DomainRepository,
     ExposureFilter,
     IdentityRef,
+    IdentityRepository,
     InstrumentFilter,
+    LinkCounts,
+    LinkFilter,
+    LinkPair,
 )
 from app.governance.constants import AuditOutcome, ClassificationCode, ProposalDecision
 from app.governance.models import SchemaField
@@ -148,6 +179,8 @@ class Notes:
 
     type_not_projected: Counter[str] = field(default_factory=Counter)
     unknown_values: Counter[str] = field(default_factory=Counter)
+    # Projector v2 (D-57): absent values of the spec's `missing_counted` fields (NULL column).
+    missing: Counter[str] = field(default_factory=Counter)
 
 
 def typed(kind: ColumnKind, text: str) -> Any:
@@ -195,6 +228,8 @@ def project_record(
         pinned = fields.get(column.field)
         text = payload.get(column.field)
         value: Any = None
+        if text is None and column.field in spec.missing_counted:
+            notes.missing[column.field] += 1  # NULL, and counted (projector v2)
         if text is not None and pinned is not None:
             if pinned.data_type != column.kind.value:
                 notes.type_not_projected[column.field] += 1  # never parsed (D-29 §4)
@@ -253,6 +288,8 @@ class SchemaPins:
     codes: Mapping[uuid.UUID, str]  # schema code
     versions: Mapping[uuid.UUID, int]
     fields: Mapping[uuid.UUID, Mapping[str, PinnedField]]
+    # Phase 31 (D-57 §2): each version's contract hash, which picks the instrument spec.
+    hashes: Mapping[uuid.UUID, str] = field(default_factory=dict)
 
     def classes(self, schema_version_id: uuid.UUID) -> dict[str, str]:
         return {n: f.classification for n, f in self.fields.get(schema_version_id, {}).items()}
@@ -363,6 +400,64 @@ class ExposureView:
     vocabulary: Mapping[CreditVocabularyKind, frozenset[str]]
 
 
+@dataclass(frozen=True)
+class PairResult:
+    """One (source kind, target kind) pair after linking: links written now and counts."""
+
+    pair: LinkPair
+    links_written: int
+    counts: LinkCounts
+
+
+@dataclass(frozen=True)
+class LinkResult:
+    legal_entities_written: int
+    links_written: int
+    results: list[PairResult]
+
+
+@dataclass(frozen=True)
+class ReconcileView:
+    links_written: int
+    legal_entities_written: int
+    results: list[PairResult]  # in IDENTITY_LINK_TARGETS order
+    reconciled_at: datetime
+    reconciled_by: str
+
+
+@dataclass(frozen=True)
+class LegalEntityRow:
+    entity: LegalEntity
+    source_code: str
+    classification: str  # what its code is masked by
+
+
+@dataclass(frozen=True)
+class LegalEntityPageView:
+    rows: list[LegalEntityRow]
+    total: int
+
+
+@dataclass(frozen=True)
+class LegalEntityView:
+    row: LegalEntityRow
+    link_counts: dict[IdentitySourceKind, int]
+
+
+@dataclass(frozen=True)
+class LinkPageView:
+    links: list[DomainIdentityLink]
+    total: int
+
+
+def _most_sensitive(codes: set[str]) -> str:
+    """The most sensitive classification code; an unknown code ranks above every known one,
+    and no code at all is `unclassified` (fail closed)."""
+    if not codes:
+        return UNCLASSIFIED
+    return max(codes, key=lambda c: _CLASS_RANK.get(c, len(_CLASS_RANK)))
+
+
 def _pinned(field_row: SchemaField) -> PinnedField:
     return PinnedField(
         name=field_row.name,
@@ -378,6 +473,7 @@ class DomainService:
         self.session = session
         self.principal = principal
         self.repo = DomainRepository(session, principal.scope)
+        self.links = IdentityRepository(session, principal.scope)
         self.imports = ImportService(session, principal)
         self.schemas = SchemaService(session, principal)
 
@@ -385,12 +481,14 @@ class DomainService:
         codes: dict[uuid.UUID, str] = {}
         versions: dict[uuid.UUID, int] = {}
         fields: dict[uuid.UUID, dict[str, PinnedField]] = {}
+        hashes: dict[uuid.UUID, str] = {}
         for schema in await self.schemas.list_schemas():
             for version in schema.versions:
                 codes[version.id] = schema.code
                 versions[version.id] = version.version
                 fields[version.id] = {f.name: _pinned(f) for f in version.fields}
-        return SchemaPins(codes, versions, fields)
+                hashes[version.id] = version.content_sha256
+        return SchemaPins(codes, versions, fields, hashes)
 
     # --- projection (BE-14.3) ------------------------------------------------------------
 
@@ -402,12 +500,20 @@ class DomainService:
         raise error
 
     async def project(
-        self, import_id: uuid.UUID, enabled: bool, credit_enabled: bool = True
+        self,
+        import_id: uuid.UUID,
+        enabled: bool,
+        credit_enabled: bool = True,
+        v2_enabled: bool = True,
+        links_enabled: bool = True,
     ) -> tuple[ProjectionView, bool]:
         """Project the import once (D-29), in one transaction; the view and whether it was
         projected now (False: the existing projection, nothing written). With
         `credit_enabled` off (CREDIT_PROJECTION_ENABLED, D-37 §7) the credit codes are
-        `projection_unsupported`, the pre-Feature-04 behaviour."""
+        `projection_unsupported`, the pre-Feature-04 behaviour; with `v2_enabled` off
+        (INSTRUMENT_PROJECTOR_V2_ENABLED, D-57 §2) so are typed-maturity instrument imports.
+        With `links_enabled` (IDENTITY_LINKS_ENABLED, D-58 §4) the projection's own position,
+        cash-flow and credit-exposure rows are linked in the same transaction."""
         if not enabled:
             await self._refuse(
                 ApiError(
@@ -428,16 +534,20 @@ class DomainService:
         code = supported.get(schema_code) if schema_code else None
         if code in CREDIT_SCHEMA_CODES and not credit_enabled:
             await self._refuse(self._unsupported(schema_code, schema_version), job.id)
+        matched = self._spec(code, job.schema_version_id, schema_version, pins)
+        if matched is not None and matched[0] == PROJECTOR_V2 and not v2_enabled:
+            await self._refuse(self._unsupported(schema_code, schema_version, PROJECTOR_V2), job.id)
         existing = await self.repo.projection_for(job.id)
         if existing is not None:
             manifest = await self.imports.manifest(job)
             assert manifest is not None  # a projection is written only with one (DB trigger)
             return ProjectionView(existing, job, manifest, schema_version), False
 
-        # A code without a projector v1 spec is projection_unsupported, never a KeyError.
-        spec = PROJECTION_SPECS.get(code) if code is not None else None
-        if spec is None or schema_version not in spec.schema_versions:
+        # A code (or instrument contract) without a projector spec is projection_unsupported,
+        # never a KeyError.
+        if matched is None:
             await self._refuse(self._unsupported(schema_code, schema_version), job.id)
+        projector_version, spec = matched
         manifest = await self.imports.manifest(job)
         status = ImportStatus(job.status)
         if manifest is None or status not in PROJECTABLE_STATUSES:
@@ -451,23 +561,56 @@ class DomainService:
                 ),
                 job.id,
             )
-        projection = await self._write(job, manifest, spec, pins.fields[job.schema_version_id])
+        projection = await self._write(
+            job,
+            manifest,
+            spec,
+            pins.fields[job.schema_version_id],
+            projector_version,
+            links_enabled,
+        )
         await self.session.commit()
         return ProjectionView(projection, job, manifest, schema_version), True
 
     @staticmethod
-    def _unsupported(schema_code: str | None, schema_version: int) -> ApiError:
+    def _spec(
+        code: DomainSchemaCode | None,
+        schema_version_id: uuid.UUID,
+        schema_version: int,
+        pins: SchemaPins,
+    ) -> tuple[int, ProjectionSpec] | None:
+        """The projector version and frozen spec for the import's pinned schema version, or
+        None (projection_unsupported). `instrument` is matched by contract hash (D-57 §2):
+        the seeded v1 contract is projector 1, the typed-maturity contract projector 2, under
+        whatever version number the registry gave them; the other schemas by version number
+        (projector 1, D-29 §4)."""
+        if code is None:
+            return None
+        if code is DomainSchemaCode.INSTRUMENT:
+            return INSTRUMENT_SPECS_BY_HASH.get(pins.hashes.get(schema_version_id, ""))
+        spec = PROJECTION_SPECS.get(code)
+        if spec is None or schema_version not in spec.schema_versions:
+            return None
+        return PROJECTOR_VERSION, spec
+
+    @staticmethod
+    def _unsupported(
+        schema_code: str | None, schema_version: int, projector_version: int = PROJECTOR_VERSION
+    ) -> ApiError:
         return ApiError(
             409,
             ProjectionRefusal.PROJECTION_UNSUPPORTED,
-            "Projector version 1 projects instrument, position, cashflow_event, counterparty "
-            "and credit_exposure imports of schema version 1 only (the credit schemas while "
-            "CREDIT_PROJECTION_ENABLED is on); another schema or version needs a new "
-            "projector version (D-29, D-37).",
+            "Projector version 1 projects instrument imports of the seeded v1 contract and "
+            "position, cashflow_event, counterparty and credit_exposure imports of schema "
+            "version 1 (the credit schemas while CREDIT_PROJECTION_ENABLED is on); projector "
+            "version 2 projects instrument imports of the typed-maturity contract while "
+            "INSTRUMENT_PROJECTOR_V2_ENABLED is on. Instrument contracts are matched by "
+            "contract hash, not version number; another schema, version or contract needs a "
+            "new projector version (D-29, D-37, D-57).",
             {
                 "schema_code": schema_code,
                 "schema_version": schema_version,
-                "projector_version": PROJECTOR_VERSION,
+                "projector_version": projector_version,
             },
         )
 
@@ -477,6 +620,8 @@ class DomainService:
         manifest: ImportManifest,
         spec: ProjectionSpec,
         fields: Mapping[str, PinnedField],
+        projector_version: int = PROJECTOR_VERSION,
+        links_enabled: bool = True,
     ) -> DomainProjection:
         await self.repo.lock_tenant()
         records = await self.imports.accepted_records(job)
@@ -555,6 +700,8 @@ class DomainService:
             "unknown_values": dict(sorted(notes.unknown_values.items())),
             "canonical_only_fields": canonical_only(spec, fields),
         }
+        if spec.missing_counted:  # projector v2 only: every projector 1 summary is unchanged
+            summary["missing_values"] = dict(sorted(notes.missing.items()))
         projection = DomainProjection(
             id=uuid.uuid4(),
             tenant_id=tenant,
@@ -562,7 +709,7 @@ class DomainService:
             import_manifest_id=manifest.id,
             schema_code=spec.schema_code.value,
             schema_version_id=job.schema_version_id,
-            projector_version=PROJECTOR_VERSION,
+            projector_version=projector_version,
             record_count=len(projected),
             summary=summary,
             created_by=actor,
@@ -622,12 +769,23 @@ class DomainService:
         details: dict[str, Any] = {
             "projection_id": str(projection.id),
             "schema_code": spec.schema_code.value,
-            "projector_version": PROJECTOR_VERSION,
+            "projector_version": projector_version,
             "rows_projected": len(projected),
             "new_identities": new_identities,
             "type_not_projected": sum(notes.type_not_projected.values()),
             "unknown_values": sum(notes.unknown_values.values()),
         }
+        if spec.missing_counted:
+            details["missing_values"] = sum(notes.missing.values())
+        # D-58 §4: the projection links its own rows (value-free counts in the audit only:
+        # the summary of a projector 1 import is unchanged).
+        source_kind = IDENTITY_SOURCE_SCHEMAS.get(spec.schema_code)
+        if links_enabled and source_kind is not None:
+            linked = await self._link(source_kind, projection.id)
+            details["legal_entities_new"] = linked.legal_entities_written
+            details["links_written"] = linked.links_written
+            details["links_unresolved"] = sum(r.counts.unresolved for r in linked.results)
+            details["links_ambiguous"] = sum(r.counts.ambiguous for r in linked.results)
         audit_by(
             self.session,
             self.principal,
@@ -1137,3 +1295,142 @@ class DomainService:
     async def rating_in_effect(self, counterparty_id: uuid.UUID, at: date) -> ObligorRating | None:
         """D-39 §4 for one counterparty of the caller's tenant (None when none applies)."""
         return (await self.ratings_in_effect([counterparty_id], at)).get(counterparty_id)
+
+    # --- Phase 31: legal entities and identity links (BE-31.4, BE-31.5, D-58) --------------
+
+    async def _link(
+        self, source_kind: IdentitySourceKind, projection_id: uuid.UUID | None
+    ) -> LinkResult:
+        """Link the tenant's rows of this source kind (only the projection's, when given): a
+        legal entity for every new position source and code first, then one link per pair
+        where exactly one identity of the tenant has the row's key (D-58 §3). The caller
+        holds the tenant's projection lock. Nothing is changed or removed."""
+        actor = self.principal.actor
+        entities = 0
+        if source_kind is IdentitySourceKind.POSITION_VERSION:
+            entities = await self.links.register_legal_entities(projection_id, actor)
+        results = []
+        for target_kind, key_field in IDENTITY_LINK_TARGETS[source_kind]:
+            pair = LinkPair(source_kind, target_kind, key_field)
+            written = await self.links.write_links(pair, projection_id, actor)
+            counts = await self.links.link_counts(pair, projection_id)
+            accounted = counts.linked + counts.unresolved + counts.ambiguous + counts.no_key
+            if accounted != counts.rows:  # every row is linked or counted (fail closed)
+                raise RuntimeError("identity link counts do not account for every row")
+            results.append(PairResult(pair, written, counts))
+        return LinkResult(entities, sum(r.links_written for r in results), results)
+
+    async def reconcile_identity_links(self, enabled: bool) -> ReconcileView:
+        """POST /identity-links/reconcile (D-58 §4-5): link the tenant's historical position,
+        cash-flow and credit-exposure rows, in one transaction, audited
+        `identity_link.reconcile`. Idempotent: an existing link is never changed, so a
+        repeat writes nothing and returns the same counts. A key that has become ambiguous
+        since its link was written keeps the link and is reported
+        (`linked_now_ambiguous`). Refused while IDENTITY_LINKS_ENABLED is off: 409
+        identity_links_disabled, audited DENIED, nothing written."""
+        action = RECONCILE_IDENTITY_LINKS
+        tenant = str(self.principal.tenant_id)
+        if not enabled:
+            error = ApiError(
+                409,
+                IdentityLinkRefusal.IDENTITY_LINKS_DISABLED,
+                "Identity links are switched off in this environment; existing links stay "
+                "readable and runs are unaffected.",
+            )
+            await record_denial(
+                self.session, self.principal, action, "domain_identity_link", tenant, error.code
+            )
+            raise error
+        await self.repo.lock_tenant()  # serialised with projections of the tenant
+        entities, results = 0, []
+        for source_kind in IDENTITY_LINK_TARGETS:
+            linked = await self._link(source_kind, None)
+            entities += linked.legal_entities_written
+            results.extend(linked.results)
+        written = sum(r.links_written for r in results)
+        counts = [
+            {
+                "source_kind": r.pair.source_kind.value,
+                "target_kind": r.pair.target_kind.value,
+                "rows": r.counts.rows,
+                "linked": r.counts.linked,
+                "links_written": r.links_written,
+                "unresolved": r.counts.unresolved,
+                "ambiguous": r.counts.ambiguous,
+                "no_key": r.counts.no_key,
+                "linked_now_ambiguous": r.counts.linked_now_ambiguous,
+            }
+            for r in results
+        ]
+        details: dict[str, Any] = {
+            "resolver_version": RESOLVER_VERSION,
+            "links_written": written,
+            "legal_entities_new": entities,
+            "counts": counts,
+        }
+        audit_by(
+            self.session,
+            self.principal,
+            action,
+            "domain_identity_link",
+            resource_id=tenant,
+            details=details,
+            details_classification=dict.fromkeys(details, ClassificationCode.PUBLIC.value),
+        )
+        await self.session.commit()
+        return ReconcileView(written, entities, results, datetime.now(UTC), self.principal.actor)
+
+    async def _entity_rows(self, entities: Sequence[LegalEntity]) -> list[LegalEntityRow]:
+        """Each entity with its source code and the classification its code is masked by:
+        the most sensitive of the `legal_entity_id` field over the pinned position schema
+        versions naming it (none: unclassified, fail closed)."""
+        versions: dict[uuid.UUID, set[uuid.UUID]] = {}
+        for entity_id, version_id in await self.links.legal_entity_schema_versions(
+            [e.id for e in entities]
+        ):
+            versions.setdefault(entity_id, set()).add(version_id)
+        pins = await self._pins() if entities else SchemaPins({}, {}, {})
+        codes = await self.imports.source_codes({e.source_system_id for e in entities})
+        rows = []
+        for e in entities:
+            classes = {
+                pins.classes(v).get(LEGAL_ENTITY_FIELD, UNCLASSIFIED)
+                for v in versions.get(e.id, set())
+            }
+            rows.append(
+                LegalEntityRow(e, codes.get(e.source_system_id, ""), _most_sensitive(classes))
+            )
+        return rows
+
+    async def legal_entities(
+        self, source_id: uuid.UUID | None, limit: int, offset: int
+    ) -> LegalEntityPageView:
+        """The tenant's legal entities (D-58 §2), by code, then source."""
+        entities, total = await self.links.legal_entity_page(source_id, limit, offset)
+        return LegalEntityPageView(await self._entity_rows(entities), total)
+
+    async def legal_entity(self, legal_entity_id: uuid.UUID) -> LegalEntityView:
+        """One legal entity with its links per source kind: 404 alike for an absent and a
+        foreign id (D-04)."""
+        entity = await self.links.legal_entity(legal_entity_id)
+        if entity is None:
+            raise ApiError(404, "not_found", "Legal entity not found.")
+        [row] = await self._entity_rows([entity])
+        found = await self.links.target_link_counts(IdentityTargetKind.LEGAL_ENTITY, entity.id)
+        return LegalEntityView(row, {k: found.get(k.value, 0) for k in IdentitySourceKind})
+
+    async def identity_links(
+        self,
+        source_kind: IdentitySourceKind | None,
+        source_id: uuid.UUID | None,
+        target_kind: IdentityTargetKind | None,
+        target_id: uuid.UUID | None,
+        limit: int,
+        offset: int,
+    ) -> LinkPageView:
+        """The tenant's identity links (ids only, D-58 §7), oldest first. Another tenant's
+        row or identity gives an empty page, as an absent one does (D-04)."""
+        links, total = await self.links.link_page(
+            LinkFilter(source_kind, source_id, target_kind, target_id), limit, offset
+        )
+        return LinkPageView(links, total)

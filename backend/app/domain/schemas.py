@@ -18,6 +18,9 @@ from app.domain.constants import (
     RATING_RATIONALE_MAX,
     CreditVocabularyKind,
     DomainSchemaCode,
+    IdentityLinkMethod,
+    IdentitySourceKind,
+    IdentityTargetKind,
     ObligorRatingStatus,
 )
 from app.governance.constants import FieldType, ProposalDecision
@@ -50,6 +53,12 @@ class ProjectionSummary(BaseModel):
     canonical_only_fields: list[str] = Field(
         description="Schema fields with no typed column: they stay in the canonical record, "
         "reached through the row's canonical_record_id (lineage)."
+    )
+    missing_values: dict[str, int] | None = Field(
+        default=None,
+        description="Projector 2 only (the typed-maturity instrument contract, D-57): per "
+        "counted field (`maturity_date`), the records without a value; the column is NULL. "
+        "Absent for projector 1, whose summary is unchanged.",
     )
 
 
@@ -149,6 +158,11 @@ class InstrumentVersionOut(BaseModel):
     interest_rate_unit: str | None
     maturity_date: Value | None = Field(
         description="ISO date; empty while the pinned field is free text (TYPE_NOT_PROJECTED)."
+    )
+    maturity_typed: bool = Field(
+        description="The pinned schema version types `maturity_date` as DATE (the typed "
+        "contract, projector v2, D-57). False: schema v1 free text, so `maturity_date` is "
+        "empty and the value stays in the canonical record ('Not stated')."
     )
     attributes: list[AttributeOut]
     cash_flows: list[CashFlowOut] = Field(
@@ -419,3 +433,98 @@ class CreditExposureDetail(BaseModel):
     source_code: str
     created_at: datetime
     versions: list[CreditExposureVersionOut] = Field(description="Oldest first.")
+
+
+# --- Phase 31: legal entities and identity links (BE-31.4, BE-31.5, D-58) ------------------
+# Links carry ids only (D-58 §7): the target's own read applies its classification.
+
+
+class LegalEntityOut(BaseModel):
+    legal_entity_id: uuid.UUID = Field(
+        description="Stable per (tenant, source system, code) (D-58 §2)."
+    )
+    code: Value = Field(
+        description="The source's legal entity code (positions' `legal_entity_ref`), masked "
+        "by that schema field's classification (unknown: unclassified, fail closed)."
+    )
+    source_id: uuid.UUID
+    source_code: str
+    provisional: bool = Field(
+        description="Always true: attributes and the source-of-truth rule are deferred to "
+        "the client (D-58 §2, Data Model §11)."
+    )
+    created_at: datetime
+
+
+class LegalEntityPage(BaseModel):
+    items: list[LegalEntityOut] = Field(description="By code, then source.")
+    total: int
+    limit: int
+    offset: int
+
+
+class LegalEntityDetail(LegalEntityOut):
+    link_counts: dict[IdentitySourceKind, int] = Field(
+        description="Links of the caller's tenant targeting this entity, per source kind."
+    )
+
+
+class IdentityLinkOut(BaseModel):
+    link_id: uuid.UUID
+    source_kind: IdentitySourceKind
+    source_row_id: uuid.UUID = Field(
+        description="The position_version, cashflow_event or credit_exposure_version row."
+    )
+    target_kind: IdentityTargetKind
+    target_id: uuid.UUID = Field(
+        description="The instrument, counterparty or legal entity id; read it through its "
+        "own route, which applies its classification."
+    )
+    method: IdentityLinkMethod
+    resolver_version: int
+    created_by: str
+    created_at: datetime
+
+
+class IdentityLinkPage(BaseModel):
+    items: list[IdentityLinkOut] = Field(
+        description="Oldest first (created_at, then link_id). An empty page for a source row "
+        "means its text key is unresolved or ambiguous ('Unresolved (text key)')."
+    )
+    total: int
+    limit: int
+    offset: int
+
+
+class IdentityLinkKindCount(BaseModel):
+    """Value-free counts for one (source kind, target kind) pair."""
+
+    source_kind: IdentitySourceKind
+    target_kind: IdentityTargetKind
+    rows: int = Field(description="Source rows of the tenant examined.")
+    linked: int = Field(description="Rows with a link after the reconcile (new or existing).")
+    links_written: int = Field(description="Links written by this call (0 on a repeat).")
+    unresolved: int = Field(description="LINK_UNRESOLVED: no identity has the key; no link.")
+    ambiguous: int = Field(
+        description="LINK_AMBIGUOUS: several identities have the key (e.g. two source "
+        "systems); no link written."
+    )
+    no_key: int = Field(description="Rows whose key field is empty; no link.")
+    linked_now_ambiguous: int = Field(
+        description="Of `linked`: rows whose key has since become ambiguous. The link is "
+        "kept, never changed, and reported here (D-58 §5). "
+        "rows = linked + unresolved + ambiguous + no_key."
+    )
+
+
+class IdentityLinkReconcileOut(BaseModel):
+    """The result of POST /identity-links/reconcile (D-58 §4, §5). Idempotent: a repeat
+    writes nothing and returns the same counts except `links_written` (0)."""
+
+    resolver_version: int
+    links_written: int
+    counts: list[IdentityLinkKindCount] = Field(
+        description="One entry per (source kind, target kind) pair, in a fixed order."
+    )
+    reconciled_at: datetime
+    reconciled_by: str

@@ -34,6 +34,7 @@ const ROUTE_LABELS: Record<string, string> = {
   rules: 'Rules',
   modules: 'Modules',
   'assumption-sets': 'Assumption sets',
+  'legal-entities': 'Legal entities',
   calculations: 'Calculations',
   runs: 'Runs',
   scenarios: 'Reconciliation & Scenarios',

@@ -3997,7 +3997,7 @@ Goal: an instrument's maturity is typed and projected through a governed new sch
 projector v2. Positions, cash flows and credit exposures resolve to identities through
 append-only links. v1 behaviour is unchanged.
 
-- [ ] **BE-31.1** Migration 0030: `legal_entity` (a stable UUID per tenant, source system and
+- [x] **BE-31.1** Migration 0030: `legal_entity` (a stable UUID per tenant, source system and
   code; `provisional`; append-only) and `domain_identity_link` (D-58 §2; append-only;
   same-tenant triggers on both ends).
   - *Done-when:*
@@ -4006,6 +4006,18 @@ append-only links. v1 behaviour is unchanged.
     - the downgrade refuses while rows exist;
     - the existing domain table shapes are byte-for-byte unchanged (the frozen-copy check, as
       in BE-25.1).
+  - *Evidence (2026-10-24, architect-verified):* `0030_identity_links.py` (revision 0030,
+    down_revision 0027, pre-numbered; append-only and no-truncate triggers :133-139, link
+    insert checks :105-128, downgrade guard :238-243). `test_ws1_verification.py:1041-1066`:
+    `check_identity_append_only` (`identity_kit.py:244-257`, UPDATE/DELETE "append-only",
+    TRUNCATE refused, row unchanged) at :1044; refusal "this downgrade is refused" with counts
+    unchanged at :1054-1056; after `clean`, 0030 -> down_revision -> head with both tables gone
+    and `identity_shape` of 13 existing domain/credit tables equal on both sides at :1058-1066.
+    The test takes 0030's `down_revision` from the script, so it survives the merge re-chain.
+    CLI round trip on scratch `moodymate_scratch_p31` (`Running downgrade 0030 -> 0027` /
+    `0027` / `Running upgrade 0027 -> 0030` / `0030 (head)`, dropped). Run: fix-round targeted
+    domain + credit + WS1 + calculations + committed-artifacts `9 passed`
+    (`moodymate_test_p31c`).
 - [ ] **BE-31.2** Typed-maturity contract `INSTRUMENT_TYPED_MATURITY` (D-57 option B): v1 with
   `maturity_date` DATE and `interest_rate` (11,6). Its hash is frozen in code. It is published
   only through the governed proposal path, never by migration or the default seed. A
@@ -4016,6 +4028,13 @@ append-only links. v1 behaviour is unchanged.
     - finds the new version ACTIVE (`max + 1`) and v1 DEPRECATED;
     - finds the seeded v2 DRAFT's `content_sha256` unchanged;
     - and the e2e smoke diff still passes.
+  - *Not yet ticked (2026-10-24, architect):* the domain fold is evidenced at
+    `test_domain.py:609-636` (frozen hash equals `INSTRUMENT_TYPED_MATURITY_SHA256`,
+    `constants.py:467`; `approve_proposal` asserts BREAKING with the `core_instrument` MAPPING
+    dependent and a second-person APPLIED, `identity_kit.py:121-147`; statuses
+    `{1: DEPRECATED, 2: DRAFT, max+1: ACTIVE}`; v2 DRAFT hash unchanged). **Missing:** the e2e
+    smoke diff (`e2e/smoke.spec.ts`) was not run in this phase; only `counterparties.spec.ts`
+    and `ws3-smoke.spec.ts` were. Tick when the CI Playwright run on the PR shows it passing.
 - [ ] **BE-31.3** Projector v2 (D-57 §2). The instrument spec is matched by **contract hash**.
   v1 imports use the frozen v1 spec (`projector_version` 1), typed imports record 2, and an
   unknown hash gives `projection_unsupported`. `INSTRUMENT_PROJECTOR_V2_ENABLED` switches it.
@@ -4028,9 +4047,29 @@ append-only links. v1 behaviour is unchanged.
     - `interest_rate` keeps 6 dp exactly;
     - the same version number with a different hash gives `projection_unsupported`;
     - switched off, it gives `projection_unsupported`, audited DENIED;
-    - a ladder run over a typed-instrument snapshot gives the same `result_sha256` as over the
-      v1 one.
-- [ ] **BE-31.4** Identity links (D-58). The projection step links its own rows, and
+    - ~~a ladder run over a typed-instrument snapshot gives the same `result_sha256` as over the
+      v1 one~~ reworded 2026-10-24 (Q2, auto-resolved; D-57 amendment), because contributions
+      carry `instrument_version_id`, which D-31 §4 hashes:
+      - (a) a run over the v1 snapshot still gives the same `result_sha256` as its pre-phase
+        golden;
+      - (b) a typed-snapshot run and a v1-snapshot run give result documents that are equal
+        once only `instrument_version_id` is removed from each contribution, with the same
+        number of contributions;
+      - (c) repeating the run over the same typed snapshot gives an equal `result_sha256`.
+  - *Not yet ticked (2026-10-24, architect):* evidenced in `test_domain.py`: v1 golden summary
+    and every `payload_sha256` (`golden_check` :383, `identity_kit.py:72-87`; golden captured
+    from the unchanged projector); `TYPE_NOT_PROJECTED` 25 :480; held dates
+    `{2030-02-30, 2030-13-01, n/a}` :659-666 and never projected :706; `2030-06-30` stored as
+    DATE :707 and read back as `"2030-06-30"` :712-718; missing maturity NULL :708 and counted
+    `missing_values == {"maturity_date": 1}` :693 (absent from v1, :414); 6 dp exact :709-711;
+    matched by hash, not number :637-649 and via the API :676-687; switch off 409 audited DENIED
+    :668-675; (b) `run_outputs` equal with instrument version ids replaced by business key
+    :719-741 (`identity_kit.py:311-339`). **Missing:** (c) no repeat run over the typed snapshot
+    is asserted; (a) there is no pre-phase golden of a run's `result_sha256` (the test shows the
+    v1 run's hash equal before and after reconcile, :476-477, which is BE-31.4's check). Test
+    writer: assert (c); for (a), add the golden or send the wording back to the
+    decision-resolver (run hashes depend on per-database row ids).
+- [x] **BE-31.4** Identity links (D-58). The projection step links its own rows, and
   `POST identity-links/reconcile` links historical rows. Exactly one identity in the tenant
   gives a link. Zero or several give no link and are counted (`LINK_UNRESOLVED`,
   `LINK_AMBIGUOUS`). Runs do not read links.
@@ -4040,6 +4079,18 @@ append-only links. v1 behaviour is unchanged.
     - an ambiguous key (two source systems) and an unresolved key are counted;
     - a fixture run's `result_sha256` is equal before and after reconcile;
     - the WS1 matrix, isolation and audit tests list the routes.
+  - *Evidence (2026-10-24, architect-verified):* `test_domain.py`: with the switch off no
+    entity or link is written and `new_identities` stays 25 :412-414; reconcile switched off is
+    409 `identity_links_disabled`, audited DENIED, nothing written :415-420; each position
+    (instrument and legal entity) and cash flow links to its SQL-derived expected id, 75 links
+    :432-466; second reconcile writes 0 with equal counts :471-474; ladder `result_sha256` equal
+    before and after :476-477; ambiguous (two source systems) and unresolved keys counted in the
+    audit details and the reconcile, existing links `linked_now_ambiguous` :742-777.
+    `test_credit.py:500-524`: each exposure links to its expected counterparty, the rest are
+    `LINK_UNRESOLVED`, two reconciles write 0. `test_ws1_verification.py`: matrix :268-286,
+    isolation :421-423, :455-459, :499, AUDITED `identity_link.reconcile` :774 and the call
+    :1020. Run: `9 passed` (`moodymate_test_p31c`); mutation checks M1-M4 each failed the domain
+    test.
 - [ ] **BE-31.5** `GET legal-entities`, `GET legal-entities/{id}` and `GET identity-links`,
   the `openapi.json` export, `docs/RETENTION.md` rows, and `docs/DOMAIN_IDENTITY.md` (how
   historical text keys are reconciled, D-58 §5).
@@ -4048,16 +4099,35 @@ append-only links. v1 behaviour is unchanged.
     - the WS1 matrix gives 200 for `domain:read` holders and 403 for the others;
     - another tenant's id gives 404;
     - the docs are present (grep).
-- [ ] **FE-31.1** (owner of `navigation.ts`/`features.ts`, behind `NEXT_PUBLIC_DOMAIN_LINKS_UI`)
+  - *Not yet ticked (2026-10-24, architect):* evidenced: drift check `openapi.json is up to
+    date` (rc=0); matrix `test_ws1_verification.py:268-275` (all five seeded roles hold
+    `domain:read`, so 200 for all; printed rows 200 x5); another tenant's legal entity is the
+    404 of a random id :499, and its lists total 0 :455-459. **Missing:** `docs/DOMAIN_IDENTITY.md`
+    does not exist and `docs/RETENTION.md` has no `legal_entity` or `domain_identity_link` row
+    (grep, 2026-10-24). Per Q3 the coordinator reviews the drafts, commits them, then runs the
+    grep.
+- [x] **FE-31.1** (owner of `navigation.ts`/`features.ts`, behind `NEXT_PUBLIC_DOMAIN_LINKS_UI`)
   - the instrument detail shows a typed maturity, or "Not stated (schema v1 free text)";
-  - the position, cash-flow and exposure details show the linked identity, or "Unresolved
-    (text key)";
+  - ~~the position, cash-flow and exposure details show the linked identity, or "Unresolved
+    (text key)"~~ reworded 2026-10-24 (Q14, auto-resolved): the cash-flow and exposure details
+    show the linked identity, or "Unresolved (text key)"; position links show on the legal
+    entity detail (there is no position detail page; a position read route and page are a
+    follow-up);
   - a Legal entities list appears under Domain.
   - *Done-when:*
     - vitests cover the three states;
     - a Playwright fold shows a typed instrument with its maturity and a v1 instrument showing
       "Not stated";
     - with the switch off, the Phase 30 nav returns.
+  - *Evidence (2026-10-24, architect-verified):* `identity.test.ts`: typed, v1 "Not stated",
+    and no-maturity/masked states :49-77; linked, "Unresolved (text key)" and 403/failed states
+    :79-121; `NEXT_PUBLIC_DOMAIN_LINKS_UI=off` restores the Phase 30 nav exactly :202-210 and
+    the routes 404 :227. `ws3-smoke.spec.ts:656` (typed date and "Typed date" badge :703, v1
+    "Not stated (schema v1 free text)" :708-713; must-stay-last comment :653-655).
+    `counterparties.spec.ts` step 4b checks the exposure's linked counterparty (Q15). Runs:
+    vitest `38 passed / 642 passed`, then domain + credit `176 passed`; tsc and lint clean;
+    Playwright (`moodymate_e2e_p31fx`, CI=1) `3 passed (24.0s)`. The switch-off state was not
+    checked in a browser (vitest only, which the Done-when allows).
 
 *Test budget:* 49 → 49.
 *Reversibility:*

@@ -20,6 +20,17 @@ Populates a running LOCAL backend so every page has something to show:
      and one projected BOND funding source unavailable for 7 days, APPROVED_FOR_TEST by
      approver (the Shared library).
 
+6. Opt-in only (`--publish-typed-instrument`, Phase 31, D-57 §3): the typed-maturity
+   instrument contract INSTRUMENT_TYPED_MATURITY (v1 with `maturity_date` DATE and
+   `interest_rate` (11,6)) is proposed by data_steward through the governed path (impact
+   analysis, submit) and approved by approver; it becomes the ACTIVE instrument version and
+   v1 is DEPRECATED. The instrument sample is then imported again through
+   "Core banking instruments (demo)" with a mapping for the new version
+   (demo_instruments_typed) and projected by projector v2, so the instrument detail shows a
+   typed maturity next to the v1 "Not stated". Never part of the default seed: publishing
+   changes the contract new instrument imports are checked against (a client decision outside
+   a local demo).
+
 Every step goes through the public API as the seeded dev users (no SQL), so permissions,
 maker-checker and audit apply exactly as in the UI. Sources and mappings have stable codes
 (demo_instruments, demo_cashflows, ...). Re-running is safe: finished steps are skipped and a
@@ -29,7 +40,7 @@ Refused unless the backend config is ENV=local with synthetic data (D-13, D-14):
 exist only in local/test, and test databases are disposable (D-03).
 
 Usage (from backend/, with the backend running):
-    python -m scripts.seed_demo [--api http://localhost:8000]
+    python -m scripts.seed_demo [--api http://localhost:8000] [--publish-typed-instrument]
 """
 
 import argparse
@@ -47,6 +58,11 @@ from typing import Any
 import httpx
 
 from app.core.config import get_settings
+from app.domain.constants import (
+    INSTRUMENT_TYPED_MATURITY,
+    INSTRUMENT_TYPED_MATURITY_SHA256,
+    INSTRUMENT_TYPED_MATURITY_TITLE,
+)
 
 SAMPLES = Path(__file__).resolve().parent.parent / "samples" / "synthetic"
 PREFIX = "demo"
@@ -229,6 +245,29 @@ def _projected_import(api: Api, schema_code: str, source_id: str) -> str | None:
         limit=1,
     )
     return str(found[0]["id"]) if found else None
+
+
+def _mapped_import(api: Api, feed: Feed, source_id: str) -> str | None:
+    """The newest projected import of the feed's schema from a source that the feed's own
+    mapping mapped, if any. Phase 31 (ruling Q7): after `--publish-typed-instrument` the
+    newest instrument import of the core source is the typed one (its own mapping,
+    demo_instruments_typed); the snapshot keeps the v1 import, so a re-run creates no new
+    snapshot or run."""
+    mappings = api.items("data_steward", "/api/v1/mappings", source_id=source_id, limit=200)
+    hit = next((m for m in mappings if m["code"] == feed.mapping_code), None)
+    if hit is None:
+        return None
+    detail = api.get("data_steward", f"/api/v1/mappings/{hit['id']}")
+    versions = {v["id"] for v in detail["versions"]}
+    found = api.items(
+        "data_steward",
+        "/api/v1/imports",
+        source_id=source_id,
+        schema_code=feed.schema,
+        projected="true",
+        limit=200,
+    )
+    return next((str(i["id"]) for i in found if i["mapping_version_id"] in versions), None)
 
 
 def _ensure_source(api: Api, src: Source, feed: Feed) -> dict[str, Any]:
@@ -500,7 +539,7 @@ def _snapshot(api: Api) -> str:
     import_ids = []
     for src, feed in ((CORE, INSTRUMENT), (POSITIONS, POSITION), (CORE, CASHFLOW)):
         source = _find_source(api, src.code)
-        import_id = _projected_import(api, feed.schema, source["id"]) if source else None
+        import_id = _mapped_import(api, feed, source["id"]) if source else None
         if import_id is None:
             raise SeedError(f"no projected {feed.schema} import from {src.code} to snapshot")
         import_ids.append(import_id)
@@ -651,6 +690,87 @@ def seed_scenarios(api: Api) -> None:
     )
 
 
+# --- 6. opt-in: the typed-maturity instrument contract (Phase 31, D-57) ------------------------
+
+TYPED_INSTRUMENT = Feed(
+    "instrument", "instrument.csv", "instrument_id", _csv_columns("instrument.csv"),
+    "demo_instruments_typed", "Core banking instruments, typed maturity (demo)",
+)  # fmt: skip
+OPEN_PROPOSALS = ("DRAFT", "SUBMITTED")
+
+
+def _typed_version(api: Api) -> dict[str, Any] | None:
+    """The instrument schema version whose contract is INSTRUMENT_TYPED_MATURITY, if any."""
+    schema = _schema(api, "instrument")
+    versions = api.items("data_steward", f"/api/v1/schemas/{schema['id']}/versions")
+    return next(
+        (v for v in versions if v["content_sha256"] == INSTRUMENT_TYPED_MATURITY_SHA256), None
+    )
+
+
+def _typed_proposal(api: Api, version_id: str) -> dict[str, Any] | None:
+    proposals = api.items("data_steward", "/api/v1/schema-change-proposals", limit=200)
+    return next((p for p in proposals if p["proposed_version"]["id"] == version_id), None)
+
+
+def publish_typed_contract(api: Api) -> dict[str, Any]:
+    """Propose (data_steward), analyse, submit and approve (approver) the frozen contract,
+    or move an earlier attempt on. Returns the ACTIVE version."""
+    version = _typed_version(api)
+    if version is not None and version["status"] == "ACTIVE":
+        print(f"  instrument v{version['version']} (typed maturity) already ACTIVE, skipped")
+        return version
+    proposal = _typed_proposal(api, version["id"]) if version else None
+    if proposal is None:
+        body = {
+            "schema_id": _schema(api, "instrument")["id"],
+            "title": INSTRUMENT_TYPED_MATURITY_TITLE,
+            "rationale": "Demo seed (opt-in): type the maturity date (D-57 option B).",
+            "fields": list(INSTRUMENT_TYPED_MATURITY),
+        }
+        proposal = api.post("data_steward", "/api/v1/schema-change-proposals", body, 201)
+    elif proposal["status"] not in OPEN_PROPOSALS:
+        raise SeedError(f"the typed-maturity proposal is {proposal['status']}")
+    base = f"/api/v1/schema-change-proposals/{proposal['id']}"
+    if proposal["status"] == "DRAFT":
+        if proposal.get("impact") is None:  # the impact analysis precedes the submission
+            proposal = api.post("data_steward", f"{base}/impact-analysis", None, 200)
+        proposal = api.post("data_steward", f"{base}/submit", {}, 200)
+    if proposal["status"] == "SUBMITTED":
+        proposal = api.post("approver", f"{base}/approval", {"decision": "APPROVE"}, 200)
+    version = _typed_version(api)
+    if version is None or version["status"] != "ACTIVE":
+        raise SeedError(f"the typed-maturity proposal ended {proposal['status']}")
+    print(f"  instrument v{version['version']} (typed maturity) ACTIVE; v1 DEPRECATED")
+    return version
+
+
+def seed_typed_instruments(api: Api) -> None:
+    version = publish_typed_contract(api)
+    source = _ensure_source(api, CORE, TYPED_INSTRUMENT)
+    projected = api.items(
+        "data_steward",
+        "/api/v1/imports",
+        source_id=source["id"],
+        schema_code="instrument",
+        projected="true",
+        limit=200,
+    )
+    if any(i["schema_version_id"] == version["id"] for i in projected):
+        print(f"  typed instruments via {CORE.code}: already projected, skipped")
+        return
+    contract = _ensure_contract(api, source, TYPED_INSTRUMENT)
+    upload = _pending_import(api, source["id"], TYPED_INSTRUMENT, contract["id"])
+    if not upload:
+        name, data = _file(TYPED_INSTRUMENT, CORE)
+        upload = _upload(api, source["id"], name, data, CORE.mime)
+    if upload["schema_version_id"] != version["id"]:
+        raise SeedError("the typed import does not pin the typed-maturity version")
+    _ensure_mapping(api, source["id"], contract["id"], upload, TYPED_INSTRUMENT)
+    count = _validate_and_project(api, upload)
+    print(f"  typed instruments via {CORE.code}: {count} projected (projector v2)")
+
+
 # --- entry point ------------------------------------------------------------------------------
 
 
@@ -669,6 +789,12 @@ def _refused() -> bool:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--api", default="http://localhost:8000", help="The running backend.")
+    parser.add_argument(
+        "--publish-typed-instrument",
+        action="store_true",
+        help="Opt-in (D-57 §3): publish the typed-maturity instrument contract through the "
+        "governed proposal path and project the instrument sample under it (projector v2).",
+    )
     args = parser.parse_args(argv)
     if _refused():
         return 2
@@ -687,6 +813,8 @@ def main(argv: list[str] | None = None) -> int:
         (f"Calculations (reporting date {REPORTING_DATE})", lambda: seed_calculations(api)),
         ("Scenarios", lambda: seed_scenarios(api)),
     )
+    if args.publish_typed_instrument:
+        steps += (("Typed-maturity instruments (opt-in)", lambda: seed_typed_instruments(api)),)
     try:
         for title, step in steps:
             print(f"{title}:")

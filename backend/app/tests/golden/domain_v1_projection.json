@@ -1,0 +1,129 @@
+{
+  "cashflow_event": {
+    "payload_sha256": [
+      "e8015976c149c32bbe750447d235dabde8a45e42c7933c7d8bf3104a09dd1858",
+      "c3f3cf9c5612f9ce2631058ad16bd2a33d75aecaabf709fe0e072881a316a24f",
+      "cafe71e4a7a8f756bc7d17a4244961c811d3a9d2d919ca86e442de3590a83b4b",
+      "ad8c6c63ff94c90a4cc104bbd4d4607af28dba5b03bd1609161a8a848f4f17c8",
+      "470be6ddcec62a0c60c4d4ab3d538594cbfdeaa095a7f771cae70f4d840b14ae",
+      "03be264f198535283d16cae2d95d1c64c39f0ca39e63cdab0814a47b8f4504f7",
+      "ca8baf3cb0378cae549df90e594723365ddd8efd3054f06785872c55255facbf",
+      "c6e0b99b743d458e844b919a8428fc9db4139f68138368cc2f26ee8b3b20dafa",
+      "5ebb131e4da398666daa4bc8e2847fc9d3d23e056fd6a0218f058c4f5ac12096",
+      "db3e9897032e733ecea00cef07f8b5ccc01e30e02e1c8a1ff81f39ab1eda1634",
+      "c1a8caf85306559e1bb329f0575f6a66436fce71814deb755feb987e90e84544",
+      "2bbad877edf66800a9bc08fbb6b589628e43ea9b978c065e15a437eaba7d1e76",
+      "d8114a8d37f1cc5cf82f157f937bef22645bda7e4f454aaf6d727db6eddc9bfa",
+      "40fafbcda55959ed3bca9d9594985379f101fdca1e4003b7e5a9303d6c02ef71",
+      "212bb818b1e7a1eea307ec9124bbfb4719b80e8d238837a0d5587ccd8c8a4566",
+      "24362d76bae5c22950f58c63c74aac9985392eb8090641adc48814bdd6f630b3",
+      "fc123a869d30e8dabb8399402cc1188c1263f180b2304bf7e0ad1cbd58c74966",
+      "a17ff6a6813faa5abd50c7a41adcb6cf1d37280f6df74009362ae6c00251ed40",
+      "e81baf999d40419dfd699fa3153e549f356328c339de9a17c8412cd7873a6f83",
+      "436d80cdfc6c51befa505c27412cdff39d72a6ca3d43748c2608577a6b97e526",
+      "9005ed3d6dc10b7c75d5e27a9b2c107a404fe98b3ce944717f98b45901b21629",
+      "7427d0afeb51020368a8b16cc5607956d780c5b9535fa2574794fbdf7f67dc57",
+      "ae542bf69fd33c6872f1b722fbdff77ae3801453065dc4c40dfd41cb444df577",
+      "81e1050eef1c913a0bf08301c1cb0870451bec3d5ff8e9b5373a1dfb1fbd9502",
+      "c9949ffc537c020732339f64e6880722e4ae7c0834319e2163a3c9682a398a09"
+    ],
+    "projector_version": 1,
+    "schema_version": 1,
+    "summary": {
+      "attribute_values": 0,
+      "canonical_only_fields": [],
+      "new_identities": 0,
+      "records": 25,
+      "rows_projected": 25,
+      "type_not_projected": {},
+      "unknown_values": {}
+    }
+  },
+  "instrument": {
+    "payload_sha256": [
+      "d41d303481457a32e77ec8c7276658e477eaa58bff688c81af138fc747e440d4",
+      "df2b74acc20ce894bc4d7d55349b3c798f02b469f128bf03ff4b61fd77efbb9e",
+      "7b5bd5646dc4a3d06948489bd51f7486f60930cbe7da50a71bdfb218b4f98fa5",
+      "f79c76f5f76c087faa45f2ac735a54536acd525944777baaadcb6cd8e11486c3",
+      "1f1ebeca5dea648bb957c24ba32843e32341ff229c80447cccffd9425353aa32",
+      "91972b33203e5244e27abf300387f75bfb9bb578f74d01e2f9b42ee6b178508c",
+      "57bf878363e50e76b5436034a8a2fae5ca03f2939ffc482991d9b40671efc3a8",
+      "7d82502e09146fec1c3cc2b7b41cdca8ab176973c60208e54dd66943e4d897a6",
+      "db480bb10742161a0ab0124616b4580dbc437b8f65d0e5903c7fdbc2a87587eb",
+      "72e53d8e12d3846f9bc565fd29ff229927b9d97b1290143ae99958064ac1a36a",
+      "770f189bc111b8298b0cac6d58cf47535f10c190bcecd73f9ffa472c08e81b8b",
+      "81ed2e1da2d3927dee2b8b4e416057efdec100e3af10e7ad006f400577f1ba6d",
+      "f0a7d1d763211c4cec29102c516a8dffdf3c69cfedb28af0fd33cbc3a30a4b01",
+      "f7450b5234353cd74239158a48ecb5ea7f32a56ae28d569a5818a6a590085637",
+      "0e90e2c5dcacec48ba4a58811991dc3b0fe12d219352b024429bd047dc18bd12",
+      "d7fcecac7191872a89ec832d2878bce878bdc87573be689d1fc1a7d9a1f29d39",
+      "54213bca63f358057c0731ec5844ee09a9bdc315816af148eca80e7ba360a2d7",
+      "3ac60deecdf5d391415e33068c0c823da9ec0322ee569fb72a181f054625ce89",
+      "8c0c6baa3deeb74d03d6e74d3b0e5296a36ab933d36e4761412ae8719438d19d",
+      "5f1a86980b704521e4bcf1aac28f88d17bd93e4f43be6030cc6f4a983d7ddc98",
+      "7f67cbd975c1ee8aabc3c7e102c1f9a71f25efb66dbbb4afaa3e2a2b5a05ae2b",
+      "9bbc975a722296d2776eb803a262db3704a0cdc473d7d362420c6abdb9a95e3d",
+      "6e93217684858c971fbcde5744cb736b4dcbe217c056df9f7cc232a4c25215db",
+      "f38a104d10a2150f84d3b82c4aa3cc61fea5dff4cb3099b34c18e9f33e407782",
+      "3fbb0f86aac9aa1c1c84851893ea5d3bf7e9ee8e5d7d5b7913050ca8d65c85d6"
+    ],
+    "projector_version": 1,
+    "schema_version": 1,
+    "summary": {
+      "attribute_values": 25,
+      "canonical_only_fields": [
+        "counterparty_id",
+        "legacy_book_code"
+      ],
+      "new_identities": 25,
+      "records": 25,
+      "rows_projected": 25,
+      "type_not_projected": {
+        "maturity_date": 25
+      },
+      "unknown_values": {}
+    }
+  },
+  "position": {
+    "payload_sha256": [
+      "0c616013476e25335439806e0d8607a46e1ca0a3cc9f455d84e55ec277f4bd10",
+      "3ef8402525ee3d264b4cf3568e112a42951074607ed74442f2e00f6138c1a686",
+      "679da9d0271fd05bc7a05b400467f6632fd1c0bf5ce5b89380d5c40e02c0a6ce",
+      "f7d1b1c0e1bb2f781f03a7da3d50bccaa1639ff0b1158c3f9a042a2de2040d8c",
+      "d8a3c5a564ac51a5d99f510f5352b9d27cd898d1531bf741855ffc839f5edf52",
+      "d8d6e64d470d557341be082fc1ddda9095abd3c2a24d3e6975a8bc27bcd67994",
+      "5af308bda6b304903f7663fd6c2f7bf5dfda76514a70b6939c26dbd01d17642f",
+      "387537f48473fa6c49e89e228da75fbbc563aa84c5e3414a7157ec71428ab54d",
+      "49bb6afb97aa9dcf4fb2a752cb250367834276397e3c090e9b35278741f49bb4",
+      "26c116437a2ae68a7b2aa49af9cb2c20aa604bc02ef954a4f1dfaf6edd5e35be",
+      "81566467b584f905a6304e749b9a5ece44761c5061e0a2cf7135354dc5570e88",
+      "c9e96df0d65030ab2a01a3043d0c82449621fc004cd77fc685083643c7ac1e13",
+      "f3b926e8aa1b0e0b1fa972e6c5ec42c12a5b400926f4ed79b16e99efacbbbd1a",
+      "0ff783b5a882c265214bd7960e6b8e455bbbc66e77e847bb9c030fb913010d11",
+      "228d881d05adbb89690a567ccbed94882919db740c886b390f9d23b3250ff2bf",
+      "02a9a09b9386548421d243c4b31172543c3090b3a8d025c5484e0ae493fdca5f",
+      "618605f082af3e0321dd4100bb09c099f31b9c07fcdc725c2fb7b6d03ff46706",
+      "63f0a29120cf2cacd1bc1c958b4fed60b6759a198bc256839dbccb3b43c0d203",
+      "01301cd0274c328adabc0132790cd1f005d635c45ea4d597d37828a6a1c16cb6",
+      "409e6029575264495d858bd0bd39b1623c8cd32020a13f84c6ea96845c2094f1",
+      "59b6ea251c3db2921622416056a08412f3ebd5e575c2dd56341208b470a967f6",
+      "c5275f2c86d09af8700807c9d64031a40c4885a67934c9cf1a842f4d44e9b176",
+      "f28b8e3c89dd16c47d321dbe58e16505e9e7a1ad1330d2b715695a464ffc4c46",
+      "9e97948c63181d3270aea96fb196c6d1754d8f8117b8911accb96b48886d3bf0",
+      "ae9e94f80a5f37cf38522b24257207af9d2928b6fa97c51a14401ca36c111e73"
+    ],
+    "projector_version": 1,
+    "schema_version": 1,
+    "summary": {
+      "attribute_values": 0,
+      "canonical_only_fields": [
+        "account_id"
+      ],
+      "new_identities": 25,
+      "records": 25,
+      "rows_projected": 25,
+      "type_not_projected": {},
+      "unknown_values": {}
+    }
+  }
+}

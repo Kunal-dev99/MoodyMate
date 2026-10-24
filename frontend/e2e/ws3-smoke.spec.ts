@@ -571,3 +571,163 @@ test('FE-18.2: WS3 smoke: project → catalogue → snapshot (PLANNED not select
     if (process.env.WS3_SMOKE_SCREENSHOT) await analyst.screenshot({ path: `${process.env.WS3_SMOKE_SCREENSHOT}/registry-planned.png`, fullPage: true })
   })
 })
+
+// --- Phase 31, FE-31.1 (D-57, D-58): typed maturity and identity links -------------------------
+
+/**
+ * contract_sha256(INSTRUMENT_TYPED_MATURITY), frozen in backend/app/domain/constants.py (BE-31.2).
+ * Mirrors app.domain.constants.INSTRUMENT_TYPED_MATURITY_SHA256 (frozen, D-57): if BE-31.2 ever
+ * changes the frozen contract, this constant must be updated with it (Q18). A mismatch fails
+ * publishTypedMaturity below rather than drifting silently.
+ */
+const TYPED_MATURITY_SHA256 = '20f272b42f1151ff2fc84c626bf5c474c23d10af6b1368a23b3fd74e3b88ceed'
+
+/**
+ * The typed-maturity contract published through the governed path (not under test; BE-31.2 owns
+ * it): instrument v1's fields with `maturity_date` DATE and `interest_rate` (11,6), proposed by
+ * the steward, analysed, submitted and approved by a second person. The new ACTIVE version's
+ * hash must be the frozen one, so the e2e cannot drift from the code. Reused when already active.
+ */
+async function publishTypedMaturity(request: APIRequestContext, steward: AuthHeaders, approver: AuthHeaders): Promise<Schemas['SchemaVersionOut']> {
+  const schemas: Schemas['SchemaList'] = await (await request.get(`${API}/api/v1/schemas`, { headers: steward })).json()
+  const schema = schemas.items.find((s) => s.code === 'instrument')
+  expect(schema).toBeTruthy()
+  const versionsUrl = `${API}/api/v1/schemas/${schema!.id}/versions`
+  const versions: Schemas['SchemaVersionList'] = await (await request.get(versionsUrl, { headers: steward })).json()
+  const active = versions.items.find((v) => v.status === 'ACTIVE')
+  if (active?.content_sha256 === TYPED_MATURITY_SHA256) return active
+
+  const v1 = versions.items.find((v) => v.version === 1)
+  expect(v1).toBeTruthy()
+  const fields: Schemas['SchemaFieldIn'][] = [...v1!.fields]
+    .sort((a, b) => a.position - b.position)
+    .map(({ position: _position, ...f }) => {
+      // Descriptions as the frozen contract has them (they are not part of the hash).
+      if (f.name === 'maturity_date')
+        return { ...f, data_type: 'DATE', unit: null, precision: null, scale: null, description: 'Typed ISO date (typed-maturity contract, D-57).' }
+      if (f.name === 'interest_rate') return { ...f, precision: 11, scale: 6 }
+      if (f.name === 'legacy_book_code') return { ...f, description: 'Kept as in v1.' }
+      return f
+    })
+  const body: Schemas['ProposalCreate'] = { schema_id: schema!.id, title: 'Typed maturity date (INSTRUMENT_TYPED_MATURITY, D-57)', fields }
+  const created = await request.post(`${API}/api/v1/schema-change-proposals`, { headers: steward, data: body })
+  expect(created.status(), await created.text()).toBe(201)
+  const proposal: Schemas['ProposalOut'] = await created.json()
+  const base = `${API}/api/v1/schema-change-proposals/${proposal.id}`
+  const impact = await request.post(`${base}/impact-analysis`, { headers: steward })
+  expect(impact.ok(), await impact.text()).toBe(true)
+  const analysed: Schemas['ProposalOut'] = await impact.json()
+  expect(analysed.impact?.proposed_sha256).toBe(TYPED_MATURITY_SHA256)
+  expect(analysed.impact?.overall).toBe('BREAKING')
+  const submitted = await request.post(`${base}/submit`, { headers: steward, data: {} })
+  expect(submitted.ok(), await submitted.text()).toBe(true)
+  const approved = await request.post(`${base}/approval`, { headers: approver, data: { decision: 'APPROVE' } })
+  expect(approved.ok(), await approved.text()).toBe(true)
+  expect(((await approved.json()) as Schemas['ProposalOut']).status).toBe('APPLIED')
+
+  const after: Schemas['SchemaVersionList'] = await (await request.get(versionsUrl, { headers: steward })).json()
+  const typed = after.items.find((v) => v.status === 'ACTIVE')
+  expect(typed?.content_sha256).toBe(TYPED_MATURITY_SHA256)
+  return typed!
+}
+
+/** maturity_date of instrument.csv by business key, as the file has it (ISO text). */
+function sampleMaturities(): Map<string, string> {
+  const lines = readFileSync(join(SAMPLES, 'instrument.csv'), 'utf8').split('\n').filter((l) => l.trim() && !l.startsWith('#'))
+  const header = lines[0].split(',')
+  const key = header.indexOf('instrument_id')
+  const maturity = header.indexOf('maturity_date')
+  return new Map(lines.slice(1).map((l) => l.split(',')).map((cells) => [cells[key], cells[maturity]]))
+}
+
+/** The instrument (and its version) one import projected, read through the API. */
+async function instrumentOf(request: APIRequestContext, headers: AuthHeaders, importId: string) {
+  const listed: Schemas['InstrumentPage'] = await (await request.get(`${API}/api/v1/instruments?import_id=${importId}&limit=1`, { headers })).json()
+  expect(listed.items.length, `import ${importId} projected an instrument`).toBe(1)
+  const detail: Schemas['InstrumentDetail'] = await (await request.get(`${API}/api/v1/instruments/${listed.items[0].instrument_id}`, { headers })).json()
+  const version = detail.versions.find((v) => v.import_id === importId)
+  expect(version).toBeTruthy()
+  return { detail, version: version! }
+}
+
+// MUST STAY LAST in this file (and ws3-smoke.spec.ts last in the run): this test publishes
+// INSTRUMENT_TYPED_MATURITY (D-57 §3), which retires the instrument v1 version that every earlier
+// spec maps against. Do not add tests after it (Q16; the coordinator re-checks at merge).
+test('FE-31.1: a typed instrument shows its maturity and a v1 instrument "Not stated"; Legal entities is under Domain', async ({
+  browser,
+  request,
+}) => {
+  test.setTimeout(180_000)
+  const stamp = Date.now()
+  const stewardApi = await bearer(request, 'data_steward')
+  const approverApi = await bearer(request, 'approver')
+
+  // Setup (not under test). Last in the run: publishing deprecates the instrument version every
+  // earlier spec maps against, so this test sorts after them all (ws3-smoke is the last file).
+  // A v1 instrument projected earlier in this run (domain.spec, calculations.spec, the journey).
+  const imports: Schemas['ImportPage'] = await (
+    await request.get(`${API}/api/v1/imports?projected=true&schema_code=instrument&limit=200&offset=0`, { headers: stewardApi })
+  ).json()
+  const v1Import = imports.items.find((i) => i.schema_version === 1)
+  expect(v1Import, 'an instrument v1 import projected earlier in this run').toBeTruthy()
+  const v1 = await instrumentOf(request, stewardApi, v1Import!.id)
+  expect(v1.version.maturity_typed).toBe(false)
+  expect(v1.version.maturity_date).toBeNull()
+
+  // The typed contract, then instrument.csv on a new source against it, projected by projector v2.
+  const typedVersion = await publishTypedMaturity(request, stewardApi, approverApi)
+  const { sourceId, contractId } = await registerInstrumentSource(request, stewardApi, stamp)
+  const uploaded: Schemas['ImportDetail'] = await uploadSample(request, stewardApi, sourceId, 'instrument.csv')
+  expect(uploaded.schema_version_id).toBe(typedVersion.id)
+  await ensureActiveMapping(request, contractId, sourceId, uploaded.id, `e2e_ws3_typed_${stamp}`)
+  await validate(request, stewardApi, uploaded.id)
+  const projected = await request.post(`${API}/api/v1/imports/${uploaded.id}/projection`, { headers: stewardApi })
+  expect(projected.status(), await projected.text()).toBe(201)
+  expect(((await projected.json()) as Schemas['ProjectionOut']).projector_version).toBe(2)
+  const typed = await instrumentOf(request, stewardApi, uploaded.id)
+  expect(typed.version.maturity_typed).toBe(true)
+  const key = typed.detail.business_key
+  expect(typeof key).toBe('string')
+  // ISO text in, the same ISO text out (BE-31.3).
+  expect(typed.version.maturity_date).toBe(sampleMaturities().get(key as string))
+
+  const steward = await browser.newPage()
+  await signIn(steward, 'Data steward')
+
+  await test.step('1. the typed instrument shows its maturity date as the server sent it', async () => {
+    await steward.goto(`/domain/instruments/${typed.detail.instrument_id}`)
+    const card = steward.locator(`[data-testid="instrument-version"][data-version-id="${typed.version.version_id}"]`)
+    const maturity = card.getByTestId('version-maturity-date')
+    await expect(maturity).toHaveAttribute('data-state', 'typed')
+    await expect(maturity).toHaveText(typed.version.maturity_date as string)
+    await expect(card.getByTestId('maturity-typed-badge')).toHaveText('Typed date')
+    await expect(card.getByText('Not stated (schema v1 free text)')).toHaveCount(0)
+    if (process.env.WS3_SMOKE_SCREENSHOT) await steward.screenshot({ path: `${process.env.WS3_SMOKE_SCREENSHOT}/typed-maturity.png`, fullPage: true })
+  })
+
+  await test.step('2. the v1 instrument shows "Not stated (schema v1 free text)"', async () => {
+    await steward.goto(`/domain/instruments/${v1.detail.instrument_id}`)
+    const card = steward.locator(`[data-testid="instrument-version"][data-version-id="${v1.version.version_id}"]`)
+    const maturity = card.getByTestId('version-maturity-date')
+    await expect(maturity).toHaveAttribute('data-state', 'v1-free-text')
+    await expect(maturity).toHaveText('Not stated (schema v1 free text)')
+    await expect(card.getByTestId('maturity-typed-badge')).toHaveCount(0)
+    // No cash-flow "Linked identity" loop here (Q15): an instrument lists only the cash flows of
+    // its own source (D-29 §3), and every e2e cash-flow import has a source of its own, so the
+    // loop would see no rows. The cash-flow cell's states are proven by the vitests
+    // (src/components/domain/__tests__/identity.test.ts); a real linked identity on the stack is
+    // proven by the counterparties.spec fold (an exposure's linked counterparty).
+  })
+
+  await test.step('3. Legal entities is a tab under Financial Domain, listing what the API lists', async () => {
+    await steward.goto('/domain')
+    await steward.getByTestId('domain-tab-legal-entities').click()
+    await steward.waitForURL('**/domain/legal-entities')
+    const listed: Schemas['LegalEntityPage'] = await (await request.get(`${API}/api/v1/legal-entities?limit=50`, { headers: stewardApi })).json()
+    if (listed.items.length === 0) await expect(steward.getByText('No legal entities yet')).toBeVisible()
+    else {
+      await expect(steward.getByTestId('legal-entity-table')).toHaveAttribute('data-total', String(listed.total))
+      await expect(steward.getByTestId('legal-entity-row')).toHaveCount(listed.items.length)
+    }
+  })
+})
