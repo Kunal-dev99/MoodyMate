@@ -4477,7 +4477,7 @@ supported size is measured.
     `repr`); `test_config.py:193-198` (s3 settings required in staging/production);
     `pyproject.toml:39-42` (`s3` extra, `boto3>=1.35.2,<2`). Run: `6 passed, 1 warning in
     5.42s`. The library and the fake are recorded in the D-59 amendment of 2026-10-24.
-- [ ] **BE-33.7** `scripts/perf_run.py` runs deterministic synthetic sets of 10k and 100k cash
+- [x] **BE-33.7** `scripts/perf_run.py` runs deterministic synthetic sets of 10k and 100k cash
   flows and records duration, peak RSS (inline and pool) and health p95 during a run. The
   output goes to `docs/evidence/phase-33/perf.json`. `docs/PERFORMANCE.md` states the
   supported size and concurrency.
@@ -4485,13 +4485,14 @@ supported size is measured.
     - both files exist;
     - a 5,000-flow fold stays under ceilings set at 3× the measured values;
     - multi-instance needs are listed: the shared rate-limit store, and S3.
-  - *Not yet ticked (2026-10-24):* the script exists (`scripts/perf_run.py`, default output
+  - *Ticked 2026-10-24 (coordinator); note at build time:* the script exists (`scripts/perf_run.py`, default output
     :45, doc path :47) and the fold is written (`test_db_check.py:27-46`, called at :105; it
     asserts the four required words in the doc, the recorded hash and the 3× ceilings).
-    **Missing:** `docs/evidence/phase-33/perf.json` and `docs/PERFORMANCE.md` do not exist in
+    **Was missing at build time:** `docs/evidence/phase-33/perf.json` and `docs/PERFORMANCE.md` do not exist in
     the worktree (glob), so the fold fails with `FileNotFoundError` at :32. Per Q7 the
     coordinator re-runs the script into the default path against a phase DB copy, writes
     `PERFORMANCE.md` from that file, and re-runs `test_db_check`.
+    **Closed:** `docs/evidence/phase-33/perf.json` re-run by the coordinator on a phase DB copy (`measured_at` 2026-10-24T08:48:51Z, after Phases 32 and 34 merged in); `docs/PERFORMANCE.md` written from it (supported size PROVISIONAL, concurrency per process, the rate-limit store and S3 multi-instance needs, the 100k pool health p95 of 244 ms over budget and why); `check_perf_fold` passes in the full suite (49 passed).
 - [x] **FE-33.1** Every capped list shows "Showing n of total" and a next control (`next_cursor`).
   The audit timeline pages by its stable `before` keyset instead: its Older control appears
   only while an older event exists and sends the last shown event's id as `before`, because

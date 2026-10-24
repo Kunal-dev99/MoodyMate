@@ -276,3 +276,27 @@ Files edited by the architect:
   - BE-34.2 gains the pool setting in the example (Q4);
   - a Deferred entry for hashing in the worker (Q8).
 - `/home/user/MoodyMate-wt/f06-p33/docs/DECISIONS.md`: a D-59 amendment (Q3, Q4, Q5, Q6, Q13, Q17) and a D-04 amendment (Q9 part 1), both dated 2026-10-24 and marked auto-resolved.
+
+## Coordinator merge (2026-10-24)
+
+- **Blocking items 1-4 done.**
+  1. `perf.json` was re-run on a phase DB copy (`moodymate_f06_p33_perf`, migrated to 0031; never `moodymate_dev`):
+     - 10k: inline 0.174 s, pool 0.653 s;
+     - 100k: inline 2.311 s, pool 6.731 s, with pool health p95 244.2 ms (over the 200 ms budget; Q8);
+     - the same `result_sha256` in both modes at every size.
+     `docs/PERFORMANCE.md` was written from it under Q7's conditions, and BE-33.7 is ticked.
+  2. `schema.d.ts` was regenerated.
+  3. Q3, on top of Phase 34's uv-based CI: the backend job installs `--extra dev --extra s3`, and pip-audit reads the `uv export --locked --extra dev --extra s3` output (`No known vulnerabilities found`). The backend image installs the `s3` extra too, so it can serve `ARTIFACT_STORE_KIND=s3`. `uv lock` was re-run additively; the diff adds only boto3, botocore, jmespath, python-dateutil and s3transfer.
+  4. The full suite on the merged tree: `49 passed, 1 warning in 334.38s`.
+- **Phase 34 merge note (Q3 e), done:**
+  - `RunExecutor.ready()` answers the readiness `workers` check. It returns false only while shutting down; a full queue is answered per request with 503 `workers_busy`.
+  - `app.state.workers` is set in pool mode.
+  - The worker-queue gauge follows the waiters.
+  - Runs record the BE-34.4 run metrics on the inline path and on the background (`respond-async`) path.
+- **Phase 34 interplay:**
+  - `S3ArtifactStore.ready()` (HeadBucket) satisfies the store's readiness contract, folded into the store test.
+  - `.env.production.example` sets `CURSOR_SIGNING_KEY` (placeholder) and `CALC_EXECUTION_MODE=pool` with the default worker and queue sizes (Q4). The compose `prod` check fills the key with a random value.
+- **Additive-contract base:** `backend/openapi.base.json` is now master's `openapi.json`, the actual merge base, so the check proves Phase 33 only adds to the merged contract.
+- **Checks:**
+  - frontend: vitest `783 passed (783)`, tsc clean, `No ESLint warnings or errors`;
+  - backend: ruff and mypy (`187 source files`) clean, `openapi.json is up to date`.
