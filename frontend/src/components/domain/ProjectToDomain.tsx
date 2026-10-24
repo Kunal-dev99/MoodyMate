@@ -17,6 +17,7 @@ import type { ImportDetail } from '@/components/ingestion/imports'
 import type { Refusal } from '@/components/ingestion/mappings'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { INSTRUMENT_TERMS_UI_ENABLED } from '@/config/features'
 import {
   browseLink,
   canProject,
@@ -156,6 +157,21 @@ export function ProjectionSummaryView({ projection, origin }: { projection: Proj
           <FieldCountList counts={s.unknown_values} testId="unknown-value" none="none" />
           <div className="text-xs text-muted-foreground">Values outside a seeded provisional vocabulary; still projected.</div>
         </Field>
+        {/* FE-32.1 (D-61 §4): projector v3 only; absent for projectors 1 and 2, and hidden while NEXT_PUBLIC_INSTRUMENT_TERMS_UI=off. */}
+        {INSTRUMENT_TERMS_UI_ENABLED && s.term_rows != null && (
+          <Field label="Rate-term rows" testId="projection-term-rows">
+            <span className="font-mono">{s.term_rows}</span>
+            <div className="text-xs text-muted-foreground">One per instrument version whose terms are consistent.</div>
+          </Field>
+        )}
+        {INSTRUMENT_TERMS_UI_ENABLED && s.terms_inconsistent != null && (
+          <Field label="Inconsistent terms" testId="projection-terms-inconsistent">
+            <span className="font-mono">{s.terms_inconsistent}</span>
+            <div className="text-xs text-muted-foreground">
+              FIXED with a reference index, FLOATING with no reset frequency, or a floor above the cap: the version is recorded, its terms are not.
+            </div>
+          </Field>
+        )}
         <Field label="Canonical-only fields" testId="projection-canonical-only">
           {s.canonical_only_fields.length === 0 ? (
             <span className="text-muted-foreground">none</span>

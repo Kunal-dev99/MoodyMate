@@ -45,6 +45,25 @@ Phase 31 (BE-31.2 - BE-31.5, D-57, D-58):
   audited `identity_link.reconcile`; 409 identity_links_disabled while the switch is off).
   Links are never changed; runs never read them.
 
+Phase 32 (BE-32.1 - BE-32.4, D-61):
+
+- Projector v3 matches the frozen rate-terms contract (INSTRUMENT_RATE_TERMS) by hash: the
+  instrument version is projected exactly as projector v2 does, and the rate terms,
+  `effective_from` and `lifecycle_state` go to one `instrument_term_version` row in the same
+  transaction, unless the terms are inconsistent (FIXED with an index, FLOATING with no reset,
+  floor > cap): then no term row is written and the record is counted `terms_inconsistent`
+  (the version is still written, D-29 §2). A value outside its seeded vocabulary is kept as
+  text, counted in `unknown_values` and named in the row's `unknown_fields`. Rate-terms imports
+  are `projection_unsupported` while INSTRUMENT_TERMS_PROJECTION_ENABLED is off.
+- Reads show `effective_from` (the business date) beside `imported_at` (the import's creation
+  time). `effective_on` picks the version with the latest `effective_from` on or before it
+  (ties: the higher version), among the versions whose `effective_from` the caller is cleared
+  for. Fail closed: no pick when a rate-terms version has no term row (TERMS_INCONSISTENT, its
+  date not stored) or a masked `effective_from`, since either could change it. Snapshots and
+  runs are unchanged (D-30): nothing here is read by them.
+- The currency reference and the FX observation count are read only. Nothing converts
+  between currencies: FX consolidation is BLOCKED (D-61 §6).
+
 Phase 20 (BE-20.2, BE-20.3, D-39): the obligor rating workflow.
 
 - `propose_rating`: a new immutable version, written IN_REVIEW, audited
@@ -82,6 +101,7 @@ from app.domain.constants import (
     CREDIT_SCHEMA_CODES,
     IDENTITY_LINK_TARGETS,
     IDENTITY_SOURCE_SCHEMAS,
+    INSTRUMENT_RATE_TERMS_SHA256,
     INSTRUMENT_SPECS_BY_HASH,
     INSTRUMENT_TYPE_FIELD,
     LEGAL_ENTITY_FIELD,
@@ -89,10 +109,12 @@ from app.domain.constants import (
     PROJECTABLE_STATUSES,
     PROJECTION_SPECS,
     PROJECTOR_V2,
+    PROJECTOR_V3,
     PROJECTOR_VERSION,
     RATING_CLASSIFICATIONS,
     RECONCILE_IDENTITY_LINKS,
     RESOLVER_VERSION,
+    TERM_COLUMNS,
     ColumnKind,
     CreditVocabularyKind,
     DomainSchemaCode,
@@ -104,6 +126,8 @@ from app.domain.constants import (
     ObligorRatingStatus,
     ProjectionRefusal,
     ProjectionSpec,
+    RateType,
+    TermVocabularyKind,
 )
 from app.domain.models import (
     CashflowEvent,
@@ -112,11 +136,13 @@ from app.domain.models import (
     CreditExposure,
     CreditExposureVersion,
     CreditVocabulary,
+    Currency,
     DomainIdentityLink,
     DomainProjection,
     Instrument,
     InstrumentAttributeDefinition,
     InstrumentAttributeValue,
+    InstrumentTermVersion,
     InstrumentType,
     InstrumentVersion,
     LegalEntity,
@@ -171,6 +197,9 @@ class Projected:
     instrument_key: str | None
     columns: dict[str, Any]
     attributes: dict[str, str]
+    # Projector v3 (D-61): the term row's values and `unknown_fields`; None when the spec has
+    # no term columns or the terms are inconsistent (no term row).
+    terms: dict[str, Any] | None = None
 
 
 @dataclass
@@ -181,6 +210,8 @@ class Notes:
     unknown_values: Counter[str] = field(default_factory=Counter)
     # Projector v2 (D-57): absent values of the spec's `missing_counted` fields (NULL column).
     missing: Counter[str] = field(default_factory=Counter)
+    # Projector v3 (D-61 §4): records whose terms are inconsistent (no term row written).
+    terms_inconsistent: int = 0
 
 
 def typed(kind: ColumnKind, text: str) -> Any:
@@ -212,11 +243,58 @@ def typed(kind: ColumnKind, text: str) -> Any:
     return text
 
 
+def terms_consistent(values: Mapping[str, Any]) -> bool:
+    """D-61 §4: FIXED has no reference index, FLOATING has a reset frequency, and the floor is
+    not above the cap (the three CHECKs of `instrument_term_version` repeat this)."""
+    rate_type = values.get("rate_type")
+    if rate_type == RateType.FIXED and values.get("reference_index") is not None:
+        return False
+    if rate_type == RateType.FLOATING and values.get("reset_frequency") is None:
+        return False
+    floor, cap = values.get("floor_rate"), values.get("cap_rate")
+    return floor is None or cap is None or floor <= cap
+
+
+def project_terms(
+    spec: ProjectionSpec,
+    fields: Mapping[str, PinnedField],
+    payload: Mapping[str, str | None],
+    vocabulary: Mapping[TermVocabularyKind, frozenset[str]],
+    notes: Notes,
+) -> dict[str, Any] | None:
+    """Projector v3 (D-61 §1-4): the term row's typed values and `unknown_fields`, or None
+    (counted `terms_inconsistent`) when the terms are inconsistent. A vocabulary value outside
+    the seeded vocabulary is kept as given and counted UNKNOWN_VALUE (D-29 §5)."""
+    values: dict[str, Any] = {}
+    unknown: list[str] = []
+    for column in spec.term_columns:
+        pinned = fields.get(column.field)
+        text = payload.get(column.field)
+        value: Any = None
+        if text is not None and pinned is not None:
+            if pinned.data_type != column.kind.value:
+                notes.type_not_projected[column.field] += 1  # never parsed (D-29 §4)
+            else:
+                value = typed(column.kind, text)
+                kind = column.term_vocabulary
+                if kind is not None and value not in vocabulary.get(kind, frozenset()):
+                    unknown.append(column.field)
+        values[column.column] = value
+    if not terms_consistent(values):
+        notes.terms_inconsistent += 1
+        return None
+    for name in unknown:
+        notes.unknown_values[name] += 1
+    values["unknown_fields"] = unknown
+    return values
+
+
 def project_record(
     spec: ProjectionSpec,
     fields: Mapping[str, PinnedField],
     record: CanonicalRecord,
     notes: Notes,
+    term_vocabulary: Mapping[TermVocabularyKind, frozenset[str]] | None = None,
 ) -> Projected:
     """Project one canonical record by the frozen spec (D-29 §4)."""
     payload: Mapping[str, str | None] = record.payload
@@ -254,6 +332,11 @@ def project_record(
         instrument_key=payload.get(spec.instrument_key) if spec.instrument_key else None,
         columns=columns,
         attributes=attributes,
+        terms=(
+            project_terms(spec, fields, payload, term_vocabulary or {}, notes)
+            if spec.term_columns
+            else None
+        ),
     )
 
 
@@ -267,7 +350,13 @@ def canonical_only(spec: ProjectionSpec, fields: Mapping[str, PinnedField]) -> l
 
 
 # The projector's pure parts, for the test that proves they hold no float (as BE-11.2).
-PROJECTOR_PARTS = ("typed", "project_record", "canonical_only")
+PROJECTOR_PARTS = (
+    "typed",
+    "terms_consistent",
+    "project_terms",
+    "project_record",
+    "canonical_only",
+)
 
 
 # --- views returned to the router ------------------------------------------------------------
@@ -323,12 +412,38 @@ class AttributeView:
     value_text: str
 
 
+# The term fields shown under a version's `terms` (D-61 §1): every term column but
+# `effective_from`, which reads show beside `imported_at` on the version itself (D-61 §5).
+TERM_VALUES = tuple(c.column for c in TERM_COLUMNS if c.column != "effective_from")
+
+
+@dataclass(frozen=True)
+class TermView:
+    """One version's typed rate terms (D-61 §1-§4), unmasked; the router masks them."""
+
+    term_version_id: uuid.UUID
+    values: Mapping[str, Decimal | date | str | None]  # contract field name -> value
+    unknown_fields: list[str]
+    created_at: datetime
+
+
 @dataclass(frozen=True)
 class InstrumentView:
     row: InstrumentRow
     attributes: Mapping[uuid.UUID, list[AttributeView]]  # version id -> its attributes
     cash_flows: list[CashflowEvent]
     pins: SchemaPins
+    # Phase 32 (D-61 §5): import id -> its creation time, version id -> its terms, and the
+    # `?effective_on=` pick.
+    imported_at: Mapping[uuid.UUID, datetime] = field(default_factory=dict)
+    terms: Mapping[uuid.UUID, TermView] = field(default_factory=dict)
+    effective_from: Mapping[uuid.UUID, date] = field(default_factory=dict)
+    effective_version_id: uuid.UUID | None = None
+
+
+@dataclass(frozen=True)
+class FxConsolidationView:
+    observation_count: int
 
 
 @dataclass(frozen=True)
@@ -499,6 +614,7 @@ class DomainService:
         credit_enabled: bool = True,
         v2_enabled: bool = True,
         links_enabled: bool = True,
+        terms_enabled: bool = True,
     ) -> tuple[ProjectionView, bool]:
         """Project the import once (D-29), in one transaction; the view and whether it was
         projected now (False: the existing projection, nothing written). With
@@ -506,7 +622,9 @@ class DomainService:
         `projection_unsupported`, the pre-Feature-04 behaviour; with `v2_enabled` off
         (INSTRUMENT_PROJECTOR_V2_ENABLED, D-57 §2) so are typed-maturity instrument imports.
         With `links_enabled` (IDENTITY_LINKS_ENABLED, D-58 §4) the projection's own position,
-        cash-flow and credit-exposure rows are linked in the same transaction."""
+        cash-flow and credit-exposure rows are linked in the same transaction. With
+        `terms_enabled` off (INSTRUMENT_TERMS_PROJECTION_ENABLED, D-61) rate-terms instrument
+        imports are `projection_unsupported`."""
         if not enabled:
             await self._refuse(
                 ApiError(
@@ -530,6 +648,8 @@ class DomainService:
         matched = self._spec(code, job.schema_version_id, schema_version, pins)
         if matched is not None and matched[0] == PROJECTOR_V2 and not v2_enabled:
             await self._refuse(self._unsupported(schema_code, schema_version, PROJECTOR_V2), job.id)
+        if matched is not None and matched[0] == PROJECTOR_V3 and not terms_enabled:
+            await self._refuse(self._unsupported(schema_code, schema_version, PROJECTOR_V3), job.id)
         existing = await self.repo.projection_for(job.id)
         if existing is not None:
             manifest = await self.imports.manifest(job)
@@ -597,9 +717,11 @@ class DomainService:
             "position, cashflow_event, counterparty and credit_exposure imports of schema "
             "version 1 (the credit schemas while CREDIT_PROJECTION_ENABLED is on); projector "
             "version 2 projects instrument imports of the typed-maturity contract while "
-            "INSTRUMENT_PROJECTOR_V2_ENABLED is on. Instrument contracts are matched by "
+            "INSTRUMENT_PROJECTOR_V2_ENABLED is on; projector version 3 projects instrument "
+            "imports of the rate-terms contract while INSTRUMENT_TERMS_PROJECTION_ENABLED is "
+            "on. Instrument contracts are matched by "
             "contract hash, not version number; another schema, version or contract needs a "
-            "new projector version (D-29, D-37, D-57).",
+            "new projector version (D-29, D-37, D-57, D-61).",
             {
                 "schema_code": schema_code,
                 "schema_version": schema_version,
@@ -621,7 +743,8 @@ class DomainService:
         if len(records) != manifest.accepted_count:  # the manifest is written with them
             raise RuntimeError("canonical records do not match the manifest's accepted count")
         notes = Notes()
-        projected = [project_record(spec, fields, r, notes) for r in records]
+        term_vocabulary = await self.term_vocabulary_codes() if spec.term_columns else None
+        projected = [project_record(spec, fields, r, notes, term_vocabulary) for r in records]
         actor = self.principal.actor
         tenant = job.tenant_id  # D-04: copied from the import (canonical_record has none)
 
@@ -695,6 +818,10 @@ class DomainService:
         }
         if spec.missing_counted:  # projector v2 only: every projector 1 summary is unchanged
             summary["missing_values"] = dict(sorted(notes.missing.items()))
+        term_count = sum(p.terms is not None for p in projected)
+        if spec.term_columns:  # projector v3 only: every projector 1 and 2 summary is unchanged
+            summary["term_rows"] = term_count
+            summary["terms_inconsistent"] = notes.terms_inconsistent
         projection = DomainProjection(
             id=uuid.uuid4(),
             tenant_id=tenant,
@@ -758,6 +885,20 @@ class DomainService:
         target: type[Base] = versioned.version if versioned else CashflowEvent
         await self.repo.insert_rows(target, rows)
         await self.repo.insert_rows(InstrumentAttributeValue, attribute_rows)
+        # D-61 §2: the side table, one row per version whose terms are consistent.
+        term_rows = [
+            {
+                "id": uuid.uuid4(),
+                "tenant_id": tenant,
+                "instrument_version_id": row["id"],
+                "domain_projection_id": projection.id,
+                "created_by": actor,
+                **p.terms,
+            }
+            for p, row in zip(projected, rows, strict=True)
+            if p.terms is not None
+        ]
+        await self.repo.insert_rows(InstrumentTermVersion, term_rows)
 
         details: dict[str, Any] = {
             "projection_id": str(projection.id),
@@ -770,6 +911,9 @@ class DomainService:
         }
         if spec.missing_counted:
             details["missing_values"] = sum(notes.missing.values())
+        if spec.term_columns:
+            details["term_rows"] = term_count
+            details["terms_inconsistent"] = notes.terms_inconsistent
         # D-58 §4: the projection links its own rows (value-free counts in the audit only:
         # the summary of a projector 1 import is unchanged).
         source_kind = IDENTITY_SOURCE_SCHEMAS.get(spec.schema_code)
@@ -935,9 +1079,12 @@ class DomainService:
 
         return [[one(shock) for shock in group] for group in shocks]
 
-    async def instrument(self, instrument_id: uuid.UUID) -> InstrumentView:
-        """One instrument with its versions, attributes and cash flows: 404 alike for an
-        absent and a foreign id (D-04)."""
+    async def instrument(
+        self, instrument_id: uuid.UUID, effective_on: date | None = None
+    ) -> InstrumentView:
+        """One instrument with its versions, attributes, cash flows, rate terms and import
+        times: 404 alike for an absent and a foreign id (D-04). `effective_on` picks the
+        version by business date (D-61 §5), not by import order."""
         instrument = await self.repo.instrument(instrument_id)
         if instrument is None:
             raise ApiError(404, "not_found", "Instrument not found.")
@@ -947,12 +1094,89 @@ class DomainService:
             attributes.setdefault(value.instrument_version_id, []).append(
                 AttributeView(definition.code, definition.data_type, value.value_text)
             )
+        imported_at: dict[uuid.UUID, datetime] = {}
+        for import_id in sorted({v.import_job_id for v in row.versions}):
+            job = await self.imports.find(import_id)
+            if job is not None:
+                imported_at[import_id] = job.created_at
+        pins = await self._pins()
+        terms: dict[uuid.UUID, TermView] = {}
+        effective_from: dict[uuid.UUID, date] = {}
+        for t in await self.repo.term_versions([v.id for v in row.versions]):
+            terms[t.instrument_version_id] = TermView(
+                t.id,
+                {name: getattr(t, name) for name in TERM_VALUES},
+                list(t.unknown_fields),
+                t.created_at,
+            )
+            if t.effective_from is not None:
+                effective_from[t.instrument_version_id] = t.effective_from
         return InstrumentView(
             row,
             attributes,
             await self.repo.cashflows_for(instrument.business_key, instrument.source_system_id),
-            await self._pins(),
+            pins,
+            imported_at=imported_at,
+            terms=terms,
+            effective_from=effective_from,
+            effective_version_id=(
+                None
+                if effective_on is None
+                else self._effective_version(
+                    row.versions, terms, effective_from, effective_on, pins
+                )
+            ),
         )
+
+    def _effective_version(
+        self,
+        versions: Sequence[InstrumentVersion],
+        terms: Mapping[uuid.UUID, TermView],
+        effective_from: Mapping[uuid.UUID, date],
+        effective_on: date,
+        pins: SchemaPins,
+    ) -> uuid.UUID | None:
+        """D-61 §5: the version with the latest `effective_from` on or before `effective_on`
+        (by business date, not import order; ties: the higher version), or None.
+
+        Fail closed (D-04): None, too, when the pick cannot be determined, that is when any
+        version of the rate-terms contract has no term row (TERMS_INCONSISTENT: its
+        `effective_from` is not stored) or an `effective_from` the caller is not cleared for.
+        Either date could change the pick, so skipping the version would pick another one
+        silently, and comparing a masked date would reveal it. The read shows which applies:
+        `terms_typed` with null `terms`, or a masked `effective_from`. Versions of the other
+        contracts carry no business date and never take part."""
+        clear = self.principal.clear_classifications
+        candidates: list[tuple[date, int, uuid.UUID]] = []
+        for v in versions:
+            if pins.hashes.get(v.schema_version_id) != INSTRUMENT_RATE_TERMS_SHA256:
+                continue
+            if v.id not in terms:
+                return None
+            if pins.classes(v.schema_version_id).get("effective_from", UNCLASSIFIED) not in clear:
+                return None
+            when = effective_from.get(v.id)
+            if when is not None and when <= effective_on:
+                candidates.append((when, v.version, v.id))
+        return max(candidates)[2] if candidates else None
+
+    async def term_vocabulary_codes(self) -> dict[TermVocabularyKind, frozenset[str]]:
+        """The tenant's term vocabularies (D-61 §3), by kind."""
+        codes: dict[TermVocabularyKind, set[str]] = {k: set() for k in TermVocabularyKind}
+        for entry in await self.repo.term_vocabulary():
+            codes[TermVocabularyKind(entry.vocabulary)].add(entry.code)
+        return {k: frozenset(v) for k, v in codes.items()}
+
+    # --- Phase 32 reference reads (BE-32.4, D-61 §6): tenant-scoped -----------------------
+
+    async def currencies(self) -> list[Currency]:
+        """The tenant's currency reference (the tagged PROVISIONAL seed), by code."""
+        return await self.repo.currencies()
+
+    async def fx_consolidation_status(self) -> FxConsolidationView:
+        """FX consolidation is BLOCKED (D-61 §6): the tenant's observation count only. Nothing
+        reads an observation's rate."""
+        return FxConsolidationView(observation_count=await self.repo.fx_observation_count())
 
     # --- Feature 04 credit reads (BE-19.5, D-37, D-43): tenant-scoped, masked by the router -
 

@@ -133,6 +133,18 @@ export const STRESS_COMPARE_UI_ENABLED = STRESS_EXPLORER_UI_ENABLED && process.e
  */
 export const DOMAIN_LINKS_UI_ENABLED = DOMAIN_UI_ENABLED && process.env.NEXT_PUBLIC_DOMAIN_LINKS_UI !== 'off'
 
+/**
+ * NEXT_PUBLIC_INSTRUMENT_TERMS_UI=off (FE-32.1): the instrument detail loses its "Contract terms"
+ * panels and its versions table ("Effective from" beside "Imported at"), the projection summary
+ * loses its term-row counts, and the maturity-ladder and LCR views lose the FX consolidation
+ * notice, restoring the Phase 31 UI exactly. Independent of NEXT_PUBLIC_DOMAIN_UI because the
+ * notice sits on the calculations pages; the instrument parts only render where the domain
+ * workspace does. The backend's own switch is INSTRUMENT_TERMS_PROJECTION_ENABLED (rate-terms
+ * imports refused, 409 `projection_unsupported`). FX stays read-only and blocked either way
+ * (D-61 §6): the UI never converts, totals across currencies or writes an FX rate.
+ */
+export const INSTRUMENT_TERMS_UI_ENABLED = process.env.NEXT_PUBLIC_INSTRUMENT_TERMS_UI !== 'off'
+
 /*
  * Build-time server switch (FE-28.5), listed here for discoverability; no NEXT_PUBLIC_ value,
  * nothing reaches the browser: NEXT_SECURITY_HEADERS=off at `next build` drops the security

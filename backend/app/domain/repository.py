@@ -39,11 +39,15 @@ from app.domain.models import (
     CreditExposure,
     CreditExposureVersion,
     CreditVocabulary,
+    Currency,
     DomainIdentityLink,
     DomainProjection,
+    FxRateObservation,
     Instrument,
     InstrumentAttributeDefinition,
     InstrumentAttributeValue,
+    InstrumentTermVersion,
+    InstrumentTermVocabulary,
     InstrumentType,
     InstrumentVersion,
     LegalEntity,
@@ -405,6 +409,44 @@ class DomainRepository(ScopedRepository[DomainProjection]):
             )
         )
         return [(row[0], row[1]) for row in result]
+
+    # --- Phase 32: rate terms, currency and FX reference (D-61): in the caller's tenant ------
+
+    async def term_vocabulary(self) -> list[InstrumentTermVocabulary]:
+        result = await self.session.execute(
+            select(InstrumentTermVocabulary)
+            .where(InstrumentTermVocabulary.tenant_id == self.scope.tenant_id)
+            .order_by(InstrumentTermVocabulary.vocabulary, InstrumentTermVocabulary.code)
+        )
+        return list(result.scalars())
+
+    async def term_versions(self, version_ids: Sequence[uuid.UUID]) -> list[InstrumentTermVersion]:
+        """The term rows of these instrument versions (at most one each)."""
+        if not version_ids:
+            return []
+        result = await self.session.execute(
+            select(InstrumentTermVersion).where(
+                InstrumentTermVersion.tenant_id == self.scope.tenant_id,
+                InstrumentTermVersion.instrument_version_id.in_(list(version_ids)),
+            )
+        )
+        return list(result.scalars())
+
+    async def currencies(self) -> list[Currency]:
+        result = await self.session.execute(
+            select(Currency)
+            .where(Currency.tenant_id == self.scope.tenant_id)
+            .order_by(Currency.code)
+        )
+        return list(result.scalars())
+
+    async def fx_observation_count(self) -> int:
+        total = await self.session.scalar(
+            select(func.count())
+            .select_from(FxRateObservation)
+            .where(FxRateObservation.tenant_id == self.scope.tenant_id)
+        )
+        return int(total or 0)
 
     # --- Feature 04 credit reads (BE-19.5, D-37): read only, in the caller's tenant ----------
 

@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { CalendarClock, GitBranch, Landmark, ListTree } from 'lucide-react'
+import { CalendarClock, GitBranch, History, Landmark, ListTree } from 'lucide-react'
 import { api, call } from '@/api/client'
 import { Forbidden } from '@/components/auth/Forbidden'
 import { EmptyState } from '@/components/common/EmptyState'
@@ -14,11 +14,12 @@ import { PageSection } from '@/components/common/PageSection'
 import { createLoader, type Loaded } from '@/components/common/load'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { DOMAIN_LINKS_UI_ENABLED } from '@/config/features'
+import { DOMAIN_LINKS_UI_ENABLED, INSTRUMENT_TERMS_UI_ENABLED } from '@/config/features'
 import { ProvisionalBadge } from './InstrumentCatalogue'
 import { LinkedIdentity, MaturityValue, useSourceLinks } from './IdentityParts'
 import { linkStateOf } from './identity'
 import { ShownValue } from './ShownValue'
+import { ContractTerms, VersionsTable } from './TermsParts'
 import {
   cashFlowsOf,
   importHref,
@@ -150,7 +151,10 @@ function Version({ version, types }: { version: InstrumentVersion; types: Instru
               </Field>
             </dl>
           </div>
-  
+
+          {/* FE-32.1 (D-61): the typed rate terms, or why there are none; off, the Phase 31 version exactly. */}
+          {INSTRUMENT_TERMS_UI_ENABLED && <ContractTerms version={v} />}
+
           <h3 className="mb-2 mt-4 text-sm font-medium">Attributes</h3>
           {v.attributes.length === 0 ? (
             <p className="text-sm text-muted-foreground" data-testid="version-no-attributes">
@@ -317,6 +321,16 @@ export function InstrumentView({ instrumentId }: { instrumentId: string }) {
             </Field>
           </dl>
         </PageSection>
+        {/* FE-32.1 (D-61 §5): the business date beside the import time, per version; off, the Phase 31 page exactly. */}
+        {INSTRUMENT_TERMS_UI_ENABLED && (
+          <PageSection
+            icon={History}
+            title="Versions"
+            description="Oldest first, as recorded. Effective from is the business date the source states; Imported at is when its import was created. Neither picks a current version: runs pin snapshots."
+          >
+            <VersionsTable versions={detail.versions} />
+          </PageSection>
+        )}
         {detail.versions.map((v) => (
           <Version key={v.version_id} version={v} types={types} />
         ))}

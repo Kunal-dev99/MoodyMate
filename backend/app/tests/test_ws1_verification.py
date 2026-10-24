@@ -25,7 +25,15 @@ from fastapi.testclient import TestClient
 from app.core.auth import AUTHENTICATED, PUBLIC_PATHS, declared_permission, permission_alternatives
 from app.core.routes import served_routes
 from app.governance.constants import ROLE_PERMISSIONS, Role
-from app.tests.conftest import WS1_MATRIX, alembic_config, clean, dev_token, insert_tenant, sql
+from app.tests.conftest import (
+    WS1_MATRIX,
+    alembic_config,
+    clean,
+    dev_token,
+    insert_tenant,
+    script,
+    sql,
+)
 from app.tests.credit_kit import COUNTERPARTIES, EXPOSURES, VOCABULARIES, projected_credit
 from app.tests.helpers import (
     FIELD_KEYS,
@@ -65,6 +73,15 @@ from app.tests.identity_kit import (
     projected_legal_entity,
 )
 from app.tests.scenario_kit import SCENARIOS, create_scenario
+from app.tests.terms_kit import (
+    CURRENCIES,
+    FX_STATUS,
+    SEEDED_TERM_TABLES,
+    TERM_TABLES,
+    check_term_seed,
+    check_terms_append_only,
+    term_counts,
+)
 
 # BE-18.3: every test here (matrix, isolation, audit, round trip) is in the WS3 suite too.
 pytestmark = [pytest.mark.db, pytest.mark.ws1, pytest.mark.ws3]
@@ -270,10 +287,20 @@ def test_route_by_role_authorization_matrix(api: TestClient, db: str) -> None:
         "GET /api/v1/legal-entities",
         "GET /api/v1/legal-entities/{legal_entity_id}",
         "GET /api/v1/identity-links",
+        # BE-32.4: the currency reference and the FX consolidation status (domain:read).
+        "GET /api/v1/currencies",
+        "GET /api/v1/fx/consolidation-status",
     ):
         [row] = [r for r in WS1_MATRIX if r["route"] == route]
         assert row["permission"] == "domain:read"
         assert all(row[role] == 200 for role in ROLES), row
+    # BE-32.4 (D-61 §6): no write route for FX or currencies (the route-list grep).
+    fx_writes = [
+        f"{method} {path}"
+        for method, path, _ in routes
+        if method in MUTATING and any(w in path for w in ("/fx", "fx-", "fx_", "currenc"))
+    ]
+    assert fx_writes == [], fx_writes
     # BE-31.4: the reconcile is domain:project like the projection: 200 (idempotent) for
     # data_steward only, 403 for the others.
     for route in (
@@ -460,6 +487,10 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
         assert api.get(path, headers=outsider).json()["total"] == 0, path
     # Phase 19: the credit vocabularies are seeded for this tenant only.
     assert api.get(VOCABULARIES, headers=outsider).json()["items"] == []
+    # Phase 32 (BE-32.4): so are the currencies; the FX status counts the caller's tenant only.
+    assert api.get(CURRENCIES, headers=dev_token(api, "auditor")).json()["items"]
+    assert api.get(CURRENCIES, headers=outsider).json()["items"] == []
+    assert api.get(FX_STATUS, headers=outsider).json()["observation_count"] == 0
     audit = api.get("/api/v1/audit-events", params={"limit": 200}, headers=outsider).json()
     theirs = {
         str(r["id"])
@@ -1066,6 +1097,56 @@ def test_migration_round_trip_and_downgrade_guards(api: TestClient, db: str) -> 
     finally:
         command.upgrade(alembic_config(db), "head")
     assert revision() == head and identity_shape(db, existing) == frozen
+
+    # BE-32.1 (D-61): 0031's seed is tagged and PROVISIONAL, its seeded tables refuse UPDATE,
+    # DELETE and TRUNCATE; its downgrade refuses while a non-seed row exists (one transaction:
+    # nothing changes); without one 0031 -> previous -> 0031 removes the four tables, keeps
+    # every existing shape (domain, credit and identity tables) and restores the tagged seed.
+    m0031 = ScriptDirectory.from_config(Config("alembic.ini")).get_revision("0031")
+    assert m0031 is not None and isinstance(m0031.down_revision, str)
+    check_term_seed(db)
+    check_terms_append_only(db, SEEDED_TERM_TABLES)
+    steward_p32 = dev_token(api, "data_steward")
+    seed_rows = {t: sql(db, f"SELECT * FROM {t} ORDER BY id") for t in SEEDED_TERM_TABLES}
+    # Non-seed rows: an unseeded currency, then an FX observation (no write route: SQL only).
+    for statement in (
+        "INSERT INTO currency (id, tenant_id, code, name, minor_units, provisional, created_by)"
+        " SELECT gen_random_uuid(), tenant_id, 'JPY', 'Yen (test)', 0, true, 'test'"
+        " FROM currency LIMIT 1",
+        "INSERT INTO fx_rate_observation (id, tenant_id, base_currency, quote_currency, rate,"
+        " observed_on, provisional, created_by) SELECT gen_random_uuid(), tenant_id, 'EUR',"
+        " 'USD', 1.0825, DATE '2026-01-02', true, 'test' FROM currency LIMIT 1",
+    ):
+        sql(db, statement)
+        kept_terms = term_counts(db)
+        with pytest.raises(Exception, match="this downgrade is refused"):
+            command.downgrade(alembic_config(db), m0031.down_revision)
+        assert revision() == head and term_counts(db) == kept_terms
+    check_terms_append_only(db, ("fx_rate_observation",))
+    assert api.get(FX_STATUS, headers=steward_p32).json()["observation_count"] == 1
+    frozen_terms = identity_shape(db, (*existing, *IDENTITY_TABLES))
+    script(
+        db,
+        "BEGIN; ALTER TABLE fx_rate_observation DISABLE TRIGGER USER;"
+        " ALTER TABLE currency DISABLE TRIGGER USER; DELETE FROM fx_rate_observation;"
+        " DELETE FROM currency WHERE seeded_by IS NULL;"
+        " ALTER TABLE currency ENABLE TRIGGER USER;"
+        " ALTER TABLE fx_rate_observation ENABLE TRIGGER USER; COMMIT;",
+    )
+    try:
+        command.downgrade(alembic_config(db), m0031.down_revision)
+        assert revision() == m0031.down_revision
+        for table in TERM_TABLES:
+            assert sql(db, "SELECT to_regclass($1) AS t", table)[0]["t"] is None, table
+        assert identity_shape(db, (*existing, *IDENTITY_TABLES)) == frozen_terms
+    finally:
+        command.upgrade(alembic_config(db), "head")
+    assert revision() == head
+    assert identity_shape(db, (*existing, *IDENTITY_TABLES)) == frozen_terms
+    check_term_seed(db)
+    assert {t: len(sql(db, f"SELECT * FROM {t}")) for t in SEEDED_TERM_TABLES} == {
+        t: len(rows) for t, rows in seed_rows.items()
+    }
 
     # BE-24.1: previous head -> 0026 -> previous head -> 0026. The downgrade refuses while a
     # scenario exists (in one transaction: nothing changes); the tagged seed

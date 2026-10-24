@@ -63,6 +63,7 @@ from app.calculations import scenario_overlay
 from app.calculations.constants import (
     AGGREGATE_CLASSIFICATION,
     CONTEXT_AMOUNT_UNIT,
+    CONTEXT_CONSOLIDATION,
     CONTEXT_CURRENCY_BASIS,
     CONTEXT_DAYS_UNIT,
     CONTEXT_RATIO_UNITS,
@@ -2375,6 +2376,7 @@ class CalculationService:
             },
             "validation_status": validation_status_of(module["code"], module["version"]).value,
             "statement": manifest["labels"]["statement"],
+            "consolidation": CONTEXT_CONSOLIDATION,
         }
 
     async def _run(self, run_id: uuid.UUID) -> CalculationRun:

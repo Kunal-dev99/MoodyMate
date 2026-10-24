@@ -8,12 +8,14 @@ row pins (BE-3.5), so a caller not cleared for it gets `MaskedValue`.
 
 import uuid
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.classification import MaskedValue
 from app.core.text import SafeMultilineText
 from app.domain.constants import (
+    FX_CONSOLIDATION_REASON,
     RATING_COMMENT_MAX,
     RATING_RATIONALE_MAX,
     CreditVocabularyKind,
@@ -59,6 +61,20 @@ class ProjectionSummary(BaseModel):
         description="Projector 2 only (the typed-maturity instrument contract, D-57): per "
         "counted field (`maturity_date`), the records without a value; the column is NULL. "
         "Absent for projector 1, whose summary is unchanged.",
+    )
+    term_rows: int | None = Field(
+        default=None,
+        description="Projector 3 only (the rate-terms instrument contract, D-61): the "
+        "`instrument_term_version` rows written, one per version whose terms are consistent. "
+        "Absent for projectors 1 and 2, whose summaries are unchanged.",
+    )
+    terms_inconsistent: int | None = Field(
+        default=None,
+        description="Projector 3 only: TERMS_INCONSISTENT, the records whose terms are "
+        "inconsistent (FIXED with a reference index, FLOATING with no reset frequency, or "
+        "floor > cap). Their instrument version is written; no term row is (D-61 §4). Those "
+        "records' term values, unknown ones included, are not counted in `unknown_values` "
+        "and stay in the canonical record.",
     )
 
 
@@ -130,6 +146,42 @@ class CashFlowOut(BaseModel):
     origin: Value | None
 
 
+class InstrumentTermsOut(BaseModel):
+    """D-61 §1-§4: the typed rate terms of one instrument version (its `instrument_term_version`
+    row, written only when the terms are consistent). Values are masked by the classification
+    of the schema field they were projected from. Vocabulary values not in the seeded
+    PROVISIONAL vocabularies are kept as given text and named in `unknown_fields`."""
+
+    term_version_id: uuid.UUID
+    rate_type: Value | None = Field(description="FIXED or FLOATING (PROVISIONAL), or as given.")
+    reference_index: Value | None = Field(
+        description="As given: no reference index is seeded (D-61 §3)."
+    )
+    spread: Value | None = Field(description="Exact decimal text (11,6), in `rate_unit`.")
+    reset_frequency: Value | None = Field(description="ISO-8601 period (P1M, P3M, P6M, P1Y).")
+    next_reset_date: Value | None = Field(description="ISO date.")
+    cap_rate: Value | None = Field(description="Exact decimal text (11,6), in `rate_unit`.")
+    floor_rate: Value | None = Field(description="Exact decimal text (11,6), in `rate_unit`.")
+    day_count: Value | None = Field(
+        description="ACT_360, ACT_365F, 30_360 or ACT_ACT, or as given."
+    )
+    payment_frequency: Value | None = Field(description="ISO-8601 period, or as given.")
+    lifecycle_state: Value | None = Field(
+        description="ACTIVE, MATURED, PREPAID, RESTRUCTURED or DEFAULTED, or as given."
+    )
+    rate_unit: str | None = Field(
+        description="The unit of `spread`, `cap_rate` and `floor_rate` from the pinned schema."
+    )
+    unknown_fields: list[str] = Field(
+        description="Term fields whose value is not in the seeded vocabulary (kept as text, "
+        "counted UNKNOWN_VALUE). Field names only, never values."
+    )
+    provisional: bool = Field(
+        description="The term vocabularies are PROVISIONAL seeds (D-61 §3, D-11)."
+    )
+    created_at: datetime
+
+
 class InstrumentVersionOut(BaseModel):
     version_id: uuid.UUID
     version: int
@@ -164,6 +216,25 @@ class InstrumentVersionOut(BaseModel):
         "contract, projector v2, D-57). False: schema v1 free text, so `maturity_date` is "
         "empty and the value stays in the canonical record ('Not stated')."
     )
+    effective_from: Value | None = Field(
+        description="The business date the version is effective from (ISO date, D-61 §5), "
+        "kept apart from `imported_at`; empty when the pinned contract has no such field. "
+        "Null, too, for a version with no term row (TERMS_INCONSISTENT: `terms_typed` true, "
+        "`terms` null), whose date is not stored: it is not an `?effective_on=` candidate, "
+        "and the pick is then undetermined (`effective_version_id` null, fail closed)."
+    )
+    imported_at: datetime = Field(
+        description="When the import this version came from was created (system time)."
+    )
+    terms_typed: bool = Field(
+        description="The pinned schema version is the INSTRUMENT_RATE_TERMS contract "
+        "(projector v3, D-61 §1)."
+    )
+    terms: InstrumentTermsOut | None = Field(
+        description="The typed rate terms; null when the contract has none or the terms were "
+        "inconsistent (TERMS_INCONSISTENT: FIXED with an index, FLOATING with no reset, or "
+        "floor > cap)."
+    )
     attributes: list[AttributeOut]
     cash_flows: list[CashFlowOut] = Field(
         description="Projected cash-flow events of the instrument's own source naming its "
@@ -179,6 +250,20 @@ class InstrumentDetail(BaseModel):
     source_code: str
     created_at: datetime
     versions: list[InstrumentVersionOut] = Field(description="Oldest first.")
+    effective_on: date | None = Field(
+        description="The `?effective_on=` business date asked for, echoed; null without it."
+    )
+    effective_version_id: uuid.UUID | None = Field(
+        description="With `?effective_on=`: the version with the latest `effective_from` on or "
+        "before that date, picked by business date, not by import order (ties: the higher "
+        "version). Only versions whose `effective_from` the caller is cleared for take part; "
+        "a version with no term row (TERMS_INCONSISTENT) shows a null `effective_from` and is "
+        "not a candidate. Null without the parameter, when no version is effective by then, "
+        "or when the pick cannot be determined (fail closed): some version of the rate-terms "
+        "contract (`terms_typed`) has no term row or an `effective_from` the caller is not "
+        "cleared for, either of which could change the pick. This is a read aid only: runs "
+        "pin snapshots (D-30) and no 'current' is defined (D-61 §5)."
+    )
 
 
 # --- Feature 04 credit reads (BE-19.5, D-37, D-43) -------------------------------------------
@@ -528,3 +613,36 @@ class IdentityLinkReconcileOut(BaseModel):
     )
     reconciled_at: datetime
     reconciled_by: str
+
+
+# --- Phase 32: currency reference and FX consolidation status (BE-32.4, D-61 §6) -------------
+
+
+class CurrencyOut(BaseModel):
+    code: str = Field(description="ISO 4217 alphabetic code.")
+    name: str
+    minor_units: int | None = Field(description="ISO 4217 minor units (decimal places).")
+    provisional: bool = Field(
+        description="A tagged PROVISIONAL seed (`0031_currencies`, D-61 §6, D-11)."
+    )
+
+
+class CurrencyList(BaseModel):
+    items: list[CurrencyOut] = Field(description="The caller's tenant's currencies, by code.")
+
+
+class FxConsolidationStatusOut(BaseModel):
+    """D-61 §6: FX consolidation is blocked. There is no conversion code and no FX write route;
+    the rate source, rate types, reporting currency and conversion method are a client
+    decision."""
+
+    status: Literal["BLOCKED"] = Field(
+        description="Always BLOCKED until a client-approved FX policy exists."
+    )
+    reason_code: Literal["fx_policy_not_approved"] = Field(
+        description=f"`{FX_CONSOLIDATION_REASON}`: no approved rate source or conversion policy."
+    )
+    observation_count: int = Field(
+        description="FX rate observations stored for the caller's tenant (append-only; none "
+        "are used by any calculation)."
+    )
