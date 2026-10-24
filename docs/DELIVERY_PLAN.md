@@ -3942,7 +3942,7 @@ helpers moved into core and `src/lib`. OpenAPI does not change.
     `SCHEMA_CONTRACT` re-verifies at :691-700. `HASH_SITES` columns are checked against
     `information_schema` (:582-592). The no-UPDATE regex is at :146-150. Result: "3 passed"
     (fix round, `moodymate_test_p29fix`).
-- [ ] **BE-29.3** Core helpers:
+- [x] **BE-29.3** Core helpers:
   - `core/decimals.py` `parse_decimal_text`: one regex family with named profiles (`STRICT`
     for API and rules; `SOURCE` keeps the ingestion leniency of today); it refuses over-scale
     input and never rounds;
@@ -3968,7 +3968,7 @@ helpers moved into core and `src/lib`. OpenAPI does not change.
     `export_openapi --check` gives "openapi.json is up to date". The WS1 audit-completeness test
     passed in engineer run 1. **Missing:** the full-suite "49 passed" on the final tree. The WS1
     test has also not run since the last backend edits.
-- [ ] **BE-29.4** `hypothesis` (new dev dependency), with properties folded in (`derandomize=True`
+- [x] **BE-29.4** `hypothesis` (new dev dependency), with properties folded in (`derandomize=True`
   and a fixed `max_examples`):
   - decimal round trip, and over-scale refused;
   - canonical serialisation is idempotent and independent of key order;
@@ -3992,7 +3992,7 @@ helpers moved into core and `src/lib`. OpenAPI does not change.
     `lib/__tests__/helpers.test.ts:56-60`. vitest gives "Tests 695 passed (695)", against a
     baseline of 630. `git diff --stat` over the existing `*.test.ts` and `e2e` files is empty,
     as reported by the frontend engineer and confirmed by the e2e run.
-- [ ] **FE-29.2** One `<Masked>` value component, one generic `StatusPill`, and a shared
+- [x] **FE-29.2** One `<Masked>` value component, one generic `StatusPill`, and a shared
   maker-checker gate (holds the permission and is not the author). Each enum pill becomes a thin
   enum → variant map. At Phase 29 there are 18: the 13 `*StatusPill` plus ImplementationPill,
   SeverityPill, DriftTypePill, ReconciliationOutcomePill and ValidationStatusBadge. *(reworded
