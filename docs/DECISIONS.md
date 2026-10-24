@@ -503,6 +503,9 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
   `Trim the backend test suite to 33 essential tests` (3cc448c), and can be re-added one at a time if a
   regression shows up.
 - **Reversal:** a new decision.
+- **Amendment (2026-10-24, proposed, Feature 06):** D-60 replaces the under-50 cap from the
+  moment Phase 35 merges. The user's hardening plan §11 authorises removing the cap. Until then,
+  this entry binds Phases 28–34.
 
 ## D-27 Phase 11 validation semantics
 
@@ -2033,3 +2036,329 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
 - **Consequences:** an explanation can never introduce a figure the run did not produce. The
   "share of explanations backed by evidence" metric (design §8) is `VERIFIED / all` from
   these rows.
+
+---
+
+<!-- Feature 06: MVP Hardening (v1 → v2). Source: docs/design/hardening-plan-v2.md (the user's plan). -->
+
+## D-52 Canonical JSON hashing policy and legacy compatibility
+
+- **Status:** proposed (Feature 06, 2026-10-24)
+- **Context:** hashes are built in about 14 places with three different settings. Seven sites
+  use `ensure_ascii=False` (sorted, compact). Five use the default `ensure_ascii=True`: the
+  source contract, the import fingerprint, the import manifest, the profile rules and the schema
+  contract. Two use the default separators on an unsorted list (`business_key_sha256`, stored,
+  and the mapping dry-run duplicate check). Stored hashes pin runs, imports and contracts (D-31
+  §4, D-21, D-25 §6).
+- **Decision (proposed):**
+  1. **One policy** in `app/core/canonical.py`. The bytes are UTF-8 of `json.dumps(value,
+     sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)`.
+     - Keys must be `str`.
+     - A finite `Decimal` becomes a JSON string of `format(d, "f")`.
+     - A float, NaN, Infinity or any other type is refused.
+     - `canonical_sha256` is the lowercase hex SHA-256.
+
+     This is byte-identical to today's `rules/service.py:87` for every payload that site
+     accepts.
+  2. **Byte identity.** When the serialised text is ASCII, `ensure_ascii` True and False give
+     the same bytes. Any record kind whose payload class is ASCII-only therefore moves to the
+     policy with no hash change.
+  3. **Legacy record kinds.** One policy applies per kind, to its old and new rows alike (never
+     per row), so hashes stay comparable. Two named legacy functions live in the same module:
+     - `legacy_ascii_sha256` (`ensure_ascii=True`) is for each former-default kind whose
+       payload class a test cannot prove ASCII-only;
+     - `legacy_key_sha256` (default separators, a list) is for business-key hashes, which are
+       compared across imports.
+
+     A kind moves to the canonical policy only as a new versioned kind (for example, a new
+     manifest version).
+  4. **Never rewrite.** No migration or code path updates a stored `*_sha256`. The migrations'
+     frozen copies stay as they were written.
+  5. **The registry.** `HASH_SITES` maps each kind to its policy and reason. A fold test proves
+     that every kind moved from ASCII is ASCII-only: the API refuses a non-ASCII component with
+     422.
+  6. **Tests.** Golden ASCII and non-ASCII hashes, plus `hypothesis` (a new dev dependency)
+     properties, derandomised. These are folded per D-26.
+  7. New record kinds (Feature 06 on) use the canonical policy only.
+- **Consequences:** one implementation in core, and every pinned hash still verifies. Two legacy
+  functions remain on purpose, by name.
+
+## D-53 Rate limits on expensive endpoints
+
+- **Status:** proposed (Feature 06, 2026-10-24; Phase 28 brief BE-28.3)
+- **Decision (proposed):**
+  1. **Scope.** `POST imports`, `POST imports/{id}/validate`, `GET scenarios/{id}/versions/{v}/
+     validation`, `POST calculation-runs` and `POST scenarios/{id}/run`.
+     - Each has an in-process token bucket per (tenant, principal, route template).
+     - The defaults are conservative and PROVISIONAL, for example 10/min with burst 5, and
+       5/min with burst 3 for scenario runs.
+     - Each value is a setting, validated at startup (D-13).
+     - The clock is injectable, and the key map is bounded.
+  2. **Order.** Authentication and the permission check run first, so 401 and 403 are
+     unchanged. The limit is checked before any body processing or write. An Idempotency-Key
+     replay counts as a request.
+  3. **Refusal.** 429 `rate_limited`, `retryable: true` (D-07), and `Retry-After` in whole
+     seconds. It is audited DENIED under the route's action with reason `rate_limited`. Nothing
+     is written, and no value is echoed.
+  4. **Switch.** `RATE_LIMIT_ENABLED` defaults to on. Off is allowed only in local and test.
+  5. **Per process.** With N processes the effective limit is N × the setting. A shared store is
+     required before more than one API instance runs; it is deferred and documented in
+     ARCHITECTURE.md.
+  6. The AI hourly limit (D-50) stays separate.
+
+## D-54 Security headers and CSP rollout
+
+- **Status:** proposed (Feature 06, 2026-10-24; Phase 28 brief BE-28.2, FE-28.5). §5 is a
+  **hard stop**.
+- **Decision (proposed):**
+  1. **Backend middleware**, on every response including error envelopes:
+     `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`
+     and `Cross-Origin-Opener-Policy: same-origin`.
+  2. **HSTS** (`max-age=31536000; includeSubDomains`, no preload) only when ENV is staging or
+     production. TLS is terminated in front of the app, and browsers ignore HSTS over http.
+     Proxy headers are trusted only from `FORWARDED_ALLOW_IPS` (Phase 34).
+  3. **Next.js `headers()`.**
+     - `Content-Security-Policy-Report-Only`: `default-src 'self'`, `connect-src 'self'` plus
+       the API origin (and the OIDC issuer when used), `frame-ancestors 'none'`, `base-uri
+       'self'`, `object-src 'none'`;
+     - `X-Frame-Options: DENY`, nosniff, and a Referrer-Policy.
+  4. **Compatibility evidence.** Report-only violations seen in the Playwright run go in the
+     phase report. No report collector is built (deferred).
+  5. **Enforcing CSP in production is a hard stop** for the user or client. It follows the
+     compatibility review; nonces for Next inline scripts are likely needed.
+
+## D-55 Next.js 15.5.28 / React 19 upgrade and the dependency-advisory policy
+
+- **Status:** proposed (Feature 06, 2026-10-24; Phase 28 brief FE-28.1, FE-28.2, BE-28.1,
+  FE-28.3). §4 owners are a **hard stop**.
+- **Decision (proposed):**
+  1. **Pins.** `next` and `eslint-config-next` are pinned exactly at 15.5.28. `react` and
+     `react-dom` move to 19, with matching `@types/*`.
+     - Dependencies whose React peer range excludes 19 (likely `react-day-picker` ^8 and
+       `lucide-react` ^0.330) are upgraded and listed in the report.
+     - `--force` and `--legacy-peer-deps` are not used.
+  2. **Advisories.** The basis is the coordinator's statement: GHSA-2464-fhr4-w9xw,
+     GHSA-2xp9-vwfh-vxw4 and GHSA-p293-qw3h-jr36 affect ≤ 15.5.27 and are fixed in 15.5.28. The
+     architect has not verified this independently. FE-28.1 evidence must include the
+     `npm audit --omit=dev` output.
+  3. **Breaking changes.** Async `params`/`searchParams` in server pages, layouts and route
+     handlers. Client `useParams` is unchanged.
+  4. **Register and gates.**
+     - The human register is `docs/security/ADVISORIES.md`: severity, path, runtime or build
+       time, mitigation, owner and review date.
+     - The machine allowlist is `frontend/audit-allowlist.json` (GHSA id and expiry).
+     - CI fails on any unlisted high or critical finding, and on an expired entry. The same
+       applies to `pip-audit`.
+     - Moderates are recorded but do not gate. The tailwind 3 / postcss-selector-parser
+       moderates are build-time only.
+     - **Owners and acceptances need a named accountable person from the user (hard stop).**
+       Until then the owner is `UNASSIGNED`.
+  5. **Production-build guard.** `next build` fails when `NEXT_PUBLIC_API_BASE_URL` is unset.
+     Dev keeps the localhost default.
+- **Reversal:** revert the lockfile commit.
+
+## D-56 Calculation validation-status taxonomy
+
+- **Status:** proposed (Feature 06, 2026-10-24). §3 and §6 are **hard stops**.
+- **Decision (proposed):**
+  1. **The values** are `ILLUSTRATIVE | INTERNAL_VALIDATED | REGULATORY_VALIDATED`. Every
+     current module version is ILLUSTRATIVE, consistent with `illustrative = true`.
+  2. **Storage.** A code constant `MODULE_VALIDATION` per (module code, version) in
+     `app/rules/constants.py`. `module_version` is immutable, so there is no column. No API
+     sets the status. A `module_validation_record` table is deferred to the first real
+     validation.
+  3. **Promotion.** A non-ILLUSTRATIVE `ValidationRecord` must name an approver, `approved_on`
+     and an `evidence_ref` (methodology doc version and approved golden pack); otherwise it
+     fails at import. **Adding one, and deciding who may approve it, is a hard stop**: it is a
+     regulatory claim and an approval-model change.
+  4. **Exposure.** The registry, runs, result reads and comparison expose it, in the response
+     wrapper only, never in the manifest or result document (hash stability, BE-25.3).
+  5. **Context.** Every result read carries a `context` block: units, currency, as-of date,
+     methodology (module, engine and rule versions), validation status and the D-35 statement.
+     It is built from the pins.
+  6. **Client-owned methodology (hard stops, not tasks):**
+     - SME review;
+     - independently approved golden packs;
+     - L2A/L2B caps;
+     - the HQLA valuation basis;
+     - deposit classes and run-offs;
+     - day-0, past-due, missing, negative and out-of-horizon cash flows;
+     - the FX method;
+     - intended use, jurisdiction and reporting basis per module.
+
+     Engineering does not invent any of these (user plan §16).
+
+## D-57 Typed-maturity instrument contract and projector v2
+
+- **Status:** proposed (Feature 06, 2026-10-24)
+- **Context:**
+  - The seeded `instrument` v2 DRAFT is the BE-4.3/FE-4.2 diff fixture. Besides DATE maturity
+    and scale-6 interest_rate, it removes `legacy_book_code`, requires `product_family` and adds
+    `rating_category`. `e2e/smoke.spec.ts` asserts that diff.
+  - A proposal always creates version `max + 1`, so the existing governed path cannot publish
+    the seeded DRAFT.
+  - Approval deprecates the base. Under D-18 §4, v1 mappings then stop working for new imports.
+- **Options:**
+  - **A:** add a path that adopts the seeded DRAFT. Rejected: it is new governance behaviour,
+    it carries three unrelated breaking changes, and it breaks the fixture.
+  - **B (recommended):** propose through the existing path a contract frozen in code,
+    `INSTRUMENT_TYPED_MATURITY`. It is v1 with `maturity_date` DATE and `interest_rate` (11,6),
+    and nothing else changes. The registry assigns its number (3 in the seeded tenant). The v2
+    DRAFT stays untouched.
+- **Decision (proposed, B):**
+  1. v1 stays untouched, and so does its frozen projector v1 spec.
+  2. **Projector v2** matches the new instrument spec by **contract hash**, not version number.
+     - `projector_version` is recorded per projection: 1 for v1 imports (byte-identical to
+       today), 2 for typed imports.
+     - Any other hash gives `projection_unsupported`.
+     - The switch is `INSTRUMENT_PROJECTOR_V2_ENABLED`.
+  3. **Publication** is a governed runtime act per tenant: proposal, impact analysis and a
+     second-person approval. It is never done by a migration or the default seed (an opt-in seed
+     flag exists). It deprecates v1 for new imports until a mapping for the new version is
+     approved. Existing imports, projections, snapshots and runs are unchanged. Publishing in a
+     shared or production tenant is a client open item.
+  4. The Phase 32 rate-terms contract follows the same pattern (D-61).
+  5. **Reversal** is a further governed proposal that re-establishes the v1 contract as a new
+     version. It is never a migration.
+- **Note:** the coordinator's brief said "publish v2". B delivers its intent; choosing A needs
+  an amendment here first.
+
+## D-58 Identity links rather than FK columns on append-only rows
+
+- **Status:** proposed (Feature 06, 2026-10-24)
+- **Context:** domain rows are append-only (D-29 §6). An FK column would need UPDATEs on
+  history, which are refused, or leave history NULL. Cross-references resolve by business key
+  per snapshot (D-30 §4).
+- **Decision (proposed):**
+  1. **No new column** on `instrument_version`, `position_version`, `cashflow_event` or the
+     credit tables.
+  2. **Tables (0030).**
+     - `legal_entity` is an identity: a stable UUID per (tenant, source system, code),
+       `provisional`. Its attributes are deferred to the client.
+     - `domain_identity_link` is append-only, with same-tenant triggers. Its columns:
+       `source_kind` (POSITION_VERSION, CASHFLOW_EVENT, CREDIT_EXPOSURE), `source_row_id`,
+       `target_kind` (INSTRUMENT, COUNTERPARTY, LEGAL_ENTITY), `target_id`, `method`,
+       `resolver_version`, and the creator and time. It is `UNIQUE (source_kind, source_row_id,
+       target_kind)`.
+  3. **Rule.** Exactly one identity for the key in the tenant gives a link. Zero gives
+     `LINK_UNRESOLVED` and several give `LINK_AMBIGUOUS`; both are counted and write no link.
+     Resolution is deterministic and never guesses.
+  4. **When.**
+     - The projection step links its own rows (switch `IDENTITY_LINKS_ENABLED`).
+     - `POST identity-links/reconcile` (`domain:project`, idempotent, audited) covers
+       historical rows.
+  5. **Historical text keys.** Run reconcile per tenant. A link is never changed. A key that
+     later becomes ambiguous keeps its link and is reported. Correction and precedence wait for
+     the client's source-of-truth rule (Data Model §11).
+  6. **Runs ignore links,** so results and hashes are unchanged. Adopting links needs a new
+     engine and manifest version (deferred).
+  7. Links carry ids only. The target's classification governs reads.
+
+## D-59 Background execution compatible with the existing run contract
+
+- **Status:** proposed (Feature 06, 2026-10-24)
+- **Decision (proposed):**
+  1. **Pool.** A bounded process pool (`CALC_WORKERS`, `CALC_WORKER_QUEUE_MAX`) runs the pure
+     module `run()`. Pins, DB reads and writes stay in the API process. The switch is
+     `CALC_EXECUTION_MODE=inline|pool`.
+  2. **Contract.** The default request still waits and returns the terminal run, unchanged.
+     `Prefer: respond-async` gives 202 with RUNNING, `Location` and `Preference-Applied`.
+  3. **Statuses.** These are unchanged (D-31 §3): RUNNING then one terminal status. QUEUED and
+     CANCELLED stay reserved. API cancellation is deferred. **Widening any CHECK is a hard
+     stop.**
+  4. **Failure.**
+     - A worker error, crash or `CALC_RUN_TIMEOUT_SECONDS` gives FAILED `ENGINE_ERROR`, an
+       existing code.
+     - A sweeper closes runs past `CALC_RUN_STALE_SECONDS`.
+     - A retry uses a new key and makes a new run; a replay returns the same run.
+     - 0018 guards and the single terminal move prevent duplicate outputs.
+     - A full queue gives 503 `workers_busy`, retryable, with `Retry-After`, audited DENIED,
+       and no run.
+  5. **Determinism.** Inline and pool hashes are equal, and a test asserts it.
+  6. **Scale companions.**
+     - DB pool and statement-timeout settings, with SQLAlchemy defaults.
+     - Capped lists add `has_more` and a tenant-bound opaque `next_cursor`, alongside `total`.
+     - `S3ArtifactStore` has the D-15 semantics (content-addressed, write-once, verified on
+       read, never deleted) behind `ARTIFACT_STORE_KIND` (default `filesystem`). The client
+       library and test fake are recorded here when chosen.
+  7. **Supported size** is documented from Phase 33 measurements. The client confirms the
+     target.
+
+## D-60 Test budget after Feature 06 (amends D-26)
+
+- **Status:** proposed (Feature 06, 2026-10-24).
+  - Removing the under-50 cap is **user-authorised** by the uploaded hardening plan §11
+    (Workstream G: "Remove the arbitrary test-function cap or use parametrized cases so failures
+    are isolated and parallelizable").
+  - The replacement budget below is the architect's proposal.
+  - It takes effect when Phase 35 merges.
+- **Decision (proposed):**
+  1. Until Phase 35 merges, D-26 binds: Phases 28–34 fold, and the suite stays at 49.
+  2. **From Phase 35** there is no cap on the number of functions. Instead:
+     - the full backend suite stays **≤ 180 s** wall time in CI (`--durations` recorded);
+     - parametrise only where each case is an independent failure (boundaries, permissions,
+       lifecycle moves, error codes), never per combination; route × role stays one printed
+       matrix;
+     - no test function is over 300 lines;
+     - D-26 §1's coverage areas remain the floor.
+  3. Splits keep every assertion. The phase report maps old hunks to new tests.
+- **Reversal:** a new decision.
+
+## D-61 Rate terms, effective dating, lifecycle vocabulary and currency/FX reference
+
+- **Status:** proposed (Feature 06, 2026-10-24). §6 is a **hard stop**.
+- **Decision (proposed):**
+  1. **Contract.** `INSTRUMENT_RATE_TERMS` is the typed-maturity contract plus optional fields:
+     `rate_type`, `reference_index`, `spread`, `reset_frequency`, `next_reset_date`,
+     `cap_rate`, `floor_rate`, `day_count`, `payment_frequency`, `effective_from` and
+     `lifecycle_state`. It is published as in D-57 §3, and projector v3 matches it by hash.
+  2. **Storage.** `instrument_term_version` is a side table (one row per `instrument_version`,
+     append-only), so the `instrument_version` shape stays frozen.
+  3. **Vocabularies.** `instrument_term_vocabulary` is seeded and PROVISIONAL:
+     - rate types FIXED and FLOATING;
+     - day counts ACT_360, ACT_365F, 30_360 and ACT_ACT;
+     - frequencies P1M, P3M, P6M and P1Y;
+     - lifecycle states ACTIVE, MATURED, PREPAID, RESTRUCTURED and DEFAULTED.
+
+     No reference index is seeded. Unknown values are kept as text and counted `UNKNOWN_VALUE`
+     (D-29 §5).
+  4. **Consistency.** FIXED with an index, FLOATING without a reset, or floor > cap writes no
+     term row and counts `TERMS_INCONSISTENT`. The instrument row is still written (D-29 §2).
+  5. **Effective dating.** `effective_from` is the business date, kept apart from
+     `imported_at`, and reads show both. Runs still pin snapshots (D-30), and no "current" is
+     defined.
+  6. **Currency and FX.** `currency` is a tagged PROVISIONAL seed. `fx_rate_observation` is
+     append-only with no write route. Consolidation is **BLOCKED**, shown by a status read and
+     in the result `context`. There is no conversion code. **The rate source, rate types,
+     reporting currency and conversion method are a client hard stop.**
+  7. Bond attributes and deposit classes are deferred (client).
+
+## D-62 Deployment and observability surfaces
+
+- **Status:** proposed (Feature 06, 2026-10-24). §4 is a **hard stop**.
+- **Decision (proposed):**
+  1. **Health.**
+     - `GET /api/v1/health/live` does no I/O.
+     - `GET /api/v1/health/ready` checks the DB within 2 s, the migration head, the artifact
+       store and the workers. It answers 200 or 503 with value-free check names.
+     - Both are added to `PUBLIC_PATHS`; this entry is the security decision `core/auth.py`
+       asks for. `/api/v1/health` is unchanged.
+  2. **Metrics.**
+     - They run on an internal listener only: `METRICS_ENABLED` (default off), with an
+       optional `METRICS_TOKEN` bearer.
+     - Nothing is mounted on the public app, so the route × role matrix is unchanged and no
+       role or permission is involved.
+     - No tenant, principal, id or value label is used.
+  3. **Access log.** JSON with the correlation id, method, route template, status and duration.
+     There are no queries, bodies, headers or tokens (D-50 §3 redaction).
+  4. **Error tracker.** A no-op `report_exception` hook. **The vendor is a client hard stop.**
+  5. **Build.** A `uv` lockfile with frozen CI installs. Non-root Docker images. A compose
+     `prod` profile with a one-shot migration. Secrets come from the environment or a secret
+     store only (D-50 §2).
+  6. **API compatibility.**
+     - `/api/v1` changes are additive only, gated by the OpenAPI drift check.
+     - A deprecation gets `Deprecation`/`Sunset` headers and an entry here.
+     - A breaking change needs a new version path.
+
+
+**Coordinator ruling (2026-10-24), D-57:** option B adopted (auto-resolved, safer default). The seeded instrument v2 DRAFT stays the Phase 4 diff fixture; Phase 31 proposes a code-frozen contract (v1 + `maturity_date` DATE + `interest_rate` 11,6) through the existing governed path, published per tenant at runtime, never by migration or default seed.
