@@ -16,11 +16,11 @@ and low findings do not gate; they are recorded here and reviewed by the date sh
 - Python: fastapi 0.162 / starlette 1.9 (PYSEC-2026-161, -248, -249, -1941, -1942, -2280, -2281),
   pytest 9.1 (PYSEC-2026-1845), certifi 2026.10.23 (PYSEC-2026-4320). CI runs `pip-audit`.
 
-**Remaining (moderate, accepted pending an owner).** Owners are a client decision (hard stop).
+**Remaining (moderate, accepted).** Owner: the frontend lead, accepted until the Tailwind 4 upgrade (D-63 §4, user ruling 2026-10-24).
 
 | Package | Severity | Advisory | Exposure | Mitigation | Owner | Review by |
 |---|---|---|---|---|---|---|
-| `postcss-nested` | moderate | via postcss-selector-parser | build-time (Tailwind/PostCSS toolchain; not shipped to the browser or the API) | none upstream for Tailwind 3; revisit with the Tailwind 4 migration | UNASSIGNED (client to name) | 2026-11-23 |
-| `postcss-selector-parser` | moderate | GHSA-rj75-hqrm-r3gf | build-time (Tailwind/PostCSS toolchain; not shipped to the browser or the API) | none upstream for Tailwind 3; revisit with the Tailwind 4 migration | UNASSIGNED (client to name) | 2026-11-23 |
-| `tailwindcss` | moderate | via postcss-nested, postcss-selector-parser | build-time (Tailwind/PostCSS toolchain; not shipped to the browser or the API) | none upstream for Tailwind 3; revisit with the Tailwind 4 migration | UNASSIGNED (client to name) | 2026-11-23 |
-| `tailwindcss-animate` | moderate | via tailwindcss | build-time (Tailwind/PostCSS toolchain; not shipped to the browser or the API) | none upstream for Tailwind 3; revisit with the Tailwind 4 migration | UNASSIGNED (client to name) | 2026-11-23 |
+| `postcss-nested` | moderate | via postcss-selector-parser | build-time (Tailwind/PostCSS toolchain; not shipped to the browser or the API) | none upstream for Tailwind 3; revisit with the Tailwind 4 migration | Frontend lead (D-63) | 2026-11-23 |
+| `postcss-selector-parser` | moderate | GHSA-rj75-hqrm-r3gf | build-time (Tailwind/PostCSS toolchain; not shipped to the browser or the API) | none upstream for Tailwind 3; revisit with the Tailwind 4 migration | Frontend lead (D-63) | 2026-11-23 |
+| `tailwindcss` | moderate | via postcss-nested, postcss-selector-parser | build-time (Tailwind/PostCSS toolchain; not shipped to the browser or the API) | none upstream for Tailwind 3; revisit with the Tailwind 4 migration | Frontend lead (D-63) | 2026-11-23 |
+| `tailwindcss-animate` | moderate | via tailwindcss | build-time (Tailwind/PostCSS toolchain; not shipped to the browser or the API) | none upstream for Tailwind 3; revisit with the Tailwind 4 migration | Frontend lead (D-63) | 2026-11-23 |
