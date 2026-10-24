@@ -11,10 +11,9 @@ import { Label } from '@/components/ui/label'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
-import { DEMO_BANNER, ratio } from './agentDemo'
 import {
-  BALANCES_NOTE, DEPOSIT_EVIDENCE, LATEST, NOT_COMPUTABLE, PREVIOUS, RUNOFF_COLUMN, bridge, calculate, crore, largestDepositChange, lcrDelta, movementText, pct, pp,
-  shockDeposits, type LcrResult,
+  BALANCES_NOTE, DEMO_BANNER, DEPOSIT_EVIDENCE, LATEST, NOT_COMPUTABLE, PREVIOUS, RUNOFF_COLUMN, bridge, calculate, crore, largestDepositChange, lcrDelta, movementText, pct, pp,
+  ratio, shockDeposits, type LcrResult,
 } from './liquidityIntel'
 
 const STEPS = ['Request', 'Validate runs', 'Historical movement', 'Explanation', 'Define scenario', 'Authorise & execute', 'Results & audit']

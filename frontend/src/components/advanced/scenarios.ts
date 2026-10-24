@@ -1,8 +1,10 @@
 import { ApiError, api, call, type Schemas } from '@/api/client'
 import type { operations } from '@/api/schema'
 import { commentProblem } from '@/lib/forms'
+import { fetchLimits } from '@/lib/limits'
 import { isAuthorOf, makerCheckerGate, type MakerCheckerGate } from '@/lib/maker-checker'
 import { refusalOf, type Refusal } from '@/lib/refusal'
+import { explorerHref, scenarioHref } from '@/lib/scenario-links'
 
 /*
  * FE-24.2: the Agentic Stress-Test Explorer's pure helpers (D-44, D-47). Every payload type is
@@ -34,19 +36,28 @@ export type InstrumentPage = Schemas['InstrumentPage']
 type Me = Schemas['Me']
 type Has = (permission: Schemas['Permission']) => boolean
 
-export const explorerHref = '/advanced/stress-explorer'
+/** FE-35.1: defined below both workspaces (a stressed calculation run links to its scenario) and re-exported here. */
+export { explorerHref, scenarioHref }
 export const newScenarioHref = `${explorerHref}/new`
-export const scenarioHref = (scenarioId: string) => `${explorerHref}/${scenarioId}`
 export const editVersionHref = (scenarioId: string, version: number) => `${scenarioHref(scenarioId)}/versions/${version}/edit`
 export const newVersionHref = (scenarioId: string, parent: number) => `${scenarioHref(scenarioId)}/versions/new?parent=${parent}`
 
 export const PAGE_SIZE = 50
-/** ScenarioVersionDecision / ScenarioVersionSubmit `comment` maxLength (a test reads openapi.json). */
-export { COMMENT_MAX } from '@/lib/forms'
-/** ScenarioCreate `name` / `description` and `change_summary` maxLength. */
-export const NAME_MAX = 200
-export const DESCRIPTION_MAX = 2000
-export const SUMMARY_MAX = 1000
+/*
+ * ScenarioCreate `name` / `description` and `change_summary` maxLength, the shock count and the
+ * fraction scale: GET config/limits serves them (FE-35.3, `fetchLimits().scenario`); the editor
+ * reads the server's values and mirrors none of them.
+ */
+export type { ScenarioLimits } from '@/lib/limits'
+
+/**
+ * FE-35.3 (Q20): the ScenarioVersionSubmit / ScenarioVersionDecision / ScenarioVersionClose
+ * `comment` bound, as GET config/limits serves it (`scenario.max_comment_length`, the validators'
+ * own constant). The comment dialogs read it here and mirror no literal.
+ */
+export async function fetchCommentMax(): Promise<number> {
+  return (await fetchLimits()).scenario.max_comment_length
+}
 
 // --- status pill ---------------------------------------------------------------------------------
 
@@ -72,7 +83,6 @@ export const SCENARIO_STATUS_STYLE: Record<ScenarioVersionStatus, { label: strin
   REJECTED: { label: 'Rejected', className: 'status-failed', description: 'The approver rejected it. Not runnable; its author may copy it into a new version. Kept, never deleted.' },
   CLOSED: { label: 'Closed', className: 'status-draft', description: 'Hidden from pickers; still readable by id. Kept, never deleted.' },
 }
-export const SCENARIO_STATUSES = Object.keys(SCENARIO_STATUS_STYLE) as ScenarioVersionStatus[]
 
 // --- library tabs ---------------------------------------------------------------------------------
 
@@ -158,12 +168,15 @@ export function acknowledged(v: Pick<ScenarioVersion, 'origin' | 'parameter_sour
 
 // --- comments -------------------------------------------------------------------------------------
 
-/** Why a decision comment cannot be sent yet, or null (1 to 1,000 characters, D-44 §6): the shared check (FE-29.1). */
+/**
+ * Why a comment cannot be sent yet, or null: the shared check (FE-29.1). A decision comment is
+ * required (D-44 §6); pass `max`, the served `max_comment_length` (fetchCommentMax).
+ */
 export { commentProblem }
 
-/** The decision body, or null while the comment has a problem. */
-export function decisionBody(decision: Decision, text: string): ScenarioVersionDecision | null {
-  return commentProblem(text) ? null : { decision, comment: text.trim() }
+/** The decision body, or null while the comment has a problem against the served bound `max`. */
+export function decisionBody(decision: Decision, text: string, max: number): ScenarioVersionDecision | null {
+  return commentProblem(text, { max }) ? null : { decision, comment: text.trim() }
 }
 
 // --- refusals -------------------------------------------------------------------------------------
@@ -245,12 +258,12 @@ export function shockProblemLines(err: unknown): ProblemLine[] {
  * binary float. Text that is not plain decimal is returned as it came.
  */
 export function fractionToPercent(fraction: string): string {
-  const m = /^(\d+)(?:\.(\d{1,4}))?$/.exec(fraction)
+  const m = /^(\d+)(?:\.(\d+))?$/.exec(fraction)
   if (!m) return fraction
-  const units = (m[1] + (m[2] ?? '').padEnd(4, '0')).replace(/^0+(?=\d)/, '')
-  const padded = units.padStart(3, '0')
-  const whole = padded.slice(0, -2).replace(/^0+(?=\d)/, '')
-  const part = padded.slice(-2).replace(/0+$/, '')
+  // FE-35.3: the point moves two places in the text, whatever the scale the server padded to.
+  const places = m[2] ?? ''
+  const whole = (m[1] + places.slice(0, 2).padEnd(2, '0')).replace(/^0+(?=\d)/, '')
+  const part = places.slice(2).replace(/0+$/, '')
   return part ? `${whole}.${part}` : whole
 }
 

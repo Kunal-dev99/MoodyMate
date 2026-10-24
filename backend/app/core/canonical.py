@@ -180,25 +180,25 @@ HASH_SITES: Mapping[HashKind, HashSite] = MappingProxyType(
         ),
         HashKind.DATASET_SNAPSHOT: HashSite(
             C,
-            "app.calculations.service:snapshot_sha256",
+            "app.calculations.snapshots:snapshot_sha256",
             "dataset_snapshot.content_sha256",
             _ALWAYS_CANONICAL,
         ),
         HashKind.CALCULATION_MANIFEST: HashSite(
             C,
-            "app.calculations.service:CalculationService",
+            "app.calculations.runs:CalculationService",
             "calculation_run.manifest_sha256",
             _ALWAYS_CANONICAL,
         ),
         HashKind.CALCULATION_RESULT: HashSite(
             C,
-            "app.calculations.service:reproduce",
+            "app.calculations.results:reproduce",
             "calculation_run.result_sha256",
             _ALWAYS_CANONICAL,
         ),
         HashKind.CALCULATION_RUN_REQUEST: HashSite(
             C,
-            "app.calculations.service:RunSpec/RerunSpec/ScenarioRunSpec.sha256",
+            "app.calculations.queries:RunSpec/RerunSpec/ScenarioRunSpec.sha256",
             "calculation_run.request_sha256",
             _ALWAYS_CANONICAL,
         ),
@@ -222,41 +222,41 @@ HASH_SITES: Mapping[HashKind, HashSite] = MappingProxyType(
             _ALWAYS_CANONICAL,
         ),
         HashKind.SOURCE_ROW: HashSite(
-            C, "app.ingestion.service:row_sha256", "source_record.row_sha256", _ALWAYS_CANONICAL
+            C, "app.ingestion.imports:row_sha256", "source_record.row_sha256", _ALWAYS_CANONICAL
         ),
         HashKind.DATA_PROFILE: HashSite(
             C,
-            "app.ingestion.service:profile_sha256",
+            "app.ingestion.profiling:profile_sha256",
             "data_profile_snapshot.content_sha256",
             _ALWAYS_CANONICAL,
         ),
         HashKind.CANONICAL_PAYLOAD: HashSite(
             C,
-            "app.ingestion.service:payload_sha256",
+            "app.ingestion.validation:payload_sha256",
             "canonical_record.payload_sha256",
             _ALWAYS_CANONICAL,
         ),
         HashKind.SOURCE_CONTRACT: HashSite(
             A,
-            "app.ingestion.service:contract_sha256",
+            "app.ingestion.contracts:contract_sha256",
             "source_contract.content_sha256",
             _NON_ASCII.format("expected column names are free text"),
         ),
         HashKind.IMPORT_REQUEST: HashSite(
             A,
-            "app.ingestion.service:request_sha256",
+            "app.ingestion.imports:request_sha256",
             "import_job.request_sha256",
             _NON_ASCII.format("control_totals keys are column names, free text"),
         ),
         HashKind.IMPORT_MANIFEST: HashSite(
             A,
-            "app.ingestion.service:ImportService",
+            "app.ingestion.manifests:ImportValidation",
             "import_manifest.manifest_sha256, dataset_snapshot_member.manifest_sha256",
             _SEEDED.format("schema code, validation profile code, artifact classification"),
         ),
         HashKind.VALIDATION_PROFILE_RULES: HashSite(
             A,
-            "app.ingestion.service:profile_rules_sha256",
+            "app.ingestion.validation:profile_rules_sha256",
             "validation_profile.content_sha256",
             _SEEDED.format("the profile's rules are seeded by migration 0015"),
         ),
@@ -268,7 +268,7 @@ HASH_SITES: Mapping[HashKind, HashSite] = MappingProxyType(
         ),
         HashKind.BUSINESS_KEY: HashSite(
             K,
-            "app.ingestion.service:business_key_sha256",
+            "app.ingestion.validation:business_key_sha256",
             "quarantine_item.business_key_sha256",
             "Compared across imports (duplicates, retries): its bytes never change.",
         ),

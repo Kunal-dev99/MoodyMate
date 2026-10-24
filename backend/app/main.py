@@ -25,6 +25,7 @@ from app.core.correlation import HEADER, CorrelationIdMiddleware
 from app.core.environment import DATA_CLASS_HEADER, DataClassHeaderMiddleware
 from app.core.error_tracker import configure_error_tracker
 from app.core.errors import register_error_handlers
+from app.core.interfaces import governance
 from app.core.logging import configure_logging
 from app.core.metrics import MetricsListener, bind_pool
 from app.core.observability import RequestObservabilityMiddleware
@@ -96,6 +97,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     register_error_handlers(app)
     app.include_router(build_api_router(settings))
+    # BE-35.1: app.core reaches governance only through its port (core.interfaces), which
+    # governance binds when it is imported (the routers above import it). Checked once
+    # here, so an unbound port fails the startup, never a later request (a 500).
+    governance()
 
     # Middleware order: the last added runs outermost. CORS must be outside the
     # correlation middleware so that the 500 envelope CorrelationIdMiddleware produces for

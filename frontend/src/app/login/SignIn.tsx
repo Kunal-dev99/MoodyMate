@@ -6,6 +6,7 @@ import { EnvironmentBanner } from '@/components/layout/EnvironmentBanner'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { KeyRound, LogIn, ServerCrash } from 'lucide-react'
 import { api, call, ApiError, type Schemas } from '@/api/client'
+import { SessionExpiredNotice } from '@/components/auth/SessionExpiredNotice'
 import { EmptyState } from '@/components/common/EmptyState'
 import { LoadingBlock } from '@/components/common/LoadingBlock'
 import { toastApiError } from '@/components/common/api-error-toast'
@@ -21,7 +22,10 @@ type Persona = Schemas['DevPersona']
 
 export function SignIn() {
   const router = useRouter()
-  const rawNext = useSearchParams().get('next')
+  const params = useSearchParams()
+  const rawNext = params.get('next')
+  // FE-35.4: set by the re-authentication after a 401 token_expired.
+  const reason = params.get('reason')
   // Resolved when used (client only): needs window.location.origin.
   const next = () => safeRedirectPath(rawNext, window.location.origin)
   const setToken = useSession((s) => s.setToken)
@@ -74,6 +78,8 @@ export function SignIn() {
             <h1 className="text-base font-semibold tracking-tight text-foreground">Financial Risk Platform</h1>
           </div>
         </div>
+
+        <SessionExpiredNotice reason={reason} />
 
         {error && (
           <EmptyState

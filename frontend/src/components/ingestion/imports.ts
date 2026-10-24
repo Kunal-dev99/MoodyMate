@@ -30,11 +30,12 @@ export const IMPORT_STATUS_STYLE: Record<ImportStatus, { label: string; classNam
 
 export const IMPORT_STATUSES = Object.keys(IMPORT_STATUS_STYLE) as ImportStatus[]
 
-/**
- * D-16 §1: the upload byte limit (IMPORT_MAX_BYTES hard ceiling, 10 MiB). The client-side
- * pre-check only saves a pointless upload; the server enforces the limit itself (413).
+/*
+ * D-16 §1: the upload byte limit is the deployment's IMPORT_MAX_BYTES (at most its hard ceiling),
+ * as GET config/limits serves it (FE-35.3, `fetchLimits().upload.max_bytes`); nothing here
+ * mirrors the value. The client-side pre-check only saves a pointless upload; the server enforces
+ * the limit itself (413).
  */
-export const IMPORT_MAX_BYTES = 10 * 1024 * 1024
 
 export function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`
@@ -42,8 +43,8 @@ export function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(2)} MiB`
 }
 
-/** The client-side size pre-check: null when the file may be uploaded. */
-export function sizeProblem(size: number, limit = IMPORT_MAX_BYTES): string | null {
+/** The client-side size pre-check against the served `limit` (bytes): null when the file may be uploaded. */
+export function sizeProblem(size: number, limit: number): string | null {
   if (size === 0) return 'The file is empty.'
   if (size > limit) return `The file is ${formatBytes(size)}; the limit is ${formatBytes(limit)}.`
   return null
@@ -85,8 +86,8 @@ export const attestationRequired = (dataClass: DataClass | null): boolean => dat
 const DECIMAL = /^-?\d+(\.\d+)?$/
 const COUNT = /^\d+$/
 
-/** Client-side checks mirroring the API's rules, so problems show before the upload. */
-export function importProblems(d: ImportDraft, dataClass: DataClass | null, limit = IMPORT_MAX_BYTES): string[] {
+/** Client-side checks mirroring the API's rules, so problems show before the upload (`limit`: the served max_bytes). */
+export function importProblems(d: ImportDraft, dataClass: DataClass | null, limit: number): string[] {
   const problems: string[] = []
   if (!d.sourceId) problems.push('Choose a source.')
   if (!d.file) problems.push('Choose a file.')

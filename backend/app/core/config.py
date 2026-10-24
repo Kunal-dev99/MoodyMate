@@ -35,6 +35,7 @@ DEV_SECRET_DEFAULT = "local-dev-only-secret-change-me-0123456789"  # noqa: S105
 DEV_CURSOR_KEY_DEFAULT = "local-dev-only-cursor-key-change-me-0123"  # noqa: S105
 MIN_KEY_CHARS = 32
 # S3 bucket names (AWS rules, the subset every S3-compatible store accepts) and key prefixes.
+# Always `fullmatch` (BE-35.7): with `match`, `$` also accepts a trailing newline.
 S3_BUCKET_PATTERN = re.compile(r"^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$")
 S3_PREFIX_PATTERN = re.compile(r"^([A-Za-z0-9_.-]+/)*$")
 
@@ -335,9 +336,9 @@ class Settings(BaseSettings):
         bucket = self.ARTIFACT_S3_BUCKET
         if not bucket:
             raise ValueError("ARTIFACT_STORE_KIND=s3 requires ARTIFACT_S3_BUCKET")
-        if not S3_BUCKET_PATTERN.match(bucket) or ".." in bucket:
+        if not S3_BUCKET_PATTERN.fullmatch(bucket) or ".." in bucket:
             raise ValueError("ARTIFACT_S3_BUCKET is not a valid bucket name")
-        if not S3_PREFIX_PATTERN.match(self.ARTIFACT_S3_PREFIX):
+        if not S3_PREFIX_PATTERN.fullmatch(self.ARTIFACT_S3_PREFIX):
             raise ValueError("ARTIFACT_S3_PREFIX must be empty or path segments ending in /")
         if not local and not self.ARTIFACT_S3_REGION:
             raise ValueError(f"ARTIFACT_S3_REGION is required when ENV={self.ENV}")

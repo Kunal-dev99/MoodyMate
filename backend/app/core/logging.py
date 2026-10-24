@@ -49,9 +49,6 @@ class Sensitive:
 
     __str__ = __repr__
 
-    def reveal(self) -> object:
-        return self._value
-
 
 def redact(value: Any, key: str | None = None) -> Any:
     if isinstance(value, Sensitive):

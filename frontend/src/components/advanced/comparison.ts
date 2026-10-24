@@ -264,10 +264,6 @@ export function firstNegativeText(code: string | Masked | null): string | null {
   return isMasked(code) ? null : code
 }
 
-/** The combined run's first negative cumulative bucket (one per currency), as the headline. */
-export const combinedFirstNegative = (currency: Pick<ComparisonCurrency, 'first_negative_cumulative'>): FirstNegativeCumulative | undefined =>
-  currency.first_negative_cumulative.find((f) => f.combined)
-
 // --- buckets ------------------------------------------------------------------------------------
 
 /** "(7, 30] days", "(90, ∞) days". */

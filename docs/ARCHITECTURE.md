@@ -43,6 +43,36 @@ backend/app/{core, governance, ingestion, mapping, domain, rules, calculations,
 frontend/src/{app, features, components, api (generated), types}
 ```
 
+**Split modules (Phase 35, BE-35.2; Q4, auto-resolved).** The seven files are the minimum. A
+module that outgrows them adds files by responsibility beside them (`calculations`: snapshots,
+results, queries, execution, runs; `ingestion`: contracts, imports, profiling, validation,
+manifests, uploads, quarantine, plus `upload_form.py` beside the router). During the one
+re-export release, `service.py` stays the module's public facade (an explicit `__all__`); new
+code imports the defining submodule. The re-exports are removed in the next feature's first
+backend phase (DELIVERY_PLAN, Feature 06 Deferred). Arch §15 calls its layout a suggested
+structure.
+
+**Core ports (`app/core/interfaces.py`, Phase 35 BE-35.1; Q3, auto-resolved).** `app.core`
+imports only `app.db`. What core needs from governance (`resolve_principal`, `audit_denied`,
+`record_denial`) is declared in `core/interfaces.py` as a port. `app.governance.service`
+implements it and binds it when it is imported, so governance → core is the only edge between
+the two. `AccountDenied` is defined in core and re-exported by `governance.service`; the dev
+token issuer and audience live in `core/tokens.py` and `governance.constants` re-exports them.
+Fail closed (D-04, D-10): with nothing bound, `governance()` raises, and `create_app` calls it
+once after building the API router, so a missing binding stops the app at startup instead of
+showing up as a 500 on the first denial. The engine's shock contract (`ScenarioTemplate`,
+`MIN_SHOCKS`/`MAX_SHOCKS`, the approval labels and states, `PartChange`,
+`MAX_PARTS_PER_FLOW`) lives in `calculations/constants.py`, and `orchestration.constants`
+re-exports it, so calculations never imports orchestration. The committed-artifacts fold
+checks both rules against the ast import graph (function-level and TYPE_CHECKING imports
+included).
+
+**Served limits (`GET /api/v1/config/limits`, BE-35.3; Q5).** It lives at the API root
+(`api/v1/config.py`), because it composes the rule, scenario and upload bounds through each
+module's service (`rule_parameter_limits`, `scenario_limits`, `ingestion.imports.limits_from`)
+and no module gains an import of another. Permission `authenticated`; every value is the
+object the validator or setting itself reads.
+
 ## Module → tables → endpoints
 
 Tables are from the Detailed Data Model. Endpoints are the **proposed** contracts from the
@@ -67,6 +97,19 @@ WS plans and must be finalised in OpenAPI before coding.
 Platform admin · Source & schema registry · Ingestion workbench · Financial domain ·
 Calculation operations · Reconciliation & scenarios · Reports · AI assistant (optional,
 switchable off).
+
+**Phase 35 switches (D-02; Q21, auto-resolved).** Both default on; `off` restores the Phase 34
+behaviour exactly.
+- `NEXT_PUBLIC_REAUTH_UI` (FE-35.4): a 401 `token_expired` for the current token leads to one
+  re-authentication that keeps the route (OIDC silent renew with a refresh token where the IdP
+  issues one, otherwise one redirect; dev: back to the persona sign-in), and a second expiry
+  within 60 s (PROVISIONAL) stops on the sign-in page instead of looping. No iframe renew
+  (D-54 §1, §3).
+- `NEXT_PUBLIC_ROUTE_GATES_UI` (FE-35.5): `NavPermissionGate` in `(platform)/layout.tsx` shows
+  the 403 state when the user lacks the permission of the longest nav entry the path sits
+  under. Cosmetic: the API stays authoritative (D-04). Paths with no nav entry pass through.
+
+Editors read their bounds from `GET config/limits` (FE-35.3) and have no switch.
 
 ## Non-negotiables (from the signed-off docs)
 

@@ -355,3 +355,9 @@ ISO_4217_CODES = frozenset(
 def is_iso4217_unit(unit: str | None) -> bool:
     """A schema field's unit names ISO 4217 ('ISO4217', 'ISO 4217', any case)."""
     return unit is not None and unit.replace(" ", "").replace("-", "").upper() == "ISO4217"
+
+
+# Audit action of an upload; a refusal is recorded under the same action, DENIED (D-24 §4).
+# Defined here since BE-35.2: source registration (contracts) and imports both refuse
+# under it, and neither imports the other's module for it.
+CREATE_IMPORT = "import.create"

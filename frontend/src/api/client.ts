@@ -5,6 +5,7 @@
  * `npm run gen:api`. Never hand-write a type that mirrors an API payload.
  */
 import createClient, { type Middleware } from 'openapi-fetch'
+import { REAUTH_UI_ENABLED } from '@/config/features'
 import { useSession } from '@/lib/session'
 import type { components, paths } from './schema'
 
@@ -29,10 +30,36 @@ const correlation: Middleware = {
   },
 }
 
+/** The 401 code of an expired session (backend core/auth.py), which FE-35.4 re-authenticates. */
+export const TOKEN_EXPIRED = 'token_expired'
+
+let tokenExpiredHandler: (() => void) | null = null
+
+/**
+ * FE-35.4: who handles a 401 `token_expired` that answers the current token (the session
+ * provider installs the re-authentication; it dedupes concurrent 401s). Without one, such a 401
+ * ends the session like any other.
+ */
+export function setTokenExpiredHandler(handler: (() => void) | null): void {
+  tokenExpiredHandler = handler
+}
+
+/** The envelope code of an error response, read from a copy (the caller still reads the body). */
+async function envelopeCodeOf(response: Response): Promise<string | null> {
+  try {
+    const body: unknown = await response.clone().json()
+    return isEnvelope(body) ? body.code : null
+  } catch {
+    return null
+  }
+}
+
 /**
  * Attaches the bearer token. A 401 ends the session so the app returns to sign-in, but
  * only when it answers the token that is still current (FE-2.4): a slow request sent
- * with an old token must not sign out a session the user has just renewed.
+ * with an old token must not sign out a session the user has just renewed. FE-35.4: a 401
+ * `token_expired` goes to the re-authentication handler instead (renew or one redirect that
+ * keeps the route); NEXT_PUBLIC_REAUTH_UI=off restores the plain sign-out.
  */
 export const authMiddleware: Middleware = {
   onRequest({ request }) {
@@ -40,11 +67,16 @@ export const authMiddleware: Middleware = {
     if (token) request.headers.set('Authorization', `Bearer ${token}`)
     return request
   },
-  onResponse({ request, response }) {
+  async onResponse({ request, response }) {
     if (response.status !== 401) return response
     const sent = request.headers.get('Authorization')
-    const { token, clear } = useSession.getState()
-    if (token && sent === `Bearer ${token}`) clear()
+    const { token } = useSession.getState()
+    if (!token || sent !== `Bearer ${token}`) return response
+    const expired = REAUTH_UI_ENABLED && tokenExpiredHandler !== null && (await envelopeCodeOf(response)) === TOKEN_EXPIRED
+    // Re-read after the body: a session renewed meanwhile is never ended by an older answer.
+    if (useSession.getState().token !== token) return response
+    if (expired && tokenExpiredHandler) tokenExpiredHandler()
+    else useSession.getState().clear()
     return response
   },
 }

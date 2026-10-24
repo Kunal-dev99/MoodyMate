@@ -319,6 +319,28 @@ MAX_BUCKETS = 50
 MAX_MAP_ENTRIES = 200
 MAX_DECIMAL_SCALE = 18
 MAX_DAYS = 36_600  # bucket bounds: about 100 years of calendar days
+MAX_BUCKET_CODE_LENGTH = 20  # a DAY_BUCKETS code: a letter, then letters, digits or _
+
+
+@dataclass(frozen=True)
+class RuleParameterLimits:
+    """The bounds the BE-16.1 parameter validator (rules.service) enforces, as one object:
+    `GET config/limits` serves this very object's values (BE-35.3)."""
+
+    max_buckets: int
+    max_map_entries: int
+    max_decimal_scale: int
+    max_days: int
+    max_bucket_code_length: int
+
+
+RULE_PARAMETER_LIMITS = RuleParameterLimits(
+    max_buckets=MAX_BUCKETS,
+    max_map_entries=MAX_MAP_ENTRIES,
+    max_decimal_scale=MAX_DECIMAL_SCALE,
+    max_days=MAX_DAYS,
+    max_bucket_code_length=MAX_BUCKET_CODE_LENGTH,
+)
 
 
 class RuleRefusal(StrEnum):

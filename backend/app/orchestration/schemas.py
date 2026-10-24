@@ -27,11 +27,16 @@ from app.core.text import SafeMultilineText, SafeText
 from app.governance.constants import ProposalDecision
 from app.orchestration.constants import (
     DECIMAL_TEXT_PATTERN,
+    MAX_CHANGE_SUMMARY,
     MAX_DECISION_COMMENT,
     MAX_DELAY_DAYS,
+    MAX_DESCRIPTION,
     MAX_INSTRUMENT_KEYS,
+    MAX_NAME,
     MAX_PARTS_PER_FLOW,
     MAX_SHOCKS,
+    MAX_SOURCE_SYSTEM_CODE,
+    MAX_TEXT_FIELD,
     MAX_UNAVAILABLE_DAYS,
     MIN_SHOCKS,
     ApprovalLabel,
@@ -100,7 +105,7 @@ class FundingSourceSelector(ShockSelector):
 
     instrument_type: InstrumentType = Field(description="An INFLOW instrument type.")
     instrument_keys: (
-        list[Annotated[str, Field(min_length=1, max_length=200)] | MaskedValue] | None
+        list[Annotated[str, Field(min_length=1, max_length=MAX_TEXT_FIELD)] | MaskedValue] | None
     ) = Field(
         default=None,
         max_length=MAX_INSTRUMENT_KEYS,
@@ -112,7 +117,7 @@ class FundingSourceSelector(ShockSelector):
     )
     source_system_code: str | None = Field(
         default=None,
-        max_length=100,
+        max_length=MAX_SOURCE_SYSTEM_CODE,
         description="Matches all of a snapshot's cash flows or none in v1 (D-30 §1).",
     )
 
@@ -257,10 +262,10 @@ class ScenarioCreate(BaseModel):
         pattern=r"^[A-Z][A-Z0-9_]{1,63}$",
         description="Unique per tenant (409 duplicate_code); assigned by the service if absent.",
     )
-    name: SafeText = Field(max_length=200)
-    description: SafeMultilineText | None = Field(default=None, max_length=2000)
+    name: SafeText = Field(max_length=MAX_NAME)
+    description: SafeMultilineText | None = Field(default=None, max_length=MAX_DESCRIPTION)
     shocks: ShocksIn
-    change_summary: SafeMultilineText | None = Field(default=None, max_length=1000)
+    change_summary: SafeMultilineText | None = Field(default=None, max_length=MAX_CHANGE_SUMMARY)
 
 
 class ScenarioVersionCreate(BaseModel):
@@ -270,7 +275,7 @@ class ScenarioVersionCreate(BaseModel):
 
     shocks: ShocksIn
     parent_version: int | None = Field(default=None, ge=1, le=1_000_000)
-    change_summary: SafeMultilineText | None = Field(default=None, max_length=1000)
+    change_summary: SafeMultilineText | None = Field(default=None, max_length=MAX_CHANGE_SUMMARY)
 
 
 class ScenarioVersionUpdate(BaseModel):
@@ -279,7 +284,7 @@ class ScenarioVersionUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     shocks: ShocksIn
-    change_summary: SafeMultilineText | None = Field(default=None, max_length=1000)
+    change_summary: SafeMultilineText | None = Field(default=None, max_length=MAX_CHANGE_SUMMARY)
 
 
 class AiAcknowledgement(BaseModel):

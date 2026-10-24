@@ -205,14 +205,3 @@ class ScenarioRepository:
             )
         )
         return list(result.scalars())
-
-    async def versions_by_id(self, version_ids: Sequence[uuid.UUID]) -> list[ScenarioVersion]:
-        if not version_ids:
-            return []
-        result = await self.session.execute(
-            select(ScenarioVersion).where(
-                ScenarioVersion.tenant_id == self.scope.tenant_id,
-                ScenarioVersion.id.in_(version_ids),
-            )
-        )
-        return list(result.scalars())

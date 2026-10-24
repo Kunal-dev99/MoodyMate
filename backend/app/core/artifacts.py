@@ -30,6 +30,7 @@ from typing import Any, Protocol
 from app.core.config import Settings
 from app.core.errors import ApiError
 
+# Always `fullmatch` (BE-35.7): with `match`, `$` also accepts a trailing newline.
 _REF = re.compile(r"^sha256/([0-9a-f]{2})/([0-9a-f]{64})$")
 _READ_ONLY = 0o444
 
@@ -76,7 +77,7 @@ class ArtifactStore(ABC):
 
 def _checked(ref: str) -> str:
     """The ref, when well-formed; else `malformed_ref` (nothing outside the store is named)."""
-    match = _REF.match(ref)
+    match = _REF.fullmatch(ref)
     if match is None or match.group(2)[:2] != match.group(1):
         raise ArtifactIntegrityError(ref, "malformed_ref")
     return ref

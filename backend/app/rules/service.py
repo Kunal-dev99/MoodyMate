@@ -60,6 +60,7 @@ from app.rules.constants import (
     ACTIVATE_RULE,
     APPROVE_RULE,
     BASELINE_ASSUMPTION_SET,
+    MAX_BUCKET_CODE_LENGTH,
     MAX_BUCKETS,
     MAX_DAYS,
     MAX_DECIMAL_SCALE,
@@ -67,11 +68,13 @@ from app.rules.constants import (
     PARAMETER_VOCABULARIES,
     PROPOSE_RULE,
     REJECT_RULE,
+    RULE_PARAMETER_LIMITS,
     SUBMIT_RULE,
     SUPERSEDE_RULE,
     ImplementationStatus,
     ParameterKind,
     ParameterProblem,
+    RuleParameterLimits,
     RuleRefusal,
     RuleVersionStatus,
 )
@@ -95,10 +98,17 @@ def rule_set_sha256(version_ids: Sequence[uuid.UUID]) -> str:
 
 # --- the closed parameter kinds (BE-16.1, D-32 §1): pure and value-free ------------------------
 
+
+def rule_parameter_limits() -> RuleParameterLimits:
+    """The bounds this validator enforces (BE-35.3: `GET config/limits` serves them)."""
+    return RULE_PARAMETER_LIMITS
+
+
 P = ParameterProblem
 K = ParameterKind
 _BUCKET_KEYS = frozenset({"code", "label", "lower_exclusive", "upper_inclusive"})
-BUCKET_CODE = re.compile(r"^[A-Z][A-Z0-9_]{0,19}$")
+# Always `fullmatch` (BE-35.7): with `match`, `$` also accepts a trailing newline.
+BUCKET_CODE = re.compile(rf"^[A-Z][A-Z0-9_]{{0,{MAX_BUCKET_CODE_LENGTH - 1}}}$")
 ENUM_VALUE = re.compile(r"^[A-Z][A-Z0-9_]{0,49}$")
 # kind -> (required schema keys, the one parameter key)
 _KINDS: dict[ParameterKind, tuple[frozenset[str], str]] = {
@@ -199,7 +209,7 @@ def check_schema(schema: Any) -> list[Problem]:
         values = schema["values"]
         if not isinstance(values, list) or not values:
             problems.append(Problem("values", P.EMPTY))
-        elif not all(isinstance(v, str) and ENUM_VALUE.match(v) for v in values):
+        elif not all(isinstance(v, str) and ENUM_VALUE.fullmatch(v) for v in values):
             problems.append(Problem("values", P.INVALID_CODE))
         elif len(set(values)) != len(values):
             problems.append(Problem("values", P.DUPLICATE))
@@ -265,7 +275,7 @@ def _buckets(value: Any) -> tuple[list[dict[str, Any]], list[Problem]]:
             item.get("lower_exclusive"),
             item.get("upper_inclusive"),
         )
-        if not isinstance(code, str) or not BUCKET_CODE.match(code):
+        if not isinstance(code, str) or not BUCKET_CODE.fullmatch(code):
             problems.append(Problem(f"{path}.code", P.INVALID_CODE))
         if not _whole(lower) or (upper is not None and not _whole(upper)):
             problems.append(Problem(path, P.NOT_INTEGER))
@@ -417,10 +427,6 @@ class ModuleView:
             and all(r.active is not None for r in self.rules)
             and self.assumption_set is not None
         )
-
-    @property
-    def pinned_versions(self) -> list[RuleVersion]:
-        return [r.active for r in self.rules if r.active is not None]
 
 
 RULE_NOT_FOUND = "Rule not found."

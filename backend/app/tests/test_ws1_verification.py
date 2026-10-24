@@ -14,6 +14,7 @@ separate step and the route x role matrix is printed in the test report.
 """
 
 import uuid
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -72,6 +73,7 @@ from app.tests.identity_kit import (
     identity_shape,
     projected_legal_entity,
 )
+from app.tests.limits_kit import CONFIG_LIMITS, check_config_limits
 from app.tests.observability_kit import check_ready_reports_the_migration_head
 from app.tests.scenario_kit import SCENARIOS, create_scenario
 from app.tests.terms_kit import (
@@ -171,7 +173,7 @@ def ws1_mapping_body(db: str, rules: list[dict[str, Any]]) -> dict[str, Any]:
 # --- 1. Authorization matrix ---------------------------------------------------------------------
 
 
-def test_route_by_role_authorization_matrix(api: TestClient, db: str) -> None:
+def test_route_by_role_authorization_matrix(api: TestClient, db: str, artifact_dir: Path) -> None:
     assert {r["code"] for r in sql(db, "SELECT code FROM role")} == set(ROLES)
     routes = protected_routes(api)
     # Without a token every protected route is 401.
@@ -419,6 +421,12 @@ def test_route_by_role_authorization_matrix(api: TestClient, db: str) -> None:
         assert all(row[role] in (200, 404, 422) for role in ROLES), row
     [runs_row] = [r for r in WS1_MATRIX if r["route"] == "GET /api/v1/scenario-runs"]
     assert all(runs_row[role] == 200 for role in ROLES), runs_row
+    # BE-35.3: the served limits are `authenticated`, 200 for every seeded role (401 without a
+    # token above); their values are the validators' own objects, and follow IMPORT_MAX_ROWS.
+    [limits_row] = [r for r in WS1_MATRIX if r["route"] == f"GET {CONFIG_LIMITS}"]
+    assert limits_row["permission"] == AUTHENTICATED
+    assert all(limits_row[role] == 200 for role in ROLES), limits_row
+    check_config_limits(api, tokens["auditor"], db, artifact_dir)
     assert len(WS1_MATRIX) >= 12
 
 

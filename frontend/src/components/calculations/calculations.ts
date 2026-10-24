@@ -1,10 +1,11 @@
-import { ApiError, api, call, callWithResponse, type Schemas } from '@/api/client'
+import { api, call, callWithResponse, type Schemas } from '@/api/client'
 import { toastApiError } from '@/components/common/api-error-toast'
 import { BACKGROUND_RUNS_UI_ENABLED, LIQUIDITY_UI_ENABLED } from '@/config/features'
 import { isMasked } from '@/components/common/MaskedValue'
 import { DOMAIN_SCHEMA_CODES, type DomainSchemaCode } from '@/components/domain/domain'
 import type { ImportSummary } from '@/components/ingestion/imports'
 import { newIdempotencyKey } from '@/lib/idempotency'
+import { RESULT_STATUSES, hasResults, runHref } from '@/lib/runs'
 import { isIsoDate } from '@/lib/forms'
 import { refusalOf, type Refusal } from '@/lib/refusal'
 
@@ -94,9 +95,12 @@ export const RUN_STATUS_STYLE: Record<RunStatus, { label: string; className: str
 }
 export const RUN_STATUSES = Object.keys(RUN_STATUS_STYLE) as RunStatus[]
 
-/** The statuses whose outputs are results (the server's word, D-31 §3). */
-export const RESULT_STATUSES: readonly RunStatus[] = ['SUCCEEDED', 'SUCCEEDED_WITH_WARNINGS']
-export const hasResults = (status: RunStatus): boolean => RESULT_STATUSES.includes(status)
+/**
+ * The statuses whose outputs are results (the server's word, D-31 §3), and the run link. FE-35.1:
+ * defined in '@/lib/runs' and re-exported for this workspace's files. Other workspaces import
+ * them from '@/lib/runs'.
+ */
+export { RESULT_STATUSES, hasResults, runHref }
 
 /** `module_version.implementation_status`: PLANNED is an extension point, never shown as ready. */
 export const IMPLEMENTATION_STYLE: Record<ImplementationStatus, { label: string; className: string }> = {
@@ -161,11 +165,6 @@ export const INPUT_REF_TEXT: Record<InputRefType, string> = {
   RULE_VERSION: 'Rule version',
   ASSUMPTION_SET: 'Assumption set',
 }
-
-// --- links -----------------------------------------------------------------------------------
-
-export const runHref = (runId: string): string => `/calculations/runs/${encodeURIComponent(runId)}`
-export const snapshotLabel = (id: string): string => `${id.slice(0, 8)}…`
 
 /** A ladder bucket's interval as the pinned rule defines it: (lower, upper] calendar days; the last one open. */
 export function bucketRange(b: Pick<Bucket, 'lower_exclusive_days' | 'upper_inclusive_days'>): string {

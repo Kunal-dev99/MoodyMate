@@ -18,7 +18,6 @@ import { ContractStatusPill } from '@/components/ingestion/ContractStatusPill'
 import { ImportsPlanned } from '@/components/ingestion/ImportsTab'
 import {
   ACCEPT,
-  IMPORT_MAX_BYTES,
   attestationRequired,
   emptyImportDraft,
   formatBytes,
@@ -37,12 +36,14 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { IMPORTS_UI_ENABLED, VALIDATION_UI_ENABLED } from '@/config/features'
+import { fetchLimits, type UploadLimits } from '@/lib/limits'
 import { cn } from '@/lib/utils'
 
 const SOURCE_PAGE = 200
 const selectClass = 'h-9 rounded-md border border-input bg-background px-2 text-sm'
 
-type Loaded = { sources: Source[]; total: number; dataClass: DataClass | null }
+/** FE-35.3: `limits` are the upload bounds GET config/limits serves (the deployment's IMPORT_MAX_*). */
+type Loaded = { sources: Source[]; total: number; dataClass: DataClass | null; limits: UploadLimits }
 type State = { kind: 'loading' } | ({ kind: 'ready' } & Loaded) | LoadFailure
 
 const STEPS = ['Choose a source', 'Upload', 'Status'] as const
@@ -160,10 +161,11 @@ function Wizard() {
     // X-Data-Class comes with the answer: it decides whether the attestation is asked for.
     request.current = startLoad(
       async (signal) => {
-        const { data, response } = await callWithResponse(() =>
-          api.GET('/api/v1/sources', { params: { query: { limit: SOURCE_PAGE, offset: 0 } }, signal }),
-        )
-        return { sources: data.items, total: data.total, dataClass: dataClassOf(response) }
+        const [{ data, response }, limits] = await Promise.all([
+          callWithResponse(() => api.GET('/api/v1/sources', { params: { query: { limit: SOURCE_PAGE, offset: 0 } }, signal })),
+          fetchLimits(),
+        ])
+        return { sources: data.items, total: data.total, dataClass: dataClassOf(response), limits: limits.upload }
       },
       { onReady: (loaded) => setState({ kind: 'ready', ...loaded }), onFailure: setState, failureTitle: 'Could not load sources' },
       request.current,
@@ -199,7 +201,7 @@ function Wizard() {
       />
     )
 
-  const { sources, total, dataClass } = state
+  const { sources, total, dataClass, limits } = state
   if (sources.length === 0)
     return <EmptyState icon={Database} title="No sources registered" description="Register a source before uploading a file for it." />
 
@@ -220,8 +222,8 @@ function Wizard() {
       </>
     )
 
-  const problems = importProblems(draft, dataClass)
-  const fileProblem = draft.file ? sizeProblem(draft.file.size) : null
+  const problems = importProblems(draft, dataClass, limits.max_bytes)
+  const fileProblem = draft.file ? sizeProblem(draft.file.size, limits.max_bytes) : null
   const askAttestation = attestationRequired(dataClass)
 
   const upload = async () => {
@@ -250,7 +252,7 @@ function Wizard() {
         <PageSection
           icon={FileUp}
           title="2. Upload"
-          description={`For ${source.name} (${source.code}): a ${source.profile.format} file, at most ${formatBytes(IMPORT_MAX_BYTES)}.`}
+          description={`For ${source.name} (${source.code}): a ${source.profile.format} file, at most ${formatBytes(limits.max_bytes)}.`}
           headerRight={
             <Button variant="ghost" size="sm" onClick={() => setStep(0)} disabled={uploading}>
               Change source

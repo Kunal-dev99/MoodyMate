@@ -3,11 +3,14 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { LogOut, RefreshCw, ShieldAlert } from 'lucide-react'
-import { api, call, ApiError, type Schemas } from '@/api/client'
+import { api, call, setTokenExpiredHandler, ApiError, type Schemas } from '@/api/client'
 import { EmptyState } from '@/components/common/EmptyState'
 import { LoadingBlock } from '@/components/common/LoadingBlock'
 import { Button } from '@/components/ui/button'
+import { REAUTH_UI_ENABLED } from '@/config/features'
 import { oidcManager } from '@/lib/oidc'
+import { reauthInProgress } from '@/lib/reauth'
+import { reauthenticateInBrowser } from '@/lib/reauth-browser'
 import { useSession } from '@/lib/session'
 
 export type Permission = Schemas['Permission']
@@ -66,9 +69,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // sessionStorage is only readable after mount.
   useEffect(() => setHydrated(true), [])
 
+  // FE-35.4: a 401 token_expired renews the session or redirects once, keeping the route.
+  useEffect(() => {
+    if (!REAUTH_UI_ENABLED) return
+    setTokenExpiredHandler(() => void reauthenticateInBrowser())
+    return () => setTokenExpiredHandler(null)
+  }, [])
+
   useEffect(() => {
     if (!hydrated) return
     if (!token) {
+      // The re-authentication navigates itself (keeping the query and hash too).
+      if (REAUTH_UI_ENABLED && reauthInProgress()) return
       router.replace(
         signingOut.current
           ? '/login'

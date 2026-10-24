@@ -7,7 +7,7 @@ test_route_registry fails CI if one is added.
 
 from fastapi import APIRouter
 
-from app.api.v1 import health
+from app.api.v1 import config, health
 from app.calculations import router as calculations
 from app.core.config import Settings
 from app.core.errors import ERROR_RESPONSES
@@ -34,6 +34,7 @@ def build_api_router(settings: Settings) -> APIRouter:
     api_router.include_router(assumptions_router.router)
     api_router.include_router(calculations.router)
     api_router.include_router(orchestration.router)  # Phase 24: the Scenario API
+    api_router.include_router(config.router)  # Phase 35 (BE-35.3): GET /config/limits
     if settings.dev_sessions_enabled:
         api_router.include_router(governance.dev_router)
     return api_router

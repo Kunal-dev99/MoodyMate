@@ -12,19 +12,11 @@ limit is enforced while streaming: a declared or received size beyond the limit 
 with 413 `payload_too_large` before the rest of the body is read.
 """
 
-import json
-import unicodedata
 import uuid
-from collections.abc import AsyncGenerator, AsyncIterator
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Request, Response
-from fastapi.exceptions import RequestValidationError
-from pydantic import ValidationError
-from python_multipart.exceptions import MultipartParseError
 from sqlalchemy.ext.asyncio import AsyncSession
-from starlette.datastructures import UploadFile
-from starlette.formparsers import MultiPartException, MultiPartParser
 
 from app.core.auth import get_principal, require_permission
 from app.core.classification import mask_mapping, mask_value
@@ -44,7 +36,6 @@ from app.core.refusals import refuse_endpoint
 from app.db.session import get_session
 from app.domain.service import DomainService
 from app.governance.constants import Permission
-from app.ingestion.adapters import Limits
 from app.ingestion.constants import (
     ImportStatus,
     QuarantineStatus,
@@ -70,7 +61,6 @@ from app.ingestion.schemas import (
     ContractOut,
     DispositionIn,
     ImportDetail,
-    ImportForm,
     ImportPage,
     ImportProfile,
     ImportSummary,
@@ -94,7 +84,6 @@ from app.ingestion.service import (
     CREATE_IMPORT,
     VALIDATE_IMPORT,
     ContractSpec,
-    DriftThresholds,
     ImportLabels,
     ImportPolicy,
     ImportService,
@@ -105,15 +94,17 @@ from app.ingestion.service import (
     SourceService,
     UploadSpec,
     current_contract,
+    drift_thresholds,
+    limits_from,
     manual_moves,
     profile_of,
 )
+from app.ingestion.upload_form import FILENAME_MAX, _TooLarge, read_upload
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 SourceReader = Annotated[Principal, Depends(require_permission(Permission.SOURCE_READ))]
 SourceManager = Annotated[Principal, Depends(require_permission(Permission.SOURCE_MANAGE))]
 ImportReader = Annotated[Principal, Depends(require_permission(Permission.IMPORT_READ))]
-ImportWriter = Annotated[Principal, Depends(require_permission(Permission.IMPORT_WRITE))]
 QuarantineReader = Annotated[Principal, Depends(require_permission(Permission.QUARANTINE_READ))]
 QualityReviewer = Annotated[Principal, Depends(require_permission(Permission.QUALITY_REVIEW))]
 # BE-28.3 (D-53): import:write, then the route's rate-limit bucket.
@@ -286,11 +277,7 @@ async def create_source_contract(
 
 # --- Phase 8: imports (BE-8.4) ------------------------------------------------------------------
 
-# Multipart framing (boundaries, part headers) and the small form fields, on top of the
-# file's own D-16 byte limit. Also the cap on any non-file field.
-FORM_OVERHEAD = 64 * 1024
-FILENAME_MAX = 255
-
+# The multipart reader is ingestion.upload_form (BE-35.2).
 UPLOAD_BODY: dict[str, Any] = {
     "required": True,
     "content": {
@@ -333,113 +320,6 @@ UPLOAD_BODY: dict[str, Any] = {
         }
     },
 }
-
-
-class _TooLarge(MultiPartException):
-    def __init__(self) -> None:
-        super().__init__(UploadRefusal.PAYLOAD_TOO_LARGE)
-
-
-async def _bounded(stream: AsyncIterator[bytes], limit: int) -> AsyncGenerator[bytes, None]:
-    """Pass the body through, refusing as soon as more than `limit` bytes arrived."""
-    received = 0
-    async for chunk in stream:
-        received += len(chunk)
-        if received > limit:
-            raise _TooLarge()
-        yield chunk
-
-
-def _malformed(message: str, *loc: str) -> RequestValidationError:
-    return RequestValidationError([{"loc": ("body", *loc), "msg": message, "type": "value_error"}])
-
-
-def _filename(name: str | None) -> str | None:
-    """The file's base name, bounded and free of control characters."""
-    base = (name or "").replace("\\", "/").rsplit("/", 1)[-1].strip()
-    if not base:
-        return None
-    if len(base) > FILENAME_MAX:
-        raise _malformed(f"The file name is longer than {FILENAME_MAX} characters.", "file")
-    if any(unicodedata.category(c) == "Cc" for c in base):
-        raise _malformed("The file name contains control characters.", "file")
-    return base
-
-
-def _form_fields(form: Any) -> dict[str, Any]:
-    fields: dict[str, Any] = {
-        k: v for k, v in form.multi_items() if isinstance(v, str) and k in ImportForm.model_fields
-    }
-    if fields.get("control_totals") in ("", None):
-        fields.pop("control_totals", None)
-    elif "control_totals" in fields:
-        try:
-            fields["control_totals"] = json.loads(fields["control_totals"])
-        except ValueError:
-            raise _malformed("control_totals must be a JSON object.", "control_totals") from None
-    if fields.get("expected_row_count") == "":
-        fields.pop("expected_row_count")
-    return fields
-
-
-async def read_upload(request: Request, limits: Limits) -> tuple[ImportForm, bytes, str | None]:
-    """The validated form, the file's bytes and its name. Raises _TooLarge (413) while
-    streaming, or RequestValidationError (422) for a malformed body."""
-    body_limit = limits.max_bytes + FORM_OVERHEAD
-    if not request.headers.get("content-type", "").lower().startswith("multipart/form-data"):
-        raise _malformed("Expected a multipart/form-data body.")
-    declared = request.headers.get("content-length", "")
-    if declared.isdigit() and int(declared) > body_limit:
-        raise _TooLarge()  # refused before any of the body is read
-    parser = MultiPartParser(
-        request.headers,
-        _bounded(request.stream(), body_limit),
-        max_files=1,
-        max_fields=10,
-        max_part_size=FORM_OVERHEAD,
-    )
-    try:
-        form = await parser.parse()
-    except _TooLarge:
-        raise
-    except (MultiPartException, MultipartParseError):
-        raise _malformed("The multipart body is malformed.") from None
-    try:
-        upload = form.get("file")
-        if not isinstance(upload, UploadFile):
-            raise _malformed("A file is required.", "file")
-        filename = _filename(upload.filename)
-        try:
-            fields = ImportForm.model_validate(_form_fields(form))
-        except ValidationError as exc:
-            raise RequestValidationError(
-                [
-                    {"loc": ("body", *e["loc"]), "msg": e["msg"], "type": e["type"]}
-                    for e in exc.errors()
-                ]
-            ) from None
-        return fields, await upload.read(), filename
-    finally:
-        await form.close()
-
-
-def limits_from(settings: Settings) -> Limits:
-    return Limits(
-        max_bytes=settings.IMPORT_MAX_BYTES,
-        max_rows=settings.IMPORT_MAX_ROWS,
-        max_columns=settings.IMPORT_MAX_COLUMNS,
-        max_cell_chars=settings.IMPORT_MAX_CELL_CHARS,
-        max_xlsx_uncompressed_bytes=settings.IMPORT_MAX_XLSX_UNCOMPRESSED_BYTES,
-        max_xlsx_ratio=settings.IMPORT_MAX_XLSX_RATIO,
-        max_decoded_chars=settings.IMPORT_MAX_DECODED_CHARS,
-    )
-
-
-def drift_thresholds(settings: Settings) -> DriftThresholds | None:
-    """BE-12.3: the PROVISIONAL thresholds, or None while DRIFT_DETECTION_ENABLED is off."""
-    if not settings.DRIFT_DETECTION_ENABLED:
-        return None
-    return DriftThresholds(settings.DRIFT_NULL_RATE_THRESHOLD, settings.DRIFT_RANGE_THRESHOLD)
 
 
 def _import_fields(job: ImportJob, labels: ImportLabels, principal: Principal) -> ImportSummary:
