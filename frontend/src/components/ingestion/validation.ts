@@ -1,6 +1,6 @@
-import { ApiError, type Schemas } from '@/api/client'
+import type { Schemas } from '@/api/client'
 import type { ImportStatus } from './imports'
-import type { Refusal } from './mappings'
+import { refusalOf, type Refusal } from '@/lib/refusal'
 
 /*
  * FE-11.1/11.2: the validation dashboard's and the quarantine view's pure helpers. Every
@@ -138,14 +138,4 @@ const ERROR_TITLES: Record<string, string> = {
   validation_error: 'Some values were rejected',
 }
 
-export function validationRefusal(err: unknown, fallback: string): Refusal {
-  if (err instanceof ApiError)
-    return {
-      title: ERROR_TITLES[err.envelope.code] ?? fallback,
-      status: err.status,
-      code: err.envelope.code,
-      message: err.envelope.message,
-      cid: err.correlationId,
-    }
-  return { title: fallback, status: null, code: 'unexpected_error', message: 'Something went wrong.', cid: null }
-}
+export const validationRefusal = (err: unknown, fallback: string): Refusal => refusalOf(err, fallback, ERROR_TITLES)

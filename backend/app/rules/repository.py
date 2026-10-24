@@ -11,8 +11,9 @@ import uuid
 from collections.abc import Sequence
 from typing import Any
 
-from sqlalchemy import func, insert, select, text, update
+from sqlalchemy import func, insert, select, update
 
+from app.core.locks import advisory_xact_lock
 from app.db.base import Base
 from app.db.repository import ScopedRepository
 from app.rules.constants import RuleVersionStatus
@@ -83,10 +84,7 @@ class RulesRepository(ScopedRepository[RuleDefinition]):
     async def lock(self, key: str) -> None:
         """Serialise writers of one content-addressed row within the tenant for this
         transaction (a second writer then finds the first one's row)."""
-        await self.session.execute(
-            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
-            {"key": f"{key}:{self.scope.tenant_id}"},
-        )
+        await advisory_xact_lock(self.session, key, self.scope.tenant_id)
 
     async def rule_set(self, content_sha256: str) -> RuleSet | None:
         result = await self.session.execute(

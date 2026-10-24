@@ -1,4 +1,4 @@
-import { cn } from '@/lib/utils'
+import { StatusPill } from '@/components/common/StatusPill'
 import { IMPLEMENTATION_STYLE, RUN_STATUS_STYLE, type ImplementationStatus, type RunStatus } from './calculations'
 
 /**
@@ -6,17 +6,7 @@ import { IMPLEMENTATION_STYLE, RUN_STATUS_STYLE, type ImplementationStatus, type
  * The pill shows what the server says; RUNNING is never shown as success.
  */
 export function RunStatusPill({ status, className, testId = 'run-status' }: { status: RunStatus; className?: string; testId?: string }) {
-  const style = RUN_STATUS_STYLE[status]
-  return (
-    <span
-      className={cn('inline-flex items-center rounded-sm border px-2 py-0.5 text-xs font-medium', style.className, className)}
-      title={style.description}
-      data-testid={testId}
-      data-status={status}
-    >
-      {style.label}
-    </span>
-  )
+  return <StatusPill value={status} variant={RUN_STATUS_STYLE[status]} titled testId={testId} className={className} />
 }
 
 /** `module_version.implementation_status`: PLANNED modules are extension points, never shown as ready. */
@@ -31,15 +21,5 @@ export function ImplementationPill({
   title?: string
   testId?: string
 }) {
-  const style = IMPLEMENTATION_STYLE[status]
-  return (
-    <span
-      className={cn('inline-flex items-center rounded-sm border px-2 py-0.5 text-xs font-medium', style.className, className)}
-      title={title}
-      data-testid={testId}
-      data-status={status}
-    >
-      {style.label}
-    </span>
-  )
+  return <StatusPill value={status} variant={IMPLEMENTATION_STYLE[status]} title={title} testId={testId} className={className} />
 }

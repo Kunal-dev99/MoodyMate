@@ -34,6 +34,7 @@ from fastapi.testclient import TestClient
 
 from app.calculations.constants import CalculationRunStatus
 from app.calculations.service import result_document
+from app.core.canonical import canonical_sha256
 from app.rules.constants import (
     ILLUSTRATIVE_STATEMENT,
     MATURITY_LADDER,
@@ -42,7 +43,6 @@ from app.rules.constants import (
     ValidationStatus,
     validation_status_of,
 )
-from app.rules.service import canonical_sha256
 from app.tests.conftest import dev_token, sql
 from app.tests.helpers import IMPORTS, MODULES, RUNS, make_snapshot, project, start_run, upload
 from app.tests.lcr_kit import position_csv

@@ -15,7 +15,7 @@ from app.core.auth import authenticated, get_principal, require_permission
 from app.core.classification import mask_model
 from app.core.errors import ApiError
 from app.core.principal import Principal
-from app.core.routes import route_template
+from app.core.refusals import refuse_endpoint
 from app.db.session import get_session
 from app.governance.constants import Permission, ProposalStatus
 from app.governance.models import (
@@ -63,7 +63,6 @@ from app.governance.service import (
     SchemaService,
     UserService,
     effective_version,
-    record_denial,
 )
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
@@ -337,17 +336,15 @@ async def schema_change_enabled(
     """Writes are off when SCHEMA_CHANGE_ENABLED is false: the registry is read-only. The
     refusal is audited like any other denied request (BE-3.2)."""
     if not request.app.state.settings.SCHEMA_CHANGE_ENABLED:
-        endpoint = route_template(request)
-        await record_denial(
+        await refuse_endpoint(
+            request,
             session,
             principal,
-            f"{request.method} {endpoint}",
-            "endpoint",
-            endpoint,
-            "schema_change_disabled",
-        )
-        raise ApiError(
-            403, "schema_change_disabled", "Schema changes are switched off in this environment."
+            ApiError(
+                403,
+                "schema_change_disabled",
+                "Schema changes are switched off in this environment.",
+            ),
         )
 
 

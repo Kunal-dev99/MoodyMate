@@ -7,12 +7,18 @@
   (e.g. audit details), using a per-key classification map.
 * `Classified(value, code)`: wraps a value for logging. Only `LOG_CLEAR` codes print; any
   other (or unknown) code is redacted, using the same codes as API masking.
+* `mask_value(value, code, clear)`: the one masking path of a single value (BE-29.3); the
+  model and mapping masks use it too.
+* `most_sensitive(codes)` (BE-29.3): the one ranking of classification codes. An unknown
+  code ranks above every known one (the most restrictive level: no role is cleared for it);
+  no code at all is `unclassified`. `storable(code)` is the code a module writes to a
+  classification column: a known code as is, anything else `restricted`.
 
 Unknown classification codes are treated as not clear (fail closed). The codes and ranks
 are PROVISIONAL (D-11) and seeded by migration 0005.
 """
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from types import UnionType
 from typing import Annotated, Any, Literal, TypeVar, Union, get_args, get_origin
 
@@ -20,6 +26,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 # Logs have no viewer to check, so only the two lowest classifications may appear in them.
 LOG_CLEAR = frozenset({"public", "internal"})
+# The classification codes from least to most sensitive (ranks 0..3, migration 0005, D-11).
+# app.governance.constants.ClassificationCode is the same order and checks it at import.
+SENSITIVITY: tuple[str, ...] = ("public", "internal", "confidential", "restricted")
+MOST_RESTRICTIVE_KNOWN = SENSITIVITY[-1]
+_RANK = {code: rank for rank, code in enumerate(SENSITIVITY)}
 
 
 class Classification:
@@ -54,10 +65,30 @@ class Classified:
 
 
 M = TypeVar("M", bound=BaseModel)
+V = TypeVar("V")
 
 # Stored audit details written before every key had to be classified (or by hand) are
 # masked under this code, which no role is cleared for (fail closed).
 UNCLASSIFIED = "unclassified"
+
+
+def most_sensitive(codes: Iterable[str]) -> str:
+    """The most sensitive of these codes. An unknown code ranks above every known one (fail
+    closed: no role is cleared for it); between unknown codes the first wins. No code at all
+    is `unclassified`."""
+    return max(codes, key=lambda c: _RANK.get(c, len(_RANK)), default=UNCLASSIFIED)
+
+
+def storable(code: str) -> str:
+    """The code to store in a classification column (an FK to a real code): a known code as
+    is; an unknown one (or `unclassified`) as `restricted`, the most sensitive known code."""
+    return code if code in _RANK else MOST_RESTRICTIVE_KNOWN
+
+
+def mask_value(value: V, code: str, clear: frozenset[str]) -> V | MaskedValue:
+    """The value when `code` is cleared for the caller, else a MaskedValue of `code`. An
+    unknown code is never in `clear` (fail closed)."""
+    return value if code in clear else MaskedValue(classification=code)
 
 
 def _marker(metadata: list[Any]) -> Classification | None:
@@ -144,8 +175,6 @@ def mask_mapping(
     A key with no classification is masked as `unclassified` (fail closed).
     """
     return {
-        key: value
-        if classes.get(key, UNCLASSIFIED) in clear
-        else MaskedValue(classification=classes.get(key, UNCLASSIFIED))
+        key: mask_value(value, classes.get(key, UNCLASSIFIED), clear)
         for key, value in values.items()
     }

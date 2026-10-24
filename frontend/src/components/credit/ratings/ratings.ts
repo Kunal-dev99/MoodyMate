@@ -1,5 +1,7 @@
-import { ApiError, api, call, type Schemas } from '@/api/client'
-import type { Refusal } from '@/components/ingestion/mappings'
+import { api, call, type Schemas } from '@/api/client'
+import { dateProblem } from '@/lib/forms'
+import { isAuthorOf } from '@/lib/maker-checker'
+import { refusalOf, type Refusal } from '@/lib/refusal'
 
 /*
  * FE-20.1: the Ratings panel's pure helpers (D-39). Every payload type comes from the generated
@@ -53,17 +55,8 @@ export const EMPTY_PROPOSAL: ProposalForm = { grade: '', effective_from: '', rat
 export type ProposalField = keyof ProposalForm
 export type ProposalProblems = Partial<Record<ProposalField, string>>
 
-const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/
-
-/** A real calendar date written YYYY-MM-DD (no time zone arithmetic: the parts are checked). */
-export function isIsoDate(text: string): boolean {
-  const m = ISO_DATE.exec(text)
-  if (!m) return false
-  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])]
-  if (y < 1 || mo < 1 || mo > 12 || d < 1) return false
-  const days = [31, (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0 ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][mo - 1]
-  return d <= days
-}
+/** A real calendar date written YYYY-MM-DD: the shared check (FE-29.1). */
+export { isIsoDate } from '@/lib/forms'
 
 /** The rationale's length as the server counts it (it strips surrounding whitespace). */
 export const rationaleLength = (rationale: string): number => rationale.trim().length
@@ -77,8 +70,8 @@ export function proposalProblems(f: ProposalForm, grades: readonly string[] = []
   const out: ProposalProblems = {}
   if (!f.grade) out.grade = 'Choose a grade.'
   else if (grades.length > 0 && !grades.includes(f.grade)) out.grade = 'Not a rating_grade code of your tenant.'
-  if (!f.effective_from) out.effective_from = 'An effective date is required.'
-  else if (!isIsoDate(f.effective_from)) out.effective_from = 'A valid date, YYYY-MM-DD.'
+  const date = dateProblem(f.effective_from, { missing: 'An effective date is required.' })
+  if (date) out.effective_from = date
   const n = rationaleLength(f.rationale)
   if (n === 0) out.rationale = 'A rationale is required.'
   else if (n > RATIONALE_MAX) out.rationale = `At most ${RATIONALE_MAX.toLocaleString('en')} characters (${n.toLocaleString('en')} now).`
@@ -107,7 +100,7 @@ type Has = (permission: Schemas['Permission']) => boolean
 export const canProposeRating = (has: Has): boolean => has('rating:propose')
 
 /** The signed-in user proposed this version. */
-export const isProposer = (r: Pick<ObligorRating, 'proposer_user_id'>, me: { user_id: string }): boolean => r.proposer_user_id === me.user_id
+export const isProposer = (r: Pick<ObligorRating, 'proposer_user_id'>, me: { user_id: string }): boolean => isAuthorOf(r.proposer_user_id, me)
 
 // --- requests and refusals ----------------------------------------------------------------------
 
@@ -123,17 +116,7 @@ export const RATING_REFUSAL_TITLES: Record<string, string> = {
   validation_error: 'The request was rejected',
 }
 
-export function ratingRefusal(err: unknown, fallback: string): Refusal {
-  if (err instanceof ApiError)
-    return {
-      title: RATING_REFUSAL_TITLES[err.envelope.code] ?? fallback,
-      status: err.status,
-      code: err.envelope.code,
-      message: err.envelope.message,
-      cid: err.correlationId,
-    }
-  return { title: fallback, status: null, code: 'unexpected_error', message: 'Something went wrong.', cid: null }
-}
+export const ratingRefusal = (err: unknown, fallback: string): Refusal => refusalOf(err, fallback, RATING_REFUSAL_TITLES)
 
 export const fetchCreditVocabularies = (signal: AbortSignal) => call(() => api.GET('/api/v1/credit-vocabularies', { signal }))
 

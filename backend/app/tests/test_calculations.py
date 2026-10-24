@@ -114,6 +114,7 @@ from app.calculations.service import (
     reproduce,
     result_document,
 )
+from app.core.canonical import canonical_sha256
 from app.core.config import Settings
 from app.core.decimals import exact_context
 from app.domain.constants import CashflowOrigin, DomainSchemaCode
@@ -143,7 +144,8 @@ from app.rules.constants import (
     RuleCategory,
     RuleVersionStatus,
 )
-from app.rules.service import canonical_sha256, check_parameters, check_schema, exact_json
+from app.rules.service import check_parameters, check_schema, exact_json
+from app.tests.canonical_kit import check_overlay_properties
 from app.tests.conftest import _IDENTITY_CLEANUP, alembic_config, clean, dev_token, script, sql
 from app.tests.helpers import (
     IMPORTS,
@@ -590,6 +592,7 @@ def test_registry_snapshot_run_and_maturity_ladder(
     with localcontext(exact_context()), pytest.raises((Inexact, Rounded)):
         _ = Decimal(1) / Decimal(3)
     check_overlay_pure()  # Phase 25 (BE-25.2): the overlay golden loop, §5 case, greps
+    check_overlay_properties()  # Phase 29 (BE-29.4): hypothesis, conservation and part ids
     reporting = GOLDEN[0]["reporting_date"]
     flow_id, version_id = uuid.uuid4(), uuid.uuid4()
     pure_inputs = ModuleInputs(

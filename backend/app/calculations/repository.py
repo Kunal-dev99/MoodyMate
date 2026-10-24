@@ -10,7 +10,7 @@ import uuid
 from collections.abc import Sequence
 from typing import Any
 
-from sqlalchemy import Integer, cast, func, insert, or_, select, text, update
+from sqlalchemy import Integer, cast, func, insert, or_, select, update
 
 from app.calculations.constants import CalculationRunStatus
 from app.calculations.models import (
@@ -27,6 +27,7 @@ from app.calculations.models import (
     ScenarioContribution,
     ScenarioShockApplication,
 )
+from app.core.locks import advisory_xact_lock
 from app.db.base import Base
 from app.db.repository import M, ScopedRepository
 
@@ -35,10 +36,7 @@ class _Writes(ScopedRepository[M]):
     async def lock(self, key: str) -> None:
         """Serialise writers of one content-addressed or keyed row within the tenant for this
         transaction (a second writer then finds the first one's row)."""
-        await self.session.execute(
-            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
-            {"key": f"{key}:{self.scope.tenant_id}"},
-        )
+        await advisory_xact_lock(self.session, key, self.scope.tenant_id)
 
     def add(self, *rows: object) -> None:
         self.session.add_all(rows)

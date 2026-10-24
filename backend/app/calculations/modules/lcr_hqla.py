@@ -44,7 +44,6 @@ Pure: no I/O, no clock, no randomness, no environment, Decimal only (exact produ
 sums under the declared context; the ratio is the only rounding).
 """
 
-import re
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -74,7 +73,13 @@ from app.calculations.modules.base import (
     RegisteredModule,
     divide,
 )
-from app.core.decimals import DeclaredRounding, exact_context
+from app.core.decimals import (
+    UNSIGNED,
+    DecimalTextError,
+    DeclaredRounding,
+    exact_context,
+    parse_decimal_text,
+)
 from app.domain.constants import DomainSchemaCode
 from app.rules.constants import (
     HQLA_HAIRCUT,
@@ -94,7 +99,6 @@ ZERO = Decimal(0)
 ONE = Decimal(1)
 # D-35 §2: the ratio, 4 dp ROUND_HALF_EVEN (PROVISIONAL).
 RATIO_ROUNDING = DeclaredRounding(Decimal("0.0001"), ROUND_HALF_EVEN)
-DECIMAL_TEXT = re.compile(r"^\d+(\.\d+)?$")
 
 EXCLUSIONS = frozenset(
     {
@@ -178,9 +182,10 @@ class Parameters:
 def fraction(value: Any) -> Decimal:
     """A DECIMAL parameter: a JSON string of plain decimal text in [0, 1], parsed exactly
     (never a JSON number, never exponent form, NaN or infinity)."""
-    if not isinstance(value, str) or not DECIMAL_TEXT.match(value):
-        raise ParameterError("a decimal parameter is a string of plain decimal text")
-    parsed = Decimal(value)
+    try:
+        parsed = parse_decimal_text(value, UNSIGNED)
+    except DecimalTextError:
+        raise ParameterError("a decimal parameter is a string of plain decimal text") from None
     if parsed > ONE:
         raise ParameterError("a rate, haircut or cap is between 0 and 1")
     return parsed

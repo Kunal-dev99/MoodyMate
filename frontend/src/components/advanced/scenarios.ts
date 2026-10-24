@@ -1,6 +1,8 @@
 import { ApiError, api, call, type Schemas } from '@/api/client'
 import type { operations } from '@/api/schema'
-import type { Refusal } from '@/components/ingestion/mappings'
+import { commentProblem } from '@/lib/forms'
+import { isAuthorOf, makerCheckerGate, type MakerCheckerGate } from '@/lib/maker-checker'
+import { refusalOf, type Refusal } from '@/lib/refusal'
 
 /*
  * FE-24.2: the Agentic Stress-Test Explorer's pure helpers (D-44, D-47). Every payload type is
@@ -40,7 +42,7 @@ export const newVersionHref = (scenarioId: string, parent: number) => `${scenari
 
 export const PAGE_SIZE = 50
 /** ScenarioVersionDecision / ScenarioVersionSubmit `comment` maxLength (a test reads openapi.json). */
-export const COMMENT_MAX = 1000
+export { COMMENT_MAX } from '@/lib/forms'
 /** ScenarioCreate `name` / `description` and `change_summary` maxLength. */
 export const NAME_MAX = 200
 export const DESCRIPTION_MAX = 2000
@@ -106,7 +108,7 @@ export function libraryQuery(tab: ExplorerTab, offset: number, showClosed = fals
 
 // --- version gates --------------------------------------------------------------------------------
 
-export const isAuthor = (v: Pick<ScenarioVersion, 'author_user_id'>, me: Pick<Me, 'user_id'>) => v.author_user_id === me.user_id
+export const isAuthor = (v: Pick<ScenarioVersion, 'author_user_id'>, me: Pick<Me, 'user_id'>): boolean => isAuthorOf(v.author_user_id, me)
 
 type Gated = Pick<ScenarioVersion, 'status' | 'author_user_id'>
 
@@ -125,14 +127,10 @@ export const canAdapt = (has: Has) => has('scenario:propose')
  * Whether Approve and Reject are offered. The author never is (409 `self_approval`); without
  * `scenario:approve` they are hidden (403). The server checks both again.
  */
-export type DecisionGate = 'allowed' | 'not_in_review' | 'self_approval' | 'no_permission'
+export type DecisionGate = Exclude<MakerCheckerGate, 'change_disabled'>
 
-export function decisionGate(v: Gated, me: Pick<Me, 'user_id'>, has: Has): DecisionGate {
-  if (v.status !== 'IN_REVIEW') return 'not_in_review'
-  if (isAuthor(v, me)) return 'self_approval'
-  if (!has('scenario:approve')) return 'no_permission'
-  return 'allowed'
-}
+export const decisionGate = (v: Gated, me: Pick<Me, 'user_id'>, has: Has): DecisionGate =>
+  makerCheckerGate({ inReview: v.status === 'IN_REVIEW', authorUserId: v.author_user_id, me, mayApprove: has('scenario:approve') })
 
 /** The PROPOSED_DEFAULT parameter paths an AI_PROPOSED version needs acknowledged (D-44 §6). */
 export function proposedDefaults(v: Pick<ScenarioVersion, 'parameter_sources'>): string[] {
@@ -159,13 +157,8 @@ export function acknowledged(v: Pick<ScenarioVersion, 'origin' | 'parameter_sour
 
 // --- comments -------------------------------------------------------------------------------------
 
-/** Why a decision comment cannot be sent yet, or null (1 to 1,000 characters, D-44 §6). */
-export function commentProblem(text: string, required = true): string | null {
-  const t = text.trim()
-  if (!t) return required ? 'A comment is required.' : null
-  if (t.length > COMMENT_MAX) return `At most ${COMMENT_MAX.toLocaleString('en')} characters (${t.length.toLocaleString('en')} now).`
-  return null
-}
+/** Why a decision comment cannot be sent yet, or null (1 to 1,000 characters, D-44 §6): the shared check (FE-29.1). */
+export { commentProblem }
 
 /** The decision body, or null while the comment has a problem. */
 export function decisionBody(decision: Decision, text: string): ScenarioVersionDecision | null {
@@ -189,11 +182,7 @@ const REFUSAL_TITLES: Record<string, string> = {
 }
 
 /** A refused scenario request, as the server sent it (status, code, correlation ID). */
-export function scenarioRefusal(err: unknown, fallback: string): Refusal {
-  if (err instanceof ApiError)
-    return { title: REFUSAL_TITLES[err.envelope.code] ?? fallback, status: err.status, code: err.envelope.code, message: err.envelope.message, cid: err.correlationId }
-  return { title: fallback, status: null, code: 'unexpected_error', message: 'Something went wrong.', cid: null }
-}
+export const scenarioRefusal = (err: unknown, fallback: string): Refusal => refusalOf(err, fallback, REFUSAL_TITLES)
 
 const PROBLEM_TEXT: Record<string, string> = {
   not_a_list: 'not a list',

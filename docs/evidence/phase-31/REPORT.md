@@ -6,7 +6,7 @@
   - one frontend-engineer, who owns FE-31.1, `navigation.ts` and `features.ts`;
   - one review agent and one e2e run;
   - a backend and a frontend fix round.
-- **Commits.** Nothing is committed yet. The coordinator commits and merges.
+- **Commits.** The coordinator committed the phase and merged Phases 28 and 29 in. In that merge the service moved to the shared helpers: `most_sensitive` from `core.classification`, the reconcile refusal through `core.refusals.refuse`, and the test import of `canonical_sha256` to `app.core.canonical` (Q10). The maturity masked cell also renders through `<Masked>` (FE-29.2).
 - **Migration 0030 is pre-numbered,** with `down_revision` "0027".
   - Phases 21–22 hold 0024–0025 and Phases 26–27 hold 0028–0029; none of these is built. Phases 28–30 add no migration. Phase 32 holds 0031.
   - The coordinator re-chains 0030 at merge (protocol step 6). The WS1 test reads 0030's `down_revision` from the script, so the test survives the re-chain.

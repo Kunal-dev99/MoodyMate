@@ -48,13 +48,6 @@ RECONCILE_IMPORT = "import.reconcile"
 # Exact arithmetic: wide enough for any D-16 cell, and any rounding raises (fail closed).
 EXACT = Context(prec=100_000, traps=[Inexact, Rounded, InvalidOperation])
 ZERO = Decimal(0)
-_CLASS_RANK = {c.value: i for i, c in enumerate(ClassificationCode)}
-
-
-def most_sensitive(*codes: str) -> str:
-    """The most sensitive of these classification codes; an unknown code wins (fail
-    closed: no role is cleared for it)."""
-    return max(codes, key=lambda c: _CLASS_RANK.get(c, len(_CLASS_RANK)))
 
 
 def item_status(variance: Decimal, tolerance: Decimal) -> ReconciliationItemStatus:

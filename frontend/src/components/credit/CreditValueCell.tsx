@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { MaskedValue, isMasked } from '@/components/common/MaskedValue'
+import { Masked } from '@/components/common/Masked'
 import { groupDecimal } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { valueText, type CreditValue } from './credit'
@@ -25,22 +25,22 @@ export function CreditValueCell({
   testId?: string
   className?: string
 }) {
-  if (isMasked(value))
-    return (
-      <span data-testid={testId} data-masked="true">
-        <MaskedValue value={value} />
-      </span>
-    )
-  const text = valueText(value)
-  if (text === null)
-    return (
-      <span className="text-muted-foreground" data-testid={testId} data-empty="true">
-        {empty}
-      </span>
-    )
   return (
-    <span className={cn('font-mono', className)} data-testid={testId} data-value={money ? text : undefined}>
-      {money ? groupDecimal(text) : text}
-    </span>
+    <Masked value={value} cell testId={testId}>
+      {(v) => {
+        const text = valueText(v)
+        if (text === null)
+          return (
+            <span className="text-muted-foreground" data-testid={testId} data-empty="true">
+              {empty}
+            </span>
+          )
+        return (
+          <span className={cn('font-mono', className)} data-testid={testId} data-value={money ? text : undefined}>
+            {money ? groupDecimal(text) : text}
+          </span>
+        )
+      }}
+    </Masked>
   )
 }

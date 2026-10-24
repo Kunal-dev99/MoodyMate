@@ -2082,6 +2082,25 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
   7. New record kinds (Feature 06 on) use the canonical policy only.
 - **Consequences:** one implementation in core, and every pinned hash still verifies. Two legacy
   functions remain on purpose, by name.
+- **Amendment (2026-10-24, Phase 29 build, auto-resolved):** implementation note, plus §2 and
+  §5 made precise. The status stays **proposed**: it was implemented in Phase 29, and acceptance
+  waits for the user's approval of Feature 06 (Q3).
+  - **Implemented (Q3).** The policy lives in `app/core/canonical.py`, and every production hash
+    goes through `sha256_for(kind, value)` under `HASH_SITES`. There are 19 kinds: 12 CANONICAL,
+    5 LEGACY_ASCII and 2 LEGACY_KEY. No former-default kind moved to CANONICAL. SOURCE_CONTRACT,
+    IMPORT_REQUEST, IMPORT_MANIFEST, VALIDATION_PROFILE_RULES and SCHEMA_CONTRACT stay
+    LEGACY_ASCII. For the first, second and fifth, the API accepts non-ASCII free text. For the
+    manifest and profile rules, the components come from seeds, so no 422 can prove them
+    ASCII-only. No stored hash changed, and no code writes a `*_sha256` column (§4).
+  - **§2 byte identity (Q9).** It holds for ASCII text **without U+007F (DEL)**. With
+    `ensure_ascii=True` the stdlib escapes DEL as `\u007f`; with `ensure_ascii=False` it writes
+    DEL raw. Controls below U+0020 are escaped the same way by both. The tests pin this boundary.
+  - **§5 moving a kind (Q9).** A future move from LEGACY_ASCII to CANONICAL must prove that the
+    payload class excludes both non-ASCII text and U+007F. The API must refuse both with 422, and
+    the probe is registered in the fold's `ASCII_ONLY_PROBES`.
+  - **§1 helper location (Q10).** `app.rules.service.canonical_sha256` is removed, with no
+    re-export. Later phases import from `app.core.canonical`. The migrations' frozen copies and
+    their docstrings stay as written (§4).
 
 ## D-53 Rate limits on expensive endpoints
 

@@ -11,9 +11,10 @@ import uuid
 from collections.abc import Sequence
 from typing import Any
 
-from sqlalchemy import exists, func, insert, select, text, update
+from sqlalchemy import exists, func, insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.locks import advisory_xact_lock
 from app.db.repository import DataScope
 from app.orchestration.constants import ScenarioOrigin, ScenarioVersionStatus
 from app.orchestration.models import Scenario, ScenarioChange, ScenarioRun, ScenarioVersion
@@ -32,10 +33,7 @@ class ScenarioRepository:
 
     async def lock(self, key: str) -> None:
         """Serialise writes on one key within the tenant for this transaction."""
-        await self.session.execute(
-            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
-            {"key": f"{key}:{self.scope.tenant_id}"},
-        )
+        await advisory_xact_lock(self.session, key, self.scope.tenant_id)
 
     # --- scenarios ------------------------------------------------------------------------
 

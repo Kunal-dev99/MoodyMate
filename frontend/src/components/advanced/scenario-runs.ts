@@ -1,7 +1,7 @@
-import { ApiError, api, call, callWithResponse, type Schemas } from '@/api/client'
+import { api, call, callWithResponse, type Schemas } from '@/api/client'
 import { hasResults, type RunDetail, type RunPage, type RunSummary } from '@/components/calculations/calculations'
-import { newIdempotencyKey } from '@/components/ingestion/imports'
-import type { Refusal } from '@/components/ingestion/mappings'
+import { newIdempotencyKey } from '@/lib/idempotency'
+import { refusalOf, type Refusal } from '@/lib/refusal'
 import type { ScenarioVersion, ScenarioVersionStatus } from './scenarios'
 
 /*
@@ -176,11 +176,7 @@ const RUN_REFUSAL_TITLES: Record<string, string> = {
 }
 
 /** A refused run or dry run, as the server sent it (status, code, correlation ID). */
-export function scenarioRunRefusal(err: unknown, fallback = 'Could not run the scenario'): Refusal {
-  if (err instanceof ApiError)
-    return { title: RUN_REFUSAL_TITLES[err.envelope.code] ?? fallback, status: err.status, code: err.envelope.code, message: err.envelope.message, cid: err.correlationId }
-  return { title: fallback, status: null, code: 'unexpected_error', message: 'Something went wrong.', cid: null }
-}
+export const scenarioRunRefusal = (err: unknown, fallback = 'Could not run the scenario'): Refusal => refusalOf(err, fallback, RUN_REFUSAL_TITLES)
 
 // --- labels -------------------------------------------------------------------------------------
 

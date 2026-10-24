@@ -73,9 +73,10 @@ from typing import Any, NoReturn
 from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.classification import UNCLASSIFIED, MaskedValue
+from app.core.classification import UNCLASSIFIED, MaskedValue, mask_value, most_sensitive
 from app.core.errors import ApiError
 from app.core.principal import Principal
+from app.core.refusals import refuse
 from app.db.base import Base
 from app.domain.constants import (
     CREDIT_SCHEMA_CODES,
@@ -136,7 +137,7 @@ from app.domain.repository import (
 )
 from app.governance.constants import AuditOutcome, ClassificationCode, ProposalDecision
 from app.governance.models import SchemaField
-from app.governance.service import SchemaService, audit_by, record_denial
+from app.governance.service import SchemaService, audit_by
 from app.ingestion.constants import ImportStatus
 from app.ingestion.models import CanonicalRecord, ImportJob, ImportManifest
 from app.ingestion.service import ImportService
@@ -145,7 +146,6 @@ _CURRENCY = re.compile(r"^[A-Z]{3}$")
 _COUNTRY = re.compile(r"^[A-Z]{2}$")  # ISO 3166-1 alpha-2 (counterparty v1 `country`)
 _INTEGER = re.compile(r"-?[0-9]+")  # the canonical INTEGER text (D-22)
 _BOOLEANS = {"true": True, "false": False}  # the canonical BOOLEAN text (D-22)
-_CLASS_RANK = {c.value: i for i, c in enumerate(ClassificationCode)}
 
 
 # --- the pure projection core (no I/O; holds no float) -----------------------------------------
@@ -294,14 +294,11 @@ class SchemaPins:
     def classes(self, schema_version_id: uuid.UUID) -> dict[str, str]:
         return {n: f.classification for n, f in self.fields.get(schema_version_id, {}).items()}
 
-    def most_sensitive(self, schema_version_id: uuid.UUID) -> str:
+    def payload_classification(self, schema_version_id: uuid.UUID) -> str:
         """The most sensitive classification of the pinned version's fields (every field a
         canonical payload can hold). An unknown code ranks above all; a version with no
         known fields is `unclassified`, which no role is cleared for (fail closed)."""
-        codes = set(self.classes(schema_version_id).values())
-        if not codes:
-            return UNCLASSIFIED
-        return max(codes, key=lambda c: _CLASS_RANK.get(c, len(_CLASS_RANK)))
+        return most_sensitive(sorted(set(self.classes(schema_version_id).values())))
 
 
 @dataclass(frozen=True)
@@ -450,14 +447,6 @@ class LinkPageView:
     total: int
 
 
-def _most_sensitive(codes: set[str]) -> str:
-    """The most sensitive classification code; an unknown code ranks above every known one,
-    and no code at all is `unclassified` (fail closed)."""
-    if not codes:
-        return UNCLASSIFIED
-    return max(codes, key=lambda c: _CLASS_RANK.get(c, len(_CLASS_RANK)))
-
-
 def _pinned(field_row: SchemaField) -> PinnedField:
     return PinnedField(
         name=field_row.name,
@@ -494,10 +483,14 @@ class DomainService:
 
     async def _refuse(self, error: ApiError, import_id: uuid.UUID) -> NoReturn:
         """Roll back, audit the refusal (DENIED, reason = the error code) and raise it."""
-        await record_denial(
-            self.session, self.principal, PROJECT_IMPORT, "import_job", str(import_id), error.code
+        await refuse(
+            self.session,
+            self.principal,
+            error,
+            action=PROJECT_IMPORT,
+            resource_type="import_job",
+            resource_id=import_id,
         )
-        raise error
 
     async def project(
         self,
@@ -902,9 +895,7 @@ class DomainService:
             latest = versions[instrument.id][-1]
             code = pins.classes(latest.schema_version_id).get("instrument_id", UNCLASSIFIED)
             seen = out.get(instrument.business_key)
-            rank = len(_CLASS_RANK)
-            if seen is None or _CLASS_RANK.get(code, rank) > _CLASS_RANK.get(seen, rank):
-                out[instrument.business_key] = code
+            out[instrument.business_key] = code if seen is None else most_sensitive([seen, code])
         return out
 
     async def mask_instrument_keys(
@@ -927,10 +918,8 @@ class DomainService:
         clear = self.principal.clear_classifications
 
         def shown(key: str) -> str | dict[str, Any]:
-            code = classes.get(key, UNCLASSIFIED)
-            if code in clear:
-                return key
-            return MaskedValue(classification=code).model_dump()
+            value = mask_value(key, classes.get(key, UNCLASSIFIED), clear)
+            return value.model_dump() if isinstance(value, MaskedValue) else value
 
         def one(shock: dict[str, Any]) -> dict[str, Any]:
             selector = shock.get("selector") or {}
@@ -1070,10 +1059,14 @@ class DomainService:
         self, action: str, resource_type: str, resource_id: uuid.UUID, error: ApiError
     ) -> NoReturn:
         """Roll back, audit the refusal (DENIED, reason = the error code) and raise it."""
-        await record_denial(
-            self.session, self.principal, action, resource_type, str(resource_id), error.code
+        await refuse(
+            self.session,
+            self.principal,
+            error,
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
         )
-        raise error
 
     def _audit_rating(
         self,
@@ -1337,10 +1330,14 @@ class DomainService:
                 "Identity links are switched off in this environment; existing links stay "
                 "readable and runs are unaffected.",
             )
-            await record_denial(
-                self.session, self.principal, action, "domain_identity_link", tenant, error.code
+            await refuse(
+                self.session,
+                self.principal,
+                error,
+                action=action,
+                resource_type="domain_identity_link",
+                resource_id=tenant,
             )
-            raise error
         await self.repo.lock_tenant()  # serialised with projections of the tenant
         entities, results = 0, []
         for source_kind in IDENTITY_LINK_TARGETS:
@@ -1398,7 +1395,9 @@ class DomainService:
                 for v in versions.get(e.id, set())
             }
             rows.append(
-                LegalEntityRow(e, codes.get(e.source_system_id, ""), _most_sensitive(classes))
+                LegalEntityRow(
+                    e, codes.get(e.source_system_id, ""), most_sensitive(sorted(classes))
+                )
             )
         return rows
 

@@ -1,7 +1,7 @@
 import { Fragment } from 'react'
-import { MaskedValue, isMasked } from '@/components/common/MaskedValue'
+import { Masked } from '@/components/common/Masked'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { cn } from '@/lib/utils'
+import { StatusPill } from '@/components/common/StatusPill'
 import {
   bucketRows,
   kindText,
@@ -15,16 +15,14 @@ import {
 
 /** One parameter leaf: exact text in monospace, or the "masked" marker if the server withheld it (D-04). */
 function Leaf({ value, testId }: { value: unknown; testId?: string }) {
-  if (isMasked(value))
-    return (
-      <span data-testid={testId} data-masked="true">
-        <MaskedValue value={value} />
-      </span>
-    )
   return (
-    <span className="font-mono text-sm" data-testid={testId}>
-      {leafText(value)}
-    </span>
+    <Masked value={value} cell testId={testId}>
+      {(v) => (
+        <span className="font-mono text-sm" data-testid={testId}>
+          {leafText(v)}
+        </span>
+      )}
+    </Masked>
   )
 }
 
@@ -155,9 +153,7 @@ export function ParameterDiffTable({ changes }: { changes: readonly ParameterCha
           <TableRow key={c.path} data-testid="parameter-diff-row" data-path={c.path} data-change={c.change}>
             <TableCell className="font-mono text-xs">{c.path || '(root)'}</TableCell>
             <TableCell>
-              <span className={cn('inline-flex items-center rounded-sm border px-2 py-0.5 text-xs font-medium', CHANGE_STYLE[c.change].className)}>
-                {CHANGE_STYLE[c.change].label}
-              </span>
+              <StatusPill value={c.change} variant={CHANGE_STYLE[c.change]} attr={null} />
             </TableCell>
             <TableCell className="font-mono text-sm" data-testid="parameter-diff-from">
               {c.from ?? <span className="text-muted-foreground">—</span>}

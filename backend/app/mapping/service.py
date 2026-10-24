@@ -13,12 +13,10 @@ detection and review (BE-12.3, BE-12.4, DI-06) at the end of this module.
   DEPRECATED and a `schema_dependency` (MAPPING, code) row is upserted (D-18 §3, §6).
 
 Every write is audited in the same transaction and committed here (D-10); every refused
-write is audited DENIED with its reason code (D-24 §4) through `record_denial`, after a
+write is audited DENIED with its reason code (D-24 §4) through `app.core.refusals.refuse`, after a
 rollback. Other modules are reached through their services only.
 """
 
-import hashlib
-import json
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -31,8 +29,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
+from app.core.canonical import HashKind, sha256_for
+from app.core.classification import most_sensitive
 from app.core.errors import ApiError
 from app.core.principal import Principal
+from app.core.refusals import refuse
 from app.governance.constants import (
     ClassificationCode,
     DependentType,
@@ -41,7 +42,7 @@ from app.governance.constants import (
     SchemaVersionStatus,
 )
 from app.governance.models import SchemaDefinition, SchemaVersion
-from app.governance.service import SchemaService, audit_by, effective_version, record_denial
+from app.governance.service import SchemaService, audit_by, effective_version
 from app.ingestion.constants import ContractStatus
 from app.ingestion.models import DataProfileSnapshot, ImportJob, SourceContract
 from app.ingestion.service import DriftThresholds, ImportService, SourceService
@@ -87,7 +88,6 @@ REJECT = "mapping.reject"
 
 VALIDATE_FETCH_ROWS = 1_000  # records per streamed partition of a dry run
 # Most sensitive last (the seeded order, D-11). An unknown code ranks above all (fail closed).
-_SENSITIVITY = [c.value for c in ClassificationCode]
 
 
 def _public(*keys: str) -> dict[str, str]:
@@ -146,8 +146,7 @@ def mapping_sha256(schema_version_id: uuid.UUID | str, rules: Sequence[RuleSpec]
         "schema_version_id": str(schema_version_id),
         "rules": [r.canonical() for r in rules],
     }
-    text = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(text.encode()).hexdigest()
+    return sha256_for(HashKind.MAPPING_VERSION, payload)
 
 
 def target_fields(version: SchemaVersion) -> dict[str, TargetField]:
@@ -219,7 +218,7 @@ class DryRun:
         self.issues: list[dict[str, Any]] = []
         self.rows = 0
         self.business_keys = list(business_keys)
-        self._keys: set[bytes] = set()
+        self._keys: set[str] = set()
         self._duplicates = 0
         self._missing_keys = 0
         present = set(columns)
@@ -351,7 +350,7 @@ class DryRun:
             if not all(key):
                 self._missing_keys += 1
                 return
-            digest = hashlib.sha256(json.dumps(key, ensure_ascii=False).encode()).digest()
+            digest = sha256_for(HashKind.DRY_RUN_BUSINESS_KEY, key)
             if digest in self._keys:
                 self._duplicates += 1
             else:
@@ -513,8 +512,9 @@ class MappingService:
             if code is None:
                 continue
             current = result.get(rule.source_column)
-            if current is None or _rank(code) > _rank(current):
-                result[rule.source_column] = code
+            result[rule.source_column] = (
+                code if current is None else most_sensitive([current, code])
+            )
         return result
 
     # --- writes: create and version (BE-10.3) ---------------------------------------------
@@ -523,15 +523,14 @@ class MappingService:
         self, action: str, resource_id: uuid.UUID | None, error: ApiError
     ) -> NoReturn:
         """Roll back, audit the refusal (DENIED, reason = the error code) and raise it."""
-        await record_denial(
+        await refuse(
             self.session,
             self.principal,
-            action,
-            "field_mapping",
-            str(resource_id) if resource_id else None,
-            error.code,
+            error,
+            action=action,
+            resource_type="field_mapping",
+            resource_id=resource_id,
         )
-        raise error
 
     async def _contract(
         self, contract_id: uuid.UUID, action: str, resource_id: uuid.UUID | None
@@ -1195,10 +1194,6 @@ class MappingService:
         return next(v for v in mapping.versions if v.version == number)
 
 
-def _rank(code: str) -> int:
-    return _SENSITIVITY.index(code) if code in _SENSITIVITY else len(_SENSITIVITY)
-
-
 def _duplicate(code: str) -> ApiError:
     return ApiError(409, Refusal.DUPLICATE_CODE, "A mapping with this code exists.", {"code": code})
 
@@ -1431,15 +1426,14 @@ class DriftService:
         return await self._view(job, await self.repo.for_import(job.id))
 
     async def _refuse(self, resource_id: uuid.UUID, error: ApiError) -> NoReturn:
-        await record_denial(
+        await refuse(
             self.session,
             self.principal,
-            REVIEW_DRIFT,
-            "data_drift_event",
-            str(resource_id),
-            error.code,
+            error,
+            action=REVIEW_DRIFT,
+            resource_type="data_drift_event",
+            resource_id=resource_id,
         )
-        raise error
 
     async def review(
         self, event_id: uuid.UUID, outcome: DriftStatus, comment: str

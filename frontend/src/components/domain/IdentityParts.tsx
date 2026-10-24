@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
-import { MaskedValue } from '@/components/common/MaskedValue'
+import { Masked } from '@/components/common/Masked'
 import { startLoad, type Loaded } from '@/components/common/load'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -26,11 +26,7 @@ import type { InstrumentVersion } from './domain'
 export function MaturityValue({ version, testId }: { version: Pick<InstrumentVersion, 'maturity_date' | 'maturity_typed'>; testId?: string }) {
   const state = maturityState(version)
   if (state.kind === 'masked')
-    return (
-      <span data-testid={testId} data-state="masked" data-masked="true">
-        <MaskedValue value={state.value} />
-      </span>
-    )
+    return <Masked value={state.value} cell testId={testId} attrs={{ 'data-state': 'masked' }} />
   if (state.kind === 'typed')
     return (
       <span className="inline-flex flex-wrap items-center gap-2">

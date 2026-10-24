@@ -1,4 +1,6 @@
 import { ApiError, type Schemas } from '@/api/client'
+import { mayDecide } from '@/lib/maker-checker'
+import { refusalOf, type Refusal } from '@/lib/refusal'
 
 /*
  * FE-10.1/10.2: the mapping workbench's pure helpers. Every payload type comes from the
@@ -319,7 +321,7 @@ export function canSubmitVersion(v: MappingVersion, userId: string): boolean {
 
 /** The approver decides only on someone else's version in review (maker-checker). */
 export function canDecideVersion(v: MappingVersion, userId: string, mayApprove: boolean): boolean {
-  return mayApprove && v.status === 'IN_REVIEW' && v.author_user_id !== userId
+  return mayDecide({ inReview: v.status === 'IN_REVIEW', authorUserId: v.author_user_id, me: { user_id: userId }, mayApprove })
 }
 
 export const activeVersion = (m: MappingDetail): MappingVersion | undefined => m.versions.find((v) => v.status === 'ACTIVE')
@@ -385,17 +387,8 @@ export function mappingErrorTitle(err: unknown, fallback: string): string {
   return err instanceof ApiError ? ERROR_TITLES[err.envelope.code] ?? fallback : fallback
 }
 
-/** A refused request as shown inline: the backend's envelope, never reworded away. */
-export interface Refusal {
-  title: string
-  status: number | null
-  code: string
-  message: string
-  cid: string | null
-}
+/** A refused request as shown inline: the shared shape (FE-29.1), re-exported for existing imports. */
+export type { Refusal } from '@/lib/refusal'
 
-export function refusalOf(err: unknown, fallback: string): Refusal {
-  if (err instanceof ApiError)
-    return { title: mappingErrorTitle(err, fallback), status: err.status, code: err.envelope.code, message: err.envelope.message, cid: err.correlationId }
-  return { title: fallback, status: null, code: 'unexpected_error', message: 'Something went wrong.', cid: null }
-}
+/** A refused mapping request, with the mapping titles. */
+export const mappingRefusal = (err: unknown, fallback: string): Refusal => refusalOf(err, fallback, ERROR_TITLES)

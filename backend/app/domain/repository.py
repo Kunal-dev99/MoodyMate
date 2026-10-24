@@ -15,11 +15,12 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
-from sqlalchemy import Select, and_, exists, func, insert, literal, or_, select, text, update
+from sqlalchemy import Select, and_, exists, func, insert, literal, or_, select, update
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.sql.elements import ColumnElement
 
+from app.core.locks import advisory_xact_lock
 from app.db.base import Base
 from app.db.repository import ScopedRepository
 from app.domain.constants import (
@@ -120,10 +121,7 @@ class DomainRepository(ScopedRepository[DomainProjection]):
     async def lock_tenant(self) -> None:
         """Serialise projections within the tenant for this transaction, so version numbers
         of one identity are never taken twice."""
-        await self.session.execute(
-            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
-            {"key": f"domain_projection:{self.scope.tenant_id}"},
-        )
+        await advisory_xact_lock(self.session, "domain_projection", self.scope.tenant_id)
 
     async def projected_import_ids(self) -> list[uuid.UUID]:
         """The imports of the tenant that have a projection."""
@@ -567,9 +565,8 @@ class DomainRepository(ScopedRepository[DomainProjection]):
     async def lock_counterparty_ratings(self, counterparty_id: uuid.UUID) -> None:
         """Serialise the rating writes of one counterparty within the tenant for this
         transaction (so two approvals for one date cannot both find no ACTIVE version)."""
-        await self.session.execute(
-            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
-            {"key": f"obligor_rating:{counterparty_id}:{self.scope.tenant_id}"},
+        await advisory_xact_lock(
+            self.session, f"obligor_rating:{counterparty_id}", self.scope.tenant_id
         )
 
     async def rating_grades(self) -> dict[str, int]:

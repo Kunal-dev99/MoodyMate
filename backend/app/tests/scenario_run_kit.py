@@ -70,6 +70,7 @@ from app.calculations.modules.base import (
     ModuleInputs,
     PinnedRule,
 )
+from app.core.canonical import canonical_sha256
 from app.core.config import Settings
 from app.core.decimals import exact_context
 from app.main import create_app
@@ -78,7 +79,6 @@ from app.rules.constants import (
     MATURITY_BUCKETS,
     SEEDED_RULES,
 )
-from app.rules.service import canonical_sha256
 from app.tests.conftest import sql
 from app.tests.helpers import cid, events, make_snapshot, project, start_run
 from app.tests.scenario_kit import (
