@@ -203,7 +203,7 @@ These come from an architect grep over `backend/` with `\b<name>\b`. Each name m
 | Formula-like cells kept as text (CSV, JSON, XLSX) | new: `test_security.py::test_formula_like_cells_are_stored_as_text` (:94) |
 | CRLF in `Idempotency-Key` (422, nothing written); an unsafe correlation id is replaced by a fresh UUID and reaches no audit row; the Q2 `fullmatch` folds | new: `test_security.py::test_crlf_in_idempotency_key_or_correlation_id_is_refused` (:112, db) |
 | Rate limits | existing: `test_auth.py::test_missing_permission_is_403_with_a_denied_audit_event` via `_rate_limits_refuse_audit_and_switch_off` (:185-224, called at :249) |
-| Tenant and authorization boundaries | existing: `test_ws1_verification.py::test_another_tenant_sees_and_changes_nothing_here` (:436) and its foreign-vs-random list; `test_quarantine.py:121-136` (cross-tenant 404 parity). The review found no uncovered boundary, so no new function was added |
+| Tenant and authorization boundaries | existing: `test_ws1_verification.py::test_another_tenant_sees_nothing_here` and `::test_another_tenant_changes_nothing_here` (split from the old function in BE-35.5) and their foreign-vs-random list; `test_quarantine.py:121-136` (cross-tenant 404 parity). The review found no uncovered boundary, so no new function was added |
 
 ### FE-35.7 evidence
 
@@ -392,3 +392,102 @@ Files edited by the architect:
   - under Shape: "Split modules" (Q4), "Core ports" (Q3) and "Served limits" (Q5);
   - under Frontend workspaces: "Phase 35 switches" (Q21).
 - `/home/user/MoodyMate-wt/f06-p35/docs/DECISIONS.md`: unchanged, because no ruling amends a decision.
+
+## Coordinator completion (2026-10-24)
+
+Open items 1-5 above were done by coordinator-dispatched agents, each owning distinct files, then checked on the tree merged with master (Phase 33's last ticks and D-63).
+
+### BE-35.5: the splits (old hunk → new test)
+
+Every split was copied by line range, not retyped. An ast comparison of every `assert`, `pytest.raises` and kit `check_*` call in the old function against the new file shows none missing: calculations 336 → 347, domain 203 present, credit 195 present, rules 97 → 101, ws1 33 → 33. The extra asserts are setup checks in fixtures and helpers. Each new test also passes alone (`-k`).
+
+**`test_calculations.py::test_registry_snapshot_run_and_maturity_ladder`** (old :422-1800, 1379 lines) became 10 tests. The longest is 235 lines. Shared setup is in function-scoped fixtures `world`, `ran` and `all_runs`, plus the helpers `Loader`, `copy()`, `seeded_rule_versions()`, `lcr_inputs()`, `stressed_run()` and `run_ids()`.
+
+| Old lines | New test |
+|---|---|
+| :425-595 | `test_registry_seed_matches_the_code_and_the_catalogue` |
+| :597-724 | `test_modules_are_pure_exact_and_float_free` |
+| :766-852 | `test_snapshot_refusals_replay_and_content_hash` |
+| :854-1055 | `test_runs_golden_ladder_replay_and_refusals` |
+| :1056-1061 | `test_background_execution_matches_the_inline_run` |
+| :1062-1206 | `test_run_reads_manifest_contributions_and_masking` |
+| :1208-1269 | `test_scenario_runs_comparison_boundaries_and_pages` |
+| :1271-1395 | `test_rule_change_pinning_and_reruns` |
+| :1397-1588 | `test_lcr_golden_liquidity_masking_and_rule_change` |
+| :1590-1800 | `test_guards_refuse_changes_and_downgrades_round_trip_the_seed` |
+
+**`test_domain.py::test_domain_projection_catalogue_and_guards`** (old :290-1053, 763 lines) became 8 tests. The longest is 172 lines. The BE-31.3 golden checks are unchanged in strength: (a) is in the v1 test on the original links-off path, and (b) and (c) are in the typed-runs test.
+
+| Old lines | New test |
+|---|---|
+| :295-352 | `test_domain_seed_matrix_frozen_copies_and_typed_defects` |
+| :354-397 | `test_domain_projection_refusals_and_switch_off_write_nothing` |
+| :399-572 | `test_domain_v1_projection_matches_golden_and_links` |
+| :574-654 | `test_domain_instrument_catalogue_filters_masking_and_lineage` |
+| :656-766, :835-839 | `test_domain_typed_maturity_contract_and_projector_v2` |
+| :767-834 | `test_domain_typed_runs_match_v1_and_keys_turn_ambiguous` |
+| :841-966 | `test_domain_rate_terms_effective_dating_and_fx_status` |
+| :967-1053 | `test_domain_append_only_guards_and_downgrade` |
+
+**`test_credit.py::test_credit_domain_projection_snapshots_reads_and_guards`** (old :306-1016, 710 lines) became 7 tests. The longest is 143 lines.
+
+| Old lines | New test |
+|---|---|
+| :310-391 | `test_credit_seed_schemas_vocabulary_and_rating_grants` |
+| :393-524 | `test_credit_samples_project_once_with_lineage_and_links` |
+| :526-582 | `test_credit_snapshot_identity_hash_and_ambiguous_key` |
+| :584-678 | `test_credit_catalogue_reads_masking_and_lineage` |
+| :680-796 | `test_credit_rating_proposals_decisions_and_supersede` |
+| :797-883 | `test_credit_rating_reads_in_effect_and_switch` |
+| :885-1016 | `test_credit_append_only_guards_and_downgrade` (it now makes its own credit snapshot) |
+
+**`test_rules.py::test_governed_rule_changes_and_pinning`** (old :301-799, 499 lines) became 5 tests, all marked `ws3`. The longest is 201 lines.
+
+| Old lines | New test |
+|---|---|
+| :311-361 | `test_rule_reads_and_the_closed_kind_list` |
+| :363-573 | `test_rule_proposals_are_checked_for_every_parameter_kind` |
+| :589-687 | `test_rule_maker_checker_refusals_and_rejection` |
+| :576-586, :690-796 | `test_rule_activation_switch_and_pinning` |
+| :799 | `test_stress_scenarios_follow_the_governed_change_pattern` (now projects its own ladder snapshot) |
+
+**`test_ws1_verification.py::test_another_tenant_sees_and_changes_nothing_here`** (old :436-763, 328 lines) became 2 tests, both marked `ws1` and `ws3`, sharing a `cross_tenant()` helper. The route × role matrix stays one function.
+
+| Old lines | New test |
+|---|---|
+| :458-583, :751-763 | `test_another_tenant_sees_nothing_here` |
+| :586-749 | `test_another_tenant_changes_nothing_here` |
+
+**LOW 5 fixed.** `test_security.py` now includes `"c\n"` among the unsafe ids. It checks the 404 envelope's `correlation_id`, and it formats `caplog` with the app's `JsonFormatter` to assert that no sent value reaches a log line. A mutation that swaps `fullmatch` back to `match` fails it.
+
+**Counts and budget.**
+- `--collect-only`: `86 tests collected` (59 before).
+- Full suite on the merged tree: `86 passed, 1 warning in 406.14s`.
+- **The D-60 180 s budget is not met.** Each test now builds its own state, and the `db` fixture cleans before and after every test. BE-35.5 stays unticked, and a "parallel backend tests" item is added under Deferred. No test was weakened or folded back to save time.
+
+### FE-35.6: the 404 (root cause confirmed)
+
+- **Cause.** The layout's `notFound()` does run on the server; the payload holds `NEXT_HTTP_ERROR_FALLBACK;404`. But `SessionProvider` renders only its loading block in the server HTML. Next sets the 404 status only when the error surfaces during the HTML render, so the status went out as 200.
+- **Fix.** A new `src/middleware.ts`, matched only on `/advanced/stress-explorer/:segment/:path*`. A segment that is neither `new` nor a UUID (the layout's own pattern) is rewritten to the not-found page with `Cache-Control: private, no-cache, no-store`. The security headers still apply.
+- **Checks.**
+  - Status by path: `agent-demo`, `not-a-scenario` and `agent-demo/runs` give 404; a UUID, an upper-case UUID, `new` and the explorer root give 200.
+  - Playwright: `advanced-nav`, `security-headers`, `stress-explorer`, `scenario-run` and `scenario-compare` pass.
+  - A vitest pins the pattern and the static-sibling list.
+  - Recorded in ARCHITECTURE.md under Frontend workspaces.
+- **New LOW 13:** other `notFound()` calls below the session provider likely answer 200 the same way, for example `AdvancedGate` and `CompareGate` with their switches off. The page shown is right; the status isn't. No spec asserts those statuses.
+
+### Final checks (merged tree)
+- Backend:
+  - ruff `All checks passed!`;
+  - format `204 files already formatted`;
+  - mypy `Success: no issues found in 204 source files`;
+  - `openapi.json is up to date`;
+  - full suite `86 passed`.
+- Frontend:
+  - `gen:api` gives no diff;
+  - tsc clean;
+  - `No ESLint warnings or errors`;
+  - vitest `946 passed (946)`.
+- Ticked: BE-35.4 and FE-35.6. Still open: BE-35.5 (the budget).
+- D-60 was accepted by the user (D-63).
+- **For the user:** CLAUDE.md step 4 still says "under 50 tests (D-26)". Changing it to the D-60 budget is the user's call.

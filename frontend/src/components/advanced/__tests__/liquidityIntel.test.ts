@@ -143,4 +143,34 @@ describe('the explorer demo retired (FE-35.6 Done-when)', () => {
     const view = src('../ScenarioView.tsx')
     expect(view).toMatch(/state\.kind === 'not_found' && \(\s*<EmptyState icon=\{FileWarning\} title="Scenario not found"/)
   })
+
+  it('the server answers that 404 before rendering: the middleware, with the layout pattern (HTTP status)', async () => {
+    const { NextRequest } = await import('next/server')
+    const { NOT_FOUND_CACHE_CONTROL, SCENARIO_ID, STATIC_SEGMENTS, config, middleware } = await import('@/middleware')
+    // The layout's notFound() sits below the client SessionProvider, so it cannot set the status; same pattern here.
+    const [, body] = /const SCENARIO_ID = \/(.+)\/i/.exec(src('../../../app/(platform)/advanced/stress-explorer/[scenarioId]/layout.tsx')) ?? []
+    expect(SCENARIO_ID.source).toBe(body)
+    expect(SCENARIO_ID.flags).toBe('i')
+    // Every static route beside [scenarioId] passes; one added later fails here until it is listed.
+    const explorer = join(SRC, 'app', '(platform)', 'advanced', 'stress-explorer')
+    const statics = readdirSync(explorer).filter((n) => statSync(join(explorer, n)).isDirectory() && !n.startsWith('['))
+    expect([...STATIC_SEGMENTS].sort()).toEqual(statics.sort())
+    // Only the explorer's sub-paths run it.
+    expect(config).toEqual({ matcher: '/advanced/stress-explorer/:segment/:path*' })
+
+    const at = (path: string) => middleware(new NextRequest(new URL(path, 'http://localhost:3000')))
+    const uuid = '6f1c0f7e-0000-4000-8000-00000000abcd'
+    for (const ok of [uuid, uuid.toUpperCase(), `${uuid}/runs`, `${uuid}/runs/${uuid}`, `${uuid}/versions/new`, `${uuid}/versions/2/edit`, 'new']) {
+      const res = at(`/advanced/stress-explorer/${ok}`)
+      expect(res.headers.get('x-middleware-next'), ok).toBe('1')
+      expect(res.headers.get('x-middleware-rewrite'), ok).toBeNull()
+    }
+    for (const bad of [['agent', 'demo'].join('-'), 'not-a-scenario', `${['agent', 'demo'].join('-')}/runs`, `${uuid}x`, `x${uuid}`, uuid.replace(/-/g, ''), uuid.replace('a', 'g'), 'new-ish', '%20']) {
+      const res = at(`/advanced/stress-explorer/${bad}`)
+      expect(res.headers.get('x-middleware-rewrite'), bad).toBe('http://localhost:3000/_not-found')
+      expect(res.headers.get('x-middleware-next'), bad).toBeNull()
+      // Never cached, like Next's own 404 for an unmatched path.
+      expect(res.headers.get('cache-control'), bad).toBe(NOT_FOUND_CACHE_CONTROL)
+    }
+  })
 })

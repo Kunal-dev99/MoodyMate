@@ -98,6 +98,14 @@ Platform admin · Source & schema registry · Ingestion workbench · Financial d
 Calculation operations · Reconciliation & scenarios · Reports · AI assistant (optional,
 switchable off).
 
+**Frontend middleware (FE-35.6).** The frontend has one Next middleware, `src/middleware.ts`,
+matched only on `/advanced/stress-explorer/:segment/:path*`. A segment that is not `new` and not
+a UUID (the layout's own pattern) is rewritten to Next's not-found page with
+`Cache-Control: private, no-cache, no-store`, so the server answers 404 before rendering. The
+client `SessionProvider` renders only its loading block on the server, so a `notFound()` below it
+cannot set the status. The security headers still apply. A vitest pins the pattern and the
+static-sibling list to the route folders.
+
 **Phase 35 switches (D-02; Q21, auto-resolved).** Both default on; `off` restores the Phase 34
 behaviour exactly.
 - `NEXT_PUBLIC_REAUTH_UI` (FE-35.4): a 401 `token_expired` for the current token leads to one

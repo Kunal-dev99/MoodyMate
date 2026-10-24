@@ -5,13 +5,14 @@
   test_adapters.py::test_bad_files_and_limits_are_refused_with_their_own_code);
 * formula-like cells are kept as the exact text, never evaluated or rewritten;
 * CR/LF in `Idempotency-Key` is a 422 with nothing written, and an unsafe `X-Correlation-ID`
-  is never echoed into a response header (a fresh id replaces it); and no `$`-anchored
-  validator takes a trailing newline (`fullmatch`): rule enum values and bucket codes, the
-  S3 bucket and prefix settings, artifact refs.
+  is never echoed into a response header, an error body or a log record (a fresh id replaces
+  it); and no `$`-anchored validator takes a trailing newline (`fullmatch`): rule enum values
+  and bucket codes, the S3 bucket and prefix settings, artifact refs.
 """
 
 import io
 import json
+import logging
 import uuid
 import zipfile
 from pathlib import Path
@@ -23,6 +24,7 @@ from pydantic import ValidationError
 
 from app.core.artifacts import ArtifactIntegrityError, FilesystemArtifactStore
 from app.core.config import Settings
+from app.core.logging import JsonFormatter
 from app.ingestion.adapters import AdapterError, AdapterOptions, parse_upload
 from app.ingestion.adapters.base import HARD_LIMITS
 from app.ingestion.constants import SourceFormat, UploadRefusal
@@ -111,7 +113,7 @@ def test_formula_like_cells_are_stored_as_text() -> None:
 
 @pytest.mark.db
 def test_crlf_in_idempotency_key_or_correlation_id_is_refused(
-    api: TestClient, db: str, artifact_dir: Path
+    api: TestClient, db: str, artifact_dir: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     without_rate_limits(api)  # the rate limits themselves: test_auth.py (BE-28.3)
     steward = dev_token(api, "data_steward")
@@ -125,12 +127,23 @@ def test_crlf_in_idempotency_key_or_correlation_id_is_refused(
         assert "X-Injected" not in r.headers and "X-Injected" not in r.text, repr(key)
     assert sql(db, jobs)[0]["n"] == before  # nothing written
 
-    for unsafe in ("c\r\nSet-Cookie: session=x", "c\nX-Injected: 1", "c\r", "c" * 500):
-        r = api.get("/api/v1/me", headers={**steward, "X-Correlation-ID": unsafe})
-        assert r.status_code == 200, r.text
-        served = r.headers["X-Correlation-ID"]
-        assert served != unsafe and uuid.UUID(served), repr(unsafe)  # a fresh id instead
-        assert "set-cookie" not in r.headers and "X-Injected" not in r.headers
+    # Every record is formatted as the app formats it, while the request's id is set (LOW 5).
+    logging.getLogger().addHandler(caplog.handler)  # configure_logging replaced the root's
+    caplog.handler.setFormatter(JsonFormatter())
+    # "c\n" alone is the exact case `.match` let through (`$` before a trailing newline).
+    unsafe_ids = ("c\r\nSet-Cookie: session=x", "c\nX-Injected: 1", "c\r", "c\n", "c" * 500)
+    served_ids = []
+    for unsafe in unsafe_ids:
+        for path, status in (("/api/v1/me", 200), (f"{IMPORTS}/{uuid.uuid4()}", 404)):
+            r = api.get(path, headers={**steward, "X-Correlation-ID": unsafe})
+            assert r.status_code == status, r.text
+            served = r.headers["X-Correlation-ID"]
+            assert served != unsafe and uuid.UUID(served), repr(unsafe)  # a fresh id instead
+            assert "set-cookie" not in r.headers and "X-Injected" not in r.headers
+            assert unsafe not in r.text and json.dumps(unsafe)[1:-1] not in r.text, repr(unsafe)
+            if status == 404:  # the error envelope carries the fresh id, not the sent one
+                assert r.json()["correlation_id"] == served, r.text
+            served_ids.append(served)
     # The refused id reaches no audit row either: a write under it is audited by the fresh id.
     r = upload(api, steward, source, b"a\n1\n", cid="c\r\nX-Injected: 1")
     assert r.status_code == 201, r.text
@@ -143,6 +156,12 @@ def test_crlf_in_idempotency_key_or_correlation_id_is_refused(
         == 0
     )
     assert IMPORTS == "/api/v1/imports"
+    # No log record carries a sent value, raw or JSON-escaped; each request's access line
+    # carries its fresh id (so the check is not vacuous).
+    logged = caplog.text
+    assert all(f'"correlation_id": "{s}"' in logged for s in served_ids), logged[-2000:]
+    for unsafe in unsafe_ids:
+        assert unsafe not in logged and json.dumps(unsafe)[1:-1] not in logged, repr(unsafe)
 
     # Q2 ruling: a `$`-anchored pattern takes no trailing newline (`fullmatch`, not `match`).
     invalid_code = ParameterProblem.INVALID_CODE

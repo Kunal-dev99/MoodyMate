@@ -1,35 +1,37 @@
-"""Phase 16 (BE-16.1 - BE-16.3): governed rule changes and pinning across them, in one
-essential test (D-26), in four parts:
+"""Phase 16 (BE-16.1 - BE-16.3): governed rule changes and pinning across them. Split by
+D-60 (BE-35.5) from one function into five, along the lifecycle, permission and error
+boundaries; every assertion is kept:
 
-1. Reads and the closed parameter kinds (BE-16.1, BE-16.2, D-32 §1): GET /rules and GET
-   /rules/{rule_id} for every role; a parameter schema outside the allowlist cannot exist
-   (DB CHECK), and a definition whose own schema is malformed refuses every proposal (409
-   invalid_parameter_schema). For every kind (DECIMAL, INTEGER, ENUM, DAY_BUCKETS, ENUM_MAP,
-   DECIMAL_MAP) a loop proposes valid and invalid parameter sets: each valid one is a DRAFT,
-   each invalid one is 422 invalid_parameters with a value-free answer, audited DENIED, and
-   nothing is written; an unchanged result is 422 no_change. DECIMAL values are never stored
-   or returned as a JSON number.
-2. Maker-checker (BE-16.2, D-32 §3, D-34): only risk_analyst proposes and submits, only
-   approver decides (403 otherwise, audited); a DRAFT is not approved without submit (409
-   invalid_status); the author never decides on their own version, even holding
-   rule:approve (409 self_approval, audited); REJECT ends a version.
-3. Activation (BE-16.2): APPROVE makes the bucket version ACTIVE and SUPERSEDES the previous
-   one in the same transaction (same xmin), leaving exactly one ACTIVE version; a version
-   proposed from the superseded one is then stale (409 stale_version).
-   RULE_CHANGE_ENABLED=false answers 409 rule_change_disabled to the three writes, audited,
-   with nothing written, while reads and runs keep working.
-4. Pinning (BE-16.3): a run submitted after the approval pins the new version in a new
-   rule_set and gives another result_sha256; the old run's rows are unchanged; a re-run of
-   the old run (rerun_of) repeats its pins, manifest_sha256 and result_sha256; GET
-   /rules/{rule_id} lists the runs that pin each version.
-5. Stress scenarios (Phase 24, BE-24.1 - BE-24.4; D-44, D-47), the same governed-change
-   pattern: templates and static validation, exploration confirmation, maker-checker
-   promotion, the 0026 triggers and the SCENARIOS_ENABLED switch (app/tests/scenario_kit.py).
-
-Phase 30 (BE-30.2, D-56), folded into part 1 (+0, validation_kit): GET /calculation-modules
-shows validation_status ILLUSTRATIVE on every module version, PLANNED included, for every
-role; MODULE_VALIDATION covers every module_version row; a non-ILLUSTRATIVE ValidationRecord
-without an approver, approved_on and evidence_ref raises.
+1. `test_rule_reads_and_the_closed_kind_list` (BE-16.1, BE-16.2, D-32 §1): GET /rules and GET
+   /rules/{rule_id} for every role; a parameter schema outside the allowlist cannot exist (DB
+   CHECK) or pass check_schema. Phase 30 (BE-30.2, D-56, validation_kit): GET
+   /calculation-modules shows validation_status ILLUSTRATIVE on every module version, PLANNED
+   included, for every role; MODULE_VALIDATION covers every module_version row; a
+   non-ILLUSTRATIVE ValidationRecord without an approver, approved_on and evidence_ref raises.
+2. `test_rule_proposals_are_checked_for_every_parameter_kind` (BE-16.2): for every kind
+   (DECIMAL, INTEGER, ENUM, DAY_BUCKETS, ENUM_MAP, DECIMAL_MAP) a loop proposes valid and
+   invalid parameter sets: each valid one is a DRAFT, each invalid one is 422
+   invalid_parameters with a value-free answer, audited DENIED, and nothing is written; an
+   unchanged result is 422 no_change. DECIMAL values are never stored or returned as a JSON
+   number. A definition whose own schema is malformed refuses every proposal (409
+   invalid_parameter_schema).
+3. `test_rule_maker_checker_refusals_and_rejection` (BE-16.2, D-32 §3, D-34): only
+   risk_analyst proposes and submits, only approver decides (403 otherwise, audited); a DRAFT
+   is not approved without submit (409 invalid_status); the author never decides on their own
+   version, even holding rule:approve (409 self_approval, audited); REJECT ends a version.
+4. `test_rule_activation_switch_and_pinning` (BE-16.2, BE-16.3): APPROVE makes the bucket
+   version ACTIVE and SUPERSEDES the previous one in the same transaction (same xmin), leaving
+   exactly one ACTIVE version; a version proposed from the superseded one is then stale (409
+   stale_version). RULE_CHANGE_ENABLED=false answers 409 rule_change_disabled to the three
+   writes, audited, with nothing written, while reads and runs keep working. A run submitted
+   after the approval pins the new version in a new rule_set and gives another result_sha256;
+   the old run's rows are unchanged; a re-run of the old run (rerun_of) repeats its pins,
+   manifest_sha256 and result_sha256; GET /rules/{rule_id} lists the runs that pin each
+   version.
+5. `test_stress_scenarios_follow_the_governed_change_pattern` (Phase 24, BE-24.1 - BE-24.4;
+   D-44, D-47), the same governed-change pattern: templates and static validation,
+   exploration confirmation, maker-checker promotion, the 0026 triggers and the
+   SCENARIOS_ENABLED switch (app/tests/scenario_kit.py).
 """
 
 import json
@@ -297,17 +299,67 @@ def pinned(run: dict[str, Any], code: str) -> dict[str, Any]:
     return dict(member)
 
 
-@pytest.mark.ws3
-def test_governed_rule_changes_and_pinning(api: TestClient, db: str, artifact_dir: Path) -> None:
-    analyst = dev_token(api, "risk_analyst")
-    approver = dev_token(api, "approver")
-    steward = dev_token(api, "data_steward")
-    tokens = {role: dev_token(api, role) for role in ROLES}
-    analyst_id = api.get("/api/v1/me", headers=analyst).json()["user_id"]
-    # Holds rule:propose and rule:approve: only maker-checker stops self-approval.
-    both = token_for(db, "maker-and-checker", ("risk_analyst", "approver"))
+# The DAY_BUCKETS proposal made from v1, which the activation of NEW_BUCKETS leaves stale.
+STALE_BUCKETS = [bucket("B01", 0, 30), bucket("B02", 30, 365), bucket("B03", 365, None)]
+# Test definitions for the kinds Phase 17 seeds: code, parameter schema, ACTIVE v1 parameters.
+TEST_KIND_RULES: dict[ParameterKind, tuple[str, dict[str, Any], dict[str, Any]]] = {
+    ParameterKind.DECIMAL: (
+        "test_run_off",
+        {"kind": "DECIMAL", "min": "0", "max": "1", "scale": 2, "unit": "ratio"},
+        {"value": "0.10"},
+    ),
+    ParameterKind.INTEGER: (
+        "test_horizon",
+        {"kind": "INTEGER", "min": 1, "max": 365},
+        {"value": 30},
+    ),
+    ParameterKind.DECIMAL_MAP: (
+        "test_haircuts",
+        {
+            "kind": "DECIMAL_MAP",
+            "key_vocabulary": "instrument_type",
+            "min": "0",
+            "max": "1",
+            "scale": 2,
+        },
+        {"map": {"BOND": "0.00", "LOAN": "0.50"}},
+    ),
+}
 
-    # --- 1. Reads and the closed parameter kinds (BE-16.1, BE-16.2) ----------------------------
+
+def insert_kind_rule(db: str, kind: ParameterKind) -> str:
+    """The test definition of this kind (TEST_KIND_RULES), with an ACTIVE v1."""
+    code, schema, parameters = TEST_KIND_RULES[kind]
+    return insert_rule(db, code, schema, parameters)
+
+
+def both_roles(db: str) -> dict[str, str]:
+    """Holds rule:propose and rule:approve: only maker-checker stops self-approval."""
+    return token_for(db, "maker-and-checker", ("risk_analyst", "approver"))
+
+
+def propose_draft(
+    api: TestClient, headers: dict[str, str], route: str, patch: Any
+) -> dict[str, Any]:
+    """A DRAFT proposed on a rule's versions route, from its ACTIVE version."""
+    r = api.post(
+        route,
+        json={"parameters_patch": patch, "change_summary": "Proposed from the ACTIVE version"},
+        headers=headers,
+    )
+    assert r.status_code == 201 and r.json()["status"] == "DRAFT", r.text
+    return dict(r.json())
+
+
+# --- 1. Reads and the closed parameter kinds (BE-16.1, BE-16.2) ----------------------------------
+
+
+@pytest.mark.ws3
+def test_rule_reads_and_the_closed_kind_list(api: TestClient, db: str) -> None:
+    """GET /rules and GET /rules/{rule_id} for every role (D-56 validation status folded in);
+    no expression kind can be stored (DB CHECK) or pass check_schema."""
+    analyst = dev_token(api, "risk_analyst")
+    tokens = {role: dev_token(api, role) for role in ROLES}
     for role, headers in tokens.items():
         r = api.get(RULES, headers=headers)
         assert r.status_code == 200, (role, r.text)
@@ -360,33 +412,25 @@ def test_governed_rule_changes_and_pinning(api: TestClient, db: str, artifact_di
         assert SENTINEL not in repr(problems)
     assert [p.code for p in check_schema({"kind": "EXPRESSION"})] == ["unknown_kind"]
 
+
+@pytest.mark.ws3
+def test_rule_proposals_are_checked_for_every_parameter_kind(api: TestClient, db: str) -> None:
+    """For every kind of the allowlist: each valid patch is a DRAFT; each invalid one is 422
+    invalid_parameters, value-free, audited DENIED, with nothing written; an unchanged result
+    is 422 no_change; a DECIMAL is never stored or returned as a JSON number. A definition
+    whose own schema is malformed refuses every proposal (409 invalid_parameter_schema)."""
+    analyst = dev_token(api, "risk_analyst")
+    approver = dev_token(api, "approver")
+    analyst_id = api.get("/api/v1/me", headers=analyst).json()["user_id"]
+    rule_ids = {code: rule_id_of(db, code) for code in SEEDED_RULES}
+
     # One rule per kind, each with an ACTIVE v1: the seeded ENUM, DAY_BUCKETS and ENUM_MAP
     # rules, and test definitions for the kinds Phase 17 seeds (DECIMAL, INTEGER, DECIMAL_MAP).
     kind_rules = {
         ParameterKind.ENUM: rule_ids[PAST_DUE_TREATMENT],
-        ParameterKind.DAY_BUCKETS: buckets_id,
+        ParameterKind.DAY_BUCKETS: rule_ids[MATURITY_BUCKETS],
         ParameterKind.ENUM_MAP: rule_ids[CASHFLOW_DIRECTION],
-        ParameterKind.DECIMAL: insert_rule(
-            db,
-            "test_run_off",
-            {"kind": "DECIMAL", "min": "0", "max": "1", "scale": 2, "unit": "ratio"},
-            {"value": "0.10"},
-        ),
-        ParameterKind.INTEGER: insert_rule(
-            db, "test_horizon", {"kind": "INTEGER", "min": 1, "max": 365}, {"value": 30}
-        ),
-        ParameterKind.DECIMAL_MAP: insert_rule(
-            db,
-            "test_haircuts",
-            {
-                "kind": "DECIMAL_MAP",
-                "key_vocabulary": "instrument_type",
-                "min": "0",
-                "max": "1",
-                "scale": 2,
-            },
-            {"map": {"BOND": "0.00", "LOAN": "0.50"}},
-        ),
+        **{kind: insert_kind_rule(db, kind) for kind in TEST_KIND_RULES},
     }
     assert set(kind_rules) == set(ParameterKind)  # every kind of the allowlist is exercised
     gap = [bucket("B01", 0, 1), bucket("B02", 2, 7), bucket("B03", 7, None)]
@@ -440,7 +484,7 @@ def test_governed_rule_changes_and_pinning(api: TestClient, db: str, artifact_di
             {"value": "EXCLUDE_WITH_WARNING"},
         ),
         ParameterKind.DAY_BUCKETS: (
-            [{"buckets": [bucket("B01", 0, 30), bucket("B02", 30, 365), bucket("B03", 365, None)]}],
+            [{"buckets": STALE_BUCKETS}],
             [
                 {"buckets": gap},
                 {"buckets": overlap},
@@ -572,25 +616,26 @@ def test_governed_rule_changes_and_pinning(api: TestClient, db: str, artifact_di
     assert (r.status_code, r.json().get("code")) == (409, "invalid_parameter_schema"), r.text
     assert_denied(db, c, "invalid_parameter_schema", "rule.propose")
 
-    # --- 2. Maker-checker (BE-16.2, D-32 §3, D-34) ---------------------------------------------
-    snapshot_id = ladder_snapshot(api, db, steward, approver, analyst)
-    body = {
-        "dataset_snapshot_id": snapshot_id,
-        "module_version_id": module_version_id(api, analyst),
-        "reporting_date": REPORTING.isoformat(),
-    }
-    r = start_run(api, analyst, body)
-    assert r.status_code == 201, r.text
-    old = no_float(r.text)
-    assert pinned(old, MATURITY_BUCKETS)["version"] == 1 and count(db, "rule_set") == 1
-    old_rows = run_rows_sha256(db, old["run_id"])
 
-    stale = drafts[ParameterKind.DAY_BUCKETS]  # proposed from v1 in part 1
+# --- 2. Maker-checker (BE-16.2, D-32 §3, D-34) ---------------------------------------------------
+
+
+@pytest.mark.ws3
+def test_rule_maker_checker_refusals_and_rejection(api: TestClient, db: str) -> None:
+    """Only risk_analyst proposes and submits, only approver decides (403 otherwise, audited);
+    a DRAFT is not approved without submit (409 invalid_status); only the author submits (409
+    not_author); the author never decides on their own version, even holding rule:approve
+    (409 self_approval, audited); REJECT ends a version."""
+    analyst = dev_token(api, "risk_analyst")
+    approver = dev_token(api, "approver")
+    tokens = {role: dev_token(api, role) for role in ROLES}
+    analyst_id = api.get("/api/v1/me", headers=analyst).json()["user_id"]
+    both = both_roles(db)
     proposal = {
         "parameters_patch": {"buckets": NEW_BUCKETS},
         "change_summary": "Coarser buckets for the review",
     }
-    route = f"{RULES}/{buckets_id}/versions"
+    route = f"{RULES}/{rule_id_of(db, MATURITY_BUCKETS)}/versions"
     # Only rule:propose proposes and submits; only rule:approve decides. Each 403 is audited.
     for role in ("platform_admin", "auditor", "data_steward", "approver"):
         c = cid()
@@ -648,12 +693,9 @@ def test_governed_rule_changes_and_pinning(api: TestClient, db: str, artifact_di
     ] == NEW_BUCKETS  # fmt: skip
     r = api.post(f"{version}/submit", json={}, headers=analyst)
     assert (r.status_code, r.json().get("code")) == (409, "invalid_status"), r.text
-    # The stale DRAFT (proposed from v1) goes to review too; it is decided in part 3.
-    r = api.post(f"{route}/{stale['version']}/submit", json={}, headers=analyst)
-    assert r.status_code == 200 and r.json()["status"] == "IN_REVIEW", r.text
 
     # Self-approval: the author holds rule:approve too, and is still refused (audited).
-    past_due = f"{RULES}/{rule_ids[PAST_DUE_TREATMENT]}/versions"
+    past_due = f"{RULES}/{rule_id_of(db, PAST_DUE_TREATMENT)}/versions"
     own = api.post(
         past_due,
         json={"parameters_patch": {"value": "INCLUDE_IN_FIRST_BUCKET"}, "change_summary": "Own"},
@@ -686,6 +728,60 @@ def test_governed_rule_changes_and_pinning(api: TestClient, db: str, artifact_di
     r = api.post(f"{own_version}/approval", json=decide, headers=approver)
     assert (r.status_code, r.json().get("code")) == (409, "invalid_status"), r.text
 
+
+# --- 3. Activation and the switch, 4. pinning across the change (BE-16.2, BE-16.3) ---------------
+
+
+@pytest.mark.ws3
+def test_rule_activation_switch_and_pinning(api: TestClient, db: str, artifact_dir: Path) -> None:
+    """APPROVE makes the bucket version ACTIVE and SUPERSEDES v1 in one transaction, leaving
+    one ACTIVE version, and a DRAFT proposed from v1 is then stale (409 stale_version).
+    RULE_CHANGE_ENABLED=false answers 409 rule_change_disabled to the three writes, audited,
+    nothing written, while reads and runs keep working. A run after the approval pins the new
+    version in a new rule_set with another result_sha256; the old run's rows are unchanged; a
+    re-run repeats the old pins and hashes; GET /rules/{rule_id} lists each version's runs."""
+    analyst = dev_token(api, "risk_analyst")
+    approver = dev_token(api, "approver")
+    steward = dev_token(api, "data_steward")
+    auditor = dev_token(api, "auditor")
+    buckets_id = rule_id_of(db, MATURITY_BUCKETS)
+    route = f"{RULES}/{buckets_id}/versions"
+    # Drafts from v1: the bucket proposal that goes stale, and the INTEGER test rule's v2 (the
+    # submit refused under the switch).
+    stale = propose_draft(api, analyst, route, {"buckets": STALE_BUCKETS})
+    integer_rule = insert_kind_rule(db, ParameterKind.INTEGER)
+    assert (
+        propose_draft(api, analyst, f"{RULES}/{integer_rule}/versions", {"value": 45})["version"]
+        == 2
+    )
+
+    snapshot_id = ladder_snapshot(api, db, steward, approver, analyst)
+    body = {
+        "dataset_snapshot_id": snapshot_id,
+        "module_version_id": module_version_id(api, analyst),
+        "reporting_date": REPORTING.isoformat(),
+    }
+    r = start_run(api, analyst, body)
+    assert r.status_code == 201, r.text
+    old = no_float(r.text)
+    assert pinned(old, MATURITY_BUCKETS)["version"] == 1 and count(db, "rule_set") == 1
+    old_rows = run_rows_sha256(db, old["run_id"])
+
+    proposal = {
+        "parameters_patch": {"buckets": NEW_BUCKETS},
+        "change_summary": "Coarser buckets for the review",
+    }
+    r = api.post(route, json=proposal, headers=analyst)
+    assert r.status_code == 201, r.text
+    new = no_float(r.text)
+    version = f"{route}/{new['version']}"
+    decide = {"decision": "APPROVE", "comment": "Reviewed against the policy"}
+    r = api.post(f"{version}/submit", json={"comment": "Ready"}, headers=analyst)
+    assert r.status_code == 200 and r.json()["status"] == "IN_REVIEW", r.text
+    # The stale DRAFT (proposed from v1) goes to review too; it is decided below.
+    r = api.post(f"{route}/{stale['version']}/submit", json={}, headers=analyst)
+    assert r.status_code == 200 and r.json()["status"] == "IN_REVIEW", r.text
+
     # --- 3. Activation, and the switch (BE-16.2) -----------------------------------------------
     off = Settings(
         ENV="test", DATABASE_URL=db, ARTIFACT_STORE_DIR=artifact_dir, RULE_CHANGE_ENABLED=False
@@ -694,10 +790,9 @@ def test_governed_rule_changes_and_pinning(api: TestClient, db: str, artifact_di
         before = versions_state(db)
         writes: tuple[tuple[str, str, dict[str, Any], dict[str, str]], ...] = (
             ("rule.propose", route, proposal, analyst),
-            ("rule.submit", f"{RULES}/{kind_rules[ParameterKind.INTEGER]}/versions/2/submit", {},
-             analyst),
+            ("rule.submit", f"{RULES}/{integer_rule}/versions/2/submit", {}, analyst),
             ("rule.approve", f"{version}/approval", decide, approver),
-        )  # fmt: skip
+        )
         for action, path, payload, headers in writes:
             c = cid()
             r = frozen.post(path, json=payload, headers={**headers, "X-Correlation-ID": c})
@@ -782,7 +877,7 @@ def test_governed_rule_changes_and_pinning(api: TestClient, db: str, artifact_di
     assert (r.status_code, r.json().get("code")) == (404, "not_found"), r.text
 
     # GET /rules/{rule_id}: each version lists the runs that pin it.
-    detail = no_float(api.get(f"{RULES}/{buckets_id}", headers=tokens["auditor"]).text)
+    detail = no_float(api.get(f"{RULES}/{buckets_id}", headers=auditor).text)
     shown = {v["version"]: v for v in detail["versions"]}
     assert detail["active_version"] == new["version"]
     assert detail["active_rule_version_id"] == new["rule_version_id"]
@@ -795,5 +890,17 @@ def test_governed_rule_changes_and_pinning(api: TestClient, db: str, artifact_di
     assert shown[new["version"]]["approved_by"] == approved["approved_by"]
     assert shown[stale["version"]]["status"] == "IN_REVIEW"
 
-    # --- 5. Stress scenarios (Phase 24, BE-24.1 - BE-24.4) -------------------------------------
-    check_scenarios(api, db, artifact_dir, tokens, both)
+
+# --- 5. Stress scenarios (Phase 24, BE-24.1 - BE-24.4) -------------------------------------------
+
+
+@pytest.mark.ws3
+def test_stress_scenarios_follow_the_governed_change_pattern(
+    api: TestClient, db: str, artifact_dir: Path
+) -> None:
+    """Templates and static validation, exploration confirmation, maker-checker promotion,
+    the 0026 triggers and the SCENARIOS_ENABLED switch (app/tests/scenario_kit.py)."""
+    tokens = {role: dev_token(api, role) for role in ROLES}
+    # The selectors name the ladder fixture's instruments (R-LOAN, R-DEP): project them first.
+    ladder_snapshot(api, db, tokens["data_steward"], tokens["approver"], tokens["risk_analyst"])
+    check_scenarios(api, db, artifact_dir, tokens, both_roles(db))

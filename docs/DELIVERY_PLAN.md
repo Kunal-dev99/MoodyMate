@@ -4755,13 +4755,14 @@ API contracts and financial results do not change.
     (`rules/constants.py:337`), `SCENARIO_BOUNDS` (`orchestration/constants.py:213`),
     `limits_from` (`ingestion/imports.py:99`). Small-int caching limits what `is` alone shows;
     the container identity, field-set and boundary checks cover that (report LOW 1).
-- [ ] **BE-35.4** Remove dead backend helpers, each one confirmed unused (dynamic use
+- [x] **BE-35.4** Remove dead backend helpers, each one confirmed unused (dynamic use
   included).
   - *Done-when:* the list and its grep evidence are in the report, and the suite is green.
-  - *Not yet ticked (2026-10-24):* the list of nine removals, their grep evidence and the
+  - *Ticked 2026-10-24 (coordinator); note at build time:* the list of nine removals, their grep evidence and the
     "kept" table (Q6) are in `docs/evidence/phase-35/REPORT.md`; an architect grep finds no
-    remaining reference to any of the nine. **Missing:** a green suite. The full backend suite
+    remaining reference to any of the nine. **Was missing at build time:** a green suite. The full backend suite
     has not run, and `test_import_graph_and_size_bounds` fails until BE-35.5 lands.
+    **Closed:** the full suite on the merged tree is green: `86 passed, 1 warning in 406.14s`, `test_import_graph_and_size_bounds` included.
 - [ ] **BE-35.5** D-60: split the oversized test functions by calculation boundaries,
   permissions, lifecycle and errors. Parametrise only for isolated cases.
   - *Done-when:*
@@ -4779,6 +4780,17 @@ API contracts and financial results do not change.
     `--durations` run of the full suite within 180 s, and the old-hunk → new-test mapping. Per
     Q8 this is a separate test-writer run (or runs, each owning distinct files) inside Phase
     35, before the PR merges.
+  - *Status 2026-10-24 (coordinator), still not ticked:* three of the four Done-when items hold.
+    - The five functions are split into 32 focused tests, and the longest is 235 lines
+      (`test_import_graph_and_size_bounds` passes).
+    - `--collect-only`: `86 tests collected` (59 before the splits).
+    - The old-hunk → new-test mapping is in `docs/evidence/phase-35/REPORT.md`, and an ast
+      comparison shows every old assertion still present.
+    - **Not met:** the 180 s budget. The full suite on the merged tree gives
+      `86 passed, 1 warning in 406.14s` locally (CI's figure is in the PR run). The splits cost
+      time because each test now builds its own state, and the `db` fixture cleans before and
+      after every test. Meeting the budget is the deferred item "parallel backend tests"
+      below; no test was weakened or folded back to save time.
 - [x] **BE-35.6** OIDC/JWKS tests (`test_auth.py`) using `httpx.MockTransport` and no network:
   - key rotation (an unknown `kid` refetches once; a removed key is refused);
   - `alg: none` and HS256-with-the-public-key are refused;
@@ -4881,19 +4893,20 @@ API contracts and financial results do not change.
     `route-gates.test.ts (90 tests)` passed; full vitest `945 passed`. The gate is cosmetic and
     the API stays authoritative (D-04; the imports/mappings divergence is recorded in the
     report, Q22).
-- [ ] **FE-35.6** Retire the Agent demo (route, components, tests and links). Liquidity
+- [x] **FE-35.6** Retire the Agent demo (route, components, tests and links). Liquidity
   Intelligence stays, labelled.
   - *Done-when:*
     - `/advanced/stress-explorer/agent-demo` gives 404 (Playwright);
     - no reference remains (grep).
-  - *Not yet ticked (2026-10-24):* the grep half holds (`grep -rniE "agent[-_ ]?demo"
-    frontend/src` exit 1; in `frontend/e2e` only the 404 check itself). **Missing:** the 404.
+  - *Ticked 2026-10-24 (coordinator); note at build time:* the grep half holds (`grep -rniE "agent[-_ ]?demo"
+    frontend/src` exit 1; in `frontend/e2e` only the 404 check itself). **Was missing at build time:** the 404.
     `e2e/advanced-nav.spec.ts:52` fails, `Expected: 404 Received: 200`, in both e2e runs; curl
     gives 200 for `agent-demo`, `not-a-scenario` and a well-formed UUID under the explorer. The
     page shown is Next's not-found page, but the status is 200: the `notFound()` in
     `[scenarioId]/layout.tsx:14` is not reached while the server renders the HTML (reported
     cause: `SessionProvider` renders only its loading block on the server). The spec is not
     to be weakened.
+    **Closed:** `src/middleware.ts` (matched on `/advanced/stress-explorer/:segment/:path*`) rewrites a non-UUID, non-`new` segment to Next's not-found page with no-store caching, before rendering. curl: `agent-demo`, `not-a-scenario` and `agent-demo/runs` give 404 with the security headers; a UUID, an upper-case UUID, `<uuid>/runs`, `new` and the explorer root give 200. `e2e/advanced-nav.spec.ts` and `security-headers.spec.ts` pass (`3 passed`), and the explorer, scenario-run and scenario-compare specs pass (`8 passed`); vitest pins the pattern and the static-sibling list (`946 passed`). The grep half still holds.
 - [x] **FE-35.7** Remove dead frontend helpers, each one confirmed unused.
   - *Done-when:* the list is in the report, and vitest is green.
   - *Evidence (2026-10-24, architect-verified):* the removed list, how "unused" was confirmed,
@@ -4918,12 +4931,19 @@ API contracts and financial results do not change.
     `export_openapi --check` → `openapi.json is up to date`.
 
 *Test budget:* 49 → the recorded D-60 count. *(2026-10-24: 59 collected before BE-35.5; the
-recorded count is the post-split `--collect-only` figure, Q7.)*
+recorded count is the post-split `--collect-only` figure, Q7.)* *(Recorded 2026-10-24: **86** collected after BE-35.5.)*
 *Reversibility:* refactors keep `openapi.json` and every hash unchanged; `config/limits` is
 additive; the demo removal is reverted from git. *(2026-10-24, Q21:)* `NEXT_PUBLIC_REAUTH_UI=off`
 and `NEXT_PUBLIC_ROUTE_GATES_UI=off` restore the Phase 34 behaviour.
 
 ### Deferred (out of scope for Feature 06)
+
+- **Parallel backend tests (D-60 §2 budget, added 2026-10-24).** The suite is 406 s locally
+  after the BE-35.5 splits; D-60 asks for at most 180 s in CI. Two steps get there:
+  - `pytest-xdist` with one test database per worker (created from the migrated template);
+  - removing the `db` fixture's duplicate clean (the teardown repeats the next setup's clean,
+    about 0.75 s per test).
+  BE-35.5 is ticked once a CI `--durations` run shows the budget met.
 
 - A **shared rate-limit store**, Postgres- or Redis-backed. It is needed before more than one
   API instance runs (D-53 §5). The compose `prod` profile runs one instance.

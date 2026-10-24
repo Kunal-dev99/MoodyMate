@@ -2,7 +2,7 @@
 API boundary cases, folded into existing test functions (D-26, the Phase 30 test budget:
 49 -> 49).
 
-- `check_module_validation` (rules fold, `test_rules.py::test_governed_rule_changes_and_pinning`,
+- `check_module_validation` (rules fold, `test_rules.py::test_rule_reads_and_the_closed_kind_list`,
   BE-30.2): GET /calculation-modules shows ILLUSTRATIVE on every module version, PLANNED
   included, for every role; `MODULE_VALIDATION` covers every module_version row; a
   non-ILLUSTRATIVE `ValidationRecord` without an approver, `approved_on` and `evidence_ref`

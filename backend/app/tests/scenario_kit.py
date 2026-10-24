@@ -1,7 +1,7 @@
 """Phase 24 (BE-24.1 - BE-24.4; D-44, D-47): the stress-scenario checks, folded into existing
 test functions (D-26, the Feature 05 test budget: +0 tests).
 
-`check_scenarios` is part 5 of `test_rules.py::test_governed_rule_changes_and_pinning` (the
+`check_scenarios` is `test_rules.py::test_stress_scenarios_follow_the_governed_change_pattern` (the
 governed-change pattern):
 
 1. Templates (BE-24.2): GET scenario-templates lists exactly the three templates with their
@@ -638,7 +638,7 @@ def check_scenarios(
     tokens: dict[str, dict[str, str]],
     both: dict[str, str],
 ) -> None:
-    """Part 5 of test_governed_rule_changes_and_pinning (Phase 24)."""
+    """test_stress_scenarios_follow_the_governed_change_pattern (Phase 24)."""
     analyst, approver = tokens["risk_analyst"], tokens["approver"]
     check_templates(api, tokens)
     check_validation(api, db, analyst)
