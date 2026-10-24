@@ -3696,3 +3696,692 @@ docs, fixtures, a script, a marker and tests are added.
 4. **For the client before production** (they do not block the build): self-confirmed
    exploration in production; a committee or ALM role for promotion; production use of an
    external LLM (D-49 §5); the D-46 differencing residual risk.
+
+---
+
+## Feature 06: MVP Hardening (v1 → v2)
+
+Source: the user's hardening plan (`docs/design/hardening-plan-v2.md`, added by the Feature 06
+planning change). Phases 28–35. Migrations from 0030. Phases 28–35 below; decisions D-52–D-62.
+
+### Phase 28 — Security and demo credibility (Workstream A, P0)
+
+- [ ] **FE-28.1** Upgrade `next` 14.2.35 → **15.5.28** (the first release fixing the critical
+  RCE advisories GHSA-2464-fhr4-w9xw, GHSA-2xp9-vwfh-vxw4, GHSA-p293-qw3h-jr36, all ≤15.5.27),
+  `react`/`react-dom` → 19, matching `@types/*` and `eslint-config-next`. Migrate Next 15
+  breaking changes (async `params`/`searchParams` in server pages and layouts; `useParams` in
+  client components unchanged). Done when: `npm ci`, typecheck, lint, vitest, `next build` and
+  the full Playwright suite pass; `npm audit --omit=dev` shows no critical.
+- [ ] **FE-28.2** `docs/security/ADVISORIES.md`: every remaining advisory after FE-28.1 with
+  severity, package path, exposure (runtime vs build-time), mitigation, owner and review date.
+  Done when the file matches `npm audit --omit=dev --json` exactly.
+- [ ] **BE-28.1** CI dependency scanning: a `frontend` step `npm audit --omit=dev
+  --audit-level=high` that fails unless every finding is listed in an allowlist
+  (`frontend/audit-allowlist.json`, GHSA ids + expiry); a `backend` step running `pip-audit`
+  (new dev dependency) against the installed environment. Done when both steps run in CI and a
+  deliberately unlisted advisory id would fail (unit-tested allowlist checker script).
+- [ ] **FE-28.3** Production-build guard: `next build` with `NODE_ENV=production` fails with a
+  clear message when `NEXT_PUBLIC_API_BASE_URL` is unset (CI and e2e set it); dev keeps
+  `http://localhost:8000`. Done when a vitest/unit check covers the guard function.
+- [ ] **FE-28.4** Demo credibility (D-02 unaffected; demo pages only):
+  - Agent demo (`components/advanced/AgentDemo.tsx`, `agentDemo.ts`): remove "Exact decimal
+    arithmetic" and every "verified"/"re-running reproduces it exactly" claim; call the hash an
+    "illustrative checksum (not a SHA-256 result fingerprint)"; banner "Illustrative mock:
+    browser arithmetic on synthetic data, not the calculation engine"; zero guard on any ratio.
+  - Liquidity Intelligence (`LiquidityIntel.tsx`, `liquidityIntel.ts`): remove hard-coded
+    "verified" fingerprints and checks; derive the "LCR fell … pp" text from the computed
+    values; relabel the run-off column "Illustrative run-off (not applied)" and state that
+    deposit outflows are balances in this mock; `calculate` returns `lcr: null` when net
+    outflows ≤ 0 and the UI shows "not computable"; same banner.
+  - Done when vitest covers: zero denominator → null/"not computable", no "verified"/"exact"
+    strings remain in either page (grep test), derived movement text equals computed values.
+- [ ] **BE-28.2** Security headers middleware: `X-Content-Type-Options: nosniff`,
+  `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Cross-Origin-Opener-Policy:
+  same-origin`, `Strict-Transport-Security` only when ENV is staging/production. Done when a
+  test asserts the headers on `/api/v1/health` and that HSTS is absent in ENV=test.
+- [ ] **FE-28.5** Next.js `headers()`: CSP in **Report-Only** (default-src 'self'; connect-src
+  'self' + the API origin; frame-ancestors 'none'; …), `X-Frame-Options: DENY`, nosniff,
+  Referrer-Policy. Enforcing CSP in production is a client decision (hard stop). Done when the
+  build serves the headers (Playwright header assertion on one page).
+- [ ] **BE-28.3** Rate limits: in-process per-principal, per-route token bucket on
+  `POST /imports`, `POST /imports/{id}/validate`, `GET /scenarios/{id}/versions/{v}/validation`,
+  `POST /calculation-runs`, `POST /scenarios/{id}/run`. Settings `RATE_LIMIT_ENABLED` (default on;
+  off allowed only in local/test), per-route capacity/refill with conservative defaults; 429
+  `rate_limited` with `Retry-After`; each refusal audited DENIED. Per-process until a shared store
+  exists (Phase 33). Done when a test exhausts a bucket and asserts 429 + Retry-After + the audit
+  row, and ARCHITECTURE.md documents the limits. Test budget: fold into existing test functions
+  (D-26: suite stays at 49).
+
+### Feature 06 overview (planning change, 2026-10-24)
+
+Status: **PROPOSED.** Phase 28 is building from the brief above (copied verbatim from the
+`f06-p28` worktree). Nothing is ticked. Decisions D-52…D-62 are proposed (Feature 06); D-52
+records the hashing policy, D-53…D-55 the Phase 28 policies, D-56…D-62 the later phases.
+- **No D-01 exception:** only new tables (0030, 0031); no CHECK widened; no stored hash
+  rewritten; no domain row updated.
+- **No role or permission change:** new routes use existing permissions, `authenticated`, or
+  the public health paths (D-62). Metrics are on an internal listener, not the public API.
+- **Phases 21–23, 26 and 27** (planned, not built) are untouched by this plan.
+
+| Phase | Workstream (user plan §) | Migration | Switch (D-02) |
+|---|---|---|---|
+| 28 | A security, demo credibility (§5) | none | `RATE_LIMIT_ENABLED` (headers and the upgrade are reverted from git) |
+| 29 | B canonical hashing, shared helpers (§6) | none | none (code only; hashes byte-identical) |
+| 30 | C methodology transparency, implementable part (§7) | none | none (labels always on) |
+| 31 | D1 typed maturity, legal entity, identity links (§8) | 0030 | `INSTRUMENT_PROJECTOR_V2_ENABLED`, `IDENTITY_LINKS_ENABLED`, `NEXT_PUBLIC_DOMAIN_LINKS_UI` |
+| 32 | D2 rate terms, effective dating, lifecycle, currency/FX reference (§8) | 0031 | `INSTRUMENT_TERMS_PROJECTION_ENABLED`, `NEXT_PUBLIC_INSTRUMENT_TERMS_UI` |
+| 33 | E background execution, data scale (§9) | none | `CALC_EXECUTION_MODE=inline`, `ARTIFACT_STORE_KIND=filesystem` |
+| 34 | G deployment, observability (§11) | none | `METRICS_ENABLED` (default off), `ACCESS_LOG_ENABLED` |
+| 35 | F maintainability + G test items (§10, §11) | none | n/a (refactor; contracts unchanged) |
+
+**Dependencies.** 28 first. 29 and 30 in parallel after 28. 31 after 28, then 32 after 31.
+33 after 29. 34 after 33. 35 last.
+- Phase 33 edits run execution in `calculations/service.py`, as BE-21.2 does. If Phase 21 is
+  built first, the coordinator hands that conflict to the Phase 33 backend engineer.
+- Phase 35 splits `calculations/service.py` and `ingestion/service.py`. Run it after any
+  in-flight Phase 21–23/26–27 work merges, or re-apply the split on top.
+- New hash sites added in Phases 30–32 call `app.core.canonical` (Phase 29). If Phase 29 has not
+  merged yet, they call `app.rules.service.canonical_sha256`, which has the same bytes (D-52 §1).
+
+**Pre-plan findings** (branch `claude/modest-johnson-owigil`, 2026-10-24):
+- **Hash sites (D-52).**
+  - `ensure_ascii=False`, sorted, compact: `rules/service.py:87` (used by calculations and
+    orchestration), `mapping/service.py:149`, `orchestration/scenario_templates.py:369`,
+    `ingestion/service.py:514, 1639, 1930`.
+  - Default `ensure_ascii=True`, sorted, compact: `ingestion/service.py:134` (source contract),
+    `:505` (import fingerprint), `:1112` (import manifest), `:1819` (profile rules), and
+    `governance/service.py:396` (schema contract).
+  - Default separators, unsorted list: `ingestion/service.py:1926` (`business_key_sha256`,
+    stored) and `mapping/service.py:354` (in memory).
+  - Frozen copies sit in migrations 0007, 0011, 0015, 0018, 0020 and 0022.
+  - Schema field names are ASCII by pattern (`governance/schemas.py:203`). Contract column
+    names, control-total keys, units and descriptions are not proven ASCII.
+- **Duplicates.**
+  - Backend: `most_sensitive` ×3 (`calculations/service.py:165`, `reconciliation/service.py:54`,
+    `domain/service.py:260`); `_refuse` in 8 services; `pg_advisory_xact_lock` in 5
+    repositories; `Idempotency-Key` declared in 3 routers; decimal regexes in 6 places.
+  - Frontend: `commentProblem` ×4; `newIdempotencyKey` (`components/ingestion/imports.ts:134`);
+    `Refusal` (`components/ingestion/mappings.ts:389`); 14 `*StatusPill` components.
+- **Schema registry (D-57).**
+  - The seeded `instrument` v2 DRAFT is the BE-4.3/FE-4.2 **diff fixture**
+    (`0007_schema_seed.py:70-86`). Besides typing maturity as DATE and moving interest_rate to
+    scale 6, it removes `legacy_book_code`, makes `product_family` required and adds
+    `rating_category`. `e2e/smoke.spec.ts:44-47` asserts that diff.
+  - A proposal always creates version `max + 1` (`governance/repository.py:313`), so the
+    seeded DRAFT itself cannot be published through the existing path.
+  - Approval DEPRECATES the base version (`governance/service.py:941`). Under D-18 §4, the v1
+    mappings then stop working for new imports.
+- **Projector.** `PROJECTOR_VERSION = 1`. Specs match schema versions by number only
+  (`domain/constants.py:170, 209-218`). Positions, cash flows and credit exposures carry text
+  keys (`instrument_key`, `legal_entity_ref`, `counterparty_key`; :242-330). There is no
+  `legal_entity`, `currency` or FX table.
+- **Runs.**
+  - Runs are synchronous (D-31 §3). A stale RUNNING run is closed FAILED `ENGINE_ERROR` on
+    replay (`core/config.py:114-116`).
+  - `create_async_engine` has no pool settings (`db/session.py:24`).
+  - `ArtifactStore` has one filesystem implementation (`core/artifacts.py:58`).
+  - BE-25.3 asserts the manifest and result-document key sets exactly, so every new label
+    must go outside the hashed documents.
+- **Module registry.** `module_version` is immutable and carries `provisional`/`illustrative`
+  (`rules/models.py:66-110`). The LCR returns a `None` ratio with `LCR_DENOMINATOR_ZERO`
+  (`modules/lcr_hqla.py:37-39`).
+- **Auth.** `PUBLIC_PATHS` holds `/api/v1/health` (`core/auth.py:32-39`; adding to it "is a
+  security decision"). `AUTHENTICATED` is a declared requirement (:41).
+- **Frontend cycle.** `components/calculations/StressedRunBadge.tsx:3-4` imports
+  `components/advanced/*`, and `advanced/*` imports `calculations/*`.
+- **Tests and migrations.** There are **49** backend test functions (D-26). The head is
+  `0027`. 0024/0025 and 0028/0029 are reserved.
+
+### Endpoints and permissions (Phases 29–35; all under `/api/v1`)
+
+| Endpoint | Permission | Phase |
+|---|---|---|
+| module registry, run list/detail, result reads, comparison: + `validation_status`, + `context` (additive) | unchanged | 30 |
+| `GET legal-entities`, `GET legal-entities/{id}` | `domain:read` | 31 |
+| `GET identity-links?source_kind=&source_id=` | `domain:read` | 31 |
+| `POST identity-links/reconcile` (idempotent, audited `identity_link.reconcile`) | `domain:project` | 31 |
+| `GET currencies`, `GET fx/consolidation-status` | `domain:read` | 32 |
+| `POST calculation-runs`, `POST scenarios/{id}/run` with `Prefer: respond-async` → 202 | `calc:run` (unchanged) | 33 |
+| every capped list: + `has_more`, `next_cursor` (additive; `total` kept) | unchanged | 33 |
+| `GET health/live`, `GET health/ready` | public (`PUBLIC_PATHS`, D-62) | 34 |
+| `GET /metrics` on the internal metrics listener only | none on the public API (D-62 §2) | 34 |
+| `GET config/limits` | `authenticated` | 35 |
+
+There is no new permission and no role or clearance change. FX observations have no write route.
+
+### Test budget (D-26, then D-60)
+
+Phases 28–34 stay at **49** by folding. Each fold is its own small hunk. Hypothesis properties
+are inner `@given` functions called from an existing test.
+
+| Area | Folded into |
+|---|---|
+| golden and legacy hashes, `HASH_SITES`, decimal and canonical properties | `test_validation.py::test_engine_fixtures_invariant_and_no_floats` |
+| schema contract hash vs its frozen copy | `test_schema_registry.py::test_active_contracts_and_decided_proposals_are_immutable` |
+| re-run hashes unchanged, overlay properties, validation_status, context, API boundary cases, executor, async, timeout, pagination, bounded perf check | `test_calculations.py::test_registry_snapshot_run_and_maturity_ladder` |
+| out-of-scale import refused | `test_validation.py::test_validate_statuses_issues_and_identical_payloads` |
+| typed maturity, projector v2/v3, links, legal entities, terms, effective dating, FX blocked | `test_domain.py::test_domain_projection_catalogue_and_guards` |
+| credit-exposure links | `test_credit.py::test_credit_domain_projection_snapshots_reads_and_guards` |
+| S3 adapter | `test_artifacts.py::test_artifact_store_is_write_once_and_detects_tampering` |
+| settings guards (pool, workers, store, metrics) | `test_config.py::test_settings_fail_closed` |
+| health, metrics, error hook | `test_config.py::test_responses_carry_the_envelope_correlation_id_and_data_class` |
+| access log redaction | `test_config.py::test_logs_never_carry_tokens_or_secrets` |
+| route × role matrix, isolation, audit completeness, 0030/0031 round trip | the four `test_ws1_verification.py` functions |
+| trigger list matches `docs/ops/TRIGGERS.md`; import-graph cycle check | `test_committed_artifacts.py::test_migrations_are_additive_and_reversible` |
+
+| Phase | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 |
+|---|---|---|---|---|---|---|---|---|
+| Count after | 49 | 49 | 49 | 49 | 49 | 49 | 49 | per D-60 (recorded) |
+
+### Migrations (pre-numbered; re-chained at merge, CLAUDE.md step 6)
+
+| Rev | Phase | Content | Downgrade refuses while |
+|---|---|---|---|
+| 0030 | 31 | `legal_entity`, `domain_identity_link` (append-only, same-tenant triggers) | any row exists |
+| 0031 | 32 | `instrument_term_version`, `instrument_term_vocabulary` (tagged seed `0031_term_vocabulary`, PROVISIONAL), `currency` (tagged seed `0031_currencies`), `fx_rate_observation` (append-only, empty) | any non-seed row exists |
+
+Neither migration alters an existing table or carries `D01_EXCEPTION`.
+
+### Phase 29 — Canonical hashing and shared helpers (Workstream B; DG-03, FC-07, FC-08)
+
+Goal: one hashing implementation with a documented policy, no stored hash changed, and the shared
+helpers moved into core and `src/lib`. OpenAPI does not change.
+
+- [ ] **BE-29.1** `app/core/canonical.py` (D-52): `canonical_json`, `canonical_sha256`, and the
+  named `legacy_ascii_sha256` and `legacy_key_sha256`. Every production site in the findings
+  calls it, and the migrations' frozen copies stay as they are.
+  - *Done-when:*
+    - a grep fold finds no `json.dumps` feeding `hashlib` outside `app/core/canonical.py` and
+      `app/db/migrations/`;
+    - golden hex values hold for an ASCII and a non-ASCII payload;
+    - for ASCII payloads, canonical == legacy_ascii;
+    - `Decimal("1.10")` serialises as `"1.10"`, and float and NaN are refused;
+    - the re-run in `test_calculations.py` reproduces `manifest_sha256` and `result_sha256`;
+    - the stored contract, manifest and fingerprint hashes in the fixture DB re-verify.
+- [ ] **BE-29.2** The `HASH_SITES` registry lists each record kind with its policy
+  (CANONICAL | LEGACY_ASCII | LEGACY_KEY) and the reason (D-52 §3).
+  - *Done-when:*
+    - for every kind moved from ASCII to CANONICAL, the fold shows the API refuses a non-ASCII
+      component of its payload (422), which proves the class is ASCII-only; otherwise the kind
+      is LEGACY_ASCII;
+    - every LEGACY kind's stored rows still verify;
+    - the diff has no UPDATE of a `*_sha256` column.
+- [ ] **BE-29.3** Core helpers:
+  - `core/decimals.py` `parse_decimal_text`: one regex family with named profiles (`STRICT`
+    for API and rules; `SOURCE` keeps the ingestion leniency of today); it refuses over-scale
+    input and never rounds;
+  - `core/classification.py`: one `most_sensitive` (an unknown code gives the most restrictive
+    level) and one masking path;
+  - `core/refusals.py` `refuse(...)`, which audits DENIED and raises;
+  - `core/locks.py` `advisory_xact_lock`;
+  - `core/idempotency.py`: the `Idempotency-Key` dependency.
+  - *Done-when:*
+    - greps find one definition each;
+    - `export_openapi --check` shows no diff;
+    - the WS1 audit-completeness test passes unchanged;
+    - the full suite gives 49 passed.
+- [ ] **BE-29.4** `hypothesis` (new dev dependency), with properties folded in (`derandomize=True`
+  and a fixed `max_examples`):
+  - decimal round trip, and over-scale refused;
+  - canonical serialisation is idempotent and independent of key order;
+  - overlay conservation per currency and direction, deterministic part ids, and no negative
+    part.
+  - *Done-when:* the folds pass, and the suite time rises by no more than 10 s (`--durations`
+    in the report).
+- [ ] **FE-29.1** `src/lib`: `newIdempotencyKey`, `Refusal`/`refusalOf`, one `commentProblem`
+  (with a `required` option) and `dateProblem` (a real ISO calendar date).
+  - *Done-when:* a grep finds one definition each, and the existing vitests pass unchanged.
+- [ ] **FE-29.2** One `<Masked>` value component, one generic `StatusPill` (each of the 14
+  becomes a thin enum → variant map), and a shared maker-checker gate (holds the permission and
+  is not the author).
+  - *Done-when:*
+    - one vitest loop checks that every pill map covers its `openapi.json` enum exactly;
+    - no masked literal is rendered outside `<Masked>` (grep);
+    - Playwright CI is green.
+
+*Test budget:* 49 → 49.
+*Reversibility:* code only, with no migration and no contract change. Hashes are byte-identical
+either way (BE-29.1/29.2), so reverting the commit restores the old helpers.
+
+### Phase 30 — Methodology transparency (Workstream C, implementable part; FC-03, FC-04, FC-07)
+
+Goal: every module documented from the code as built, every output labelled with its validation
+status and context, and the API boundary cases tested. No methodology is invented or changed.
+The methodology items in D-56 §6 are client hard stops, not tasks.
+
+- [ ] **BE-30.1** `docs/methodology/{maturity_ladder,lcr_hqla,scenario_overlay}.md`. Each has
+  these headings: intended use, status, formula, units, inputs, exclusions and warnings,
+  assumptions (each seeded rule), rounding, limitations, open client decisions. Each cites
+  file:line and rule codes.
+  - *Done-when:*
+    - the headings are present (grep);
+    - the parameters equal the seeds in 0018/0020 (architect check);
+    - "compliant", "certified" and "Moody's" appear only inside the D-35 negating statement.
+- [ ] **BE-30.2** `validation_status` (D-56): a code constant `MODULE_VALIDATION` per (module
+  code, version), all ILLUSTRATIVE. A non-ILLUSTRATIVE `ValidationRecord` without an approver,
+  `approved_on` and `evidence_ref` fails at import. It is exposed in the module registry, run
+  list and detail, result reads and comparison, in the response wrapper only.
+  - *Done-when:*
+    - the rules fold sees ILLUSTRATIVE on every module version, PLANNED included;
+    - an unapproved validated record raises;
+    - the calculations fold confirms the manifest and result-document key sets are the
+      Feature 03 sets, and a re-run of a run made before this phase reproduces both hashes.
+- [ ] **BE-30.3** A `context` block on every result read (run detail, maturity ladder, LCR,
+  comparison): `units`, `currency`, `as_of_date` (`reporting_date`), `methodology` (module
+  code and version, engine version, rule versions), `validation_status` and `statement`. It is
+  built from the pins, never computed.
+  - *Done-when:* the calculations fold checks that the block equals the run's pins on all four
+    reads.
+- [ ] **BE-30.4** API boundary cases, folded in with hand-computed values labelled
+  `ENGINEERING — awaiting domain-expert approval`:
+  - an LCR ratio tie on each side of ROUND_HALF_EVEN;
+  - inflows exactly at the 75% cap, and one minor unit above;
+  - zero net outflows give JSON `ratio: null` with `LCR_DENOMINATOR_ZERO`;
+  - `999999999999999999.99` stays exact through the ladder;
+  - a 3-dp `amount` is held at validation and never rounded.
+  - *Done-when:* the five assertions pass. If the code disagrees, the engineer reports it; no
+    formula is changed to pass (user plan §16).
+- [ ] **FE-30.1** `ValidationStatusBadge` ("Illustrative — not validated") and a "Result
+  context" panel on the module registry, the runs, the ladder, the LCR and the comparison.
+  - *Done-when:*
+    - a vitest checks that the badge map covers the enum;
+    - a Playwright fold on a run detail sees the badge and the as-of date.
+
+*Test budget:* 49 → 49.
+*Reversibility:* additive response fields and docs only. Hashed documents are unchanged. Labels
+have no switch, as D-35 §3 statements have none.
+
+### Phase 31 — Typed maturity, legal entities and identity links (Workstream D part 1; FC-01, FC-02, DG-05)
+
+Goal: an instrument's maturity is typed and projected through a governed new schema version and
+projector v2. Positions, cash flows and credit exposures resolve to identities through
+append-only links. v1 behaviour is unchanged.
+
+- [ ] **BE-31.1** Migration 0030: `legal_entity` (a stable UUID per tenant, source system and
+  code; `provisional`; append-only) and `domain_identity_link` (D-58 §2; append-only;
+  same-tenant triggers on both ends).
+  - *Done-when:*
+    - the round trip passes in the WS1 migration test;
+    - UPDATE, DELETE and TRUNCATE are refused;
+    - the downgrade refuses while rows exist;
+    - the existing domain table shapes are byte-for-byte unchanged (the frozen-copy check, as
+      in BE-25.1).
+- [ ] **BE-31.2** Typed-maturity contract `INSTRUMENT_TYPED_MATURITY` (D-57 option B): v1 with
+  `maturity_date` DATE and `interest_rate` (11,6). Its hash is frozen in code. It is published
+  only through the governed proposal path, never by migration or the default seed. A
+  `seed_demo.py --publish-typed-instrument` flag is opt-in.
+  - *Done-when:* the domain fold:
+    - proposes the contract, sees impact BREAKING with the mapping dependency, and has a second
+      person approve it;
+    - finds the new version ACTIVE (`max + 1`) and v1 DEPRECATED;
+    - finds the seeded v2 DRAFT's `content_sha256` unchanged;
+    - and the e2e smoke diff still passes.
+- [ ] **BE-31.3** Projector v2 (D-57 §2). The instrument spec is matched by **contract hash**.
+  v1 imports use the frozen v1 spec (`projector_version` 1), typed imports record 2, and an
+  unknown hash gives `projection_unsupported`. `INSTRUMENT_PROJECTOR_V2_ENABLED` switches it.
+  - *Done-when:* the domain fold shows:
+    - a v1 import's summary and every `payload_sha256` equal a golden taken before the phase,
+      with `TYPE_NOT_PROJECTED` still counted;
+    - `2030-06-30` projects as a DATE and reads back as the same ISO text;
+    - `2030-02-30`, `2030-13-01` and `n/a` are held by validation and never projected;
+    - a missing maturity gives NULL and is counted;
+    - `interest_rate` keeps 6 dp exactly;
+    - the same version number with a different hash gives `projection_unsupported`;
+    - switched off, it gives `projection_unsupported`, audited DENIED;
+    - a ladder run over a typed-instrument snapshot gives the same `result_sha256` as over the
+      v1 one.
+- [ ] **BE-31.4** Identity links (D-58). The projection step links its own rows, and
+  `POST identity-links/reconcile` links historical rows. Exactly one identity in the tenant
+  gives a link. Zero or several give no link and are counted (`LINK_UNRESOLVED`,
+  `LINK_AMBIGUOUS`). Runs do not read links.
+  - *Done-when:* the domain and credit folds show:
+    - each fixture position, cash flow and exposure resolves to its expected id;
+    - a second reconcile writes nothing and returns equal counts;
+    - an ambiguous key (two source systems) and an unresolved key are counted;
+    - a fixture run's `result_sha256` is equal before and after reconcile;
+    - the WS1 matrix, isolation and audit tests list the routes.
+- [ ] **BE-31.5** `GET legal-entities`, `GET legal-entities/{id}` and `GET identity-links`,
+  the `openapi.json` export, `docs/RETENTION.md` rows, and `docs/DOMAIN_IDENTITY.md` (how
+  historical text keys are reconciled, D-58 §5).
+  - *Done-when:*
+    - the drift check passes;
+    - the WS1 matrix gives 200 for `domain:read` holders and 403 for the others;
+    - another tenant's id gives 404;
+    - the docs are present (grep).
+- [ ] **FE-31.1** (owner of `navigation.ts`/`features.ts`, behind `NEXT_PUBLIC_DOMAIN_LINKS_UI`)
+  - the instrument detail shows a typed maturity, or "Not stated (schema v1 free text)";
+  - the position, cash-flow and exposure details show the linked identity, or "Unresolved
+    (text key)";
+  - a Legal entities list appears under Domain.
+  - *Done-when:*
+    - vitests cover the three states;
+    - a Playwright fold shows a typed instrument with its maturity and a v1 instrument showing
+      "Not stated";
+    - with the switch off, the Phase 30 nav returns.
+
+*Test budget:* 49 → 49.
+*Reversibility:*
+- The 0030 downgrade refuses while rows exist.
+- `INSTRUMENT_PROJECTOR_V2_ENABLED=false` returns typed imports to `projection_unsupported`.
+- `IDENTITY_LINKS_ENABLED=false` gives 409 `identity_links_disabled` (audited) and no new links.
+- Publication is reversed only by a further governed proposal (D-57 §5).
+
+### Phase 32 — Rate terms, effective dating, lifecycle and currency/FX reference (Workstream D part 2; FC-01, FC-02, FC-08)
+
+Goal: fixed and floating rate terms, business-effective dates and a lifecycle state are typed. A
+currency reference and an FX observation store exist, and FX consolidation is explicitly
+blocked. There is no conversion code.
+
+- [ ] **BE-32.1** Migration 0031 (D-61): `instrument_term_version` (one row per
+  `instrument_version`, append-only), `instrument_term_vocabulary` (RATE_TYPE, DAY_COUNT,
+  FREQUENCY and LIFECYCLE_STATE seeded PROVISIONAL; no reference indices seeded), `currency`
+  (the codes the synthetic samples use, PROVISIONAL), and `fx_rate_observation` (append-only,
+  no write route).
+  - *Done-when:*
+    - the round trip passes;
+    - UPDATE, DELETE and TRUNCATE are refused;
+    - the downgrade refuses while non-seed rows exist;
+    - every seed row is tagged;
+    - existing shapes are unchanged.
+- [ ] **BE-32.2** `INSTRUMENT_RATE_TERMS` contract: the typed-maturity contract plus optional
+  `rate_type`, `reference_index`, `spread` (11,6), `reset_frequency`, `next_reset_date`,
+  `cap_rate`, `floor_rate`, `day_count`, `payment_frequency`, `effective_from` and
+  `lifecycle_state`. It is published as in D-57 §3, and projector v3 matches it by hash.
+  - *Done-when:* the domain fold shows:
+    - a fixed loan (FIXED, 7.250000, ACT_365F, P3M) and a floating loan (index, spread, P3M
+      reset, next reset, cap and floor) project with every term typed;
+    - FIXED with an index, FLOATING with no reset, and floor > cap write no term row and count
+      `TERMS_INCONSISTENT`, while the `instrument_version` is still written;
+    - an unknown vocabulary value is kept as text and counted `UNKNOWN_VALUE`;
+    - the BE-31.3 goldens still hold.
+- [ ] **BE-32.3** Effective dating: reads show `effective_from` (the business date) and
+  `imported_at` side by side. An optional `?effective_on=` read picks by business date, not by
+  import order. Snapshots and runs are unchanged (D-30).
+  - *Done-when:* the domain fold covers a later import with an earlier `effective_from`, and
+    the snapshot pins are unchanged.
+- [ ] **BE-32.4** `GET currencies` and `GET fx/consolidation-status`, which answers
+  `{status: "BLOCKED", reason_code: "fx_policy_not_approved", observation_count}`. The
+  result-read `context` gains `consolidation: "BLOCKED"`. Then the `openapi.json` export and
+  `RETENTION.md` rows.
+  - *Done-when:*
+    - the WS1 matrix lists both routes;
+    - there is no write route for FX (route-list grep);
+    - there is no conversion arithmetic in `app/calculations/` (grep);
+    - the drift check passes.
+- [ ] **FE-32.1** (`NEXT_PUBLIC_INSTRUMENT_TERMS_UI`) A contract-terms panel with PROVISIONAL
+  badges, a versions table with "Effective from" and "Imported at", and on the ladder and LCR
+  pages the notice "Per-currency results only; FX consolidation is blocked until an approved
+  rate source and conversion policy exist".
+  - *Done-when:*
+    - vitests cover fixed, floating, absent and unknown terms;
+    - a Playwright fold shows the notice on an LCR run.
+
+*Test budget:* 49 → 49.
+*Reversibility:*
+- The 0031 downgrade refuses while non-seed rows exist.
+- `INSTRUMENT_TERMS_PROJECTION_ENABLED=false` returns rate-terms imports to
+  `projection_unsupported`.
+- Nothing calculates from currency or FX.
+
+### Phase 33 — Background execution and data scale (Workstream E; RO-01, RO-07, FC-04)
+
+Goal: module execution runs off the event loop in a bounded process pool with the same contract
+and hashes. Lists say when they are truncated. Artifacts can live in S3-compatible storage. The
+supported size is measured.
+
+- [ ] **BE-33.1** `calculations/executor.py` (D-59 §1): a bounded `ProcessPoolExecutor`
+  (`CALC_WORKERS`, `CALC_WORKER_QUEUE_MAX`). The pure `run()` executes in a worker, and DB
+  work stays in-process. `CALC_EXECUTION_MODE=inline|pool`. A full queue gives 503
+  `workers_busy` (retryable, `Retry-After`, audited DENIED, no run).
+  - *Done-when:* the calculations fold shows:
+    - inline and pool give equal `manifest_sha256` and `result_sha256` (scenario k + 1 runs
+      included);
+    - `GET /api/v1/health` answers within 200 ms while a slow test module runs;
+    - a full queue gives 503;
+    - a worker crash gives FAILED `ENGINE_ERROR`.
+- [ ] **BE-33.2** `Prefer: respond-async` gives 202 with RUNNING, `Location` and
+  `Preference-Applied`. Without the header, the status code and body keys are unchanged. QUEUED
+  stays reserved.
+  - *Done-when:*
+    - without the header, the response equals Phase 32's;
+    - with the header, polling reaches SUCCEEDED with the sync `result_sha256`;
+    - a replay returns the same run.
+- [ ] **BE-33.3** `CALC_RUN_TIMEOUT_SECONDS` (below `CALC_RUN_STALE_SECONDS`): a run that
+  exceeds it has its worker replaced and ends FAILED `ENGINE_ERROR`. A periodic sweeper closes
+  stale RUNNING runs. A retry is a new key and a new run, and a failed run is never mutated.
+  - *Done-when:* the fold covers the timeout, the sweeper and the retry: the retry gives the
+    expected hash, the old key's replay returns FAILED, and no run gets two terminal moves.
+- [ ] **BE-33.4** DB pool settings (`DB_POOL_SIZE`, `DB_MAX_OVERFLOW`, `DB_POOL_TIMEOUT_SECONDS`,
+  `DB_POOL_RECYCLE_SECONDS`; SQLAlchemy defaults) and `DB_STATEMENT_TIMEOUT_MS`, validated at
+  startup. An exhausted pool gives 503 `db_pool_exhausted`.
+  - *Done-when:*
+    - the settings fold refuses values of 0 or below;
+    - `SHOW statement_timeout` equals the setting;
+    - with pool 1, overflow 0 and timeout 1, the request gets 503 and does not hang.
+- [ ] **BE-33.5** Pagination (D-59 §6): every capped list adds `has_more` and a tenant-bound
+  opaque `next_cursor`. The engineer's inventory of capped reads (about 17 `le=` sites, plus
+  any internal caps) goes in the report.
+  - *Done-when:*
+    - one loop over the inventory: 3 rows with `limit=2` give `has_more`, then the cursor gives
+      the 3rd row;
+    - a foreign or tampered cursor gives 400 `invalid_cursor`;
+    - the OpenAPI diff is additive only.
+- [ ] **BE-33.6** `S3ArtifactStore` behind `ArtifactStore` (`ARTIFACT_STORE_KIND`, default
+  `filesystem`). It is content-addressed and write-once, verifies on every read, and never
+  deletes. Its settings are required outside local/test (D-13). The client library and the
+  test fake are recorded in D-59.
+  - *Done-when:*
+    - the existing artifact test loops over both stores;
+    - credentials never appear in logs (log fold).
+- [ ] **BE-33.7** `scripts/perf_run.py` runs deterministic synthetic sets of 10k and 100k cash
+  flows and records duration, peak RSS (inline and pool) and health p95 during a run. The
+  output goes to `docs/evidence/phase-33/perf.json`. `docs/PERFORMANCE.md` states the
+  supported size and concurrency.
+  - *Done-when:*
+    - both files exist;
+    - a 5,000-flow fold stays under ceilings set at 3× the measured values;
+    - multi-instance needs are listed: the shared rate-limit store, and S3.
+- [ ] **FE-33.1** Every capped list shows "Showing n of total" and a next control (`next_cursor`).
+  Async runs poll, with backoff up to 5 s. `workers_busy` and `rate_limited` show their retry
+  time from `Retry-After`.
+  - *Done-when:*
+    - vitests cover polling, both refusals and the list helper;
+    - a Playwright test sees a run reach SUCCEEDED by polling.
+
+*Test budget:* 49 → 49.
+*Reversibility:*
+- `CALC_EXECUTION_MODE=inline` restores in-loop execution. Without `Prefer`, the contract is
+  unchanged.
+- The pagination fields are additive. The pool defaults are SQLAlchemy's.
+- `ARTIFACT_STORE_KIND=filesystem` is the default.
+
+### Phase 34 — Deployment and observability (Workstream G; DG-04, DG-06)
+
+Goal: a locked, repeatable build from a clean checkout; structured logs; metrics; distinct
+liveness and readiness; and operating docs.
+
+- [ ] **BE-34.1** A `uv` lockfile (`backend/uv.lock`). CI runs `uv sync --frozen --extra dev`,
+  and pip-audit reads the lock.
+  - *Done-when:* the CI install is frozen, and a deliberate pyproject/lock mismatch fails
+    (evidence in the report).
+- [ ] **BE-34.2** `backend/Dockerfile` (multi-stage, non-root, locked dependencies,
+  `--proxy-headers` with `FORWARDED_ALLOW_IPS`) and `frontend/Dockerfile` (standalone,
+  non-root, `NEXT_PUBLIC_API_BASE_URL` as a required build arg). `docker-compose.yml` gets a
+  `prod` profile with a one-shot `alembic upgrade head`, and `.env.production.example` holds
+  placeholders only.
+  - *Done-when:*
+    - a CI job builds both images from a clean checkout;
+    - compose `prod` reaches `/health/ready` 200 and frontend `/` 200;
+    - `alembic current` is the head;
+    - the images run as non-root;
+    - no secret is in an image (grep of `docker history`).
+- [ ] **BE-34.3** A structured JSON access log (`ACCESS_LOG_ENABLED`): correlation id, method,
+  route template, status and duration. It never carries a query, body, header or token.
+  - *Done-when:* the log fold shows a request with a bearer token, a sentinel query and a
+    sentinel body gives one line with those fields and no sentinel, and the correlation id
+    equals the response header.
+- [ ] **BE-34.4** Prometheus metrics (D-62 §2; `prometheus-client`) on an internal listener
+  (`METRICS_ENABLED`, default off; optional `METRICS_TOKEN`). The series cover request latency
+  and errors, run duration and status, worker queue and busy, import failures by reason code,
+  DB pool use and process memory. No tenant, principal or id label is used.
+  - *Done-when:*
+    - the public app gives 404 for `/metrics`;
+    - the series appear after a run and a failed import;
+    - no UUID appears in the output;
+    - the token is enforced when set.
+- [ ] **BE-34.5** `GET health/live` (no I/O) and `GET health/ready` (DB within 2 s, migration
+  head, artifact store, workers) give 200 or 503 with value-free check names. Both are added to
+  `PUBLIC_PATHS` (D-62 §1).
+  - *Done-when:*
+    - with the DB down, live gives 200 and ready gives 503 `database: fail`;
+    - a head mismatch gives 503;
+    - no DSN, host or version string appears;
+    - the auth test's public-path set equals D-62's.
+- [ ] **BE-34.6** Error-tracker hook: `report_exception(exc, correlation_id)` defaults to a
+  no-op behind `ERROR_TRACKER_DSN`. No vendor SDK is added (hard stop).
+  - *Done-when:* a fake reporter receives only the correlation id and the exception class, and
+    no vendor import exists (grep).
+- [ ] **BE-34.7** `docs/ops/`: `BACKUP_RESTORE.md` (DB plus artifact store, with re-hash
+  verification and RPO/RTO placeholders), `MIGRATIONS.md`, `INCIDENT_RESPONSE.md`,
+  `TRIGGERS.md` (every trigger by migration) and `API_COMPATIBILITY.md` (D-62 §6). Retention
+  enforcement points to `RETENTION.md`, which stays PROVISIONAL.
+  - *Done-when:*
+    - the `TRIGGERS.md` list equals the parsed `CREATE TRIGGER` set (committed-artifacts fold);
+    - a restore has been exercised on a scratch DB copy, with the commands and output in
+      `docs/evidence/phase-34/REPORT.md`.
+- [ ] **FE-34.1** `output: 'standalone'`, and a CI step proves that the image build fails without
+  the API base-URL arg.
+  - *Done-when:* the CI log shows the expected failure exit and a successful build with the arg.
+
+*Test budget:* 49 → 49.
+*Reversibility:* metrics are off by default; the health routes are additive;
+`ACCESS_LOG_ENABLED=false` restores the previous logs; the lockfile and Docker files are build
+artifacts only.
+
+### Phase 35 — Maintainability and test isolation (Workstream F, plus G's test items; DG-02, FC-07)
+
+Goal: no targeted cycles, smaller services and pages, limits served by the API, a tested re-auth
+path, consistent UI gates, the Agent demo retired, and the test suite restructured under D-60.
+API contracts and financial results do not change.
+
+- [ ] **BE-35.1** Break the calculations ↔ orchestration and core ↔ governance cycles. For
+  example, `core/auth.py:28-29` imports governance; that moves to core interfaces.
+  - *Done-when:* the committed-artifacts fold builds the `app/` import graph (ast) and finds no
+    cycle among the four packages, and `app.core` imports only `app.db`.
+- [ ] **BE-35.2** Split `calculations/service.py` (snapshots, runs, execution, results,
+  queries) and `ingestion/service.py` (contracts, uploads, profiling, validation, manifests).
+  `service.py` re-exports for one release.
+  - *Done-when:*
+    - no file in either package is over 800 lines;
+    - `export_openapi --check` shows no diff;
+    - every golden and re-run hash is unchanged.
+- [ ] **BE-35.3** `GET config/limits` (`authenticated`) serves the rule, scenario and upload
+  limits from the validators' own objects.
+  - *Done-when:*
+    - the WS1 matrix gives 200 for every role and 401 without a token;
+    - the values are the validator objects (an identity check);
+    - lowering `IMPORT_MAX_ROWS` changes the response.
+- [ ] **BE-35.4** Remove dead backend helpers, each one confirmed unused (dynamic use
+  included).
+  - *Done-when:* the list and its grep evidence are in the report, and the suite is green.
+- [ ] **BE-35.5** D-60: split the oversized test functions by calculation boundaries,
+  permissions, lifecycle and errors. Parametrise only for isolated cases.
+  - *Done-when:*
+    - `--collect-only` gives a count, recorded;
+    - no test function is over 300 lines (ast check);
+    - the suite runs within D-60's budget (`--durations`);
+    - an old-hunk → new-test mapping is in the report (architect spot-check).
+- [ ] **BE-35.6** OIDC/JWKS tests (`test_auth.py`) using `httpx.MockTransport` and no network:
+  - key rotation (an unknown `kid` refetches once; a removed key is refused);
+  - `alg: none` and HS256-with-the-public-key are refused;
+  - `exp`/`nbf` leeway;
+  - wrong issuer and wrong audience;
+  - a missing `kid`;
+  - JWKS down gives `ProviderUnavailable`;
+  - malformed tokens.
+  - *Done-when:* the focused functions pass.
+- [ ] **BE-35.7** Security tests:
+  - upload bombs and malformed archives;
+  - formula-like cells stored as text;
+  - CRLF in `Idempotency-Key` or the correlation id refused;
+  - rate limits;
+  - tenant and authorization boundaries not already covered by WS1.
+  - *Done-when:* the functions are listed in the report and pass.
+- [ ] **FE-35.1** Move `approvalVariant`, `memberLabel`, `scenarioHref`, `runHref` and
+  `hasResults` into `src/lib/runs.ts`, which breaks the calculations ↔ advanced cycle.
+  - *Done-when:* a vitest import-graph check finds no cycle.
+- [ ] **FE-35.2** Split the mapping workbench (`ingestion/mappings/[mappingId]/page.tsx`) and
+  `ComparisonView.tsx` into components and hooks.
+  - *Done-when:* no file is over 300 lines, and the existing vitests and Playwright specs pass
+    unchanged.
+- [ ] **FE-35.3** Read the limits from `GET config/limits`.
+  - *Done-when:* a grep finds none of the bound literals in `src/components`, and the editor
+    vitests use the served values.
+- [ ] **FE-35.4** Re-auth: OIDC silent renew where the IdP allows it; otherwise one redirect on
+  401 `token_expired` that keeps the route; in dev, back to persona sign-in.
+  - *Done-when:*
+    - a vitest shows one redirect and no loop;
+    - a Playwright test with a short dev TTL re-authenticates and returns to the route.
+- [ ] **FE-35.5** Every `(platform)` route is gated by its nav permission, including
+  `/advanced/*`.
+  - *Done-when:* a vitest enumerates the route files and asserts each one is gated.
+- [ ] **FE-35.6** Retire the Agent demo (route, components, tests and links). Liquidity
+  Intelligence stays, labelled.
+  - *Done-when:*
+    - `/advanced/stress-explorer/agent-demo` gives 404 (Playwright);
+    - no reference remains (grep).
+- [ ] **FE-35.7** Remove dead frontend helpers, each one confirmed unused.
+  - *Done-when:* the list is in the report, and vitest is green.
+
+*Test budget:* 49 → the recorded D-60 count.
+*Reversibility:* refactors keep `openapi.json` and every hash unchanged; `config/limits` is
+additive; the demo removal is reverted from git.
+
+### Deferred (out of scope for Feature 06)
+
+- A **shared rate-limit store**, Postgres- or Redis-backed. It is needed before more than one
+  API instance runs (D-53 §5). The compose `prod` profile runs one instance.
+- **Run cancellation by API**, and QUEUED use (D-59 §3). Chunked or streaming snapshot loading
+  waits until the Phase 33 measurements justify it.
+- **Links consumed by runs.** This needs a new engine and manifest version (D-58 §6).
+- **Bond-specific attributes, deposit classes, and seeded reference indices** (client items,
+  D-61 §7).
+- **An FX write path and conversion.** These are blocked until a source and policy are approved
+  (D-61 §6).
+- **A CSP report collector, and enforced CSP** (D-54 §4–5).
+- **A `module_validation_record` table**, until the first real validation (D-56 §2).
+- **Liquidity Intelligence rebuilt on the real LCR API** (user plan §14).
+- **Financial statements, and the company/credit intelligence expansion** (user plan §12 stage
+  7).
+
+### Hard stops and open items for the user (Feature 06)
+
+**Hard stops (sign-off needed):**
+1. CSP enforcement in production (D-54 §5).
+2. The advisory owners, and any accepted high advisory (D-55 §4).
+3. Any module leaving ILLUSTRATIVE, and who may approve that (D-56 §3).
+4. Methodology, all client-owned (D-56 §6):
+   - SME review;
+   - independently approved golden packs;
+   - L2A/L2B caps;
+   - the HQLA valuation basis;
+   - deposit classes and run-offs;
+   - day-0, past-due, missing, negative and out-of-horizon cash flows;
+   - the FX method;
+   - intended use and jurisdiction per module.
+5. The FX rate source, the rate types and the reporting-currency policy (D-61 §6).
+6. The error-tracker vendor (D-62 §4).
+
+**Open items for the client (do not block the build):**
+- publishing the typed-maturity contract in shared or production tenants (it deprecates v1 for
+  new imports; D-57 §3);
+- the term vocabularies and reference indices;
+- the supported dataset size and concurrency target;
+- the production rate-limit values;
+- the object-storage provider and its credentials;
+- RPO/RTO;
+- retention enforcement.
+
+**For the coordinator (architect recommendation; not a user hard stop):** D-57 chooses option B,
+a new governed version with a frozen contract. The brief's alternative, publishing the seeded v2
+DRAFT, cannot use the existing path and carries the fixture's unrelated breaking changes.
