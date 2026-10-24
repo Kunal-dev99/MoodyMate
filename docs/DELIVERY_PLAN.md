@@ -4161,13 +4161,17 @@ append-only links. v1 behaviour is unchanged.
     - ~~a ladder run over a typed-instrument snapshot gives the same `result_sha256` as over the
       v1 one~~ reworded 2026-10-24 (Q2, auto-resolved; D-57 amendment), because contributions
       carry `instrument_version_id`, which D-31 §4 hashes:
-      - (a) a run over the v1 snapshot still gives the same `result_sha256` as its pre-phase
-        golden;
+      - (a) a run over the v1 snapshot gives a result document equal to a golden captured on
+        the pre-phase code, after every row id is replaced by its stable business key
+        (instrument, cash flow, rule version, warning entity), and that document's
+        `canonical_sha256` equals the golden's. A literal `result_sha256` can't be a golden,
+        because D-31 §4 hashes row ids, which differ per database. Reworded 2026-10-24,
+        auto-resolved;
       - (b) a typed-snapshot run and a v1-snapshot run give result documents that are equal
         once only `instrument_version_id` is removed from each contribution, with the same
         number of contributions;
       - (c) repeating the run over the same typed snapshot gives an equal `result_sha256`.
-  - *Not yet ticked (2026-10-24, architect):* evidenced in `test_domain.py`: v1 golden summary
+  - *Ticked 2026-10-24 (evidence below):* evidenced in `test_domain.py`: v1 golden summary
     and every `payload_sha256` (`golden_check` :383, `identity_kit.py:72-87`; golden captured
     from the unchanged projector); `TYPE_NOT_PROJECTED` 25 :480; held dates
     `{2030-02-30, 2030-13-01, n/a}` :659-666 and never projected :706; `2030-06-30` stored as
@@ -4175,11 +4179,10 @@ append-only links. v1 behaviour is unchanged.
     `missing_values == {"maturity_date": 1}` :693 (absent from v1, :414); 6 dp exact :709-711;
     matched by hash, not number :637-649 and via the API :676-687; switch off 409 audited DENIED
     :668-675; (b) `run_outputs` equal with instrument version ids replaced by business key
-    :719-741 (`identity_kit.py:311-339`). **Missing:** (c) no repeat run over the typed snapshot
-    is asserted; (a) there is no pre-phase golden of a run's `result_sha256` (the test shows the
-    v1 run's hash equal before and after reconcile, :476-477, which is BE-31.4's check). Test
-    writer: assert (c); for (a), add the golden or send the wording back to the
-    decision-resolver (run hashes depend on per-database row ids).
+    :719-741 (`identity_kit.py:311-339`). (c) repeat typed-snapshot run with equal `result_sha256` :743-751; (a) the v1 run
+    equals `GOLDEN_V1_RUN` by key (status, document, `canonical_sha256` `4bf2ffb6…dfd03`)
+    :437-442 (`identity_kit.py:363-467`, `golden/domain_v1_run.json`, captured on 56dec79);
+    before/after-reconcile equality :485-486 kept. Nothing missing.
 - [x] **BE-31.4** Identity links (D-58). The projection step links its own rows, and
   `POST identity-links/reconcile` links historical rows. Exactly one identity in the tenant
   gives a link. Zero or several give no link and are counted (`LINK_UNRESOLVED`,
@@ -4253,7 +4256,7 @@ Goal: fixed and floating rate terms, business-effective dates and a lifecycle st
 currency reference and an FX observation store exist, and FX consolidation is explicitly
 blocked. There is no conversion code.
 
-- [ ] **BE-32.1** Migration 0031 (D-61): `instrument_term_version` (one row per
+- [x] **BE-32.1** Migration 0031 (D-61): `instrument_term_version` (one row per
   `instrument_version`, append-only), `instrument_term_vocabulary` (RATE_TYPE, DAY_COUNT,
   FREQUENCY and LIFECYCLE_STATE seeded PROVISIONAL; no reference indices seeded), `currency`
   (the codes the synthetic samples use, PROVISIONAL), and `fx_rate_observation` (append-only,
@@ -4264,7 +4267,22 @@ blocked. There is no conversion code.
     - the downgrade refuses while non-seed rows exist;
     - every seed row is tagged;
     - existing shapes are unchanged.
-- [ ] **BE-32.2** `INSTRUMENT_RATE_TERMS` contract: the typed-maturity contract plus optional
+  - *Evidence (2026-10-24, architect-verified):* `0031_rate_terms_currency_fx.py`: append-only
+    and no-truncate triggers on all four tables (0017's `domain_append_only`) :119-125; the
+    three consistency CHECKs :240-250; same-tenant and same-projection insert check :102-116;
+    tagged PROVISIONAL seeds, default tenant only :259-325; downgrade guard :342-359.
+    `test_ws1_verification.py` (`test_migration_round_trip_and_downgrade_guards`): seed tagged
+    and PROVISIONAL, vocabularies exactly D-61 §3, currencies CHF/EUR/GBP/USD :1107, :1146
+    (`terms_kit.py:252-267`); UPDATE, DELETE and TRUNCATE refused on the vocabulary, currency
+    and FX tables :1108, :1125 (`terms_kit.py:270-282`) and on `instrument_term_version`
+    (`test_domain.py:948`); downgrade refused with an unseeded currency and again with an FX
+    observation, revision and counts unchanged :1112-1124; round trip with the shapes of the
+    existing domain, credit and identity tables equal on both sides and the seed restored
+    :1127-1149. `test_domain.py:322-333`: 0031's frozen copies equal the code. CLI round trip
+    on scratch `moodymate_scratch_p32` (dropped): `Running downgrade 0031 -> 0030` / `Running
+    upgrade 0030 -> 0031` / `0031 (head)`; seed tags `0031_term_vocabulary | 15`,
+    `0031_currencies | 4`. After the fix round: `1 passed` (`moodymate_test_p32fix`).
+- [x] **BE-32.2** `INSTRUMENT_RATE_TERMS` contract: the typed-maturity contract plus optional
   `rate_type`, `reference_index`, `spread` (11,6), `reset_frequency`, `next_reset_date`,
   `cap_rate`, `floor_rate`, `day_count`, `payment_frequency`, `effective_from` and
   `lifecycle_state`. It is published as in D-57 §3, and projector v3 matches it by hash.
@@ -4275,12 +4293,33 @@ blocked. There is no conversion code.
       `TERMS_INCONSISTENT`, while the `instrument_version` is still written;
     - an unknown vocabulary value is kept as text and counted `UNKNOWN_VALUE`;
     - the BE-31.3 goldens still hold.
-- [ ] **BE-32.3** Effective dating: reads show `effective_from` (the business date) and
+  - *Evidence (2026-10-24, architect-verified):* `test_domain.py` part 6: the contract is the
+    typed-maturity contract plus the 11 optional fields with the plan's types, its hash frozen
+    as `be741da6…f749` (`constants.py:631`; `terms_kit.py:178-197`) :825; `_spec` matches
+    projector v3 by hash and typed maturity stays on v2 :826-836; published ADDITIVE with a
+    second-person approval, new version ACTIVE and typed maturity DEPRECATED :837-846
+    (`terms_kit.py:200-220`); switched off, 409 `projection_unsupported`, audited DENIED,
+    nothing written :853-862; 6 instrument versions written, `terms_inconsistent == 3`,
+    `unknown_values == {"day_count": 1}`, term rows for RT-FIX, RT-FLT and RT-UNK only
+    :869-875; terms typed in SQL (exact Decimal, DATE, no float; `terms_kit.py:237-249`) and in
+    the read (`EXPECTED_TERMS`, `terms_kit.py:143-170`) :880-898; `ACT_364` kept as text and
+    named in `unknown_fields` :896; the v1 golden still holds (`golden_check` :422) and the
+    projector 2 summary key set is unchanged :817-821. Runs: domain `1 passed` after the fix
+    round; targeted `9 passed` (`moodymate_test_p32b`).
+- [x] **BE-32.3** Effective dating: reads show `effective_from` (the business date) and
   `imported_at` side by side. An optional `?effective_on=` read picks by business date, not by
   import order. Snapshots and runs are unchanged (D-30).
   - *Done-when:* the domain fold covers a later import with an earlier `effective_from`, and
     the snapshot pins are unchanged.
-- [ ] **BE-32.4** `GET currencies` and `GET fx/consolidation-status`, which answers
+  - *Evidence (2026-10-24, architect-verified):* `test_domain.py`: a snapshot pinned before the
+    later import :903-906; RT-FIX's later version shows `imported_at` later and
+    `effective_from` earlier (2025-06-01) :911-915; `?effective_on=` 2026-06-30 picks v1,
+    2025-12-31 picks v2, 2025-01-01 picks none :916-922; RT-FLT's later, inconsistent version
+    reads `effective_from` null and the pick is null on three dates (fail closed, review MEDIUM 1
+    fix, D-61 amendment) :923-932; the pinned snapshot reads back identical :933.
+    `service.py:1131-1161` (`_effective_version`). Mutation: restoring the pre-fix skip fails
+    `test_domain.py:932` (`1 failed`).
+- [x] **BE-32.4** `GET currencies` and `GET fx/consolidation-status`, which answers
   `{status: "BLOCKED", reason_code: "fx_policy_not_approved", observation_count}`. The
   result-read `context` gains `consolidation: "BLOCKED"`. Then the `openapi.json` export and
   `RETENTION.md` rows.
@@ -4289,13 +4328,37 @@ blocked. There is no conversion code.
     - there is no write route for FX (route-list grep);
     - there is no conversion arithmetic in `app/calculations/` (grep);
     - the drift check passes.
-- [ ] **FE-32.1** (`NEXT_PUBLIC_INSTRUMENT_TERMS_UI`) A contract-terms panel with PROVISIONAL
+  - *Evidence (2026-10-24, architect-verified):* `test_ws1_verification.py:290-296`: both
+    routes `domain:read`, 200 for all five roles; no mutating route under fx or currencies
+    :297-303, and the `openapi.json` path list is `/api/v1/currencies ['get']`,
+    `/api/v1/fx/consolidation-status ['get']`; isolation :490-493. `test_domain.py:341`
+    (`calculations_have_no_fx_arithmetic`, `terms_kit.py:289-299`) and the CLI grep of
+    `app/calculations/` (no matches); status exactly `{BLOCKED, fx_policy_not_approved, 0}`
+    and `context.consolidation == "BLOCKED"` on the results and ladder reads :939-946. Routes
+    `domain/router.py:1179-1210` (`DomainReader`), tenant filter `repository.py:435-449`. Drift
+    check after the fix-round re-export: `openapi.json is up to date` (rc=0). **Not in the
+    Done-when and still open:** the `RETENTION.md` rows named in the task text (pre-merge item
+    in `docs/evidence/phase-32/REPORT.md`).
+- [x] **FE-32.1** (`NEXT_PUBLIC_INSTRUMENT_TERMS_UI`) A contract-terms panel with PROVISIONAL
   badges, a versions table with "Effective from" and "Imported at", and on the ladder and LCR
   pages the notice "Per-currency results only; FX consolidation is blocked until an approved
   rate source and conversion policy exist".
   - *Done-when:*
     - vitests cover fixed, floating, absent and unknown terms;
     - a Playwright fold shows the notice on an LCR run.
+  - *Evidence (2026-10-24, architect-verified):* `terms.test.ts`: fixed :108-122, floating
+    :124-134, absent (not in the contract; not written) :136-154, unknown :156-170, masked
+    :172-179; versions table, with the not-written Effective-from text (Q15) :183-211; notice
+    :215-241; switch off restores the Phase 31 panel and summary, nav unchanged :307-325.
+    `e2e/liquidity.spec.ts:123-128`, inside the approver LCR test at :105: the read's
+    `context.consolidation` is BLOCKED, the notice text exact, `data-consolidation` BLOCKED,
+    the context row BLOCKED; ladder fold `e2e/calculations.spec.ts:261-262`. Runs: vitest
+    full `750 passed` (before the fix round), the four targeted files `135 passed` after it;
+    tsc and lint clean; build exit 0; Playwright (`moodymate_test_p32fe`, ports 8032/3032)
+    `8 passed (34.1s)`, after the fix round `liquidity.spec.ts` `3 passed (15.5s)`
+    (`moodymate_test_p32fefix`). **Pre-merge:** `src/api/schema.d.ts` lacks the fix round's
+    three description changes, so CI's `gen:api` diff (`ci.yml:78`) fails until it is
+    regenerated.
 
 *Test budget:* 49 → 49.
 *Reversibility:*

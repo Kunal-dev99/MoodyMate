@@ -13,6 +13,8 @@ import { API, bearer, groupDecimal, signIn } from './support'
  *          the applied cap, and the ratio or "not computable" with LCR_DENOMINATOR_ZERO; the
  *          displayed HQLA total equals the sum of its displayed included rows. risk_analyst
  *          sees the asset rows "masked" and every figure exactly as the server sent it.
+ * FE-32.1: the LCR run shows "Per-currency results only; FX consolidation is blocked ..." and
+ *          the context's `consolidation: "BLOCKED"`.
  *
  * Every payload type is the generated one (src/api/schema.d.ts); none is written here.
  * Decimal text is compared exactly (scaled integers), never as floats.
@@ -118,6 +120,12 @@ test('FE-17.1: the approver sees HQLA components, outflows, capped inflows and t
   await expect(lcrContext.getByTestId('context-validation-status')).toHaveText('Illustrative — not validated')
   if (liquidity.context.units.ratio !== null) await expect(lcrContext.getByTestId('context-units-ratio')).toHaveText(liquidity.context.units.ratio)
   await expect(view.getByTestId('context-mismatch')).toHaveCount(0)
+  // FE-32.1 (D-61 §6): per-currency results only; FX consolidation is blocked, as the LCR read's context says.
+  expect(liquidity.context.consolidation).toBe('BLOCKED')
+  const fx = view.getByTestId('fx-consolidation-notice')
+  await expect(fx).toHaveText('Per-currency results only; FX consolidation is blocked until an approved rate source and conversion policy exist')
+  await expect(fx).toHaveAttribute('data-consolidation', 'BLOCKED')
+  await expect(lcrContext.getByTestId('context-consolidation')).toContainText('BLOCKED')
 
   let checkedTotals = 0
   for (const c of liquidity.currencies) {

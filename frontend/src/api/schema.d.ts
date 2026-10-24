@@ -366,6 +366,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/currencies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Currencies
+         * @description The caller's tenant's currency reference: a tagged PROVISIONAL seed (`0031_currencies`,
+         *     D-61 §6) of the codes the synthetic samples use. Reference only: no conversion.
+         */
+        get: operations["listCurrencies"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/dataset-snapshots": {
         parameters: {
             query?: never;
@@ -465,6 +486,28 @@ export interface paths {
          *     is 409 already_reviewed.
          */
         post: operations["reviewDriftEvent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/fx/consolidation-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Fx Consolidation Status
+         * @description FX consolidation is BLOCKED (`fx_policy_not_approved`, D-61 §6) until a client-approved
+         *     rate source, rate types, reporting currency and conversion method exist. The count is of
+         *     the tenant's stored observations, none of which any calculation reads.
+         */
+        get: operations["getFxConsolidationStatus"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -720,7 +763,8 @@ export interface paths {
          *     one instrument version, position version or cash-flow event per canonical record, each
          *     keeping lineage to it. 409 `projection_unsupported` for another schema (or schema
          *     version, or an instrument contract matching no projector by hash; also the typed-maturity
-         *     contract while INSTRUMENT_PROJECTOR_V2_ENABLED is off, D-57), 409 `not_validated` before
+         *     contract while INSTRUMENT_PROJECTOR_V2_ENABLED is off, D-57, and the rate-terms contract
+         *     while INSTRUMENT_TERMS_PROJECTION_ENABLED is off, D-61), 409 `not_validated` before
          *     validation (or for a FAILED import), 409 `domain_projection_disabled` while the switch is
          *     off; each refusal is audited DENIED. Position, cash-flow and credit-exposure rows are
          *     linked to their identities in the same transaction while IDENTITY_LINKS_ENABLED is on
@@ -811,7 +855,8 @@ export interface paths {
         /**
          * Get Instrument
          * @description One instrument: every version (oldest first) with its attributes, import, source row
-         *     ordinal, canonical record and the cash flows naming its business key.
+         *     ordinal, canonical record, rate terms, business-effective date beside its import time, and
+         *     the cash flows naming its business key.
          */
         get: operations["getInstrument"];
         put?: never;
@@ -3126,6 +3171,34 @@ export interface components {
          * @enum {string}
          */
         CsvDelimiter: "," | ";" | "\t" | "|";
+        /** CurrencyList */
+        CurrencyList: {
+            /**
+             * Items
+             * @description The caller's tenant's currencies, by code.
+             */
+            items: components["schemas"]["CurrencyOut"][];
+        };
+        /** CurrencyOut */
+        CurrencyOut: {
+            /**
+             * Code
+             * @description ISO 4217 alphabetic code.
+             */
+            code: string;
+            /**
+             * Minor Units
+             * @description ISO 4217 minor units (decimal places).
+             */
+            minor_units: number | null;
+            /** Name */
+            name: string;
+            /**
+             * Provisional
+             * @description A tagged PROVISIONAL seed (`0031_currencies`, D-61 §6, D-11).
+             */
+            provisional: boolean;
+        };
         /**
          * DataClass
          * @description D-14/D-16 §5: the class of data an import was uploaded as (the environment's).
@@ -3525,6 +3598,31 @@ export interface components {
              * @enum {string}
              */
             template: "FUNDING_UNAVAILABLE";
+        };
+        /**
+         * FxConsolidationStatusOut
+         * @description D-61 §6: FX consolidation is blocked. There is no conversion code and no FX write route;
+         *     the rate source, rate types, reporting currency and conversion method are a client
+         *     decision.
+         */
+        FxConsolidationStatusOut: {
+            /**
+             * Observation Count
+             * @description FX rate observations stored for the caller's tenant (append-only; none are used by any calculation).
+             */
+            observation_count: number;
+            /**
+             * Reason Code
+             * @description `fx_policy_not_approved`: no approved rate source or conversion policy.
+             * @constant
+             */
+            reason_code: "fx_policy_not_approved";
+            /**
+             * Status
+             * @description Always BLOCKED until a client-approved FX policy exists.
+             * @constant
+             */
+            status: "BLOCKED";
         };
         /** HealthResponse */
         HealthResponse: {
@@ -4211,6 +4309,16 @@ export interface components {
              */
             created_at: string;
             /**
+             * Effective On
+             * @description The `?effective_on=` business date asked for, echoed; null without it.
+             */
+            effective_on: string | null;
+            /**
+             * Effective Version Id
+             * @description With `?effective_on=`: the version with the latest `effective_from` on or before that date, picked by business date, not by import order (ties: the higher version). Only versions whose `effective_from` the caller is cleared for take part; a version with no term row (TERMS_INCONSISTENT) shows a null `effective_from` and is not a candidate. Null without the parameter, when no version is effective by then, or when the pick cannot be determined (fail closed): some version of the rate-terms contract (`terms_typed`) has no term row or an `effective_from` the caller is not cleared for, either of which could change the pick. This is a read aid only: runs pin snapshots (D-30) and no 'current' is defined (D-61 §5).
+             */
+            effective_version_id: string | null;
+            /**
              * Instrument Id
              * Format: uuid
              */
@@ -4291,6 +4399,90 @@ export interface components {
             /** Version Count */
             version_count: number;
         };
+        /**
+         * InstrumentTermsOut
+         * @description D-61 §1-§4: the typed rate terms of one instrument version (its `instrument_term_version`
+         *     row, written only when the terms are consistent). Values are masked by the classification
+         *     of the schema field they were projected from. Vocabulary values not in the seeded
+         *     PROVISIONAL vocabularies are kept as given text and named in `unknown_fields`.
+         */
+        InstrumentTermsOut: {
+            /**
+             * Cap Rate
+             * @description Exact decimal text (11,6), in `rate_unit`.
+             */
+            cap_rate: string | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Day Count
+             * @description ACT_360, ACT_365F, 30_360 or ACT_ACT, or as given.
+             */
+            day_count: string | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Floor Rate
+             * @description Exact decimal text (11,6), in `rate_unit`.
+             */
+            floor_rate: string | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Lifecycle State
+             * @description ACTIVE, MATURED, PREPAID, RESTRUCTURED or DEFAULTED, or as given.
+             */
+            lifecycle_state: string | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Next Reset Date
+             * @description ISO date.
+             */
+            next_reset_date: string | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Payment Frequency
+             * @description ISO-8601 period, or as given.
+             */
+            payment_frequency: string | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Provisional
+             * @description The term vocabularies are PROVISIONAL seeds (D-61 §3, D-11).
+             */
+            provisional: boolean;
+            /**
+             * Rate Type
+             * @description FIXED or FLOATING (PROVISIONAL), or as given.
+             */
+            rate_type: string | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Rate Unit
+             * @description The unit of `spread`, `cap_rate` and `floor_rate` from the pinned schema.
+             */
+            rate_unit: string | null;
+            /**
+             * Reference Index
+             * @description As given: no reference index is seeded (D-61 §3).
+             */
+            reference_index: string | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Reset Frequency
+             * @description ISO-8601 period (P1M, P3M, P6M, P1Y).
+             */
+            reset_frequency: string | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Spread
+             * @description Exact decimal text (11,6), in `rate_unit`.
+             */
+            spread: string | components["schemas"]["MaskedValue"] | null;
+            /**
+             * Term Version Id
+             * Format: uuid
+             */
+            term_version_id: string;
+            /**
+             * Unknown Fields
+             * @description Term fields whose value is not in the seeded vocabulary (kept as text, counted UNKNOWN_VALUE). Field names only, never values.
+             */
+            unknown_fields: string[];
+        };
         /** InstrumentTypeOut */
         InstrumentTypeOut: {
             /** Code */
@@ -4321,11 +4513,22 @@ export interface components {
             /** Currency */
             currency: string | components["schemas"]["MaskedValue"] | null;
             /**
+             * Effective From
+             * @description The business date the version is effective from (ISO date, D-61 §5), kept apart from `imported_at`; empty when the pinned contract has no such field. Null, too, for a version with no term row (TERMS_INCONSISTENT: `terms_typed` true, `terms` null), whose date is not stored: it is not an `?effective_on=` candidate, and the pick is then undetermined (`effective_version_id` null, fail closed).
+             */
+            effective_from: string | components["schemas"]["MaskedValue"] | null;
+            /**
              * Import Id
              * Format: uuid
              * @description The import this version was projected from.
              */
             import_id: string;
+            /**
+             * Imported At
+             * Format: date-time
+             * @description When the import this version came from was created (system time).
+             */
+            imported_at: string;
             /**
              * Instrument Type
              * @description As given.
@@ -4390,6 +4593,13 @@ export interface components {
              * Format: uuid
              */
             source_record_id: string;
+            /** @description The typed rate terms; null when the contract has none or the terms were inconsistent (TERMS_INCONSISTENT: FIXED with an index, FLOATING with no reset, or floor > cap). */
+            terms: components["schemas"]["InstrumentTermsOut"] | null;
+            /**
+             * Terms Typed
+             * @description The pinned schema version is the INSTRUMENT_RATE_TERMS contract (projector v3, D-61 §1).
+             */
+            terms_typed: boolean;
             /** Version */
             version: number;
             /**
@@ -5997,6 +6207,16 @@ export interface components {
              */
             rows_projected: number;
             /**
+             * Term Rows
+             * @description Projector 3 only (the rate-terms instrument contract, D-61): the `instrument_term_version` rows written, one per version whose terms are consistent. Absent for projectors 1 and 2, whose summaries are unchanged.
+             */
+            term_rows?: number | null;
+            /**
+             * Terms Inconsistent
+             * @description Projector 3 only: TERMS_INCONSISTENT, the records whose terms are inconsistent (FIXED with a reference index, FLOATING with no reset frequency, or floor > cap). Their instrument version is written; no term row is (D-61 §4). Those records' term values, unknown ones included, are not counted in `unknown_values` and stay in the canonical record.
+             */
+            terms_inconsistent?: number | null;
+            /**
              * Type Not Projected
              * @description TYPE_NOT_PROJECTED: per schema field, the values not projected into their typed column because the pinned field type differs (e.g. `instrument` v1 `maturity_date` is free text). They stay in the canonical record.
              */
@@ -6424,6 +6644,12 @@ export interface components {
              * @description The run's pinned reporting_date.
              */
             as_of_date: string;
+            /**
+             * Consolidation
+             * @description D-61 §6 (Phase 32): FX consolidation is blocked until an approved rate source and conversion policy exist; results are per currency only.
+             * @constant
+             */
+            consolidation: "BLOCKED";
             currency: components["schemas"]["ContextCurrency"];
             methodology: components["schemas"]["ContextMethodology"];
             /**
@@ -9362,6 +9588,44 @@ export interface operations {
             };
         };
     };
+    listCurrencies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurrencyList"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     listDatasetSnapshots: {
         parameters: {
             query?: {
@@ -9596,6 +9860,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DriftEventOut"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    getFxConsolidationStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FxConsolidationStatusOut"];
                 };
             };
             /** @description Client error (standard envelope) */
@@ -10402,7 +10704,10 @@ export interface operations {
     };
     getInstrument: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description A business date (D-61 §5): `effective_version_id` names the version with the latest `effective_from` on or before it, not the latest import. */
+                effective_on?: string | null;
+            };
             header?: never;
             path: {
                 instrument_id: string;
