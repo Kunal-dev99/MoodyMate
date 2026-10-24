@@ -13,6 +13,9 @@ import { LoadingBlock } from '@/components/common/LoadingBlock'
 import { MaskedValue, isMasked } from '@/components/common/MaskedValue'
 import { PageSection } from '@/components/common/PageSection'
 import { startLoad, type LoadFailure } from '@/components/common/load'
+import { ListPager, TruncationNote, cursorRefusedBody, useCursorPaging } from '@/components/common/ListPager'
+import { LIST_PAGING_UI_ENABLED } from '@/config/features'
+import { cursorQuery, truncationOf, type Truncation } from '@/lib/paging'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -101,8 +104,12 @@ export function InstrumentCatalogue() {
   const [paging, setPaging] = useState<{ query: typeof query; offset: number }>({ query, offset: 0 })
   const offset = paging.query === query ? paging.offset : 0
   const setOffset = (next: number) => setPaging({ query, offset: next })
+  // FE-33.1: the server's next_cursor, bound to these filters (NEXT_PUBLIC_LIST_PAGING_UI=off: offsets).
+  const cursorPaging = useCursorPaging(JSON.stringify(query))
+  const cursor = LIST_PAGING_UI_ENABLED ? cursorPaging.cursor : null
   const [state, setState] = useState<State>({ kind: 'loading' })
   const [sources, setSources] = useState<SourceOption[] | null>(null)
+  const [sourcesNote, setSourcesNote] = useState<Truncation | null>(null)
   const request = useRef<AbortController | null>(null)
   const canReadSources = has('source:read')
 
@@ -113,11 +120,17 @@ export function InstrumentCatalogue() {
   const load = useCallback(() => {
     // Another page or filter cancels the previous request; a late answer never lands.
     request.current = startLoad(
-      (signal) => call(() => api.GET('/api/v1/instruments', { params: { query: { limit: PAGE_SIZE, offset, ...query } }, signal })),
+      (signal) =>
+        call(() =>
+          api.GET('/api/v1/instruments', {
+            params: { query: { limit: PAGE_SIZE, ...(LIST_PAGING_UI_ENABLED ? cursorQuery(cursor) : { offset }), ...query } },
+            signal,
+          }),
+        ),
       { onReady: (page) => setState({ kind: 'ready', page }), onFailure: setState, failureTitle: 'Could not load instruments' },
       request.current,
     )
-  }, [query, offset])
+  }, [query, offset, cursor])
 
   useEffect(() => {
     setState({ kind: 'loading' })
@@ -131,7 +144,9 @@ export function InstrumentCatalogue() {
     const controller = new AbortController()
     call(() => api.GET('/api/v1/sources', { params: { query: { limit: 200 } }, signal: controller.signal })).then(
       (page) => {
-        if (!controller.signal.aborted) setSources(page.items.map(({ id, code, name }) => ({ id, code, name })))
+        if (controller.signal.aborted) return
+        setSources(page.items.map(({ id, code, name }) => ({ id, code, name })))
+        setSourcesNote(truncationOf(page, 'sources'))
       },
       () => {
         if (!controller.signal.aborted) setSources(null)
@@ -206,6 +221,8 @@ export function InstrumentCatalogue() {
               </option>
             ))}
           </select>
+          {/* Q18: the options are one capped page of sources; say so when the server cut it. */}
+          <TruncationNote note={sourcesNote} testId="filter-source-truncated" />
         </label>
       )}
       <label className="flex flex-col gap-1 text-xs text-muted-foreground">
@@ -253,7 +270,7 @@ export function InstrumentCatalogue() {
       />
     )
   else if (state.kind === 'not_found')
-    body = (
+    body = cursorRefusedBody(state, cursorPaging, 'instrument-pager') ?? (
       <EmptyState
         icon={Landmark}
         title="Instruments could not be listed"
@@ -330,7 +347,8 @@ export function InstrumentCatalogue() {
               })}
             </TableBody>
           </Table>
-          {page.total > PAGE_SIZE && (
+          {LIST_PAGING_UI_ENABLED && <ListPager page={page} paging={cursorPaging} testId="instrument-pager" />}
+          {!LIST_PAGING_UI_ENABLED && page.total > PAGE_SIZE && (
             <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
               <span data-testid="instrument-range">
                 {page.offset + 1}–{page.offset + page.items.length} of {page.total}

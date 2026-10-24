@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useEffect, useMemo, useReducer, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
 import { Boxes, CalendarDays, Database, ListChecks, Play, Puzzle } from 'lucide-react'
 import { Forbidden } from '@/components/auth/Forbidden'
 import { EmptyState } from '@/components/common/EmptyState'
@@ -15,8 +15,11 @@ import { RefusalNotice } from '@/components/ingestion/RefusalNotice'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { BACKGROUND_RUNS_UI_ENABLED } from '@/config/features'
 import { cn } from '@/lib/utils'
 import { ModuleOption } from './ModuleOption'
+import { isPending } from './polling'
+import { RunPollingNotice, useRunPolling } from './RunPolling'
 import { RunStatusPill } from './RunStatusPill'
 import { SnapshotMembers } from './SnapshotMembers'
 import {
@@ -305,9 +308,23 @@ export function NewRunPanel() {
   const snapshot = state.snapshot.kind === 'built' ? state.snapshot.snapshot : null
   const problems = submitProblems(state, moduleList)
 
+  // FE-33.1: a background run (202, RUNNING) is followed here until the server ends it, then
+  // opened; a run the server already ended (the Phase 32 path) opens at once.
+  const submittedRun = state.submit.kind === 'submitted' ? state.submit.run : null
+  const following = useRef<string | null>(null)
+  const poll = useRunPolling(submittedRun, (run) => dispatch({ type: 'run_polled', run }))
+  useEffect(() => {
+    if (submittedRun && following.current === submittedRun.run_id && !isPending(submittedRun.status)) {
+      following.current = null
+      router.push(runHref(submittedRun.run_id))
+    }
+  }, [submittedRun, router])
+
   const submit = async () => {
     const run = await submitRun(state, moduleList, dispatch)
-    if (run) router.push(runHref(run.run_id))
+    if (!run) return
+    if (BACKGROUND_RUNS_UI_ENABLED && isPending(run.status)) following.current = run.run_id
+    else router.push(runHref(run.run_id))
   }
 
   return (
@@ -348,6 +365,7 @@ export function NewRunPanel() {
               <RunStatusPill status={state.submit.run.status} />
             </p>
           )}
+          <RunPollingNotice view={poll} testId="new-run-polling" />
           <div className="flex flex-wrap items-center gap-3">
             <Button onClick={() => void submit()} disabled={problems.length > 0} data-testid="run-submit">
               <Play className="mr-2 h-4 w-4" />
@@ -366,7 +384,10 @@ export function NewRunPanel() {
                   </Link>
                 </span>
               ))}
-              . Runs are synchronous: the page opens the run when the server has ended it.
+              .{' '}
+              {BACKGROUND_RUNS_UI_ENABLED
+                ? 'Runs execute in the background: this panel follows the run and opens it when the server has ended it.'
+                : 'Runs are synchronous: the page opens the run when the server has ended it.'}
             </p>
           )}
         </div>

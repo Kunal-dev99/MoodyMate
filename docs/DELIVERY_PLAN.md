@@ -4139,13 +4139,14 @@ append-only links. v1 behaviour is unchanged.
     - finds the new version ACTIVE (`max + 1`) and v1 DEPRECATED;
     - finds the seeded v2 DRAFT's `content_sha256` unchanged;
     - and the e2e smoke diff still passes.
-  - *Not yet ticked (2026-10-24, architect):* the domain fold is evidenced at
+  - *Ticked 2026-10-24 (coordinator); architect note at build time:* the domain fold is evidenced at
     `test_domain.py:609-636` (frozen hash equals `INSTRUMENT_TYPED_MATURITY_SHA256`,
     `constants.py:467`; `approve_proposal` asserts BREAKING with the `core_instrument` MAPPING
     dependent and a second-person APPLIED, `identity_kit.py:121-147`; statuses
-    `{1: DEPRECATED, 2: DRAFT, max+1: ACTIVE}`; v2 DRAFT hash unchanged). **Missing:** the e2e
+    `{1: DEPRECATED, 2: DRAFT, max+1: ACTIVE}`; v2 DRAFT hash unchanged). **Was missing at build time:** the e2e
     smoke diff (`e2e/smoke.spec.ts`) was not run in this phase; only `counterparties.spec.ts`
     and `ws3-smoke.spec.ts` were. Tick when the CI Playwright run on the PR shows it passing.
+    **Closed:** the CI Playwright run on PR #42 (run 40072518086, e2e job green) includes `e2e/smoke.spec.ts`.
 - [x] **BE-31.3** Projector v2 (D-57 §2). The instrument spec is matched by **contract hash**.
   v1 imports use the frozen v1 spec (`projector_version` 1), typed imports record 2, and an
   unknown hash gives `projection_unsupported`. `INSTRUMENT_PROJECTOR_V2_ENABLED` switches it.
@@ -4213,13 +4214,14 @@ append-only links. v1 behaviour is unchanged.
     - the WS1 matrix gives 200 for `domain:read` holders and 403 for the others;
     - another tenant's id gives 404;
     - the docs are present (grep).
-  - *Not yet ticked (2026-10-24, architect):* evidenced: drift check `openapi.json is up to
+  - *Ticked 2026-10-24 (coordinator); architect note at build time:* evidenced: drift check `openapi.json is up to
     date` (rc=0); matrix `test_ws1_verification.py:268-275` (all five seeded roles hold
     `domain:read`, so 200 for all; printed rows 200 x5); another tenant's legal entity is the
-    404 of a random id :499, and its lists total 0 :455-459. **Missing:** `docs/DOMAIN_IDENTITY.md`
+    404 of a random id :499, and its lists total 0 :455-459. **Was missing at build time:** `docs/DOMAIN_IDENTITY.md`
     does not exist and `docs/RETENTION.md` has no `legal_entity` or `domain_identity_link` row
     (grep, 2026-10-24). Per Q3 the coordinator reviews the drafts, commits them, then runs the
     grep.
+    **Closed:** `docs/DOMAIN_IDENTITY.md` and the `legal_entity` and `domain_identity_link` RETENTION.md rows landed with PR #42 (grep: present).
 - [x] **FE-31.1** (owner of `navigation.ts`/`features.ts`, behind `NEXT_PUBLIC_DOMAIN_LINKS_UI`)
   - the instrument detail shows a typed maturity, or "Not stated (schema v1 free text)";
   - ~~the position, cash-flow and exposure details show the linked identity, or "Unresolved
@@ -4373,7 +4375,7 @@ Goal: module execution runs off the event loop in a bounded process pool with th
 and hashes. Lists say when they are truncated. Artifacts can live in S3-compatible storage. The
 supported size is measured.
 
-- [ ] **BE-33.1** `calculations/executor.py` (D-59 §1): a bounded `ProcessPoolExecutor`
+- [x] **BE-33.1** `calculations/executor.py` (D-59 §1): a bounded `ProcessPoolExecutor`
   (`CALC_WORKERS`, `CALC_WORKER_QUEUE_MAX`). The pure `run()` executes in a worker, and DB
   work stays in-process. `CALC_EXECUTION_MODE=inline|pool`. A full queue gives 503
   `workers_busy` (retryable, `Retry-After`, audited DENIED, no run).
@@ -4383,26 +4385,65 @@ supported size is measured.
     - `GET /api/v1/health` answers within 200 ms while a slow test module runs;
     - a full queue gives 503;
     - a worker crash gives FAILED `ENGINE_ERROR`.
-- [ ] **BE-33.2** `Prefer: respond-async` gives 202 with RUNNING, `Location` and
+  - *Evidence (2026-10-24, architect-verified):* `executor_kit.py` `check_background_execution`
+    (called at `test_calculations.py:1058-1060`): pool hashes equal to the inline reference
+    :179-183, :214, :234-235, :244; health max of 5 probes < 0.2 s while `slow_ladder` runs in
+    the worker :185-201 (and no connection idle in transaction :202-209); full queue 503
+    `workers_busy`, retryable, `Retry-After` >= 1, DENIED audit, no run row :216-233; crash
+    FAILED `ENGINE_ERROR`, pool recovers, admissions back to 0 :237-245. Scenario k + 1:
+    `check_pool_scenario_run` :315-342, called at `scenario_run_kit.py:994-996` on the
+    3-shock combined scenario (4 members, :669-671), each member's status and both hashes
+    equal to its inline twin. Run: `test_registry_snapshot_run_and_maturity_ladder`
+    `1 passed, 1 warning in 58.40s` (`moodymate_test_p33fix`).
+- [x] **BE-33.2** `Prefer: respond-async` gives 202 with RUNNING, `Location` and
   `Preference-Applied`. Without the header, the status code and body keys are unchanged. QUEUED
   stays reserved.
   - *Done-when:*
     - without the header, the response equals Phase 32's;
     - with the header, polling reaches SUCCEEDED with the sync `result_sha256`;
     - a replay returns the same run.
-- [ ] **BE-33.3** `CALC_RUN_TIMEOUT_SECONDS` (below `CALC_RUN_STALE_SECONDS`): a run that
+  - *Evidence (2026-10-24, architect-verified):* `executor_kit.py:149-176`: without `Prefer`,
+    201 with the reference run's key set and no `Preference-Applied` :150-153; with it, 202,
+    RUNNING, null `result_sha256`, `Location` and `Preference-Applied` :154-162; polling ends in
+    the synchronous reference's terminal status (SUCCEEDED_WITH_WARNINGS for this fixture) with
+    its `manifest_sha256` and `result_sha256` :163-165; audit create then finish :166-169; a
+    replay with or without the header is 200 `Idempotent-Replayed` with the same run :170-173;
+    `Prefer: return=minimal` keeps the plain contract :175-176. CORS exposes `Location` and
+    `Preference-Applied` (`main.py:98-104`). Same run as BE-33.1.
+- [x] **BE-33.3** `CALC_RUN_TIMEOUT_SECONDS` (below `CALC_RUN_STALE_SECONDS`): a run that
   exceeds it has its worker replaced and ends FAILED `ENGINE_ERROR`. A periodic sweeper closes
   stale RUNNING runs. A retry is a new key and a new run, and a failed run is never mutated.
   - *Done-when:* the fold covers the timeout, the sweeper and the retry: the retry gives the
     expected hash, the old key's replay returns FAILED, and no run gets two terminal moves.
-- [ ] **BE-33.4** DB pool settings (`DB_POOL_SIZE`, `DB_MAX_OVERFLOW`, `DB_POOL_TIMEOUT_SECONDS`,
+  - *Evidence (2026-10-24, architect-verified):* `executor_kit.py`: with a 1 s timeout a
+    hanging module ends FAILED `ENGINE_ERROR` in under 10 s :249-258; the retry under a new key
+    is a new run with the reference hashes on the same 1-worker pool (worker replaced)
+    :260-265; the old key's replay is 200 with the same FAILED run and an unchanged row
+    :266-270; the sweeper closes an inserted stale RUNNING run with no request, giving
+    `ENGINE_ERROR {error: stale_run}`, audited by `system:run-sweeper` with no user :273-308; no
+    run has more than one `calculation_run.finish` :310-312. The timeout-below-stale refusal is
+    `test_config.py:186-192`. Same run as BE-33.1.
+- [x] **BE-33.4** DB pool settings (`DB_POOL_SIZE`, `DB_MAX_OVERFLOW`, `DB_POOL_TIMEOUT_SECONDS`,
   `DB_POOL_RECYCLE_SECONDS`; SQLAlchemy defaults) and `DB_STATEMENT_TIMEOUT_MS`, validated at
   startup. An exhausted pool gives 503 `db_pool_exhausted`.
   - *Done-when:*
-    - the settings fold refuses values of 0 or below;
+    - the settings fold refuses 0 or below for `DB_POOL_SIZE`, `DB_POOL_TIMEOUT_SECONDS`,
+      `DB_POOL_RECYCLE_SECONDS` and `DB_STATEMENT_TIMEOUT_MS`, and below 0 for
+      `DB_MAX_OVERFLOW` (0 is valid) *(reworded 2026-10-24, Phase 33 Q12, auto-resolved; was
+      "refuses values of 0 or below")*;
     - `SHOW statement_timeout` equals the setting;
     - with pool 1, overflow 0 and timeout 1, the request gets 503 and does not hang.
-- [ ] **BE-33.5** Pagination (D-59 §6): every capped list adds `has_more` and a tenant-bound
+  - *Evidence (2026-10-24, architect-verified):* `test_config.py:148-175` (defaults 5/10/30;
+    0 and -1 refused for the positive settings; 0 accepted and -1 refused for
+    `DB_MAX_OVERFLOW` and `CALC_WORKER_QUEUE_MAX`); `test_db_check.py:60-103`
+    (`SHOW statement_timeout` = `4321ms` :81; the only connection held, `GET /sources` is 503
+    `db_pool_exhausted`, retryable, envelope keys, `Retry-After` >= 1, in under 5 s :87-100; 200
+    once released :103). Runs: settings + artifacts + committed-artifacts `6 passed, 1 warning
+    in 5.42s`; `test_db_check` `1 passed, 1 warning in 11.86s` with the BE-33.7 evidence paths
+    pointed at scratch copies. **Note:** as committed, `test_db_check_reports_each_failure` is
+    red until BE-33.7's files exist, because its last step (:105) reads them; the BE-33.4 lines
+    above run before it and passed in both runs.
+- [x] **BE-33.5** Pagination (D-59 §6): every capped list adds `has_more` and a tenant-bound
   opaque `next_cursor`. The engineer's inventory of capped reads (about 17 `le=` sites, plus
   any internal caps) goes in the report.
   - *Done-when:*
@@ -4410,14 +4451,33 @@ supported size is measured.
       the 3rd row;
     - a foreign or tampered cursor gives 400 `invalid_cursor`;
     - the OpenAPI diff is additive only.
-- [ ] **BE-33.6** `S3ArtifactStore` behind `ArtifactStore` (`ARTIFACT_STORE_KIND`, default
+  - *Evidence (2026-10-24, architect-verified):* the inventory is every GET in `openapi.json`
+    taking `cursor` (20 routes; every router `limit` site with `le=` calls `page_offset`, grep)
+    and is listed in the Phase 33 report. `pagination_kit.py:65-125` loops over it: page keys,
+    the full page has neither `has_more` nor a cursor, and with 3+ rows `limit=2` gives
+    `has_more` and a cursor whose first item equals the row at offset 2 :89-112; a tampered
+    cursor :113, other filters :114-116 and another list's cursor :119-124 give 400
+    `invalid_cursor`. Called at `test_calculations.py:1247-1264` (a role per permission; at
+    least the run list, run results, imports and audit events must reach the cursor step);
+    a second-tenant data_steward's use of a cursor is 400 :1265-1268 (`check_foreign_cursor`
+    :128-134). Additive only: `test_committed_artifacts.py:35-47` (`additive_problems`
+    :75-133 against `backend/openapi.base.json`, with a self-test). Runs: `1 passed, 1 warning
+    in 58.40s`; `6 passed, 1 warning in 5.42s`; by hand `forward []` / `reverse 124`.
+- [x] **BE-33.6** `S3ArtifactStore` behind `ArtifactStore` (`ARTIFACT_STORE_KIND`, default
   `filesystem`). It is content-addressed and write-once, verifies on every read, and never
   deletes. Its settings are required outside local/test (D-13). The client library and the
   test fake are recorded in D-59.
   - *Done-when:*
     - the existing artifact test loops over both stores;
     - credentials never appear in logs (log fold).
-- [ ] **BE-33.7** `scripts/perf_run.py` runs deterministic synthetic sets of 10k and 100k cash
+  - *Evidence (2026-10-24, architect-verified):* `test_artifacts.py:91-134` loops over the
+    filesystem store and `S3ArtifactStore(client=FakeS3Client(), bucket=…)` (write-once,
+    hash, verified read, tamper refused and never overwritten, missing object refused);
+    `test_config.py:320-337` (the S3 key id and secret are in no log line, `model_dump` log or
+    `repr`); `test_config.py:193-198` (s3 settings required in staging/production);
+    `pyproject.toml:39-42` (`s3` extra, `boto3>=1.35.2,<2`). Run: `6 passed, 1 warning in
+    5.42s`. The library and the fake are recorded in the D-59 amendment of 2026-10-24.
+- [x] **BE-33.7** `scripts/perf_run.py` runs deterministic synthetic sets of 10k and 100k cash
   flows and records duration, peak RSS (inline and pool) and health p95 during a run. The
   output goes to `docs/evidence/phase-33/perf.json`. `docs/PERFORMANCE.md` states the
   supported size and concurrency.
@@ -4425,12 +4485,33 @@ supported size is measured.
     - both files exist;
     - a 5,000-flow fold stays under ceilings set at 3× the measured values;
     - multi-instance needs are listed: the shared rate-limit store, and S3.
-- [ ] **FE-33.1** Every capped list shows "Showing n of total" and a next control (`next_cursor`).
+  - *Ticked 2026-10-24 (coordinator); note at build time:* the script exists (`scripts/perf_run.py`, default output
+    :45, doc path :47) and the fold is written (`test_db_check.py:27-46`, called at :105; it
+    asserts the four required words in the doc, the recorded hash and the 3× ceilings).
+    **Was missing at build time:** `docs/evidence/phase-33/perf.json` and `docs/PERFORMANCE.md` do not exist in
+    the worktree (glob), so the fold fails with `FileNotFoundError` at :32. Per Q7 the
+    coordinator re-runs the script into the default path against a phase DB copy, writes
+    `PERFORMANCE.md` from that file, and re-runs `test_db_check`.
+    **Closed:** `docs/evidence/phase-33/perf.json` re-run by the coordinator on a phase DB copy (`measured_at` 2026-10-24T08:48:51Z, after Phases 32 and 34 merged in); `docs/PERFORMANCE.md` written from it (supported size PROVISIONAL, concurrency per process, the rate-limit store and S3 multi-instance needs, the 100k pool health p95 of 244 ms over budget and why); `check_perf_fold` passes in the full suite (49 passed).
+- [x] **FE-33.1** Every capped list shows "Showing n of total" and a next control (`next_cursor`).
+  The audit timeline pages by its stable `before` keyset instead: its Older control appears
+  only while an older event exists and sends the last shown event's id as `before`, because
+  every read appends an audit event (D-10) *(added 2026-10-24, Phase 33 Q17, auto-resolved)*.
   Async runs poll, with backoff up to 5 s. `workers_busy` and `rate_limited` show their retry
   time from `Retry-After`.
   - *Done-when:*
     - vitests cover polling, both refusals and the list helper;
     - a Playwright test sees a run reach SUCCEEDED by polling.
+  - *Evidence (2026-10-24, architect-verified):* `polling.test.ts:43-139` (backoff 0.5 s
+    doubling to 5 s :44, terminal stop :50, `workers_busy`/`rate_limited` wait for
+    `Retry-After` :76, 403/404 stop :93, another run :104, abort :110, notice :125-139);
+    `src/lib/__tests__/paging.test.ts:38-206` (the list helper with 3 rows and limit 2 :50,
+    contract check :39, pager markup :86, Q18 :123, Q19 :144, `Retry-After` and both refusals
+    with the switch on and off :182-206). `e2e/background-runs.spec.ts:29` (202 RUNNING with
+    `Preference-Applied`, at least one poll, run page in SUCCEEDED or SUCCEEDED_WITH_WARNINGS,
+    "Showing n of total" on the run list). Runs: vitest `45 passed (45)` / `764 passed (764)`;
+    Playwright `9 passed (50.4s)` after the FE fixes, and before them `9 passed` both inline
+    (52.7s) and with `CALC_EXECUTION_MODE=pool` (56.5s).
 
 *Test budget:* 49 → 49.
 *Reversibility:*
@@ -4444,25 +4525,28 @@ supported size is measured.
 Goal: a locked, repeatable build from a clean checkout; structured logs; metrics; distinct
 liveness and readiness; and operating docs.
 
-- [ ] **BE-34.1** A `uv` lockfile (`backend/uv.lock`). CI runs ~~`uv sync --frozen --extra dev`~~
+- [x] **BE-34.1** A `uv` lockfile (`backend/uv.lock`). CI runs ~~`uv sync --frozen --extra dev`~~
   `uv sync --locked --extra dev`, and pip-audit reads the lock (the `uv export --locked` output,
   audited with `--no-deps`). Reworded 2026-10-24 (Q1, auto-resolved; D-62 amendment), because
   `--frozen` installs a stale lock without complaint and so cannot meet the Done-when.
   - *Done-when:* the CI install is ~~frozen~~ locked, and a deliberate pyproject/lock mismatch
     fails (evidence in the report).
-  - *Not yet ticked (2026-10-24, architect):* evidenced locally: `prometheus-client` 0.26.0 is
+  - *Ticked 2026-10-24 (coordinator); architect note at build time:* evidenced locally: `prometheus-client` 0.26.0 is
     in `uv.lock` (:880-881); `backend/Dockerfile:31` installs with `uv sync --locked --no-dev
     --no-install-project`; on a scratch copy with `six>=1.16` added, `uv lock --check` and
     `uv sync --locked` both exit 1 ("needs to be updated"), while `uv sync --frozen` exits 0 and
-    `import six` then fails; the worktree's `uv lock --check` exits 0. **Missing:**
+    `import six` then fails; the worktree's `uv lock --check` exits 0. **Was missing at build time:**
     `.github/workflows/ci.yml` still runs `pip install -e ".[dev]"` (:43, :122) and
     `pip-audit --skip-editable` (:61) (grep, 2026-10-24); there is no CI step that breaks a
     temp copy's pyproject and expects the locked install to fail (Q7); no CI log exists.
-- [ ] **BE-34.2** `backend/Dockerfile` (multi-stage, non-root, locked dependencies,
+    **Closed:** CI run 40077424225 on PR #45 (all four jobs green): the backend and e2e jobs install with `uv sync --locked --extra dev`; the lock-mismatch step on a temp copy and pip-audit on the `uv export --locked` output pass (backend job green).
+- [x] **BE-34.2** `backend/Dockerfile` (multi-stage, non-root, locked dependencies,
   `--proxy-headers` with `FORWARDED_ALLOW_IPS`) and `frontend/Dockerfile` (standalone,
   non-root, `NEXT_PUBLIC_API_BASE_URL` as a required build arg). `docker-compose.yml` gets a
   `prod` profile with a one-shot `alembic upgrade head`, and `.env.production.example` holds
-  placeholders only.
+  placeholders only. The example sets `CALC_EXECUTION_MODE=pool` and the `docs/PERFORMANCE.md`
+  values of `CALC_WORKERS` and `CALC_WORKER_QUEUE_MAX` *(added 2026-10-24, Phase 33 Q4,
+  auto-resolved; D-59 amendment)*.
   - *Done-when:*
     - a CI job builds both images from a clean checkout;
     - compose `prod` reaches `/health/ready` 200 and frontend `/` ~~200~~ 200 after following
@@ -4471,17 +4555,18 @@ liveness and readiness; and operating docs.
     - `alembic current` is the head;
     - the images run as non-root;
     - no secret is in an image (grep of `docker history`).
-  - *Not yet ticked (2026-10-24, architect):* evidenced in files only: `backend/Dockerfile`
+  - *Ticked 2026-10-24 (coordinator); architect note at build time:* evidenced in files only: `backend/Dockerfile`
     (multi-stage :20-33, `uv sync --locked` :31, uid/gid 10001 :34-37 and `USER 10001:10001`
     :50, `FORWARDED_ALLOW_IPS=127.0.0.1` :48, `--proxy-headers` :55, HEALTHCHECK on
     `/health/live` :53-54); `backend/.dockerignore` excludes `.env`, `.env.*`, `.venv` and
     `app/tests`; `frontend/Dockerfile` (FE-owned, Q9; required arg :23-29, `USER 1000:1000`
     :53). Without Docker, a copy of the image layout gave `alembic current` `0030 (head)`, live
-    and ready 200 with every check `ok`. **Missing:** no image has been built (no Docker
+    and ready 200 with every check `ok`. **Was missing at build time:** no image has been built (no Docker
     daemon here); `ci.yml` has no image job, non-root check or `docker history` grep;
     `docker-compose.yml` has no `prod` profile or one-shot migrate service (grep
     `profiles|prod|migrate`: no match); `.env.production.example` does not exist, and the root
     `.gitignore` would ignore it (Q10).
+    **Closed:** CI run 40077424225 on PR #45 (all four jobs green), `images` job: `migrate exit code: 0`, `alembic current: 0031 (head)`, `GET /api/v1/health/ready: 200` with every check ok, `api uid: 10001`, `frontend uid: 1000`, `published 9100: none`, `OK: no secret-like entry in docker history` for both images, `OK: compose prod is up, migrated, ready and non-root; metrics stay internal`.
 - [x] **BE-34.3** A structured JSON access log (`ACCESS_LOG_ENABLED`): correlation id, method,
   route template, status and duration. It never carries a query, body, header or token.
   - *Done-when:* the log fold shows a request with a bearer token, a sentinel query and a
@@ -4563,7 +4648,7 @@ liveness and readiness; and operating docs.
     failing reporter is swallowed), called from `correlation.py:63-68`; `ERROR_TRACKER_DSN` is
     a `SecretStr` (`config.py:172`) and only logs a value-free warning at startup
     (`error_tracker.py:39-42`). Runs: targeted `15 passed`; fix round `6 passed`.
-- [ ] **BE-34.7** `docs/ops/`: `BACKUP_RESTORE.md` (DB plus artifact store, with re-hash
+- [x] **BE-34.7** `docs/ops/`: `BACKUP_RESTORE.md` (DB plus artifact store, with re-hash
   verification and RPO/RTO placeholders), `MIGRATIONS.md`, `INCIDENT_RESPONSE.md`,
   `TRIGGERS.md` (every trigger by migration) and `API_COMPATIBILITY.md` (D-62 §6). Retention
   enforcement points to `RETENTION.md`, which stays PROVISIONAL.
@@ -4571,28 +4656,30 @@ liveness and readiness; and operating docs.
     - the `TRIGGERS.md` list equals the parsed `CREATE TRIGGER` set (committed-artifacts fold);
     - a restore has been exercised on a scratch DB copy, with the commands and output in
       `docs/evidence/phase-34/REPORT.md`.
-  - *Not yet ticked (2026-10-24, architect):* the check exists: `test_committed_artifacts.py:35`
+  - *Ticked 2026-10-24 (coordinator); architect note at build time:* the check exists: `test_committed_artifacts.py:35`
     calls `check_triggers_doc` (`observability_kit.py:282-332`), which runs each migration's
     `upgrade()` against a recording `op` and compares the (revision, trigger) set with the doc.
     Engineer-reported: the parser finds 177 pairs in 17 migrations, the same set as
     `pg_trigger` on a migrated scratch copy (diff SAME), and the draft table matches all 177
-    (with one row removed, False). **Missing:** `docs/ops/` does not exist (Glob, 2026-10-24),
+    (with one row removed, False). **Was missing at build time:** `docs/ops/` does not exist (Glob, 2026-10-24),
     so `test_committed_openapi_and_samples_are_current` fails with `FileNotFoundError` at
     `observability_kit.py:313`; `BACKUP_RESTORE.md`, `MIGRATIONS.md`, `INCIDENT_RESPONSE.md`
     and `API_COMPATIBILITY.md` are not written; no restore has been exercised.
-- [ ] **FE-34.1** `output: 'standalone'`, and a CI step proves that the image build fails without
+    **Closed:** `docs/ops/` holds TRIGGERS.md (186 triggers, generated by `backend/scripts/gen_triggers_doc.py`), BACKUP_RESTORE.md, MIGRATIONS.md, INCIDENT_RESPONSE.md and API_COMPATIBILITY.md; `test_committed_openapi_and_samples_are_current` passes (suite 49 passed); the restore exercise is in `docs/evidence/phase-34/REPORT.md`.
+- [x] **FE-34.1** `output: 'standalone'`, and a CI step proves that the image build fails without
   the API base-URL arg.
   - *Done-when:* the CI log shows the expected failure exit and a successful build with the arg.
-  - *Not yet ticked (2026-10-24, architect):* evidenced locally: `next.config.mjs:21-23`
+  - *Ticked 2026-10-24 (coordinator); architect note at build time:* evidenced locally: `next.config.mjs:21-23`
     (`output: 'standalone'` with `outputFileTracingRoot`; `NEXT_OUTPUT_STANDALONE=off` removes
     both, D-02); `frontend/Dockerfile:23-29` (the arg has no default and the build stops with
     exit 64 before `npm run build`); `frontend/scripts/check-image-build-arg.sh` (requires a
     non-zero exit and the arg message, then exit 0 and a non-root user, and prints both exit
     codes); `imageBuild.test.ts` `5 passed`; full vitest `741 passed`; a local `next build`
-    without the variable exits 1 and with it exits 0 with `standalone/server.js`. **Missing:**
+    without the variable exits 1 and with it exits 0 with `standalone/server.js`. **Was missing at build time:**
     `ci.yml` has no step that runs the script (grep `check-image-build-arg`: no match), and no
     CI log shows `exit code without the arg: <non-zero>` and `exit code with the arg: 0` (no
     Docker daemon here).
+    **Closed:** CI run 40077424225 on PR #45 (all four jobs green), `images` job: `exit code without the arg: 1` and `build arg NEXT_PUBLIC_API_BASE_URL is required`; the image built with the arg runs as `frontend uid: 1000`.
 
 *Test budget:* 49 → 49.
 *Reversibility:* metrics are off by default; the health routes are additive;
@@ -4692,6 +4779,10 @@ additive; the demo removal is reverted from git.
   API instance runs (D-53 §5). The compose `prod` profile runs one instance.
 - **Run cancellation by API**, and QUEUED use (D-59 §3). Chunked or streaming snapshot loading
   waits until the Phase 33 measurements justify it.
+- **Result hashing and post-checks in the worker.** In pool mode they stay in the API process,
+  which costs event-loop time at large sizes (Phase 33 LOW, Q8). Moving them needs a D-59
+  §1/§5 amendment and a new inline-versus-pool equality proof, and waits on the same
+  measurements *(added 2026-10-24, Phase 33 Q8, auto-resolved)*.
 - **Links consumed by runs.** This needs a new engine and manifest version (D-58 §6).
 - **Bond-specific attributes, deposit classes, and seeded reference indices** (client items,
   D-61 §7).

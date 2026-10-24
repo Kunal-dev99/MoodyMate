@@ -95,9 +95,10 @@ export const MINE_STATUSES: ScenarioVersionStatus[] = ['DRAFT', 'CONFIRMED_FOR_E
 /**
  * The GET /scenarios query of a tab. The shared library sends no status, so the server's default
  * applies (APPROVED_FOR_TEST only: never an exploration version, never a CLOSED one).
+ * FE-33.1: past the first page the server's `next_cursor` replaces the offset.
  */
-export function libraryQuery(tab: ExplorerTab, offset: number, showClosed = false): ScenarioQuery {
-  const query: ScenarioQuery = { limit: PAGE_SIZE, offset }
+export function libraryQuery(tab: ExplorerTab, offset: number, showClosed = false, cursor: string | null = null): ScenarioQuery {
+  const query: ScenarioQuery = cursor ? { limit: PAGE_SIZE, cursor } : { limit: PAGE_SIZE, offset }
   if (tab === 'mine') {
     query.mine = true
     query.status = showClosed ? [...MINE_STATUSES, 'CLOSED'] : [...MINE_STATUSES]
@@ -293,8 +294,14 @@ export const fetchScenario = (scenarioId: string) => (signal: AbortSignal) =>
   call(() => api.GET('/api/v1/scenarios/{scenario_id}', { params: { path: { scenario_id: scenarioId } }, signal }))
 
 /** The instrument picker of FUNDING_UNAVAILABLE: instruments of one type (`domain:read`). */
-export const fetchInstruments = (instrumentType: string, offset: number) => (signal: AbortSignal) =>
-  call(() => api.GET('/api/v1/instruments', { params: { query: { instrument_type: instrumentType, limit: PAGE_SIZE, offset } }, signal }))
+export const fetchInstruments = (instrumentType: string, offset: number, cursor: string | null = null) => (signal: AbortSignal) =>
+  call(() =>
+    api.GET('/api/v1/instruments', {
+      // FE-33.1: past the first page the server's next_cursor replaces the offset.
+      params: { query: { instrument_type: instrumentType, limit: PAGE_SIZE, ...(cursor ? { cursor } : { offset }) } },
+      signal,
+    }),
+  )
 
 export const createScenario = (body: ScenarioCreate) => call(() => api.POST('/api/v1/scenarios', { body }))
 

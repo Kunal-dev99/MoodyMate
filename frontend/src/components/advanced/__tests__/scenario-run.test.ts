@@ -186,7 +186,7 @@ describe('the baseline picker filter (FE-25.1 Done-when)', () => {
           offset: 0,
         }),
       )) as never)
-    const runs = await fetchBaselines(new AbortController().signal)
+    const { runs, truncation } = await fetchBaselines(new AbortController().signal)
     expect(get).toHaveBeenCalledTimes(2)
     const queries = get.mock.calls.map((c) => (c[1] as { params: { query: Record<string, unknown> } }).params.query)
     expect(queries).toEqual([
@@ -194,16 +194,24 @@ describe('the baseline picker filter (FE-25.1 Done-when)', () => {
       { module_code: 'maturity_ladder', status: 'SUCCEEDED_WITH_WARNINGS', stressed: false, limit: 200, offset: 0 },
     ])
     expect(runs.map((r) => r.run_id)).toEqual(['warned', 'plain'])
+    // Q18: each status page held every row the server counted: nothing was cut.
+    expect(truncation).toBeNull()
   })
 
   it('renders the candidates as options, or a "no baseline" state', () => {
-    const html = renderToStaticMarkup(createElement(BaselinePicker, { id: 'p', state: { kind: 'ready', value: [summary(BASE)] }, value: '', disabled: false, onChange: () => undefined }))
+    const html = renderToStaticMarkup(createElement(BaselinePicker, { id: 'p', state: { kind: 'ready', value: { runs: [summary(BASE)], truncation: null } }, value: '', disabled: false, onChange: () => undefined }))
     expect(html).toContain('data-testid="baseline-picker"')
     expect(html).toContain(`value="${BASE}"`)
     expect(html).toContain('reporting date 2026-12-31 · maturity_ladder v1 · SUCCEEDED')
-    const none = renderToStaticMarkup(createElement(BaselinePicker, { id: 'p', state: { kind: 'ready', value: [] }, value: '', disabled: false, onChange: () => undefined }))
+    expect(html).not.toContain('baseline-truncated')
+    const none = renderToStaticMarkup(createElement(BaselinePicker, { id: 'p', state: { kind: 'ready', value: { runs: [], truncation: null } }, value: '', disabled: false, onChange: () => undefined }))
     expect(none).toContain('data-testid="baseline-none"')
     expect(none).not.toContain('baseline-picker')
+    // Q18: a status page the server cut at BASELINE_PAGE is said, under the picker.
+    const truncation = { shown: 400, total: 523, text: 'Showing the first 400 of 523 succeeded maturity_ladder runs (newest first); the rest are not listed here.' }
+    const cut = renderToStaticMarkup(createElement(BaselinePicker, { id: 'p', state: { kind: 'ready', value: { runs: [summary(BASE)], truncation } }, value: '', disabled: false, onChange: () => undefined }))
+    expect(cut).toContain('data-testid="baseline-truncated"')
+    expect(cut).toContain(truncation.text)
   })
 })
 

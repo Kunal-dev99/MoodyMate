@@ -9,11 +9,12 @@ Raw upload artifacts (D-15) live under `ARTIFACT_STORE_DIR`, required outside lo
 never inside the repository; upload bounds (D-16) may be lowered, never raised.
 """
 
+import re
 import tempfile
 from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -21,6 +22,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 Environment = Literal["local", "test", "staging", "production"]
 AuthMode = Literal["oidc", "dev"]
 DataClass = Literal["synthetic", "client"]
+ExecutionMode = Literal["inline", "pool"]
+ArtifactStoreKind = Literal["filesystem", "s3"]
 
 LOCAL_ENVS = ("local", "test")
 # D-53: the per-route bucket settings are RATE_LIMIT_<ROUTE>_BURST and _PER_MINUTE.
@@ -28,6 +31,12 @@ RATE_LIMIT_SUFFIXES = ("_BURST", "_PER_MINUTE")
 
 # Signing secret for AUTH_MODE=dev, which itself only runs in local/test (D-13).
 DEV_SECRET_DEFAULT = "local-dev-only-secret-change-me-0123456789"  # noqa: S105
+# D-59 §6: the list-cursor signing key of local/test only; required (>= 32 chars) elsewhere.
+DEV_CURSOR_KEY_DEFAULT = "local-dev-only-cursor-key-change-me-0123"  # noqa: S105
+MIN_KEY_CHARS = 32
+# S3 bucket names (AWS rules, the subset every S3-compatible store accepts) and key prefixes.
+S3_BUCKET_PATTERN = re.compile(r"^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$")
+S3_PREFIX_PATTERN = re.compile(r"^([A-Za-z0-9_.-]+/)*$")
 
 _MIB = 1024 * 1024
 # D-16 §1: hard upload ceilings. The IMPORT_MAX_* settings may lower them, never raise them.
@@ -114,8 +123,23 @@ class Settings(BaseSettings):
     # a role not cleared for them sees it masked. 1 turns the rule off.
     CALC_MIN_AGGREGATE_COUNT: int = 3
     # A run still RUNNING this many seconds after it started is presumed stopped: a replay of
-    # its Idempotency-Key ends it FAILED (ENGINE_ERROR) and returns it.
+    # its Idempotency-Key ends it FAILED (ENGINE_ERROR) and returns it, and the periodic
+    # sweeper (Phase 33, BE-33.3) ends it whether or not its key is replayed.
     CALC_RUN_STALE_SECONDS: int = 900
+    # Phase 33 (RO-01, D-59 §1, D-02): where a module's pure run() executes. inline: on the
+    # API's event loop, the pre-Phase-33 behaviour; pool: in a bounded process pool of
+    # CALC_WORKERS processes, with at most CALC_WORKER_QUEUE_MAX further runs admitted to
+    # wait (beyond that, 503 workers_busy). Pins and every DB read and write stay in the API
+    # process; hashes are equal in both modes. Validated at startup (D-13).
+    CALC_EXECUTION_MODE: ExecutionMode = "inline"
+    CALC_WORKERS: int = 2
+    CALC_WORKER_QUEUE_MAX: int = 8
+    # BE-33.3 (pool mode): a run not ended this many seconds after it was written has its
+    # worker replaced and ends FAILED (ENGINE_ERROR). Below CALC_RUN_STALE_SECONDS, so a live
+    # run always ends itself before the sweeper would call it stale.
+    CALC_RUN_TIMEOUT_SECONDS: int = 600
+    # BE-33.3: how often the sweeper looks for stale RUNNING runs (every mode).
+    CALC_SWEEP_INTERVAL_SECONDS: int = 60
     # Phase 16 (FC-07, D-32 §3, D-02): governed rule changes (propose, submit, approve or
     # reject a rule version). Off freezes the rules at their ACTIVE versions: the writes
     # answer 409 rule_change_disabled (audited); reads and runs keep working.
@@ -144,6 +168,20 @@ class Settings(BaseSettings):
     # typed-maturity imports are unaffected, and existing term rows stay readable.
     INSTRUMENT_TERMS_PROJECTION_ENABLED: bool = True
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
+
+    # Phase 33 (BE-33.4, D-59 §6): the API's connection pool, at SQLAlchemy's defaults, and
+    # the server-side statement timeout (None: the server's own, normally none). A request
+    # that finds no connection within DB_POOL_TIMEOUT_SECONDS gets 503 db_pool_exhausted.
+    # DB_POOL_RECYCLE_SECONDS None: connections are not recycled by age (SQLAlchemy's -1).
+    DB_POOL_SIZE: int = 5
+    DB_MAX_OVERFLOW: int = 10
+    DB_POOL_TIMEOUT_SECONDS: int = 30
+    DB_POOL_RECYCLE_SECONDS: int | None = None
+    DB_STATEMENT_TIMEOUT_MS: int | None = None
+
+    # Phase 33 (BE-33.5, D-59 §6): HMAC key of the opaque list cursors (tenant-, list- and
+    # filter-bound). Required outside local/test (D-13), at least 32 characters.
+    CURSOR_SIGNING_KEY: SecretStr | None = None
 
     # Phase 28 (BE-28.3, D-53): in-process token buckets per (tenant, principal, route) on the
     # expensive endpoints. Off is allowed only in local/test (D-13). Each route has a burst
@@ -176,9 +214,22 @@ class Settings(BaseSettings):
     # stop), so reports stay a no-op whatever this holds; it is a secret (D-50 §2).
     ERROR_TRACKER_DSN: SecretStr | None = None
 
-    # D-15: root of the write-once raw artifact store. Required outside local/test (D-13);
-    # must be absolute and outside the repository. Pair one directory with each DB copy.
+    # D-15: root of the write-once raw artifact store. Required outside local/test (D-13)
+    # when ARTIFACT_STORE_KIND=filesystem; must be absolute and outside the repository. Pair
+    # one directory with each DB copy.
     ARTIFACT_STORE_DIR: Path | None = None
+    # Phase 33 (BE-33.6, D-59 §6, D-02): filesystem (the default, unchanged) or s3, an
+    # S3-compatible bucket with the same D-15 semantics. s3 requires ARTIFACT_S3_BUCKET, and
+    # outside local/test (D-13) ARTIFACT_S3_REGION and an https:// endpoint when one is set.
+    # The access key pair is both or neither (neither: the client's default credential
+    # chain, e.g. an instance role). Credentials are SecretStr: never printed or logged.
+    ARTIFACT_STORE_KIND: ArtifactStoreKind = "filesystem"
+    ARTIFACT_S3_BUCKET: str | None = None
+    ARTIFACT_S3_PREFIX: str = ""
+    ARTIFACT_S3_REGION: str | None = None
+    ARTIFACT_S3_ENDPOINT_URL: str | None = None
+    ARTIFACT_S3_ACCESS_KEY_ID: SecretStr | None = None
+    ARTIFACT_S3_SECRET_ACCESS_KEY: SecretStr | None = None
     # D-16 §1: upload bounds; each may only lower its IMPORT_HARD_LIMITS ceiling.
     IMPORT_MAX_BYTES: int = IMPORT_HARD_LIMITS["IMPORT_MAX_BYTES"]
     IMPORT_MAX_ROWS: int = IMPORT_HARD_LIMITS["IMPORT_MAX_ROWS"]
@@ -236,14 +287,32 @@ class Settings(BaseSettings):
             raise ValueError(f"DATA_CLASS is required when ENV={self.ENV}")
         if self.DATA_CLASS == "client" and self.ENV != "production":  # D-14
             raise ValueError(f"DATA_CLASS=client is not allowed when ENV={self.ENV}")
+        if self.CURSOR_SIGNING_KEY is None and not local:  # D-59 §6
+            raise ValueError(f"CURSOR_SIGNING_KEY is required when ENV={self.ENV}")
+        if (
+            self.CURSOR_SIGNING_KEY is not None
+            and len(self.CURSOR_SIGNING_KEY.get_secret_value()) < MIN_KEY_CHARS
+        ):
+            raise ValueError(f"CURSOR_SIGNING_KEY must be at least {MIN_KEY_CHARS} characters")
+        if (  # D-13: the published development key never signs a deployment's cursors
+            not local
+            and self.CURSOR_SIGNING_KEY is not None
+            and self.CURSOR_SIGNING_KEY.get_secret_value() == DEV_CURSOR_KEY_DEFAULT
+        ):
+            raise ValueError(
+                f"CURSOR_SIGNING_KEY must not be the development key when ENV={self.ENV}"
+            )
         self._guard_imports()
+        self._guard_artifact_store()
         self._guard_quality()
+        self._guard_scale()
         return self
 
     def _guard_imports(self) -> None:
         """D-15 artifact root and D-16 bounds (Feature 02, Phase 8)."""
         root = self.ARTIFACT_STORE_DIR
-        if root is None and self.ENV not in LOCAL_ENVS:
+        filesystem = self.ARTIFACT_STORE_KIND == "filesystem"
+        if root is None and filesystem and self.ENV not in LOCAL_ENVS:
             raise ValueError(f"ARTIFACT_STORE_DIR is required when ENV={self.ENV}")
         if root is not None:
             if not root.is_absolute():
@@ -256,6 +325,93 @@ class Settings(BaseSettings):
                 raise ValueError(f"{name} must be at least 1")
             if value > ceiling:
                 raise ValueError(f"{name} may only lower the hard ceiling ({ceiling})")
+
+    def _guard_artifact_store(self) -> None:
+        """BE-33.6 (D-59 §6, D-13): the S3 store's settings; nothing is checked for filesystem
+        beyond `_guard_imports`. Errors name the setting, never its value."""
+        if self.ARTIFACT_STORE_KIND != "s3":
+            return
+        local = self.ENV in LOCAL_ENVS
+        bucket = self.ARTIFACT_S3_BUCKET
+        if not bucket:
+            raise ValueError("ARTIFACT_STORE_KIND=s3 requires ARTIFACT_S3_BUCKET")
+        if not S3_BUCKET_PATTERN.match(bucket) or ".." in bucket:
+            raise ValueError("ARTIFACT_S3_BUCKET is not a valid bucket name")
+        if not S3_PREFIX_PATTERN.match(self.ARTIFACT_S3_PREFIX):
+            raise ValueError("ARTIFACT_S3_PREFIX must be empty or path segments ending in /")
+        if not local and not self.ARTIFACT_S3_REGION:
+            raise ValueError(f"ARTIFACT_S3_REGION is required when ENV={self.ENV}")
+        endpoint = self.ARTIFACT_S3_ENDPOINT_URL
+        if endpoint is not None:
+            if not endpoint.startswith(("https://", "http://")):
+                raise ValueError("ARTIFACT_S3_ENDPOINT_URL must be an http(s):// URL")
+            if not local and not endpoint.startswith("https://"):
+                raise ValueError(f"ARTIFACT_S3_ENDPOINT_URL must use https:// when ENV={self.ENV}")
+        if (self.ARTIFACT_S3_ACCESS_KEY_ID is None) != (self.ARTIFACT_S3_SECRET_ACCESS_KEY is None):
+            raise ValueError(
+                "ARTIFACT_S3_ACCESS_KEY_ID and ARTIFACT_S3_SECRET_ACCESS_KEY are both set or "
+                "neither"
+            )
+
+    def _guard_scale(self) -> None:
+        """Phase 33 (BE-33.1, BE-33.3, BE-33.4): counts and durations are positive; the
+        overflow and the worker queue may be 0; the run timeout is below the stale age; in
+        pool mode the admitted runs are fewer than the pool's connections."""
+        for name in (
+            "CALC_WORKERS",
+            "CALC_RUN_TIMEOUT_SECONDS",
+            "CALC_SWEEP_INTERVAL_SECONDS",
+            "DB_POOL_SIZE",
+            "DB_POOL_TIMEOUT_SECONDS",
+        ):
+            if getattr(self, name) < 1:
+                raise ValueError(f"{name} must be at least 1")
+        for name in ("DB_POOL_RECYCLE_SECONDS", "DB_STATEMENT_TIMEOUT_MS"):
+            value = getattr(self, name)
+            if value is not None and value < 1:
+                raise ValueError(f"{name} must be at least 1 (unset: none)")
+        for name in ("CALC_WORKER_QUEUE_MAX", "DB_MAX_OVERFLOW"):
+            if getattr(self, name) < 0:
+                raise ValueError(f"{name} must be at least 0")
+        if self.CALC_RUN_TIMEOUT_SECONDS >= self.CALC_RUN_STALE_SECONDS:
+            raise ValueError("CALC_RUN_TIMEOUT_SECONDS must be below CALC_RUN_STALE_SECONDS")
+        # Pool mode admits CALC_WORKERS + CALC_WORKER_QUEUE_MAX runs at once, and each may hold
+        # a connection while it reads its inputs or writes its outputs: they must leave the
+        # rest of the API (and a failed run's fresh session) connections to use.
+        admitted = self.CALC_WORKERS + self.CALC_WORKER_QUEUE_MAX
+        if (
+            self.CALC_EXECUTION_MODE == "pool"
+            and admitted >= self.DB_POOL_SIZE + self.DB_MAX_OVERFLOW
+        ):
+            raise ValueError(
+                "CALC_WORKERS + CALC_WORKER_QUEUE_MAX must be below "
+                "DB_POOL_SIZE + DB_MAX_OVERFLOW when CALC_EXECUTION_MODE=pool"
+            )
+
+    @property
+    def engine_options(self) -> dict[str, Any]:
+        """BE-33.4: the SQLAlchemy pool options and the asyncpg server settings."""
+        options: dict[str, Any] = {
+            "pool_size": self.DB_POOL_SIZE,
+            "max_overflow": self.DB_MAX_OVERFLOW,
+            "pool_timeout": self.DB_POOL_TIMEOUT_SECONDS,
+        }
+        if self.DB_POOL_RECYCLE_SECONDS is not None:
+            options["pool_recycle"] = self.DB_POOL_RECYCLE_SECONDS
+        return options
+
+    @property
+    def server_settings(self) -> dict[str, str]:
+        """BE-33.4: per-connection server settings (asyncpg `server_settings`)."""
+        if self.DB_STATEMENT_TIMEOUT_MS is None:
+            return {}
+        return {"statement_timeout": str(self.DB_STATEMENT_TIMEOUT_MS)}
+
+    @property
+    def cursor_signing_key(self) -> bytes:
+        """D-59 §6: the configured key, else (local/test only, D-13) the development key."""
+        key = self.CURSOR_SIGNING_KEY
+        return (key.get_secret_value() if key is not None else DEV_CURSOR_KEY_DEFAULT).encode()
 
     def _guard_quality(self) -> None:
         """Phase 12 thresholds: finite, not negative; a null-rate threshold is a rate. Phase 15

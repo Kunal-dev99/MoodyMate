@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import type { components } from '../src/api/schema'
-import { projectedSyntheticImports, sameDecimal, sumDecimals } from './calc-support'
+import { expectedRunStatus, projectedSyntheticImports, sameDecimal, settledRun, sumDecimals } from './calc-support'
 import { API, bearer, groupDecimal, signIn } from './support'
 
 /**
@@ -86,8 +86,9 @@ test('FE-17.1: risk_analyst runs lcr_hqla on the synthetic snapshot; the run det
   const submitted = isPost(page, `${API}/api/v1/calculation-runs`)
   await page.getByTestId('run-submit').click()
   const runResponse = await submitted
-  expect(runResponse.status(), await runResponse.text()).toBe(201)
-  run = await runResponse.json()
+  expect(runResponse.status(), await runResponse.text()).toBe(expectedRunStatus())
+  // FE-33.1: a background run (202) is polled until the server ends it.
+  run = await settledRun(page, runResponse)
   expect(run!.module.code).toBe(MODULE)
   expect(['SUCCEEDED', 'SUCCEEDED_WITH_WARNINGS']).toContain(run!.status)
   await page.waitForURL(`**/calculations/runs/${run!.run_id}`)

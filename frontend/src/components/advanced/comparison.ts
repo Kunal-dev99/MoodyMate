@@ -65,11 +65,16 @@ export const fetchComparison = (scenarioId: string, scenarioRunId: string) => (s
     }),
   )
 
-/** GET scenario-runs?scenario_id= (and `baseline_run_id`), newest first (calc:read). */
-export const fetchScenarioRuns = (scenarioId: string, baselineRunId?: string) => (signal: AbortSignal): Promise<ScenarioRunPage> =>
+/**
+ * GET scenario-runs?scenario_id= (and `baseline_run_id`), newest first (calc:read). FE-33.1: a
+ * `cursor` (the server's next_cursor) reads the page after; without one, the first page.
+ */
+export const fetchScenarioRuns = (scenarioId: string, baselineRunId?: string, cursor: string | null = null) => (signal: AbortSignal): Promise<ScenarioRunPage> =>
   call(() =>
     api.GET('/api/v1/scenario-runs', {
-      params: { query: { scenario_id: scenarioId, ...(baselineRunId ? { baseline_run_id: baselineRunId } : {}), limit: SCENARIO_RUN_PAGE, offset: 0 } },
+      params: {
+        query: { scenario_id: scenarioId, ...(baselineRunId ? { baseline_run_id: baselineRunId } : {}), limit: SCENARIO_RUN_PAGE, ...(cursor ? { cursor } : { offset: 0 }) },
+      },
       signal,
     }),
   )
@@ -83,13 +88,29 @@ export interface DrillTarget {
   combined: boolean
 }
 
-/** GET …/comparison/contributions for one member run (the combined run by default), one page. */
-export const fetchParts = (scenarioId: string, scenarioRunId: string, target: Pick<DrillTarget, 'currency' | 'bucketCode' | 'shockSubset'>, offset: number) => (signal: AbortSignal): Promise<ScenarioContributionPage> =>
+/**
+ * GET …/comparison/contributions for one member run (the combined run by default), one page.
+ * FE-33.1: past the first page the server's next_cursor replaces the offset.
+ */
+export const fetchParts = (
+  scenarioId: string,
+  scenarioRunId: string,
+  target: Pick<DrillTarget, 'currency' | 'bucketCode' | 'shockSubset'>,
+  offset: number,
+  cursor: string | null = null,
+) => (signal: AbortSignal): Promise<ScenarioContributionPage> =>
   call(() =>
     api.GET('/api/v1/scenarios/{scenario_id}/comparison/contributions', {
       params: {
         path: { scenario_id: scenarioId },
-        query: { scenario_run_id: scenarioRunId, currency: target.currency, bucket_code: target.bucketCode, shock_subset: [...target.shockSubset], limit: PARTS_PAGE, offset },
+        query: {
+          scenario_run_id: scenarioRunId,
+          currency: target.currency,
+          bucket_code: target.bucketCode,
+          shock_subset: [...target.shockSubset],
+          limit: PARTS_PAGE,
+          ...(cursor ? { cursor } : { offset }),
+        },
       },
       signal,
     }),

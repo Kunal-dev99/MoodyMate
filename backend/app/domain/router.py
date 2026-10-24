@@ -48,6 +48,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth import require_permission
 from app.core.classification import UNCLASSIFIED, MaskedValue, mask_mapping
 from app.core.idempotency import mark_replayed
+from app.core.pagination import INVALID_CURSOR_RESPONSE, Cursor, continuation, page_offset
 from app.core.principal import Principal
 from app.db.session import get_session
 from app.domain.constants import (
@@ -284,7 +285,12 @@ def _summary(row: InstrumentRow, pins: SchemaPins, clear: frozenset[str]) -> Ins
     )
 
 
-@router.get("/instruments", response_model=InstrumentPage, operation_id="listInstruments")
+@router.get(
+    "/instruments",
+    response_model=InstrumentPage,
+    operation_id="listInstruments",
+    responses=INVALID_CURSOR_RESPONSE,
+)
 async def list_instruments(
     principal: DomainReader,
     session: SessionDep,
@@ -301,9 +307,18 @@ async def list_instruments(
     import_id: Annotated[
         uuid.UUID | None, Query(description="Instruments with a version from this import.")
     ] = None,
+    cursor: Cursor = None,
 ) -> InstrumentPage:
     """The instrument catalogue of the caller's tenant, by business key. A filter matches an
     instrument when any of its versions matches."""
+    listing = "listInstruments"
+    filters = {
+        "instrument_type": instrument_type,
+        "currency": currency,
+        "source_id": source_id,
+        "import_id": import_id,
+    }
+    offset = page_offset(principal, listing, filters, offset, cursor)
     view = await DomainService(session, principal).catalogue(
         InstrumentFilter(instrument_type, currency, source_id, import_id), limit, offset
     )
@@ -313,6 +328,7 @@ async def list_instruments(
         total=view.total,
         limit=limit,
         offset=offset,
+        **continuation(principal, listing, filters, limit, offset, len(view.rows), view.total),
         instrument_types=[
             InstrumentTypeOut(code=t.code, name=t.name, provisional=t.provisional)
             for t in view.instrument_types
@@ -633,7 +649,12 @@ def _counterparty_summary(
     )
 
 
-@router.get("/counterparties", response_model=CounterpartyPage, operation_id="listCounterparties")
+@router.get(
+    "/counterparties",
+    response_model=CounterpartyPage,
+    operation_id="listCounterparties",
+    responses=INVALID_CURSOR_RESPONSE,
+)
 async def list_counterparties(
     principal: DomainReader,
     session: SessionDep,
@@ -650,9 +671,18 @@ async def list_counterparties(
     import_id: Annotated[
         uuid.UUID | None, Query(description="Counterparties with a version from this import.")
     ] = None,
+    cursor: Cursor = None,
 ) -> CounterpartyPage:
     """The counterparties of the caller's tenant, by business key. A filter matches a
     counterparty when any of its versions matches."""
+    listing = "listCounterparties"
+    filters = {
+        "segment": segment,
+        "country": country,
+        "source_id": source_id,
+        "import_id": import_id,
+    }
+    offset = page_offset(principal, listing, filters, offset, cursor)
     page = await DomainService(session, principal).counterparties(
         CounterpartyFilter(segment, country, source_id, import_id), limit, offset
     )
@@ -664,6 +694,9 @@ async def list_counterparties(
         total=page.total,
         limit=limit,
         offset=offset,
+        **continuation(
+            principal, listing, filters, limit, offset, len(page.counterparties), page.total
+        ),
     )
 
 
@@ -823,7 +856,10 @@ def _exposure_summary(
 
 
 @router.get(
-    "/credit-exposures", response_model=CreditExposurePage, operation_id="listCreditExposures"
+    "/credit-exposures",
+    response_model=CreditExposurePage,
+    operation_id="listCreditExposures",
+    responses=INVALID_CURSOR_RESPONSE,
 )
 async def list_credit_exposures(
     principal: DomainReader,
@@ -845,9 +881,19 @@ async def list_credit_exposures(
     import_id: Annotated[
         uuid.UUID | None, Query(description="Exposures with a version from this import.")
     ] = None,
+    cursor: Cursor = None,
 ) -> CreditExposurePage:
     """The credit exposures of the caller's tenant, by business key. A filter matches an
     exposure when any of its versions matches."""
+    listing = "listCreditExposures"
+    filters = {
+        "currency": currency,
+        "facility_type": facility_type,
+        "counterparty_key": counterparty_key,
+        "source_id": source_id,
+        "import_id": import_id,
+    }
+    offset = page_offset(principal, listing, filters, offset, cursor)
     page = await DomainService(session, principal).exposures(
         ExposureFilter(currency, facility_type, counterparty_key, source_id, import_id),
         limit,
@@ -859,6 +905,7 @@ async def list_credit_exposures(
         total=page.total,
         limit=limit,
         offset=offset,
+        **continuation(principal, listing, filters, limit, offset, len(page.exposures), page.total),
     )
 
 
@@ -985,7 +1032,12 @@ async def decide_obligor_rating(
     return _rating(view.row, view.pins, principal.clear_classifications)
 
 
-@router.get("/obligor-ratings", response_model=ObligorRatingPage, operation_id="listObligorRatings")
+@router.get(
+    "/obligor-ratings",
+    response_model=ObligorRatingPage,
+    operation_id="listObligorRatings",
+    responses=INVALID_CURSOR_RESPONSE,
+)
 async def list_obligor_ratings(
     principal: DomainReader,
     session: SessionDep,
@@ -998,9 +1050,12 @@ async def list_obligor_ratings(
     counterparty_id: Annotated[
         uuid.UUID | None, Query(description="Only this counterparty's versions.")
     ] = None,
+    cursor: Cursor = None,
 ) -> ObligorRatingPage:
     """The obligor rating versions of the caller's tenant (every status unless filtered),
     newest proposal first."""
+    listing, filters = "listObligorRatings", {"status": status, "counterparty_id": counterparty_id}
+    offset = page_offset(principal, listing, filters, offset, cursor)
     page = await DomainService(session, principal).ratings(status, counterparty_id, limit, offset)
     clear = principal.clear_classifications
     return ObligorRatingPage(
@@ -1008,6 +1063,7 @@ async def list_obligor_ratings(
         total=page.total,
         limit=limit,
         offset=offset,
+        **continuation(principal, listing, filters, limit, offset, len(page.rows), page.total),
     )
 
 
@@ -1028,17 +1084,25 @@ async def get_obligor_rating(
 # --- Phase 31: legal entities and identity links (BE-31.4, BE-31.5, D-58) ------------------
 
 
-@router.get("/legal-entities", response_model=LegalEntityPage, operation_id="listLegalEntities")
+@router.get(
+    "/legal-entities",
+    response_model=LegalEntityPage,
+    operation_id="listLegalEntities",
+    responses=INVALID_CURSOR_RESPONSE,
+)
 async def list_legal_entities(
     principal: DomainReader,
     session: SessionDep,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
     source_id: uuid.UUID | None = None,
+    cursor: Cursor = None,
 ) -> LegalEntityPage:
     """The legal entity identities of the caller's tenant (D-58 §2): a stable id per source
     system and code, `provisional`, append-only. Codes are masked by the classification of
     the schema field they came from."""
+    listing, filters = "listLegalEntities", {"source_id": source_id}
+    offset = page_offset(principal, listing, filters, offset, cursor)
     view = await DomainService(session, principal).legal_entities(source_id, limit, offset)
     clear = principal.clear_classifications
     return LegalEntityPage(
@@ -1046,6 +1110,7 @@ async def list_legal_entities(
         total=view.total,
         limit=limit,
         offset=offset,
+        **continuation(principal, listing, filters, limit, offset, len(view.rows), view.total),
     )
 
 
@@ -1082,7 +1147,12 @@ async def get_legal_entity(
     )
 
 
-@router.get("/identity-links", response_model=IdentityLinkPage, operation_id="listIdentityLinks")
+@router.get(
+    "/identity-links",
+    response_model=IdentityLinkPage,
+    operation_id="listIdentityLinks",
+    responses=INVALID_CURSOR_RESPONSE,
+)
 async def list_identity_links(
     principal: DomainReader,
     session: SessionDep,
@@ -1104,10 +1174,19 @@ async def list_identity_links(
     target_id: Annotated[
         uuid.UUID | None, Query(description="Only links to this identity.")
     ] = None,
+    cursor: Cursor = None,
 ) -> IdentityLinkPage:
     """The identity links of the caller's tenant (D-58), ids only. A source row of another
     tenant gives an empty page, the same as an absent one (D-04). No link for a row means its
     text key is unresolved or ambiguous."""
+    listing = "listIdentityLinks"
+    filters = {
+        "source_kind": source_kind,
+        "source_id": source_id,
+        "target_kind": target_kind,
+        "target_id": target_id,
+    }
+    offset = page_offset(principal, listing, filters, offset, cursor)
     view = await DomainService(session, principal).identity_links(
         source_kind, source_id, target_kind, target_id, limit, offset
     )
@@ -1129,6 +1208,7 @@ async def list_identity_links(
         total=view.total,
         limit=limit,
         offset=offset,
+        **continuation(principal, listing, filters, limit, offset, len(view.links), view.total),
     )
 
 

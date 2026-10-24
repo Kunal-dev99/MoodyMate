@@ -37,6 +37,12 @@ dev = [
     # BE-29.4 (D-52 §6): property tests, derandomised with a fixed max_examples (D-26 folds).
     "hypothesis>=6.100,<7",
 ]
+# BE-33.6 (D-59 §6): the S3 artifact store's client, loaded only when ARTIFACT_STORE_KIND=s3.
+# 1.35.2 is the first boto3 (it requires botocore >= 1.35.2) whose PutObject takes
+# IfNoneMatch, the write-once conditional put; with an older one the app refuses to start.
+s3 = [
+    "boto3>=1.35.2,<2",
+]
 
 [build-system]
 requires = ["setuptools>=68"]

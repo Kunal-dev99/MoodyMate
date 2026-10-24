@@ -11,7 +11,9 @@ import { toastApiError } from '@/components/common/api-error-toast'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { cursorsFor, pageView, type Paging } from './paging'
+import { LIST_PAGING_UI_ENABLED } from '@/config/features'
+import { pageSummary } from '@/lib/paging'
+import { cursorsFor, keysetNext, pageView, type Paging } from './paging'
 import { formatTimestamp } from '@/lib/format'
 import { ActorLabel } from '@/components/common/ActorLabel'
 
@@ -95,6 +97,52 @@ function EventRow({ event }: { event: Event }) {
         </dl>
       )}
     </li>
+  )
+}
+
+/**
+ * FE-33.1 (Q17): "Showing n of total" under the timeline, and its keyset controls. Older is
+ * offered only while the page's `has_more` is true and sends `before` (the last shown event's id);
+ * Newer goes back one page. Shown once the timeline spans more than one page.
+ */
+export function KeysetPager({
+  page,
+  depth,
+  loading,
+  onNewer,
+  onOlder,
+}: {
+  page: { items: readonly Event[]; total: number; index: number; hasOlder: boolean }
+  depth: number
+  loading: boolean
+  onNewer: () => void
+  onOlder: (before: string) => void
+}) {
+  const next = keysetNext(page.items, page.hasOlder)
+  const summary = pageSummary({ items: page.items, total: page.total, has_more: next.has_more, next_cursor: null }, page.index * PAGE_SIZE)
+  return (
+    <div className="flex items-center justify-between text-xs text-muted-foreground" data-testid="audit-pager" data-has-more={next.has_more}>
+      <span data-testid="audit-pager-summary">{summary.text}</span>
+      {(next.has_more || depth > 0) && (
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" disabled={depth === 0 || loading} onClick={onNewer} data-testid="audit-pager-newer">
+            <ChevronLeft className="h-3.5 w-3.5" />
+            Newer
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!next.has_more || !next.before || loading}
+            onClick={() => next.before && onOlder(next.before)}
+            data-testid="audit-pager-older"
+            data-before={next.before ?? undefined}
+          >
+            Older
+            <ChevronRight className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -219,31 +267,35 @@ export function AuditTimeline({
               <EventRow key={e.id} event={e} />
             ))}
           </ul>
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>
-              {page.index * PAGE_SIZE + 1}–{page.index * PAGE_SIZE + page.items.length} of {page.total}
-            </span>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={cursors.length === 0 || loading}
-                onClick={() => setPaging({ scope, cursors: cursors.slice(0, -1) })}
-              >
-                <ChevronLeft className="h-3.5 w-3.5" />
-                Newer
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={!page.hasOlder || loading}
-                onClick={() => setPaging({ scope, cursors: [...cursors, page.items[page.items.length - 1].id] })}
-              >
-                Older
-                <ChevronRight className="h-3.5 w-3.5" />
-              </Button>
+          {LIST_PAGING_UI_ENABLED ? (
+            <KeysetPager page={page} depth={cursors.length} loading={loading} onNewer={() => setPaging({ scope, cursors: cursors.slice(0, -1) })} onOlder={(before) => setPaging({ scope, cursors: [...cursors, before] })} />
+          ) : (
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>
+                {page.index * PAGE_SIZE + 1}–{page.index * PAGE_SIZE + page.items.length} of {page.total}
+              </span>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={cursors.length === 0 || loading}
+                  onClick={() => setPaging({ scope, cursors: cursors.slice(0, -1) })}
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                  Newer
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!page.hasOlder || loading}
+                  onClick={() => setPaging({ scope, cursors: [...cursors, page.items[page.items.length - 1].id] })}
+                >
+                  Older
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </Button>
+              </div>
             </div>
-          </div>
+          )}
         </>
       ) : null}
     </div>

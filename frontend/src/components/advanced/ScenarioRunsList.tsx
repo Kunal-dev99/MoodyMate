@@ -9,11 +9,12 @@ import { LoadFailed } from '@/components/common/LoadFailed'
 import { LoadingBlock } from '@/components/common/LoadingBlock'
 import { PageSection } from '@/components/common/PageSection'
 import { createLoader, type Loaded } from '@/components/common/load'
+import { ListPager, cursorRefusedBody, useCursorPaging } from '@/components/common/ListPager'
 import { runHref } from '@/components/calculations/calculations'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { STRESS_COMPARE_UI_ENABLED } from '@/config/features'
+import { LIST_PAGING_UI_ENABLED, STRESS_COMPARE_UI_ENABLED } from '@/config/features'
 import { formatTimestamp } from '@/lib/format'
 import { approvalVariant, memberStatusText } from './scenario-runs'
 import { comparisonHref, fetchScenarioRuns, type ScenarioRunPage } from './comparison'
@@ -75,8 +76,11 @@ export function ScenarioRunsTable({ scenarioId, page }: { scenarioId: string; pa
  * keeps its Phase 24 look (D-02).
  */
 export function ScenarioRunsSection({ scenarioId }: { scenarioId: string }) {
+  // FE-33.1: the server's next_cursor, bound to this scenario (NEXT_PUBLIC_LIST_PAGING_UI=off: the newest page only).
+  const cursorPaging = useCursorPaging(scenarioId)
+  const cursor = LIST_PAGING_UI_ENABLED ? cursorPaging.cursor : null
   const [state, setState] = useState<Loaded<ScenarioRunPage>>({ kind: 'loading' })
-  const loader = useMemo(() => createLoader(fetchScenarioRuns(scenarioId), setState, 'Could not load the scenario runs'), [scenarioId])
+  const loader = useMemo(() => createLoader(fetchScenarioRuns(scenarioId, undefined, cursor), setState, 'Could not load the scenario runs'), [scenarioId, cursor])
   useEffect(() => {
     if (!STRESS_COMPARE_UI_ENABLED) return
     loader.load()
@@ -88,8 +92,12 @@ export function ScenarioRunsSection({ scenarioId }: { scenarioId: string }) {
       {state.kind === 'loading' && <LoadingBlock rows={2} />}
       {state.kind === 'failed' && <LoadFailed icon={History} title="Could not load the scenario runs" cid={state.cid} onRetry={loader.load} />}
       {state.kind === 'forbidden' && <Forbidden permission="calc:read" correlationId={state.cid} />}
-      {state.kind === 'not_found' && <EmptyState icon={History} title="Scenario runs not available" description={state.cid ? `Correlation ID: ${state.cid}` : undefined} />}
+      {state.kind === 'not_found' &&
+        (cursorRefusedBody(state, cursorPaging, 'scenario-run-pager') ?? <EmptyState icon={History} title="Scenario runs not available" description={state.cid ? `Correlation ID: ${state.cid}` : undefined} />)}
       {state.kind === 'ready' && <ScenarioRunsTable scenarioId={scenarioId} page={state.value} />}
+      {state.kind === 'ready' && LIST_PAGING_UI_ENABLED && state.value.items.length > 0 && (
+        <ListPager page={state.value} paging={cursorPaging} testId="scenario-run-pager" />
+      )}
     </PageSection>
   )
 }

@@ -11,6 +11,9 @@ import { LoadingBlock } from '@/components/common/LoadingBlock'
 import { PageSection } from '@/components/common/PageSection'
 import { toastApiError } from '@/components/common/api-error-toast'
 import { startLoad, type LoadFailure } from '@/components/common/load'
+import { ListPager, cursorRefusedBody, useCursorPaging } from '@/components/common/ListPager'
+import { LIST_PAGING_UI_ENABLED } from '@/config/features'
+import { cursorQuery } from '@/lib/paging'
 import { ImportStatusPill } from '@/components/ingestion/ImportStatusPill'
 import { MapImportLink } from '@/components/ingestion/MapImportLink'
 import { SeverityPill } from '@/components/ingestion/QuarantineStatusPill'
@@ -166,11 +169,14 @@ function Issues({ importId }: { importId: string }) {
   const [open, setOpen] = useState<string | null>(null)
   const [state, setState] = useState<IssuesState>({ kind: 'loading' })
   const request = useRef<AbortController | null>(null)
+  // FE-33.1: the server's next_cursor, bound to these filters (NEXT_PUBLIC_LIST_PAGING_UI=off: offsets).
+  const cursorPaging = useCursorPaging(JSON.stringify(filters))
+  const cursor = LIST_PAGING_UI_ENABLED ? cursorPaging.cursor : null
 
   const load = useCallback(() => {
     const query = {
       limit: PAGE,
-      offset,
+      ...(LIST_PAGING_UI_ENABLED ? cursorQuery(cursor) : { offset }),
       ...(filters.severity ? { severity: filters.severity } : {}),
       ...(filters.code ? { code: filters.code } : {}),
       ...(filters.field ? { field: filters.field } : {}),
@@ -180,7 +186,7 @@ function Issues({ importId }: { importId: string }) {
       { onReady: (page) => setState({ kind: 'ready', page }), onFailure: setState, failureTitle: 'Could not load the issues' },
       request.current,
     )
-  }, [importId, filters, offset])
+  }, [importId, filters, offset, cursor])
 
   useEffect(() => {
     setState({ kind: 'loading' })
@@ -213,7 +219,7 @@ function Issues({ importId }: { importId: string }) {
       />
     )
   else if (state.kind === 'not_found')
-    body = <EmptyState icon={ListChecks} title="The issues could not be listed" description={`The request was refused.${state.cid ? ` Correlation ID: ${state.cid}` : ''}`} />
+    body = cursorRefusedBody(state, cursorPaging, 'issues-pager') ?? <EmptyState icon={ListChecks} title="The issues could not be listed" description={`The request was refused.${state.cid ? ` Correlation ID: ${state.cid}` : ''}`} />
   else {
     const { page } = state
     const last = Math.min(page.offset + page.items.length, page.total)
@@ -299,19 +305,23 @@ function Issues({ importId }: { importId: string }) {
               ))}
             </TableBody>
           </Table>
-          <div className="mt-3 flex items-center justify-between text-sm">
-            <span className="text-muted-foreground" data-testid="issues-range">
-              {page.offset + 1}–{last} of {page.total}
-            </span>
-            <div className="flex gap-2">
-              <Button size="sm" variant="outline" disabled={page.offset === 0} onClick={() => setOffset(Math.max(0, page.offset - PAGE))} data-testid="issues-prev">
-                Previous
-              </Button>
-              <Button size="sm" variant="outline" disabled={last >= page.total} onClick={() => setOffset(page.offset + PAGE)} data-testid="issues-next">
-                Next
-              </Button>
+          {LIST_PAGING_UI_ENABLED ? (
+            <ListPager page={page} paging={cursorPaging} testId="issues-pager" />
+          ) : (
+            <div className="mt-3 flex items-center justify-between text-sm">
+              <span className="text-muted-foreground" data-testid="issues-range">
+                {page.offset + 1}–{last} of {page.total}
+              </span>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" disabled={page.offset === 0} onClick={() => setOffset(Math.max(0, page.offset - PAGE))} data-testid="issues-prev">
+                  Previous
+                </Button>
+                <Button size="sm" variant="outline" disabled={last >= page.total} onClick={() => setOffset(page.offset + PAGE)} data-testid="issues-next">
+                  Next
+                </Button>
+              </div>
             </div>
-          </div>
+          )}
         </>
       )
   }

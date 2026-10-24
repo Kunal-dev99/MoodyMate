@@ -31,6 +31,7 @@ Phase 24 (BE-24.2 - BE-24.4): stress scenarios (D-44 §1-9, D-47 §3).
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 from typing import Any, NoReturn
 
@@ -40,13 +41,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.calculations import scenario_overlay
 from app.calculations.constants import AGGREGATE_CLASSIFICATION, CalculationRunStatus
 from app.calculations.service import (
-    SUCCEEDED as RUN_SUCCEEDED,
-)
-from app.calculations.service import (
+    INLINE,
+    Admission,
     CalculationService,
     LadderView,
+    RunExecutor,
     ScenarioMember,
     ScenarioRunSpec,
+    WorkersBusy,
+    workers_busy,
+)
+from app.calculations.service import (
+    SUCCEEDED as RUN_SUCCEEDED,
 )
 from app.core.canonical import HashKind, sha256_for
 from app.core.classification import (
@@ -761,7 +767,16 @@ class ScenarioService:
                     approved_version=approved[-1] if approved else None,
                 )
             )
-        return ScenarioPage(items=items, total=total, limit=limit, offset=offset, labels=LABELS)
+        return ScenarioPage(
+            items=items,
+            total=total,
+            limit=limit,
+            offset=offset,
+            labels=LABELS,
+            # D-59 §6: the router binds next_cursor (app.core.pagination).
+            has_more=offset + len(items) < total,
+            next_cursor=None,
+        )
 
     async def detail(self, scenario_id: uuid.UUID, enabled: bool) -> ScenarioDetail:
         """One scenario with every version; 404 alike for an absent and a foreign id (D-04)."""
@@ -801,11 +816,14 @@ class ScenarioRunService:
     No AI is involved (D-45 §11).
     """
 
-    def __init__(self, session: AsyncSession, principal: Principal) -> None:
+    def __init__(
+        self, session: AsyncSession, principal: Principal, executor: RunExecutor | None = None
+    ) -> None:
         self.session = session
         self.principal = principal
         self.repo = ScenarioRepository(session, principal.scope)
-        self.calc = CalculationService(session, principal)
+        self.executor = executor or INLINE  # BE-33.1: where the member runs execute
+        self.calc = CalculationService(session, principal, executor)
 
     # --- refusals -------------------------------------------------------------------------
 
@@ -960,6 +978,7 @@ class ScenarioRunService:
                     ),
                     (AUDIT_RUN_RESOURCE, existing.id),
                 )
+            # A replay admits each member it still has to create (calc.create, D-59 §4).
             await self._members(existing, version, calculations_enabled, scenarios_enabled)
             return await self._view(existing.id), False
         version_resource: tuple[str, uuid.UUID | None] = (VERSION, version.id)
@@ -1003,6 +1022,35 @@ class ScenarioRunService:
                 version_resource,
             )
         baseline = check.run
+        # D-59 §4: one admission for the whole scenario run (its members run one at a time),
+        # taken before anything is written; 503 workers_busy when the executor is full.
+        try:
+            admission = self.executor.admit()
+        except WorkersBusy as busy:
+            await self._refuse(workers_busy(busy.retry_after), version_resource)
+        try:
+            return await self._write_run(
+                version, baseline.id, baseline.reporting_date, approval, counts,
+                idempotency_key, fingerprint, calculations_enabled, scenarios_enabled,
+                admission,
+            )  # fmt: skip
+        finally:
+            admission.release()
+
+    async def _write_run(
+        self,
+        version: ScenarioVersion,
+        baseline_id: uuid.UUID,
+        reporting_date: date,
+        approval: ApprovalState,
+        counts: list[ShockMatchCount],
+        idempotency_key: str,
+        fingerprint: str,
+        calculations_enabled: bool,
+        scenarios_enabled: bool,
+        admission: Admission,
+    ) -> tuple[ScenarioRunOut, bool]:
+        actor = self.principal.actor
         scenario_run = ScenarioRun(
             id=uuid.uuid4(),
             tenant_id=self.principal.tenant_id,
@@ -1011,8 +1059,8 @@ class ScenarioRunService:
             version=version.version,
             shocks_sha256=version.shocks_sha256,
             approval_state=approval.value,
-            baseline_run_id=baseline.id,
-            reporting_date=baseline.reporting_date,
+            baseline_run_id=baseline_id,
+            reporting_date=reporting_date,
             shock_count=len(version.shocks),
             run_count=len(scenario_overlay.subsets(len(version.shocks))),
             shock_counts=[c.model_dump(mode="json") for c in counts],
@@ -1032,7 +1080,7 @@ class ScenarioRunService:
             "shock_count": scenario_run.shock_count,
             "run_count": scenario_run.run_count,
             "approval_state": approval.value,
-            "baseline_run_id": str(baseline.id),
+            "baseline_run_id": str(baseline_id),
         }
         audit_by(
             self.session,
@@ -1044,7 +1092,9 @@ class ScenarioRunService:
             details_classification=dict.fromkeys(details, ClassificationCode.PUBLIC.value),
         )
         await self.session.commit()
-        await self._members(scenario_run, version, calculations_enabled, scenarios_enabled)
+        await self._members(
+            scenario_run, version, calculations_enabled, scenarios_enabled, admission
+        )
         return await self._view(scenario_run.id), True
 
     async def _members(
@@ -1053,6 +1103,7 @@ class ScenarioRunService:
         version: ScenarioVersion,
         calculations_enabled: bool,
         scenarios_enabled: bool,
+        admission: Admission | None = None,
     ) -> None:
         """Every member run (D-45 §7), each a synchronous stressed run with its own derived
         key: a replay finds the runs that exist and creates only those that do not. The spec is
@@ -1088,7 +1139,11 @@ class ScenarioRunService:
             )
             key = f"scenario_run:{ids[0]}:{'-'.join(str(n) for n in subset)}"
             await self.calc.create(
-                spec, key, calculations_enabled, scenarios_enabled=scenarios_enabled
+                spec,
+                key,
+                calculations_enabled,
+                scenarios_enabled=scenarios_enabled,
+                admission=admission,
             )
 
     # --- reads (BE-25.4) ------------------------------------------------------------------
@@ -1156,7 +1211,14 @@ class ScenarioRunService:
             offset,
         )
         return ScenarioRunPage(
-            items=await self._outs(runs), total=total, limit=limit, offset=offset, labels=LABELS
+            items=await self._outs(runs),
+            total=total,
+            limit=limit,
+            offset=offset,
+            labels=LABELS,
+            # D-59 §6: the router binds next_cursor (app.core.pagination).
+            has_more=offset + len(runs) < total,
+            next_cursor=None,
         )
 
     async def _scoped_run(self, scenario_id: uuid.UUID, scenario_run_id: uuid.UUID) -> ScenarioRun:
@@ -1305,6 +1367,9 @@ class ScenarioRunService:
             limit=limit,
             offset=offset,
             labels=LABELS,
+            # D-59 §6: the router binds next_cursor (app.core.pagination).
+            has_more=offset + len(items) < total,
+            next_cursor=None,
         )
 
 

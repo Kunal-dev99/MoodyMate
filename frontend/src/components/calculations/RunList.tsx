@@ -11,6 +11,9 @@ import { LoadFailed } from '@/components/common/LoadFailed'
 import { LoadingBlock } from '@/components/common/LoadingBlock'
 import { PageSection } from '@/components/common/PageSection'
 import { startLoad, type LoadFailure } from '@/components/common/load'
+import { ListPager, cursorRefusedBody, useCursorPaging } from '@/components/common/ListPager'
+import { LIST_PAGING_UI_ENABLED } from '@/config/features'
+import { cursorQuery } from '@/lib/paging'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -51,17 +54,26 @@ export function RunList() {
   const [paging, setPaging] = useState<{ query: typeof query; offset: number }>({ query, offset: 0 })
   const offset = paging.query === query ? paging.offset : 0
   const setOffset = (next: number) => setPaging({ query, offset: next })
+  // FE-33.1: the server's next_cursor, bound to these filters (NEXT_PUBLIC_LIST_PAGING_UI=off: offsets).
+  const cursorPaging = useCursorPaging(JSON.stringify(query))
+  const cursor = LIST_PAGING_UI_ENABLED ? cursorPaging.cursor : null
   const [state, setState] = useState<State>({ kind: 'loading' })
   const [moduleCodes, setModuleCodes] = useState<string[] | null>(null)
   const request = useRef<AbortController | null>(null)
 
   const load = useCallback(() => {
     request.current = startLoad(
-      (signal) => call(() => api.GET('/api/v1/calculation-runs', { params: { query: { limit: PAGE_SIZE, offset, ...query } }, signal })),
+      (signal) =>
+        call(() =>
+          api.GET('/api/v1/calculation-runs', {
+            params: { query: { limit: PAGE_SIZE, ...(LIST_PAGING_UI_ENABLED ? cursorQuery(cursor) : { offset }), ...query } },
+            signal,
+          }),
+        ),
       { onReady: (page) => setState({ kind: 'ready', page }), onFailure: setState, failureTitle: 'Could not load runs' },
       request.current,
     )
-  }, [query, offset])
+  }, [query, offset, cursor])
 
   useEffect(() => {
     setState({ kind: 'loading' })
@@ -152,7 +164,7 @@ export function RunList() {
       />
     )
   else if (state.kind === 'not_found')
-    body = (
+    body = cursorRefusedBody(state, cursorPaging, 'run-pager') ?? (
       <EmptyState
         icon={Calculator}
         title="Runs could not be listed"
@@ -245,7 +257,8 @@ export function RunList() {
               ))}
             </TableBody>
           </Table>
-          {page.total > PAGE_SIZE && (
+          {LIST_PAGING_UI_ENABLED && <ListPager page={page} paging={cursorPaging} testId="run-pager" />}
+          {!LIST_PAGING_UI_ENABLED && page.total > PAGE_SIZE && (
             <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
               <span data-testid="run-range">
                 {page.offset + 1}–{page.offset + page.items.length} of {page.total}

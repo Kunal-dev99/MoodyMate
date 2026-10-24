@@ -21,6 +21,8 @@ import { ResultContextPanel } from './ResultContextPanel'
 import { INSTRUMENT_TERMS_UI_ENABLED } from '@/config/features'
 import { FxConsolidationNotice } from './FxConsolidationNotice'
 import { RunIdentity } from './RunIdentity'
+import { followsRun } from './polling'
+import { ResultsPending } from './RunPolling'
 import {
   EXCLUSION_TEXT,
   HQLA_LEVEL_TEXT,
@@ -345,15 +347,20 @@ export function LcrPrototypeNotice({ limitations }: { limitations: string[] }) {
 export function LiquidityView({ run }: { run: RunDetail }) {
   const [state, setState] = useState<Loaded<Liquidity | null>>({ kind: 'loading' })
   const loader = useMemo(() => createLoader(fetchLiquidity(run.run_id), setState, 'Could not load the liquidity view'), [run.run_id])
+  // FE-33.1: a background run the server has not ended has no liquidity result yet: nothing is
+  // read until it ends (RunView keys this panel on the run's status, so it reads once it ends).
+  const pending = followsRun(run)
 
   useEffect(() => {
+    if (pending) return
     loader.load()
     return () => loader.abort()
-  }, [loader])
+  }, [loader, pending])
 
   let body: ReactNode
   let liquidity: Liquidity | null = null
-  if (state.kind === 'loading') body = <LoadingBlock rows={4} />
+  if (pending) body = <ResultsPending status={run.status} testId="liquidity-pending" />
+  else if (state.kind === 'loading') body = <LoadingBlock rows={4} />
   else if (state.kind === 'forbidden') body = <Forbidden permission="calc:read" correlationId={state.cid} />
   else if (state.kind === 'failed') body = <LoadFailed icon={Droplets} title="The liquidity view could not be loaded" cid={state.cid} onRetry={loader.load} />
   else if (state.kind === 'not_found')

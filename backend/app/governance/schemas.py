@@ -10,6 +10,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 from app.core.classification import Classification, MaskedValue
+from app.core.pagination import HasMore, NextCursor
 from app.governance.constants import (
     ClassificationCode,
     Compatibility,
@@ -69,6 +70,8 @@ class UserPage(BaseModel):
     total: int
     limit: int
     offset: int
+    has_more: HasMore
+    next_cursor: NextCursor
 
 
 class DevPersona(BaseModel):
@@ -109,6 +112,8 @@ class AuditEventPage(BaseModel):
     total: int
     limit: int
     offset: int
+    has_more: HasMore
+    next_cursor: NextCursor
 
 
 # --- Schema registry (Phase 4) -----------------------------------------------------------
@@ -292,3 +297,5 @@ class ProposalOut(BaseModel):
 class ProposalList(BaseModel):
     items: list[ProposalOut]
     total: int
+    has_more: HasMore
+    next_cursor: NextCursor

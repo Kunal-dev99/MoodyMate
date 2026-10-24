@@ -22,8 +22,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Path, Query, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.calculations.schemas import WORKERS_BUSY_RESPONSE
 from app.core.auth import require_any_permission, require_permission
 from app.core.idempotency import idempotency_key_header, mark_replayed
+from app.core.pagination import INVALID_CURSOR_RESPONSE, Cursor, continuation, page_offset
 from app.core.principal import Principal
 from app.core.ratelimit import RATE_LIMITED_RESPONSE, LimitedRoute, rate_limited
 from app.db.session import get_session
@@ -94,7 +96,12 @@ async def list_scenario_templates(principal: ScenarioReader, session: SessionDep
     return await ScenarioService(session, principal).templates()
 
 
-@router.get("/scenarios", response_model=ScenarioPage, operation_id="listScenarios")
+@router.get(
+    "/scenarios",
+    response_model=ScenarioPage,
+    operation_id="listScenarios",
+    responses=INVALID_CURSOR_RESPONSE,
+)
 async def list_scenarios(
     principal: ScenarioReader,
     session: SessionDep,
@@ -111,10 +118,16 @@ async def list_scenarios(
     ] = False,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    cursor: Cursor = None,
 ) -> ScenarioPage:
     """Scenarios of the caller's tenant with at least one version matching the filter. CLOSED
     versions are hidden from pickers unless asked for by status."""
-    return await ScenarioService(session, principal).list(status, origin, mine, limit, offset)
+    listing, filters = "listScenarios", {"status": status, "origin": origin, "mine": mine}
+    offset = page_offset(principal, listing, filters, offset, cursor)
+    page = await ScenarioService(session, principal).list(status, origin, mine, limit, offset)
+    return page.model_copy(
+        update=continuation(principal, listing, filters, limit, offset, len(page.items), page.total)
+    )
 
 
 @router.get("/scenarios/{scenario_id}", response_model=ScenarioDetail, operation_id="getScenario")
@@ -302,6 +315,7 @@ async def validate_scenario_run(
             "original scenario_run is returned (header Idempotent-Replayed: true).",
         },
         **RATE_LIMITED_RESPONSE,
+        **WORKERS_BUSY_RESPONSE,
     },
 )
 async def run_scenario(
@@ -334,7 +348,8 @@ async def run_scenario(
     re-checking the version's status (it may be CLOSED since) and completes any member run a
     crash left out, on the run's recorded pins (version, shocks_sha256, approval state,
     baseline), each created member audited `calculation_run.create`."""
-    row, created = await ScenarioRunService(session, principal).run(
+    executor = request.app.state.run_executor  # BE-33.1: where the member runs execute
+    row, created = await ScenarioRunService(session, principal, executor).run(
         scenario_id,
         body,
         idempotency_key,
@@ -346,7 +361,12 @@ async def run_scenario(
     return row
 
 
-@router.get("/scenario-runs", response_model=ScenarioRunPage, operation_id="listScenarioRuns")
+@router.get(
+    "/scenario-runs",
+    response_model=ScenarioRunPage,
+    operation_id="listScenarioRuns",
+    responses=INVALID_CURSOR_RESPONSE,
+)
 async def list_scenario_runs(
     principal: ScenarioReader,
     session: SessionDep,
@@ -355,10 +375,21 @@ async def list_scenario_runs(
     approval_state: Annotated[ApprovalState | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    cursor: Cursor = None,
 ) -> ScenarioRunPage:
     """The caller's tenant's scenario runs, newest first, with their member runs (D-45 §9)."""
-    return await ScenarioRunService(session, principal).page(
+    listing = "listScenarioRuns"
+    filters = {
+        "scenario_id": scenario_id,
+        "baseline_run_id": baseline_run_id,
+        "approval_state": approval_state,
+    }
+    offset = page_offset(principal, listing, filters, offset, cursor)
+    page = await ScenarioRunService(session, principal).page(
         scenario_id, baseline_run_id, approval_state, limit, offset
+    )
+    return page.model_copy(
+        update=continuation(principal, listing, filters, limit, offset, len(page.items), page.total)
     )
 
 
@@ -388,6 +419,7 @@ async def get_scenario_comparison(
     "/scenarios/{scenario_id}/comparison/contributions",
     response_model=ScenarioContributionPage,
     operation_id="listScenarioComparisonContributions",
+    responses=INVALID_CURSOR_RESPONSE,
 )
 async def list_scenario_comparison_contributions(
     scenario_id: uuid.UUID,
@@ -405,9 +437,22 @@ async def list_scenario_comparison_contributions(
     ] = None,
     limit: Annotated[int, Query(ge=1, le=MAX_CONTRIBUTIONS_PAGE)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
+    cursor: Cursor = None,
 ) -> ScenarioContributionPage:
     """Drill-down (D-46 §4): the changed parts (moved, stayed, added) of one member run, with
     days and buckets before and after and source-row lineage. Amounts masked per D-33."""
-    return await ScenarioRunService(session, principal).contributions(
+    listing = "listScenarioComparisonContributions"
+    filters = {
+        "scenario_id": scenario_id,
+        "scenario_run_id": scenario_run_id,
+        "currency": currency,
+        "bucket_code": bucket_code,
+        "shock_subset": shock_subset,
+    }
+    offset = page_offset(principal, listing, filters, offset, cursor)
+    page = await ScenarioRunService(session, principal).contributions(
         scenario_id, scenario_run_id, currency, bucket_code, shock_subset, limit, offset
+    )
+    return page.model_copy(
+        update=continuation(principal, listing, filters, limit, offset, len(page.items), page.total)
     )

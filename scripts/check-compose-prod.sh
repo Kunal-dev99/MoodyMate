@@ -46,6 +46,8 @@ die() { echo "FAIL: $*" >&2; dc logs --no-color --tail 40 >&2; exit 1; }
 # The example's placeholders, filled with synthetic values (the token is random per run).
 token="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
 [ -n "${GITHUB_ACTIONS:-}" ] && echo "::add-mask::${token}"
+cursor_key="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
+[ -n "${GITHUB_ACTIONS:-}" ] && echo "::add-mask::${cursor_key}"
 sed -e 's/^ENV=production$/ENV=staging/' \
     -e 's/<client-or-synthetic>/synthetic/' \
     -e 's#<db-user>:<db-password>@<db-host>:5432/<db-name>#moodymate:moodymate@db:5432/moodymate_prodcheck#' \
@@ -55,6 +57,7 @@ sed -e 's/^ENV=production$/ENV=staging/' \
     -e 's/<proxy-ip>/127.0.0.1/' \
     -e 's/^METRICS_ENABLED=false$/METRICS_ENABLED=true/' \
     -e "s/^# METRICS_TOKEN=.*/METRICS_TOKEN=${token}/" \
+    -e "s/<random-32-plus-characters-from-secret-store>/${cursor_key}/" \
     .env.production.example >"$envfile"
 left="$(grep -v '^#' "$envfile" | grep -o '<[^>]*>' | sort -u | tr '\n' ' ')"
 [ -z "$left" ] || die "placeholders left unfilled: ${left}"

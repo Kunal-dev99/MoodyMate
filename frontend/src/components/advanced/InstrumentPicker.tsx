@@ -8,6 +8,8 @@ import { LoadingBlock } from '@/components/common/LoadingBlock'
 import type { Schemas } from '@/api/client'
 import { MaskedValue, isMasked } from '@/components/common/MaskedValue'
 import { createLoader, type Loaded } from '@/components/common/load'
+import { ListPager, cursorRefusedBody, useCursorPaging } from '@/components/common/ListPager'
+import { LIST_PAGING_UI_ENABLED } from '@/config/features'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { PAGE_SIZE, fetchInstruments, type InstrumentPage } from './scenarios'
@@ -37,8 +39,14 @@ export function InstrumentPicker({
   testId: string
 }) {
   const [offset, setOffset] = useState(0)
+  // FE-33.1: the server's next_cursor, bound to the instrument type (NEXT_PUBLIC_LIST_PAGING_UI=off: offsets).
+  const cursorPaging = useCursorPaging(instrumentType)
+  const cursor = LIST_PAGING_UI_ENABLED ? cursorPaging.cursor : null
   const [state, setState] = useState<Loaded<InstrumentPage>>({ kind: 'loading' })
-  const loader = useMemo(() => (instrumentType ? createLoader(fetchInstruments(instrumentType, offset), setState, 'Could not load the instruments') : null), [instrumentType, offset])
+  const loader = useMemo(
+    () => (instrumentType ? createLoader(fetchInstruments(instrumentType, offset, cursor), setState, 'Could not load the instruments') : null),
+    [instrumentType, offset, cursor],
+  )
   useEffect(() => {
     setOffset(0)
   }, [instrumentType])
@@ -89,7 +97,7 @@ export function InstrumentPicker({
       ) : state.kind === 'failed' ? (
         <LoadFailed icon={Boxes} title="Could not load the instruments" cid={state.cid} onRetry={loader.load} />
       ) : state.kind === 'not_found' ? (
-        <p className="text-xs text-muted-foreground">The instrument list was refused.</p>
+        (cursorRefusedBody(state, cursorPaging, `${testId}-pager`) ?? <p className="text-xs text-muted-foreground">The instrument list was refused.</p>)
       ) : state.value.items.length === 0 ? (
         <p className="text-xs text-muted-foreground">No {instrumentType} instrument is in the catalogue.</p>
       ) : (
@@ -127,7 +135,8 @@ export function InstrumentPicker({
               )
             })}
           </ul>
-          {state.value.total > PAGE_SIZE && (
+          {LIST_PAGING_UI_ENABLED && <ListPager page={state.value} paging={cursorPaging} testId={`${testId}-pager`} className="mt-1" />}
+          {!LIST_PAGING_UI_ENABLED && state.value.total > PAGE_SIZE && (
             <div className="flex gap-2">
               <Button type="button" size="sm" variant="outline" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>
                 Previous

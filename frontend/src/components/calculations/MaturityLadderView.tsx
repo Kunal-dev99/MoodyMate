@@ -12,6 +12,8 @@ import { LoadingBlock } from '@/components/common/LoadingBlock'
 import { MaskedValue, isMasked } from '@/components/common/MaskedValue'
 import { PageSection } from '@/components/common/PageSection'
 import { createLoader, type Loaded } from '@/components/common/load'
+import { ListPager, cursorRefusedBody, useCursorPaging } from '@/components/common/ListPager'
+import { LIST_PAGING_UI_ENABLED } from '@/config/features'
 import { ShownValue } from '@/components/domain/ShownValue'
 import { importHref, instrumentHref } from '@/components/domain/domain'
 import { Badge } from '@/components/ui/badge'
@@ -23,6 +25,8 @@ import { ResultContextPanel } from './ResultContextPanel'
 import { INSTRUMENT_TERMS_UI_ENABLED } from '@/config/features'
 import { FxConsolidationNotice } from './FxConsolidationNotice'
 import { RunIdentity } from './RunIdentity'
+import { followsRun } from './polling'
+import { ResultsPending } from './RunPolling'
 import { LadderFigureValue } from './LadderFigure'
 import {
   bucketRange,
@@ -53,10 +57,11 @@ export const fetchLadder = (runId: string) => (signal: AbortSignal) =>
  * `context` block yet; once the contract adds one, show it here with `ResultContextPanel` and the
  * same non-blocking mismatch check against the run's pins (FE-30.1 ruling).
  */
-export const fetchContributions = (runId: string, currency: string, bucket: string, offset: number) => (signal: AbortSignal) =>
+export const fetchContributions = (runId: string, currency: string, bucket: string, offset: number, cursor: string | null = null) => (signal: AbortSignal) =>
   call(() =>
     api.GET('/api/v1/calculation-runs/{run_id}/results', {
-      params: { path: { run_id: runId }, query: { currency, bucket_code: bucket, limit: RESULTS_PAGE, offset } },
+      // FE-33.1: past the first page the server's next_cursor replaces the offset.
+      params: { path: { run_id: runId }, query: { currency, bucket_code: bucket, limit: RESULTS_PAGE, ...(cursor ? { cursor } : { offset }) } },
       signal,
     }),
   )
@@ -219,10 +224,13 @@ function Contributions({
 }) {
   const router = useRouter()
   const [offset, setOffset] = useState(0)
+  // FE-33.1: the server's next_cursor, bound to this cell (NEXT_PUBLIC_LIST_PAGING_UI=off: offsets).
+  const cursorPaging = useCursorPaging(`${run.run_id}|${currency}|${bucket}`)
+  const cursor = LIST_PAGING_UI_ENABLED ? cursorPaging.cursor : null
   const [state, setState] = useState<Loaded<ResultPage>>({ kind: 'loading' })
   const loader = useMemo(
-    () => createLoader(fetchContributions(run.run_id, currency, bucket, offset), setState, 'Could not load the contributions'),
-    [run.run_id, currency, bucket, offset],
+    () => createLoader(fetchContributions(run.run_id, currency, bucket, offset, cursor), setState, 'Could not load the contributions'),
+    [run.run_id, currency, bucket, offset, cursor],
   )
 
   useEffect(() => {
@@ -235,7 +243,7 @@ function Contributions({
   else if (state.kind === 'forbidden') body = <Forbidden permission="calc:read" correlationId={state.cid} />
   else if (state.kind === 'failed') body = <LoadFailed icon={ListTree} title="The contributions could not be loaded" cid={state.cid} onRetry={loader.load} />
   else if (state.kind === 'not_found')
-    body = (
+    body = cursorRefusedBody(state, cursorPaging, 'contributions-pager') ?? (
       <EmptyState
         icon={ListTree}
         title="The contributions could not be read"
@@ -340,7 +348,8 @@ function Contributions({
               })}
             </TableBody>
           </Table>
-          {page.total > RESULTS_PAGE && (
+          {LIST_PAGING_UI_ENABLED && <ListPager page={page} paging={cursorPaging} testId="contributions-pager" />}
+          {!LIST_PAGING_UI_ENABLED && page.total > RESULTS_PAGE && (
             <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
               <span data-testid="contributions-range">
                 {page.offset + 1}–{page.offset + page.items.length} of {page.total}
@@ -416,15 +425,20 @@ export function MaturityLadderView({ run }: { run: RunDetail }) {
   const selected = useMemo(() => drillFrom(new URLSearchParams(params.toString())), [params])
   const [state, setState] = useState<Loaded<MaturityLadder | null>>({ kind: 'loading' })
   const loader = useMemo(() => createLoader(fetchLadder(run.run_id), setState, 'Could not load the maturity ladder'), [run.run_id])
+  // FE-33.1: a background run the server has not ended has no ladder yet: nothing is read until
+  // it ends (RunView keys this panel on the run's status, so it reads once the server ends it).
+  const pending = followsRun(run)
 
   useEffect(() => {
+    if (pending) return
     loader.load()
     return () => loader.abort()
-  }, [loader])
+  }, [loader, pending])
 
   let body: ReactNode
   let ladder: MaturityLadder | null = null
-  if (state.kind === 'loading') body = <LoadingBlock rows={4} />
+  if (pending) body = <ResultsPending status={run.status} testId="ladder-pending" />
+  else if (state.kind === 'loading') body = <LoadingBlock rows={4} />
   else if (state.kind === 'forbidden') body = <Forbidden permission="calc:read" correlationId={state.cid} />
   else if (state.kind === 'failed') body = <LoadFailed icon={Layers} title="The maturity ladder could not be loaded" cid={state.cid} onRetry={loader.load} />
   else if (state.kind === 'not_found')

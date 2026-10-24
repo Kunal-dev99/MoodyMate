@@ -1,0 +1,128 @@
+{
+  "statement": "ILLUSTRATIVE / SYNTHETIC: synthetic cash flows only; not client data.",
+  "phase": 33,
+  "task": "BE-33.7",
+  "measured_at": "2026-10-24T08:48:51Z",
+  "machine": {
+    "python": "3.12.3",
+    "platform": "Linux-6.18.44-fc-v153-x86_64-with-glibc2.39",
+    "cpus": 4
+  },
+  "method": {
+    "module": "maturity_ladder v1 under the seeded (illustrative) rule parameters",
+    "measured": "module run() plus the canonical result hash, per fresh process",
+    "health_probe_interval_seconds": 0.05,
+    "pool": "one worker (CALC_WORKERS=1); worker start measured separately"
+  },
+  "runs": [
+    {
+      "flows": 10000,
+      "mode": "inline",
+      "status": "SUCCEEDED_WITH_WARNINGS",
+      "contributions": 9912,
+      "warnings": 88,
+      "result_sha256": "bc2ff6d3148e751bc16a5f37a0b7b43daf16ea0c91dfb36fa114ea51f2994117",
+      "duration_seconds": 0.174,
+      "api_rss_before_run_mib": 134.3,
+      "api_peak_rss_mib": 154.2,
+      "worker_peak_rss_mib": null,
+      "health_samples": 1,
+      "health_p95_ms": 178.1,
+      "health_max_ms": 178.1
+    },
+    {
+      "flows": 10000,
+      "mode": "pool",
+      "status": "SUCCEEDED_WITH_WARNINGS",
+      "contributions": 9912,
+      "warnings": 88,
+      "result_sha256": "bc2ff6d3148e751bc16a5f37a0b7b43daf16ea0c91dfb36fa114ea51f2994117",
+      "duration_seconds": 0.653,
+      "api_rss_before_run_mib": 134.6,
+      "api_peak_rss_mib": 160.1,
+      "worker_peak_rss_mib": 53.7,
+      "health_samples": 5,
+      "health_p95_ms": 65.6,
+      "health_max_ms": 80.6,
+      "worker_start_seconds": 0.314
+    },
+    {
+      "flows": 100000,
+      "mode": "inline",
+      "status": "SUCCEEDED_WITH_WARNINGS",
+      "contributions": 99197,
+      "warnings": 803,
+      "result_sha256": "b2e63823ebc2b1dbdbd32161db17f0fd0cb2d38b269d56e10046288caf4fb4bc",
+      "duration_seconds": 2.311,
+      "api_rss_before_run_mib": 171.6,
+      "api_peak_rss_mib": 348.1,
+      "worker_peak_rss_mib": null,
+      "health_samples": 1,
+      "health_p95_ms": 2315.5,
+      "health_max_ms": 2315.5
+    },
+    {
+      "flows": 100000,
+      "mode": "pool",
+      "status": "SUCCEEDED_WITH_WARNINGS",
+      "contributions": 99197,
+      "warnings": 803,
+      "result_sha256": "b2e63823ebc2b1dbdbd32161db17f0fd0cb2d38b269d56e10046288caf4fb4bc",
+      "duration_seconds": 6.731,
+      "api_rss_before_run_mib": 171.8,
+      "api_peak_rss_mib": 445.4,
+      "worker_peak_rss_mib": 221.0,
+      "health_samples": 51,
+      "health_p95_ms": 244.2,
+      "health_max_ms": 2444.6,
+      "worker_start_seconds": 0.345
+    }
+  ],
+  "fold": {
+    "flows": 5000,
+    "ceiling_factor": 3,
+    "measured": {
+      "inline": {
+        "flows": 5000,
+        "mode": "inline",
+        "status": "SUCCEEDED_WITH_WARNINGS",
+        "contributions": 4951,
+        "warnings": 49,
+        "result_sha256": "cbdc1dd7a227971bd28a82ac24b0739e0a4d5ca04b1e98fc27c9295777f6a93b",
+        "duration_seconds": 0.084,
+        "api_rss_before_run_mib": 132.2,
+        "api_peak_rss_mib": 143.7,
+        "worker_peak_rss_mib": null,
+        "health_samples": 1,
+        "health_p95_ms": 87.6,
+        "health_max_ms": 87.6
+      },
+      "pool": {
+        "flows": 5000,
+        "mode": "pool",
+        "status": "SUCCEEDED_WITH_WARNINGS",
+        "contributions": 4951,
+        "warnings": 49,
+        "result_sha256": "cbdc1dd7a227971bd28a82ac24b0739e0a4d5ca04b1e98fc27c9295777f6a93b",
+        "duration_seconds": 0.279,
+        "api_rss_before_run_mib": 132.4,
+        "api_peak_rss_mib": 146.9,
+        "worker_peak_rss_mib": 46.8,
+        "health_samples": 3,
+        "health_p95_ms": 52.4,
+        "health_max_ms": 57.7,
+        "worker_start_seconds": 0.285
+      }
+    },
+    "ceilings": {
+      "inline": {
+        "duration_seconds": 0.252,
+        "api_peak_rss_mib": 431.1
+      },
+      "pool": {
+        "duration_seconds": 0.837,
+        "api_peak_rss_mib": 440.7
+      }
+    }
+  }
+}

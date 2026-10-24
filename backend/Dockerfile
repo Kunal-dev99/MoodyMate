@@ -27,8 +27,9 @@ ENV UV_COMPILE_BYTECODE=1 \
     UV_PROJECT_ENVIRONMENT=/opt/venv
 WORKDIR /src
 COPY pyproject.toml uv.lock ./
-# The locked runtime dependencies only (the project itself is copied as source below).
-RUN uv sync --locked --no-dev --no-install-project
+# The locked runtime dependencies only (the project itself is copied as source below), with
+# the `s3` extra so the image can serve ARTIFACT_STORE_KIND=s3 (D-59 §6, BE-33.6).
+RUN uv sync --locked --no-dev --extra s3 --no-install-project
 
 FROM ${PYTHON_IMAGE} AS runtime
 RUN groupadd --system --gid 10001 moodymate \

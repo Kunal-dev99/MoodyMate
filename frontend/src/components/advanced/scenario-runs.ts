@@ -1,6 +1,7 @@
 import { api, call, callWithResponse, type Schemas } from '@/api/client'
 import { hasResults, type RunDetail, type RunPage, type RunSummary } from '@/components/calculations/calculations'
 import { newIdempotencyKey } from '@/lib/idempotency'
+import { truncationOf, type Truncation } from '@/lib/paging'
 import { refusalOf, type Refusal } from '@/lib/refusal'
 import type { ScenarioVersion, ScenarioVersionStatus } from './scenarios'
 
@@ -66,18 +67,24 @@ export function baselineCandidates(runs: readonly RunSummary[]): RunSummary[] {
 export const baselineOptionText = (r: Pick<RunSummary, 'run_id' | 'reporting_date' | 'module' | 'status'>): string =>
   `${r.run_id.slice(0, 8)}… · reporting date ${r.reporting_date} · ${r.module.code} v${r.module.version} · ${r.status}`
 
+/** The baseline picker's options, and (Q18) whether the server cut a status page at BASELINE_PAGE. */
+export interface BaselineOptions {
+  runs: RunSummary[]
+  truncation: Truncation | null
+}
+
 /**
  * The tenant's succeeded, non-stressed maturity_ladder runs (calc:read), one page per succeeded
  * status, so a crowd of failed runs never hides a baseline. `stressed: false` has the server drop
  * stressed runs (Q23), so they never use up a page; `baselineCandidates` still filters as a guard.
  */
-export const fetchBaselines = async (signal: AbortSignal): Promise<RunSummary[]> => {
+export const fetchBaselines = async (signal: AbortSignal): Promise<BaselineOptions> => {
   const pages: RunPage[] = await Promise.all(
     (['SUCCEEDED', 'SUCCEEDED_WITH_WARNINGS'] as const).map((status) =>
       call(() => api.GET('/api/v1/calculation-runs', { params: { query: { module_code: BASELINE_MODULE, status, stressed: false, limit: BASELINE_PAGE, offset: 0 } }, signal })),
     ),
   )
-  return baselineCandidates(pages.flatMap((p) => p.items))
+  return { runs: baselineCandidates(pages.flatMap((p) => p.items)), truncation: truncationOf(pages, 'succeeded maturity_ladder runs (newest first)') }
 }
 
 /** The baseline's detail (calc:read): its pins, which every stressed run copies exactly. */

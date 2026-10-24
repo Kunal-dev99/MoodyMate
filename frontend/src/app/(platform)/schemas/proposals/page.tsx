@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { GitPullRequest } from 'lucide-react'
-import { api, call, ApiError } from '@/api/client'
+import { api, call, ApiError, type Schemas } from '@/api/client'
 import { Forbidden } from '@/components/auth/Forbidden'
 import { useCurrentSession } from '@/components/auth/SessionProvider'
 import { EmptyState } from '@/components/common/EmptyState'
@@ -11,6 +11,9 @@ import { LoadingBlock } from '@/components/common/LoadingBlock'
 import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
 import { toastApiError } from '@/components/common/api-error-toast'
+import { CursorRefused, ListPager, useCursorPaging } from '@/components/common/ListPager'
+import { LIST_PAGING_UI_ENABLED } from '@/config/features'
+import { cursorQuery, isInvalidCursor } from '@/lib/paging'
 import { CompatibilityBadge } from '@/components/schemas/CompatibilityBadge'
 import { ProposalStatusPill } from '@/components/schemas/ProposalStatusPill'
 import { PROPOSAL_STATUS_STYLE, type Proposal, type ProposalStatus } from '@/components/schemas/proposals'
@@ -18,28 +21,37 @@ import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { formatTimestamp } from '@/lib/format'
 
-type State = { kind: 'loading' } | { kind: 'ready'; items: Proposal[] } | { kind: 'forbidden'; cid: string | null }
+type State =
+  | { kind: 'loading' }
+  | { kind: 'ready'; items: Proposal[]; list: Schemas['ProposalList'] }
+  | { kind: 'forbidden'; cid: string | null }
+  /** Q19: the server refused the page's cursor (400 invalid_cursor). */
+  | { kind: 'cursor_refused'; cid: string | null }
 
 /** Schema change proposals (FE-5.1): the approver's queue and every proposer's history. */
 export default function ProposalsPage() {
   const { has } = useCurrentSession()
   const [status, setStatus] = useState<ProposalStatus | ''>(has('schema:approve') ? 'SUBMITTED' : '')
   const [state, setState] = useState<State>({ kind: 'loading' })
+  // FE-33.1: the server's next_cursor, bound to the status filter (NEXT_PUBLIC_LIST_PAGING_UI=off: the first 200 only).
+  const cursorPaging = useCursorPaging(status)
+  const cursor = LIST_PAGING_UI_ENABLED ? cursorPaging.cursor : null
 
   useEffect(() => {
     let current = true
     setState({ kind: 'loading' })
-    call(() => api.GET('/api/v1/schema-change-proposals', { params: { query: { status: status || undefined, limit: 200 } } }))
-      .then((list) => current && setState({ kind: 'ready', items: list.items }))
+    call(() => api.GET('/api/v1/schema-change-proposals', { params: { query: { status: status || undefined, limit: 200, ...cursorQuery(cursor) } } }))
+      .then((list) => current && setState({ kind: 'ready', items: list.items, list }))
       .catch((err: unknown) => {
         if (!current) return
         if (err instanceof ApiError && err.status === 403) setState({ kind: 'forbidden', cid: err.correlationId })
+        else if (LIST_PAGING_UI_ENABLED && isInvalidCursor(err)) setState({ kind: 'cursor_refused', cid: err instanceof ApiError ? err.correlationId : null })
         else toastApiError(err, 'Could not load proposals')
       })
     return () => {
       current = false
     }
-  }, [status])
+  }, [status, cursor])
 
   return (
     <>
@@ -80,6 +92,8 @@ export default function ProposalsPage() {
           >
             {state.kind === 'loading' ? (
               <LoadingBlock rows={4} />
+            ) : state.kind === 'cursor_refused' ? (
+              <CursorRefused paging={cursorPaging} cid={state.cid} testId="proposal-pager" />
             ) : state.items.length === 0 ? (
               <EmptyState icon={GitPullRequest} title="No proposals" description="Nothing matches this filter." />
             ) : (
@@ -123,6 +137,9 @@ export default function ProposalsPage() {
                   ))}
                 </TableBody>
               </Table>
+            )}
+            {LIST_PAGING_UI_ENABLED && state.kind === 'ready' && state.items.length > 0 && (
+              <ListPager page={state.list} paging={cursorPaging} testId="proposal-pager" />
             )}
           </PageSection>
         )}

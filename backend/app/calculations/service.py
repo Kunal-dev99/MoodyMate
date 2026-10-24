@@ -46,19 +46,20 @@ same version and subset, even once the version is CLOSED. Non-stressed manifests
 documents keep exactly their Feature 03 key sets.
 """
 
+import asyncio
 import contextlib
 import logging
 import time
 import uuid
 from collections import Counter
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date
-from decimal import Decimal, localcontext
+from decimal import Context, Decimal, localcontext
 from types import MappingProxyType
 from typing import Any, NoReturn
 
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.calculations import scenario_overlay
 from app.calculations.constants import (
@@ -80,9 +81,14 @@ from app.calculations.constants import (
     LcrWarningCode,
     PostCheck,
     RunRefusal,
+    RunUnavailable,
     SnapshotRefusal,
     WarningSeverity,
 )
+from app.calculations.executor import INLINE as INLINE
+from app.calculations.executor import Admission as Admission
+from app.calculations.executor import RunExecutor as RunExecutor
+from app.calculations.executor import WorkersBusy as WorkersBusy
 from app.calculations.models import (
     CalculationInputRef,
     CalculationRun,
@@ -108,25 +114,32 @@ from app.calculations.modules.base import (
     ModuleInputs,
     ModuleResult,
     ModuleWarning,
+    PinnedParameters,
     PinnedRule,
     PositionInput,
     RegisteredModule,
     divide,
 )
 from app.calculations.modules.maturity_ladder import ParameterError, parse_buckets, parse_directions
-from app.calculations.repository import CalculationRepository, SnapshotRepository
+from app.calculations.repository import (
+    CalculationRepository,
+    RunNotRunning,
+    SnapshotRepository,
+    StaleRunRepository,
+)
 from app.core import metrics
 from app.core.canonical import HashKind, sha256_for
 from app.core.classification import most_sensitive, storable
-from app.core.correlation import get_correlation_id
+from app.core.correlation import correlation_id_var, get_correlation_id
 from app.core.decimals import DeclaredRounding, decimal_text, exact_context
 from app.core.errors import ApiError
 from app.core.principal import Principal
+from app.core.ratelimit import RETRY_AFTER
 from app.core.refusals import refuse
 from app.domain.models import CashflowEvent, DomainProjection, InstrumentVersion, PositionVersion
 from app.domain.service import DomainService, SchemaPins
 from app.governance.constants import AuditOutcome, ClassificationCode
-from app.governance.service import audit_by
+from app.governance.service import audit, audit_by
 from app.ingestion.models import ImportJob, ImportManifest
 from app.ingestion.service import ImportService
 from app.orchestration.constants import PartChange
@@ -148,7 +161,14 @@ from app.rules.constants import (
 from app.rules.models import AssumptionSet, MaturityBucketDefinition, RuleDefinition, RuleVersion
 from app.rules.service import ModuleView, RulesService, exact_json
 
+# INLINE, Admission, RunExecutor and WorkersBusy are re-exported (`import X as X`) for other
+# modules: cross-module calls go through this service, never deeper.
 logger = logging.getLogger("app.calculations")
+# The ENGINE_ERROR detail of a run ended for being RUNNING past CALC_RUN_STALE_SECONDS.
+STALE_RUN = "stale_run"
+# BE-33.3: the run sweeper's audit actor, and the runs it ends per pass at most.
+SWEEPER_ACTOR = "system:run-sweeper"
+SWEEP_BATCH = 100
 W = CalculationWarningCode
 SUCCEEDED = frozenset(
     {CalculationRunStatus.SUCCEEDED, CalculationRunStatus.SUCCEEDED_WITH_WARNINGS}
@@ -951,6 +971,27 @@ class _Run:
     events: dict[uuid.UUID, CashflowEvent] = field(default_factory=dict)
     positions: dict[uuid.UUID, PositionVersion] = field(default_factory=dict)
     scenario: ScenarioRunSpec | None = None  # a stressed run (D-45)
+    # Pool mode (BE-33.3): the monotonic time (ns) by which the run must end (None: inline).
+    deadline: int | None = None
+
+
+class _Held:
+    """The run's admission to the executor (BE-33.1): taken after the replay check, before
+    anything is written; released when the run ends, by its background task once handed off
+    (respond-async), never by the caller that passed it in."""
+
+    def __init__(self, admission: Admission | None) -> None:
+        self.admission = admission
+        self.owned = admission is None
+
+    def hand_off(self) -> Admission:
+        assert self.admission is not None
+        self.owned = False
+        return self.admission
+
+    def release(self) -> None:
+        if self.owned and self.admission is not None:
+            self.admission.release()
 
 
 @dataclass(frozen=True)
@@ -1169,9 +1210,22 @@ RUN_NOT_FOUND = "Calculation run not found."
 
 
 class CalculationService:
-    def __init__(self, session: AsyncSession, principal: Principal) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        principal: Principal,
+        executor: RunExecutor | None = None,
+        *,
+        system_actor: str | None = None,
+    ) -> None:
+        """`executor`: where module runs execute (BE-33.1; None: inline). `system_actor`: a
+        system job (the run sweeper) acting in `principal`'s tenant, recorded as the actor
+        with no user."""
         self.session = session
         self.principal = principal
+        self.executor = executor or INLINE
+        self.actor = system_actor or principal.actor
+        self.actor_user_id = None if system_actor else principal.user_id
         self.repo = CalculationRepository(session, principal.scope)
         self.snapshots = SnapshotService(session, principal)
         self.rules = RulesService(session, principal)
@@ -1366,13 +1420,40 @@ class CalculationService:
         enabled: bool,
         stale_seconds: int = 900,
         scenarios_enabled: bool = True,
+        *,
+        admission: Admission | None = None,
+        respond_async: bool = False,
     ) -> tuple[RunRow, bool]:
         """Pin, run and post-check the module; the finished run and whether it ran now
         (False: a replay of the key, the original run returned). A replay that finds its run
         still RUNNING after `stale_seconds` (CALC_RUN_STALE_SECONDS) ends it FAILED with
         ENGINE_ERROR first: its engine is presumed gone, and nothing else would end it.
         A `ScenarioRunSpec`, or a re-run of a stressed run, is a stressed run (D-45): refused
-        409 `scenarios_disabled` while SCENARIOS_ENABLED is off."""
+        409 `scenarios_disabled` while SCENARIOS_ENABLED is off.
+
+        Phase 33 (D-59): a new run is admitted to the executor before anything is written
+        (pool mode: 503 `workers_busy`, audited DENIED, when it is full) unless the caller
+        passes the `admission` it holds (a scenario run's members). `respond_async` returns
+        the run RUNNING once it is written and executes it in the background."""
+        held = _Held(admission)
+        try:
+            return await self._create(
+                spec, idempotency_key, enabled, stale_seconds, scenarios_enabled, held,
+                respond_async,
+            )  # fmt: skip
+        finally:
+            held.release()
+
+    async def _create(
+        self,
+        spec: RunSpec | RerunSpec | ScenarioRunSpec,
+        idempotency_key: str,
+        enabled: bool,
+        stale_seconds: int,
+        scenarios_enabled: bool,
+        held: _Held,
+        respond_async: bool,
+    ) -> tuple[RunRow, bool]:
         if not enabled:
             await self._refuse(
                 ApiError(
@@ -1402,8 +1483,13 @@ class CalculationService:
             if existing.status == CalculationRunStatus.RUNNING.value and await self.repo.stale(
                 existing.id, stale_seconds
             ):
-                await self._fail(existing.id, {}, "stale_run")
+                await self._fail_if_running(existing.id, STALE_RUN)
             return await self.get(existing.id), False
+        if held.admission is None:  # D-59 §4: before anything is written
+            try:
+                held.admission = self.executor.admit()
+            except WorkersBusy as busy:
+                await self._refuse(workers_busy(busy.retry_after))
 
         if isinstance(spec, RerunSpec):
             pinned = await self._rerun_pins(spec)
@@ -1563,9 +1649,13 @@ class CalculationService:
             pins,
             original.result_sha256 if original is not None else None,
             scenario=scenario,
+            deadline=self.executor.deadline(),
         )
+        if respond_async:  # D-59 §2: answered RUNNING; executed by the background task
+            self.executor.spawn(self._in_background(state, held.hand_off()))
+            return await self.get(state.run_id), True
         started = time.perf_counter()
-        with metrics.run_executing():  # BE-34.4: busy while it executes (inline)
+        with metrics.run_executing():  # BE-34.4: busy while it executes
             try:
                 await self._execute(state)
             except BaseException as exc:  # the engine's own failure: recorded, never silent
@@ -1576,6 +1666,31 @@ class CalculationService:
         metrics.observe_run(out.run.status, time.perf_counter() - started)
         return out, True
 
+    async def _in_background(self, state: _Run, admission: Admission) -> None:
+        """A respond-async run (BE-33.2): executed in its own session, as the synchronous path
+        does, its failure recorded the same way. If even that fails, the run stays RUNNING
+        and the sweeper ends it (BE-33.3). The admission is released when it ends."""
+        try:
+            async with AsyncSession(self.session.bind, expire_on_commit=False) as session:
+                service = CalculationService(session, self.principal, self.executor)
+                started = time.perf_counter()
+                with metrics.run_executing():  # BE-34.4: busy while it executes
+                    try:
+                        await service._execute(state)
+                    except BaseException as exc:
+                        await service._record_failure(state.run_id, state.counts, exc)
+                        if not isinstance(exc, Exception):
+                            raise
+                done = await service.get(state.run_id)
+                metrics.observe_run(done.run.status, time.perf_counter() - started)
+        except Exception as exc:  # recorded where possible; never re-raised into the loop
+            logger.warning(
+                "calculation_background_error",
+                extra={"run_id": str(state.run_id), "error": type(exc).__name__},
+            )
+        finally:
+            admission.release()
+
     async def _record_failure(
         self, run_id: uuid.UUID, counts: Mapping[str, int], exc: BaseException
     ) -> None:
@@ -1584,9 +1699,12 @@ class CalculationService:
         stale-run rule ends it on the next replay of its key."""
         # The type only: an exception's message or traceback could carry values.
         error = type(exc).__name__
-        logger.warning("calculation_engine_error", extra={"run_id": str(run_id), "error": error})
         with contextlib.suppress(Exception):
             await self.session.rollback()
+        if isinstance(exc, RunNotRunning):  # already ended elsewhere: one terminal move only
+            logger.info("calculation_run_already_ended", extra={"run_id": str(run_id)})
+            return
+        logger.warning("calculation_engine_error", extra={"run_id": str(run_id), "error": error})
         try:
             async with AsyncSession(self.session.bind) as fresh:
                 await CalculationService(fresh, self.principal)._fail(run_id, counts, error)
@@ -1815,8 +1933,7 @@ class CalculationService:
                 await self._end(state, CalculationRunStatus.BLOCKED, ModuleResult(), [staged], {})
                 return
             stress, run_inputs = staged, staged.overlay.inputs
-        with localcontext(state.implementation.context()):
-            result = state.implementation.run(run_inputs, parameters)
+        result = await self._module_run(state, run_inputs, parameters, state.implementation.context)
         if result.blocked:
             await self._end(state, CalculationRunStatus.BLOCKED, result, list(result.warnings), {})
             return
@@ -1834,6 +1951,9 @@ class CalculationService:
                 )
                 await self._end(state, CalculationRunStatus.BLOCKED, result, [warning], {})
                 return
+        unstressed = None
+        if stress is not None:  # D-45 §6: the unstressed module run, for conservation
+            unstressed = await self._module_run(state, inputs, parameters, exact_context)
         with localcontext(exact_context()):
             if "lcr_result" in spec.output_contract["results"]:
                 checks = lcr_post_checks(inputs, result, state.implementation.rounding)
@@ -1847,7 +1967,7 @@ class CalculationService:
                 # the declared parameters, never from the overlay's own sums. So a tampered
                 # run_overlay fails SCENARIO_CONSERVATION only (both sides of SCENARIO_OVERLAY
                 # come from it).
-                assert state.scenario is not None
+                assert state.scenario is not None and unstressed is not None
                 expected = scenario_overlay.run_overlay(
                     inputs,
                     stress.directions,
@@ -1856,7 +1976,6 @@ class CalculationService:
                     state.scenario.shock_subset,
                     stress.source_system_code,
                 )
-                unstressed = state.implementation.run(inputs, parameters)
                 checks[PostCheck.SCENARIO_OVERLAY] = scenario_overlay.overlay_matches(
                     expected, stress.overlay
                 )
@@ -1883,6 +2002,26 @@ class CalculationService:
         else:
             status = CalculationRunStatus.SUCCEEDED
         await self._end(state, status, result, warnings, checks, buckets, stress)
+
+    async def _module_run(
+        self,
+        state: _Run,
+        inputs: ModuleInputs,
+        parameters: PinnedParameters,
+        context: Callable[[], Context],
+    ) -> ModuleResult:
+        """The module's pure run(), inline or in a worker (BE-33.1), by the run's deadline.
+
+        In pool mode the session's read-only transaction ends first: waiting for a worker,
+        and then for the worker (up to CALC_RUN_TIMEOUT_SECONDS), must not keep a pooled
+        connection checked out, idle in transaction. Only reads are open here (the run row
+        was committed RUNNING before `_execute`), and expire_on_commit=False keeps the rows
+        `state` holds usable; the post-checks and `_finish` read and write in a new one."""
+        if self.executor.pooled:
+            await self.session.commit()
+        return await self.executor.run(
+            state.implementation, inputs, parameters, context, state.deadline
+        )
 
     async def _stress(self, state: _Run, inputs: ModuleInputs) -> _Stress | ModuleWarning:
         """The overlay of a stressed run on its pinned inputs (D-45 §2), or the value-free
@@ -1958,6 +2097,16 @@ class CalculationService:
             state.run_id, state.counts, status, result, warnings, checks, buckets, state, scenario
         )
 
+    async def _fail_if_running(self, run_id: uuid.UUID, error: str) -> bool:
+        """`_fail`, unless the run already ended (the sweeper, a timeout or another replay got
+        there first): True when this call ended it."""
+        try:
+            await self._fail(run_id, {}, error)
+        except RunNotRunning:
+            await self.session.rollback()
+            return False
+        return True
+
     async def _fail(self, run_id: uuid.UUID, counts: Mapping[str, int], error: str) -> None:
         """End a RUNNING run FAILED with one value-free ENGINE_ERROR warning, and commit."""
         warning = ModuleWarning(
@@ -2001,7 +2150,7 @@ class CalculationService:
         )
         keep = status in SUCCEEDED
         lcr, assets = kept_lcr(status, result.lcr, result.hqla_assets)
-        tenant, actor = self.principal.tenant_id, self.principal.actor
+        tenant, actor = self.principal.tenant_id, self.actor
         bucket_ids = {b.code: b.id for b in buckets}
         gap_ids: dict[tuple[str, str], uuid.UUID] = {}
         gap_rows = []
@@ -2127,11 +2276,13 @@ class CalculationService:
             "warning_count": len(warnings),
             "result_sha256": result_sha256,
         }
-        audit_by(
+        audit(
             self.session,
-            self.principal,
-            FINISH_RUN,
-            "calculation_run",
+            tenant_id=tenant,
+            actor=actor,
+            actor_user_id=self.actor_user_id,
+            action=FINISH_RUN,
+            resource_type="calculation_run",
             outcome=AuditOutcome.SUCCESS if keep else AuditOutcome.FAILURE,
             resource_id=str(run_id),
             details=details,
@@ -2150,7 +2301,7 @@ class CalculationService:
     ) -> None:
         """A stressed run's parts (one `scenario_contribution` per placed part, with its
         cash-flow event's lineage) and its applications (D-45 §5)."""
-        tenant, actor = self.principal.tenant_id, self.principal.actor
+        tenant, actor = self.principal.tenant_id, self.actor
         bucket_version = state.versions[MATURITY_BUCKETS]
         buckets = parse_buckets(bucket_version.parameters)
         rows = []
@@ -2230,7 +2381,7 @@ class CalculationService:
         if not lcr:
             return {}
         assert state is not None
-        tenant, actor = self.principal.tenant_id, self.principal.actor
+        tenant, actor = self.principal.tenant_id, self.actor
         ids = {r.currency: uuid.uuid4() for r in lcr}
         await self.repo.insert_rows(
             LcrResult,
@@ -2663,3 +2814,73 @@ class CalculationService:
     ) -> tuple[int, list[CalculationRun]]:
         """How many runs pin one of these rule sets, and the newest `limit` of them."""
         return await self.repo.in_rule_sets(rule_set_ids, limit)
+
+
+# --- Phase 33: refusal and run sweeper (BE-33.1, BE-33.3, D-59 §4) -----------------------------
+
+
+def workers_busy(retry_after: int) -> ApiError:
+    """503 `workers_busy` (D-59 §4): retryable, with Retry-After; the route audits it DENIED
+    under its own action and writes no run."""
+    return ApiError(
+        503,
+        RunUnavailable.WORKERS_BUSY,
+        "Every calculation worker is busy and the queue is full. Retry after the time in "
+        "Retry-After.",
+        {"retry_after_seconds": retry_after},
+        retryable=True,
+        headers={RETRY_AFTER: str(retry_after)},
+    )
+
+
+def _system_principal(tenant_id: uuid.UUID) -> Principal:
+    """The sweeper's scope in one tenant: no user, no role, no permission."""
+    return Principal(
+        user_id=uuid.UUID(int=0),
+        tenant_id=tenant_id,
+        issuer="system",
+        subject=SWEEPER_ACTOR,
+        display_name="Run sweeper",
+        email=None,
+        roles=frozenset(),
+        permissions=frozenset(),
+    )
+
+
+async def sweep_stale_runs(
+    sessions: async_sessionmaker[AsyncSession], stale_seconds: int
+) -> list[uuid.UUID]:
+    """End FAILED (ENGINE_ERROR, `stale_run`) every RUNNING run older than `stale_seconds`, as
+    a replay of its key would, each in its own transaction in its own tenant, audited
+    `calculation_run.finish` by `system:run-sweeper`. A run that ended meanwhile is skipped:
+    the guarded update makes one terminal move only. The ids it ended."""
+    token = correlation_id_var.set(str(uuid.uuid4()))
+    try:
+        async with sessions() as session:
+            found = await StaleRunRepository(session).stale_runs(stale_seconds, SWEEP_BATCH)
+        ended = []
+        for run_id, tenant_id in found:
+            async with sessions() as session:
+                service = CalculationService(
+                    session, _system_principal(tenant_id), system_actor=SWEEPER_ACTOR
+                )
+                if await service._fail_if_running(run_id, STALE_RUN):
+                    ended.append(run_id)
+        if ended:
+            logger.info("calculation_runs_swept", extra={"count": len(ended)})
+        return ended
+    finally:
+        correlation_id_var.reset(token)
+
+
+async def run_sweeper(
+    sessions: async_sessionmaker[AsyncSession], stale_seconds: int, interval_seconds: int
+) -> None:
+    """The periodic sweeper (BE-33.3): a pass every `interval_seconds` until cancelled. A
+    failed pass is logged (its type only) and the next one runs."""
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            await sweep_stale_runs(sessions, stale_seconds)
+        except Exception as exc:
+            logger.warning("calculation_sweep_error", extra={"error": type(exc).__name__})

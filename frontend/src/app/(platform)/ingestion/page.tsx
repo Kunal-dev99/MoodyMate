@@ -12,6 +12,8 @@ import { EmptyState } from '@/components/common/EmptyState'
 import { LoadingBlock } from '@/components/common/LoadingBlock'
 import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
+import { CursorRefused, ListPager, useCursorPaging } from '@/components/common/ListPager'
+import { cursorQuery, isInvalidCursor } from '@/lib/paging'
 import { toastApiError } from '@/components/common/api-error-toast'
 import { ContractStatusPill } from '@/components/ingestion/ContractStatusPill'
 import { ImportsPlanned, ImportsTab } from '@/components/ingestion/ImportsTab'
@@ -21,7 +23,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { IMPORTS_UI_ENABLED, MAPPING_UI_ENABLED } from '@/config/features'
+import { IMPORTS_UI_ENABLED, LIST_PAGING_UI_ENABLED, MAPPING_UI_ENABLED } from '@/config/features'
 
 const PAGE_SIZE = 50
 
@@ -30,32 +32,44 @@ type State =
   | { kind: 'ready'; page: Schemas['SourcePage'] }
   | { kind: 'forbidden'; cid: string | null }
   | { kind: 'failed' }
+  /** Q19: the server refused the page's cursor (400 invalid_cursor). */
+  | { kind: 'cursor_refused'; cid: string | null }
 
 function SourcesTab() {
   const [offset, setOffset] = useState(0)
   const [state, setState] = useState<State>({ kind: 'loading' })
+  // FE-33.1: the server's next_cursor (NEXT_PUBLIC_LIST_PAGING_UI=off: offsets).
+  const cursorPaging = useCursorPaging('sources')
+  const cursor = LIST_PAGING_UI_ENABLED ? cursorPaging.cursor : null
 
   useEffect(() => {
     // Moving to another page cancels the previous request; a late answer never lands.
     const request = new AbortController()
     setState({ kind: 'loading' })
-    call(() => api.GET('/api/v1/sources', { params: { query: { limit: PAGE_SIZE, offset } }, signal: request.signal }))
+    call(() =>
+      api.GET('/api/v1/sources', {
+        params: { query: { limit: PAGE_SIZE, ...(LIST_PAGING_UI_ENABLED ? cursorQuery(cursor) : { offset }) } },
+        signal: request.signal,
+      }),
+    )
       .then((page) => !request.signal.aborted && setState({ kind: 'ready', page }))
       .catch((err: unknown) => {
         if (request.signal.aborted) return
         if (err instanceof ApiError && err.status === 403) setState({ kind: 'forbidden', cid: err.correlationId })
+        else if (LIST_PAGING_UI_ENABLED && isInvalidCursor(err)) setState({ kind: 'cursor_refused', cid: err instanceof ApiError ? err.correlationId : null })
         else {
           setState({ kind: 'failed' })
           toastApiError(err, 'Could not load sources')
         }
       })
     return () => request.abort()
-  }, [offset])
+  }, [offset, cursor])
 
   if (state.kind === 'forbidden') return <Forbidden permission="source:read" correlationId={state.cid} />
   if (state.kind === 'loading') return <LoadingBlock rows={4} />
   if (state.kind === 'failed')
     return <EmptyState icon={Database} title="Sources could not be loaded" description="Reload the page to try again." />
+  if (state.kind === 'cursor_refused') return <CursorRefused paging={cursorPaging} cid={state.cid} testId="source-pager" />
 
   const { page } = state
   if (page.total === 0)
@@ -118,7 +132,8 @@ function SourcesTab() {
           ))}
         </TableBody>
       </Table>
-      {page.total > PAGE_SIZE && (
+      {LIST_PAGING_UI_ENABLED && page.items.length > 0 && <ListPager page={page} paging={cursorPaging} testId="source-pager" />}
+      {!LIST_PAGING_UI_ENABLED && page.total > PAGE_SIZE && (
         <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
           <span>
             {page.offset + 1}–{page.offset + page.items.length} of {page.total}

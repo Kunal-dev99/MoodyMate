@@ -122,7 +122,7 @@ describe('linked identity on the cash-flow, exposure and position details (FE-31
 
 describe('reading links (GET /identity-links only)', () => {
   afterEach(() => vi.restoreAllMocks())
-  const page = (items: IdentityLink[], total = items.length): IdentityLinkPage => ({ items, total, limit: 200, offset: 0 })
+  const page = (items: IdentityLink[], total = items.length): IdentityLinkPage => ({ items, total, limit: 200, offset: 0, has_more: false, next_cursor: null })
   const ok = (body: unknown) => ({ data: body, error: undefined, response: new Response(null, { status: 200 }) }) as never
 
   it('one read of the links to the identity, then a read per row it does not cover; no link is null', async () => {

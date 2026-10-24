@@ -4,6 +4,10 @@ The only code that touches the DB session for snapshots and runs. Every query fi
 caller's tenant (D-04): every table here carries `tenant_id`. Nothing is deleted; the only
 update is a run's single move from RUNNING to its terminal status (`finish`), which the DB
 trigger also enforces.
+
+One read is not tenant-scoped: `StaleRunRepository.stale_runs`, for the run sweeper
+(BE-33.3), a system job with no principal. It returns only run ids and their tenants; each run
+is then ended through a repository scoped to that run's own tenant.
 """
 
 import uuid
@@ -11,6 +15,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from sqlalchemy import Integer, cast, func, insert, or_, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.calculations.constants import CalculationRunStatus
 from app.calculations.models import (
@@ -30,6 +35,40 @@ from app.calculations.models import (
 from app.core.locks import advisory_xact_lock
 from app.db.base import Base
 from app.db.repository import M, ScopedRepository
+
+
+class RunNotRunning(RuntimeError):
+    """The run already made its one terminal move (e.g. the sweeper or a replay ended it)."""
+
+    def __init__(self) -> None:
+        super().__init__("the run is not RUNNING")
+
+
+def _older_than(seconds: int) -> Any:
+    return CalculationRun.started_at < func.clock_timestamp() - func.make_interval(
+        0, 0, 0, 0, 0, 0, cast(seconds, Integer)
+    )
+
+
+class StaleRunRepository:
+    """BE-33.3: the sweeper's one cross-tenant read (no principal: a system job)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def stale_runs(self, seconds: int, limit: int) -> list[tuple[uuid.UUID, uuid.UUID]]:
+        """(run id, tenant id) of RUNNING runs started more than `seconds` ago (database
+        clock), oldest first, at most `limit`."""
+        result = await self.session.execute(
+            select(CalculationRun.id, CalculationRun.tenant_id)
+            .where(
+                CalculationRun.status == CalculationRunStatus.RUNNING.value,
+                _older_than(seconds),
+            )
+            .order_by(CalculationRun.started_at, CalculationRun.id)
+            .limit(limit)
+        )
+        return [(run_id, tenant_id) for run_id, tenant_id in result.tuples()]
 
 
 class _Writes(ScopedRepository[M]):
@@ -137,9 +176,7 @@ class CalculationRepository(_Writes[CalculationRun]):
                 CalculationRun.id == run_id,
                 CalculationRun.tenant_id == self.scope.tenant_id,
                 CalculationRun.status == CalculationRunStatus.RUNNING.value,
-                CalculationRun.started_at
-                < func.clock_timestamp()
-                - func.make_interval(0, 0, 0, 0, 0, 0, cast(seconds, Integer)),
+                _older_than(seconds),
             )
         )
         return found is not None
@@ -172,7 +209,7 @@ class CalculationRepository(_Writes[CalculationRun]):
             .execution_options(synchronize_session=False)
         )
         if getattr(result, "rowcount", 1) != 1:
-            raise RuntimeError("the run is not RUNNING")
+            raise RunNotRunning()
 
     async def _of_run(self, model: Any, run_id: uuid.UUID) -> list[Any]:
         result = await self.session.execute(

@@ -19,6 +19,8 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, WithJsonSchema, field_validator
 
 from app.calculations.constants import (
+    PREFERENCE_APPLIED_HEADER,
+    RESPOND_ASYNC,
     CalculationRunStatus,
     CalculationWarningCode,
     HqlaExclusionReason,
@@ -29,6 +31,9 @@ from app.calculations.constants import (
     WarningSeverity,
 )
 from app.core.classification import MaskedValue
+from app.core.errors import ErrorEnvelope
+from app.core.pagination import HasMore, NextCursor
+from app.core.ratelimit import RETRY_AFTER
 from app.domain.constants import CashflowOrigin, DomainSchemaCode
 from app.reconciliation.constants import ReconciliationOutcome
 from app.rules.constants import CashflowDirection, HqlaLevel, ValidationStatus
@@ -93,6 +98,8 @@ class SnapshotPage(BaseModel):
     total: int
     limit: int
     offset: int
+    has_more: HasMore
+    next_cursor: NextCursor
 
 
 # --- calculation runs (BE-15.4, BE-15.5, D-31) -------------------------------------------------
@@ -244,6 +251,8 @@ class RunPage(BaseModel):
     total: int
     limit: int
     offset: int
+    has_more: HasMore
+    next_cursor: NextCursor
 
 
 class ManifestModule(BaseModel):
@@ -477,6 +486,8 @@ class ResultPage(BaseModel):
         description="D-56 §5: units, currency, as-of date, methodology pins, validation status "
         "and the D-35 statement, from the run's pins."
     )
+    has_more: HasMore
+    next_cursor: NextCursor
 
 
 class BucketOut(BaseModel):
@@ -652,3 +663,40 @@ class LiquidityOut(BaseModel):
         description="D-56 §5: units, currency, as-of date, methodology pins, validation status "
         "and the D-35 statement, from the run's pins."
     )
+
+
+# --- Phase 33: background execution (BE-33.1, BE-33.2, D-59) -----------------------------------
+
+WORKERS_BUSY_RESPONSE: dict[int | str, dict[str, Any]] = {
+    503: {
+        "model": ErrorEnvelope,
+        "description": "workers_busy: the bounded calculation worker queue is full (D-59 §4); "
+        "retryable, audited DENIED, no run written. Also db_pool_exhausted (BE-33.4) when no "
+        "database connection frees up within DB_POOL_TIMEOUT_SECONDS; retryable.",
+        "headers": {
+            RETRY_AFTER: {
+                "description": "Whole seconds before retrying.",
+                "schema": {"type": "integer", "minimum": 1},
+            }
+        },
+    }
+}
+
+RUN_ACCEPTED_RESPONSE: dict[int | str, dict[str, Any]] = {
+    202: {
+        "model": RunDetail,
+        "description": "Prefer: respond-async (D-59 §2): the run is written RUNNING (manifest "
+        "pinned) and executes in the background; poll Location until a terminal status. A "
+        "replay of the key answers 200 with the same run, whatever its status.",
+        "headers": {
+            "Location": {
+                "description": "The run's URL: /api/v1/calculation-runs/{run_id}.",
+                "schema": {"type": "string"},
+            },
+            PREFERENCE_APPLIED_HEADER: {
+                "description": "respond-async",
+                "schema": {"type": "string", "enum": [RESPOND_ASYNC]},
+            },
+        },
+    }
+}

@@ -14,6 +14,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth import authenticated, get_principal, require_permission
 from app.core.classification import mask_model
 from app.core.errors import ApiError
+from app.core.pagination import (
+    INVALID_CURSOR_RESPONSE,
+    NO_FILTERS,
+    Cursor,
+    continuation,
+    page_offset,
+)
 from app.core.principal import Principal
 from app.core.refusals import refuse_endpoint
 from app.db.session import get_session
@@ -151,16 +158,30 @@ def _summary(u: UserAccount, principal: Principal) -> UserSummary:
     return mask_model(summary, principal.clear_classifications)
 
 
-@router.get("/users", response_model=UserPage, operation_id="listUsers")
+@router.get(
+    "/users",
+    response_model=UserPage,
+    operation_id="listUsers",
+    responses=INVALID_CURSOR_RESPONSE,
+)
 async def list_users(
     principal: Annotated[Principal, Depends(require_permission(Permission.ADMIN_READ))],
     session: SessionDep,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    cursor: Cursor = None,
 ) -> UserPage:
+    listing, filters = "listUsers", NO_FILTERS
+    offset = page_offset(principal, listing, filters, offset, cursor)
     users, total = await UserService(session, principal).list_users(limit, offset)
     items = [_summary(u, principal) for u in users]
-    return UserPage(items=items, total=total, limit=limit, offset=offset)
+    return UserPage(
+        items=items,
+        total=total,
+        limit=limit,
+        offset=offset,
+        **continuation(principal, listing, filters, limit, offset, len(items), total),
+    )
 
 
 @router.get("/users/{user_id}", response_model=UserSummary, operation_id="getUser")
@@ -176,7 +197,12 @@ async def get_user(
 FilterText = Annotated[str | None, Query(max_length=200)]
 
 
-@router.get("/audit-events", response_model=AuditEventPage, operation_id="listAuditEvents")
+@router.get(
+    "/audit-events",
+    response_model=AuditEventPage,
+    operation_id="listAuditEvents",
+    responses=INVALID_CURSOR_RESPONSE,
+)
 async def list_audit_events(
     principal: Annotated[Principal, Depends(require_permission(Permission.AUDIT_READ))],
     session: SessionDep,
@@ -193,7 +219,20 @@ async def list_audit_events(
         uuid.UUID | None,
         Query(description="Return events older than this event id (stable keyset paging)."),
     ] = None,
+    cursor: Cursor = None,
 ) -> AuditEventPage:
+    listing = "listAuditEvents"
+    bound = {
+        "resource_type": resource_type,
+        "resource_id": resource_id,
+        "actor": actor,
+        "action": action,
+        "outcome": outcome,
+        "from": occurred_from,
+        "to": occurred_to,
+        "before": before,
+    }
+    offset = page_offset(principal, listing, bound, offset, cursor)
     filters = AuditFilters(
         resource_type=resource_type,
         resource_id=resource_id,
@@ -224,6 +263,7 @@ async def list_audit_events(
         total=total,
         limit=limit,
         offset=offset,
+        **continuation(principal, listing, bound, limit, offset, len(rows), total),
     )
 
 
@@ -378,7 +418,12 @@ async def _proposal_out(service: SchemaChangeService, p: SchemaChangeProposal) -
     )
 
 
-@router.get("/schema-change-proposals", response_model=ProposalList, operation_id="listProposals")
+@router.get(
+    "/schema-change-proposals",
+    response_model=ProposalList,
+    operation_id="listProposals",
+    responses=INVALID_CURSOR_RESPONSE,
+)
 async def list_proposals(
     principal: ProposalReader,
     session: SessionDep,
@@ -386,10 +431,17 @@ async def list_proposals(
     schema_id: uuid.UUID | None = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    cursor: Cursor = None,
 ) -> ProposalList:
+    listing, filters = "listProposals", {"status": status, "schema_id": schema_id}
+    offset = page_offset(principal, listing, filters, offset, cursor)
     service = SchemaChangeService(session, principal)
     items, total = await service.page(status, schema_id, limit, offset)
-    return ProposalList(items=[await _proposal_out(service, p) for p in items], total=total)
+    return ProposalList(
+        items=[await _proposal_out(service, p) for p in items],
+        total=total,
+        **continuation(principal, listing, filters, limit, offset, len(items), total),
+    )
 
 
 @router.post(

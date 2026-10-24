@@ -44,7 +44,7 @@ jobs:
           version: "0.11.32"   # the uv backend/Dockerfile uses (UV_IMAGE)
       - name: Install (BE-34.1, D-62 §5; locked, so a stale uv.lock fails here)
         run: |
-          uv sync --locked --extra dev
+          uv sync --locked --extra dev --extra s3
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
         env:
           UV_PYTHON_DOWNLOADS: never
@@ -93,7 +93,7 @@ jobs:
         # The exported lock with the dev extra: the same set the locked install above puts in
         # place. The project itself (`-e .`) is not on PyPI, so pip-audit skips it.
         run: |
-          uv export --locked --no-hashes --format requirements-txt --extra dev -o "$RUNNER_TEMP/req.txt"
+          uv export --locked --no-hashes --format requirements-txt --extra dev --extra s3 -o "$RUNNER_TEMP/req.txt"
           pip-audit -r "$RUNNER_TEMP/req.txt" --no-deps --progress-spinner off
 
   frontend:

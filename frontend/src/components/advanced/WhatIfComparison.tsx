@@ -4,19 +4,25 @@ import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import { GitBranch } from 'lucide-react'
 import { EmptyState } from '@/components/common/EmptyState'
+import { TruncationNote } from '@/components/common/ListPager'
 import { createLoader, type Loaded } from '@/components/common/load'
 import { LoadingBlock } from '@/components/common/LoadingBlock'
 import { PageSection } from '@/components/common/PageSection'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { formatTimestamp } from '@/lib/format'
+import { truncationOf, type Truncation } from '@/lib/paging'
 import { DeltaValue } from './DeltaValue'
 import { approvalVariant } from './scenario-runs'
 import { fetchScenario, scenarioHref } from './scenarios'
 import { comparisonHref, fetchComparison, fetchScenarioRuns, flagState, parentRunOf, whatIfRows, type ComparisonCell, type ScenarioComparison, type ScenarioRunSummary, type WhatIfRow } from './comparison'
 
 /** What the side by side resolves before it can show anything. */
-export type Resolved = { kind: 'no_parent' } | { kind: 'no_parent_run'; parentVersion: number } | { kind: 'ready'; parentVersion: number; run: ScenarioRunSummary; comparison: ScenarioComparison }
+export type Resolved =
+  | { kind: 'no_parent' }
+  /** Q18: `truncation` is set when the search read one capped page of scenario runs and the server cut it. */
+  | { kind: 'no_parent_run'; parentVersion: number; truncation?: Truncation | null }
+  | { kind: 'ready'; parentVersion: number; run: ScenarioRunSummary; comparison: ScenarioComparison }
 
 /**
  * Resolves the parent: the version's `parent_version` (scenario detail), the parent's newest
@@ -29,7 +35,7 @@ const resolveParent = (scenarioId: string, version: number, baselineRunId: strin
   if (parentVersion === null) return { kind: 'no_parent' }
   const runs = await fetchScenarioRuns(scenarioId, baselineRunId)(signal)
   const run = parentRunOf(runs.items, parentVersion, baselineRunId)
-  if (!run) return { kind: 'no_parent_run', parentVersion }
+  if (!run) return { kind: 'no_parent_run', parentVersion, truncation: truncationOf(runs, 'scenario runs on this baseline') }
   return { kind: 'ready', parentVersion, run, comparison: await fetchComparison(scenarioId, run.scenario_run_id)(signal) }
 }
 
@@ -144,6 +150,8 @@ export function WhatIfBody({ scenarioId, comparison, state }: { scenarioId: stri
             </>
           }
         />
+        {/* Q18: only the newest page of scenario runs was searched; an older parent run may exist beyond it. */}
+        <TruncationNote note={state.value.truncation ?? null} testId="what-if-truncated" className="mt-2 text-center" />
       </div>
     )
   else {

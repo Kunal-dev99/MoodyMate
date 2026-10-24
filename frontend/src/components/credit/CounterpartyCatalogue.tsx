@@ -13,6 +13,9 @@ import { LoadingBlock } from '@/components/common/LoadingBlock'
 import { MaskedValue, isMasked } from '@/components/common/MaskedValue'
 import { PageSection } from '@/components/common/PageSection'
 import { startLoad, type LoadFailure } from '@/components/common/load'
+import { ListPager, TruncationNote, cursorRefusedBody, useCursorPaging } from '@/components/common/ListPager'
+import { LIST_PAGING_UI_ENABLED } from '@/config/features'
+import { cursorQuery, truncationOf, type Truncation } from '@/lib/paging'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -75,10 +78,20 @@ function useUrlFilters<K extends string>(keys: readonly K[], prefix: string) {
   return { applied, draft, setDraft, apply, filtered }
 }
 
-/** A cancellable paged GET whose offset resets when the query changes. */
-function usePaged<P, Q>(query: Q, fetcher: (query: Q, offset: number, signal: AbortSignal) => Promise<P>, failureTitle: string) {
+/**
+ * A cancellable paged GET whose offset resets when the query changes. FE-33.1: the page is
+ * selected by the server's next_cursor, bound to the query (NEXT_PUBLIC_LIST_PAGING_UI=off:
+ * by offset, as before).
+ */
+function usePaged<P, Q>(
+  query: Q,
+  fetcher: (query: Q, page: { offset: number } | { cursor?: string }, signal: AbortSignal) => Promise<P>,
+  failureTitle: string,
+) {
   const [paging, setPaging] = useState<{ query: Q; offset: number }>({ query, offset: 0 })
   const offset = paging.query === query ? paging.offset : 0
+  const cursorPaging = useCursorPaging(JSON.stringify(query))
+  const cursor = LIST_PAGING_UI_ENABLED ? cursorPaging.cursor : null
   const [state, setState] = useState<Paged<P>>({ kind: 'loading' })
   const request = useRef<AbortController | null>(null)
   const fetchRef = useRef(fetcher)
@@ -86,14 +99,14 @@ function usePaged<P, Q>(query: Q, fetcher: (query: Q, offset: number, signal: Ab
   const [attempt, setAttempt] = useState(0)
   useEffect(() => {
     setState({ kind: 'loading' })
-    request.current = startLoad((signal) => fetchRef.current(query, offset, signal), {
+    request.current = startLoad((signal) => fetchRef.current(query, LIST_PAGING_UI_ENABLED ? cursorQuery(cursor) : { offset }, signal), {
       onReady: (page) => setState({ kind: 'ready', page }),
       onFailure: setState,
       failureTitle,
     }, request.current)
     return () => request.current?.abort()
-  }, [query, offset, attempt, failureTitle])
-  return { state, setOffset: (next: number) => setPaging({ query, offset: next }), retry: () => setAttempt((n) => n + 1) }
+  }, [query, offset, cursor, attempt, failureTitle])
+  return { state, setOffset: (next: number) => setPaging({ query, offset: next }), cursorPaging, retry: () => setAttempt((n) => n + 1) }
 }
 
 function Pager({ total, offset, shown, onOffset, testId }: { total: number; offset: number; shown: number; onOffset: (n: number) => void; testId: string }) {
@@ -161,13 +174,13 @@ function VocabularySelect({
   )
 }
 
-function Counterparties({ vocab, sources }: { vocab: VocabularyEntry[]; sources: SourceOption[] | null }) {
+function Counterparties({ vocab, sources, sourcesNote = null }: { vocab: VocabularyEntry[]; sources: SourceOption[] | null; sourcesNote?: Truncation | null }) {
   const { applied, draft, setDraft, apply, filtered } = useUrlFilters(COUNTERPARTY_KEYS, '')
   const { query, problems } = useMemo(() => counterpartyQuery(applied), [applied])
-  const { state, setOffset, retry } = usePaged(
+  const { state, setOffset, cursorPaging, retry } = usePaged(
     query,
-    (q, off, signal): Promise<CounterpartyPage> =>
-      call(() => api.GET('/api/v1/counterparties', { params: { query: { limit: PAGE_SIZE, offset: off, ...q } }, signal })),
+    (q, at, signal): Promise<CounterpartyPage> =>
+      call(() => api.GET('/api/v1/counterparties', { params: { query: { limit: PAGE_SIZE, ...at, ...q } }, signal })),
     'Could not load counterparties',
   )
   const submit = (e: FormEvent) => {
@@ -215,6 +228,8 @@ function Counterparties({ vocab, sources }: { vocab: VocabularyEntry[]; sources:
               </option>
             ))}
           </select>
+          {/* Q18: the options are one capped page of sources; say so when the server cut it. */}
+          <TruncationNote note={sourcesNote} testId="cp-filter-source-truncated" />
         </Label>
       )}
       <Label text="Import ID">
@@ -247,7 +262,7 @@ function Counterparties({ vocab, sources }: { vocab: VocabularyEntry[]; sources:
 
   let body: ReactNode
   if (state.kind === 'loading') body = <LoadingBlock rows={4} />
-  else if (state.kind !== 'ready') body = failureBody(state, 'Counterparties', retry)
+  else if (state.kind !== 'ready') body = cursorRefusedBody(state, cursorPaging, 'counterparty-pager') ?? failureBody(state, 'Counterparties', retry)
   else if (state.page.items.length === 0)
     body = (
       <EmptyState
@@ -320,7 +335,11 @@ function Counterparties({ vocab, sources }: { vocab: VocabularyEntry[]; sources:
             ))}
           </TableBody>
         </Table>
-        <Pager total={page.total} offset={page.offset} shown={page.items.length} onOffset={setOffset} testId="counterparty-range" />
+        {LIST_PAGING_UI_ENABLED ? (
+          <ListPager page={page} paging={cursorPaging} testId="counterparty-pager" />
+        ) : (
+          <Pager total={page.total} offset={page.offset} shown={page.items.length} onOffset={setOffset} testId="counterparty-range" />
+        )}
       </>
     )
   }
@@ -340,10 +359,10 @@ function Counterparties({ vocab, sources }: { vocab: VocabularyEntry[]; sources:
 function Exposures({ vocab }: { vocab: VocabularyEntry[] }) {
   const { applied, draft, setDraft, apply, filtered } = useUrlFilters(EXPOSURE_KEYS, EXPOSURE_PARAM_PREFIX)
   const { query, problems } = useMemo(() => exposureQuery(applied), [applied])
-  const { state, setOffset, retry } = usePaged(
+  const { state, setOffset, cursorPaging, retry } = usePaged(
     query,
-    (q, off, signal): Promise<ExposurePage> =>
-      call(() => api.GET('/api/v1/credit-exposures', { params: { query: { limit: PAGE_SIZE, offset: off, ...q } }, signal })),
+    (q, at, signal): Promise<ExposurePage> =>
+      call(() => api.GET('/api/v1/credit-exposures', { params: { query: { limit: PAGE_SIZE, ...at, ...q } }, signal })),
     'Could not load credit exposures',
   )
   const submit = (e: FormEvent) => {
@@ -416,7 +435,7 @@ function Exposures({ vocab }: { vocab: VocabularyEntry[] }) {
 
   let body: ReactNode
   if (state.kind === 'loading') body = <LoadingBlock rows={4} />
-  else if (state.kind !== 'ready') body = failureBody(state, 'Credit exposures', retry)
+  else if (state.kind !== 'ready') body = cursorRefusedBody(state, cursorPaging, 'exposure-pager') ?? failureBody(state, 'Credit exposures', retry)
   else if (state.page.items.length === 0)
     body = (
       <EmptyState
@@ -497,7 +516,11 @@ function Exposures({ vocab }: { vocab: VocabularyEntry[] }) {
             ))}
           </TableBody>
         </Table>
-        <Pager total={page.total} offset={page.offset} shown={page.items.length} onOffset={setOffset} testId="exposure-range" />
+        {LIST_PAGING_UI_ENABLED ? (
+          <ListPager page={page} paging={cursorPaging} testId="exposure-pager" />
+        ) : (
+          <Pager total={page.total} offset={page.offset} shown={page.items.length} onOffset={setOffset} testId="exposure-range" />
+        )}
       </>
     )
   }
@@ -524,6 +547,7 @@ export function CounterpartyCatalogue() {
   const canReadSources = has('source:read')
   const [vocab, setVocab] = useState<Vocab>({ kind: 'loading' })
   const [sources, setSources] = useState<SourceOption[] | null>(null)
+  const [sourcesNote, setSourcesNote] = useState<Truncation | null>(null)
   const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
@@ -540,7 +564,9 @@ export function CounterpartyCatalogue() {
     const controller = new AbortController()
     call(() => api.GET('/api/v1/sources', { params: { query: { limit: 200 } }, signal: controller.signal })).then(
       (page) => {
-        if (!controller.signal.aborted) setSources(page.items.map(({ id, code, name }) => ({ id, code, name })))
+        if (controller.signal.aborted) return
+        setSources(page.items.map(({ id, code, name }) => ({ id, code, name })))
+        setSourcesNote(truncationOf(page, 'sources'))
       },
       () => {
         if (!controller.signal.aborted) setSources(null)
@@ -552,7 +578,7 @@ export function CounterpartyCatalogue() {
   const items = vocab.kind === 'ready' ? vocab.items : []
   return (
     <div className="space-y-4">
-      <Counterparties vocab={items} sources={canReadSources ? sources : null} />
+      <Counterparties vocab={items} sources={canReadSources ? sources : null} sourcesNote={sourcesNote} />
       <Exposures vocab={items} />
       {vocab.kind === 'loading' ? (
         <LoadingBlock rows={2} />

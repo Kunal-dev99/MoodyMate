@@ -7,9 +7,10 @@ import { useCurrentSession } from '@/components/auth/SessionProvider'
 import { toastApiError } from '@/components/common/api-error-toast'
 import { createLoader, type Loaded } from '@/components/common/load'
 import { LoadingBlock } from '@/components/common/LoadingBlock'
+import { TruncationNote } from '@/components/common/ListPager'
 import { RunIdentity } from '@/components/calculations/RunIdentity'
 import { RunStatusPill } from '@/components/calculations/RunStatusPill'
-import { INPUT_REF_TEXT, runHref, type RunDetail, type RunSummary } from '@/components/calculations/calculations'
+import { INPUT_REF_TEXT, runHref, type RunDetail } from '@/components/calculations/calculations'
 import type { Refusal } from '@/components/ingestion/mappings'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -33,6 +34,7 @@ import {
   runGate,
   runScenario,
   scenarioRunRefusal,
+  type BaselineOptions,
   type RunAttempt,
   type ScenarioRunOut,
   type ScenarioValidation,
@@ -62,27 +64,36 @@ function LoadProblem({ state, what, testId }: { state: Loaded<unknown>; what: st
 }
 
 /** The baseline picker: succeeded, non-stressed maturity_ladder runs only. */
-export function BaselinePicker({ id, state, value, disabled, onChange }: { id: string; state: Loaded<RunSummary[]>; value: string; disabled: boolean; onChange: (runId: string) => void }) {
+export function BaselinePicker({ id, state, value, disabled, onChange }: { id: string; state: Loaded<BaselineOptions>; value: string; disabled: boolean; onChange: (runId: string) => void }) {
   if (state.kind === 'loading') return <LoadingBlock rows={1} />
   if (state.kind !== 'ready') return <LoadProblem state={state} what="baseline runs" testId="baseline-load-problem" />
-  if (state.value.length === 0)
+  const { runs, truncation } = state.value
+  // Q18: one capped page per succeeded status; say so when the server cut one.
+  const note = <TruncationNote note={truncation} testId="baseline-truncated" className="mt-1" />
+  if (runs.length === 0)
     return (
-      <p className="text-sm text-muted-foreground" data-testid="baseline-none">
-        No baseline yet: a run of maturity_ladder that ended SUCCEEDED and is not itself stressed is needed.{' '}
-        <Link href="/calculations/new" className="text-primary hover:underline">
-          New run
-        </Link>
-      </p>
+      <>
+        <p className="text-sm text-muted-foreground" data-testid="baseline-none">
+          No baseline yet: a run of maturity_ladder that ended SUCCEEDED and is not itself stressed is needed.{' '}
+          <Link href="/calculations/new" className="text-primary hover:underline">
+            New run
+          </Link>
+        </p>
+        {note}
+      </>
     )
   return (
-    <select id={id} className={selectClass} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)} data-testid="baseline-picker" data-count={state.value.length}>
-      <option value="">Pick a baseline run…</option>
-      {state.value.map((r) => (
-        <option key={r.run_id} value={r.run_id}>
-          {baselineOptionText(r)}
-        </option>
-      ))}
-    </select>
+    <>
+      <select id={id} className={selectClass} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)} data-testid="baseline-picker" data-count={runs.length}>
+        <option value="">Pick a baseline run…</option>
+        {runs.map((r) => (
+          <option key={r.run_id} value={r.run_id}>
+            {baselineOptionText(r)}
+          </option>
+        ))}
+      </select>
+      {note}
+    </>
   )
 }
 
@@ -277,7 +288,7 @@ export function ScenarioRunPanel({ scenarioId, version, enabled }: { scenarioId:
 function RunPanelBody({ scenarioId, version, enabled }: { scenarioId: string; version: RunnableVersion; enabled: boolean }) {
   const [open, setOpen] = useState(false)
   const [baselineId, setBaselineId] = useState('')
-  const [baselines, setBaselines] = useState<Loaded<RunSummary[]>>({ kind: 'loading' })
+  const [baselines, setBaselines] = useState<Loaded<BaselineOptions>>({ kind: 'loading' })
   const [validation, setValidation] = useState<Loaded<ScenarioValidation>>({ kind: 'loading' })
   const [baseline, setBaseline] = useState<Loaded<RunDetail>>({ kind: 'loading' })
   const [attempt, setAttempt] = useState<RunAttempt | null>(null)
