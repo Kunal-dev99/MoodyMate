@@ -4,16 +4,21 @@ Stress scenarios (Phase 24, WS4 RO-02, RO-06; D-44, D-47): the closed template l
 lifecycle (D-06), bounds and labels. PROVISIONAL and ILLUSTRATIVE (D-11, D-35).
 """
 
+from dataclasses import dataclass
 from enum import StrEnum
 
-
-class ScenarioTemplate(StrEnum):
-    """The closed template list (D-44 §2, design §8). A new template needs code, tests and an
-    appended decision."""
-
-    DELAYED_INFLOWS = "DELAYED_INFLOWS"
-    DEPOSIT_WITHDRAWAL = "DEPOSIT_WITHDRAWAL"
-    FUNDING_UNAVAILABLE = "FUNDING_UNAVAILABLE"
+# BE-35.1: the shock contract the calculation engine applies (the templates, the shock-count
+# bounds, the approval state a run pins, the part changes and the overlay bound) is defined
+# in app.calculations.constants and re-exported here: orchestration -> calculations is the
+# only direction between the two.
+from app.calculations.constants import APPROVAL_LABELS as APPROVAL_LABELS
+from app.calculations.constants import MAX_PARTS_PER_FLOW as MAX_PARTS_PER_FLOW
+from app.calculations.constants import MAX_SHOCKS as MAX_SHOCKS
+from app.calculations.constants import MIN_SHOCKS as MIN_SHOCKS
+from app.calculations.constants import ApprovalLabel as ApprovalLabel
+from app.calculations.constants import ApprovalState as ApprovalState
+from app.calculations.constants import PartChange as PartChange
+from app.calculations.constants import ScenarioTemplate as ScenarioTemplate
 
 
 class ScenarioVersionStatus(StrEnum):
@@ -97,13 +102,6 @@ class ParameterKind(StrEnum):
     TEXT = "TEXT"
 
 
-class ApprovalLabel(StrEnum):
-    """D-44 §8: what a version (and its runs) is labelled with."""
-
-    EXPLORATION = "Exploration, not approved"
-    APPROVED = "Approved scenario (illustrative)"
-
-
 # D-44 §8, D-35 §3: every scenario response and page carries it.
 SCENARIO_STATEMENT = (
     "Illustrative stress exploration, not a regulatory stress test. Not a regulatory "
@@ -111,8 +109,6 @@ SCENARIO_STATEMENT = (
 )
 
 # D-44 §1-4 bounds.
-MIN_SHOCKS = 1
-MAX_SHOCKS = 5
 MAX_INSTRUMENT_KEYS = 50
 FRACTION_SCALE = 4
 MAX_DELAY_DAYS = 3650
@@ -196,21 +192,40 @@ MAX_TEXT_FIELD = 200  # an instrument key
 MAX_SOURCE_SYSTEM_CODE = 100
 
 
+@dataclass(frozen=True)
+class ScenarioBounds:
+    """The D-44 §1-4 bounds the template validator (scenario_templates) and the write schemas
+    (schemas.py) enforce, as one object: `GET config/limits` serves its values (BE-35.3)."""
+
+    min_shocks: int
+    max_shocks: int
+    max_instrument_keys: int
+    max_instrument_key_length: int
+    fraction_scale: int
+    max_delay_days: int
+    max_unavailable_days: int
+    max_name_length: int
+    max_description_length: int
+    max_change_summary_length: int
+    max_comment_length: int
+
+
+SCENARIO_BOUNDS = ScenarioBounds(
+    min_shocks=MIN_SHOCKS,
+    max_shocks=MAX_SHOCKS,
+    max_instrument_keys=MAX_INSTRUMENT_KEYS,
+    max_instrument_key_length=MAX_TEXT_FIELD,
+    fraction_scale=FRACTION_SCALE,
+    max_delay_days=MAX_DELAY_DAYS,
+    max_unavailable_days=MAX_UNAVAILABLE_DAYS,
+    max_name_length=MAX_NAME,
+    max_description_length=MAX_DESCRIPTION,
+    max_change_summary_length=MAX_CHANGE_SUMMARY,
+    max_comment_length=MAX_DECISION_COMMENT,
+)
+
+
 # --- Phase 25: running scenarios and comparing them (D-45, D-46) -------------------------------
-
-
-class ApprovalState(StrEnum):
-    """D-45 §4: the approval state a stressed run pins (from its version's status at run
-    time). EXPLORATION runs are never authoritative (D-47 §3)."""
-
-    EXPLORATION = "EXPLORATION"  # CONFIRMED_FOR_EXPLORATION
-    APPROVED = "APPROVED"  # APPROVED_FOR_TEST
-
-
-APPROVAL_LABELS: dict[ApprovalState, ApprovalLabel] = {
-    ApprovalState.EXPLORATION: ApprovalLabel.EXPLORATION,
-    ApprovalState.APPROVED: ApprovalLabel.APPROVED,
-}
 
 
 class ScenarioRunAction(StrEnum):
@@ -237,17 +252,6 @@ class ScenarioRunRefusal(StrEnum):
     IDEMPOTENCY_CONFLICT = "idempotency_conflict"  # the key was used for another request
 
 
-class PartChange(StrEnum):
-    """D-46 §4: what a shock did to one part of a cash flow (the drill-down)."""
-
-    MOVED = "MOVED"  # the delayed or unavailable fraction, now due later
-    STAYED = "STAYED"  # the remainder, due as before
-    ADDED = "ADDED"  # the extra outflow of DEPOSIT_WITHDRAWAL
-    UNCHANGED = "UNCHANGED"  # matched no shock (never listed by the drill-down)
-
-
-# D-45 §2: overlay bounds.
-MAX_PARTS_PER_FLOW = 32
 # Drill-down page size (GET .../comparison/contributions).
 MAX_CONTRIBUTIONS_PAGE = 500
 # Largest changes listed per comparison (D-46 §2), ranked over clear deltas only.

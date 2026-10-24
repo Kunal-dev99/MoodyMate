@@ -48,15 +48,15 @@ from datetime import timedelta
 from decimal import Decimal, InvalidOperation, localcontext
 from typing import Any
 
-from app.calculations.modules.base import Bucket, CashFlowInput, ModuleInputs, ModuleResult
-from app.core.decimals import exact_context
-from app.domain.constants import CashflowOrigin
-from app.orchestration.constants import (
+from app.calculations.constants import (
     MAX_PARTS_PER_FLOW,
     MAX_SHOCKS,
     PartChange,
     ScenarioTemplate,
 )
+from app.calculations.modules.base import Bucket, CashFlowInput, ModuleInputs, ModuleResult
+from app.core.decimals import exact_context
+from app.domain.constants import CashflowOrigin
 from app.rules.constants import CashflowDirection
 
 T = ScenarioTemplate
@@ -70,8 +70,6 @@ TEMPLATE_DIRECTION = {
     T.DEPOSIT_WITHDRAWAL: CashflowDirection.OUTFLOW,
     T.FUNDING_UNAVAILABLE: CashflowDirection.INFLOW,
 }
-TIMING_TEMPLATES = frozenset({T.DELAYED_INFLOWS, T.FUNDING_UNAVAILABLE})
-_SEGMENT = {PartChange.MOVED: "M", PartChange.STAYED: "S", PartChange.ADDED: "A"}
 
 
 class OverlayError(ValueError):

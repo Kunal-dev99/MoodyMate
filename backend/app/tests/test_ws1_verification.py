@@ -14,6 +14,8 @@ separate step and the route x role matrix is printed in the test report.
 """
 
 import uuid
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -72,6 +74,7 @@ from app.tests.identity_kit import (
     identity_shape,
     projected_legal_entity,
 )
+from app.tests.limits_kit import CONFIG_LIMITS, check_config_limits
 from app.tests.observability_kit import check_ready_reports_the_migration_head
 from app.tests.scenario_kit import SCENARIOS, create_scenario
 from app.tests.terms_kit import (
@@ -171,7 +174,7 @@ def ws1_mapping_body(db: str, rules: list[dict[str, Any]]) -> dict[str, Any]:
 # --- 1. Authorization matrix ---------------------------------------------------------------------
 
 
-def test_route_by_role_authorization_matrix(api: TestClient, db: str) -> None:
+def test_route_by_role_authorization_matrix(api: TestClient, db: str, artifact_dir: Path) -> None:
     assert {r["code"] for r in sql(db, "SELECT code FROM role")} == set(ROLES)
     routes = protected_routes(api)
     # Without a token every protected route is 401.
@@ -419,13 +422,41 @@ def test_route_by_role_authorization_matrix(api: TestClient, db: str) -> None:
         assert all(row[role] in (200, 404, 422) for role in ROLES), row
     [runs_row] = [r for r in WS1_MATRIX if r["route"] == "GET /api/v1/scenario-runs"]
     assert all(runs_row[role] == 200 for role in ROLES), runs_row
+    # BE-35.3: the served limits are `authenticated`, 200 for every seeded role (401 without a
+    # token above); their values are the validators' own objects, and follow IMPORT_MAX_ROWS.
+    [limits_row] = [r for r in WS1_MATRIX if r["route"] == f"GET {CONFIG_LIMITS}"]
+    assert limits_row["permission"] == AUTHENTICATED
+    assert all(limits_row[role] == 200 for role in ROLES), limits_row
+    check_config_limits(api, tokens["auditor"], db, artifact_dir)
     assert len(WS1_MATRIX) >= 12
 
 
 # --- 2. Cross-tenant isolation -------------------------------------------------------------------
 
 
-def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) -> None:
+@dataclass(frozen=True)
+class CrossTenant:
+    """This tenant's resources of every phase, and `outsider`: a user of `other_tenant`
+    holding every role. Built for each of the two isolation tests (reads, writes)."""
+
+    here: Any  # a schema change proposal (DRAFT)
+    instrument: Any  # the instrument schema's id
+    here_user: Any
+    here_source: str
+    here_import: Any
+    here_projected: dict[str, Any]
+    here_calculated: dict[str, Any]
+    here_module: Any
+    here_rule: str
+    here_assumption_set: Any
+    here_credit: dict[str, str]
+    here_rating: Any
+    here_scenario: Any
+    other_tenant: Any
+    outsider: dict[str, str]
+
+
+def cross_tenant(api: TestClient, db: str) -> CrossTenant:
     steward = dev_token(api, "data_steward")
     here = removal_proposal(api, db, steward)
     instrument = schema_id(db, "instrument")
@@ -434,7 +465,6 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
     here_import = upload(api, steward, here_source, b"instrument_id\nA\n").json()["id"]
     # Phase 14: a projected import and one of its instruments.
     here_projected = projected_instruments(api, db, steward, dev_token(api, "approver"))
-    here_instrument = here_projected["instrument_id"]
     # Phase 15: a snapshot and a run on it.
     here_calculated = blocked_run(api, here_projected["import_id"])
     here_module = sql(
@@ -447,10 +477,6 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
         api, dev_token(api, "risk_analyst"), here_credit["counterparty_id"]
     )
     here_scenario = create_scenario(api, dev_token(api, "risk_analyst"))["scenario_id"]  # P24
-    # Phase 31: a legal entity (the position sample projected) and this tenant's links.
-    here_legal_entity = projected_legal_entity(api, db, steward, dev_token(api, "approver"))
-    [here_link] = sql(db, "SELECT source_row_id FROM domain_identity_link LIMIT 1")
-
     other_tenant = insert_tenant(db, f"other-{uuid.uuid4().hex[:6]}")
     outsider = token_for(
         db,
@@ -458,6 +484,33 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
         ("platform_admin", "auditor", "data_steward", "approver", "risk_analyst"),
         tenant_id=other_tenant,
     )
+    return CrossTenant(
+        here, instrument, here_user, here_source, here_import, here_projected, here_calculated,
+        here_module, here_rule, here_assumption_set, here_credit, here_rating, here_scenario,
+        other_tenant, outsider,
+    )  # fmt: skip
+
+
+def test_another_tenant_sees_nothing_here(api: TestClient, db: str) -> None:
+    """Lists hold only the caller's tenant; another tenant's resource read by id is exactly
+    the 404 of an absent id (no existence oracle); and this tenant sees nothing of the
+    outsider's."""
+    w = cross_tenant(api, db)
+    here, instrument, here_user, here_source = w.here, w.instrument, w.here_user, w.here_source
+    here_import, here_projected, here_calculated = (
+        w.here_import,
+        w.here_projected,
+        w.here_calculated,
+    )
+    here_instrument = here_projected["instrument_id"]
+    here_rule, here_assumption_set, here_credit = w.here_rule, w.here_assumption_set, w.here_credit
+    here_rating, here_scenario = w.here_rating, w.here_scenario
+    other_tenant, outsider = w.other_tenant, w.outsider
+    steward = dev_token(api, "data_steward")
+    # Phase 31: a legal entity (the position sample projected) and this tenant's links.
+    here_legal_entity = projected_legal_entity(api, db, steward, dev_token(api, "approver"))
+    [here_link] = sql(db, "SELECT source_row_id FROM domain_identity_link LIMIT 1")
+
     # Lists hold only the outsider's own tenant.
     users = api.get("/api/v1/users", headers=outsider).json()["items"]
     assert len(users) == 1 and users[0]["display_name"].endswith("dev:outsider")
@@ -575,6 +628,34 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
         assert mine.status_code == absent.status_code == 404, real
         assert without_cid(mine) == without_cid(absent), real
 
+    # And the other way round: this tenant sees nothing of the outsider's.
+    foreign = sql(
+        db,
+        "INSERT INTO schema_definition (id, tenant_id, code, name, owner, provisional, created_by)"
+        " VALUES (gen_random_uuid(), $1, 'outsider_only', 'Outsider', 'x', false, 'test')"
+        " RETURNING id",
+        other_tenant,
+    )[0]["id"]
+    insider = dev_token(api, "platform_admin")
+    assert "outsider_only" not in api.get("/api/v1/schemas", headers=insider).text
+    assert api.get(f"/api/v1/schemas/{foreign}/versions", headers=insider).status_code == 404
+    users_here = api.get("/api/v1/users", params={"limit": 200}, headers=insider).json()["items"]
+    assert all(not u["display_name"].endswith("dev:outsider") for u in users_here)
+
+
+def test_another_tenant_changes_nothing_here(api: TestClient, db: str) -> None:
+    """Every write by id, or against this tenant's schema, source, import, snapshot, run, rule,
+    rating or scenario, is the same 404 as against an absent one (audited DENIED where the
+    route audits), and nothing is written in the outsider's tenant."""
+    w = cross_tenant(api, db)
+    here, instrument, here_source, here_import = w.here, w.instrument, w.here_source, w.here_import
+    here_projected, here_calculated, here_module = (
+        w.here_projected,
+        w.here_calculated,
+        w.here_module,
+    )
+    here_rule, here_credit, here_rating = w.here_rule, w.here_credit, w.here_rating
+    here_scenario, other_tenant, outsider = w.here_scenario, w.other_tenant, w.outsider
     # Writes by id and against this tenant's schema/source find nothing either.
     for action, body in (
         ("impact-analysis", None),
@@ -739,20 +820,6 @@ def test_another_tenant_sees_and_changes_nothing_here(api: TestClient, db: str) 
     ):
         n = sql(db, f"SELECT count(*) AS n FROM {table} WHERE tenant_id = $1", other_tenant)
         assert n[0]["n"] == 0, table
-
-    # And the other way round: this tenant sees nothing of the outsider's.
-    foreign = sql(
-        db,
-        "INSERT INTO schema_definition (id, tenant_id, code, name, owner, provisional, created_by)"
-        " VALUES (gen_random_uuid(), $1, 'outsider_only', 'Outsider', 'x', false, 'test')"
-        " RETURNING id",
-        other_tenant,
-    )[0]["id"]
-    insider = dev_token(api, "platform_admin")
-    assert "outsider_only" not in api.get("/api/v1/schemas", headers=insider).text
-    assert api.get(f"/api/v1/schemas/{foreign}/versions", headers=insider).status_code == 404
-    users_here = api.get("/api/v1/users", params={"limit": 200}, headers=insider).json()["items"]
-    assert all(not u["display_name"].endswith("dev:outsider") for u in users_here)
 
 
 # --- 3. Audit completeness -----------------------------------------------------------------------

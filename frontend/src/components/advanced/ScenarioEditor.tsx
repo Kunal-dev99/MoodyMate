@@ -19,9 +19,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { fetchLimits } from '@/lib/limits'
 import { InstrumentPicker } from './InstrumentPicker'
 import { ScenarioRefusalNotice } from './ScenarioRefusalNotice'
-import { DESCRIPTION_MAX, NAME_MAX, SUMMARY_MAX, explorerHref, fractionToPercent, scenarioHref } from './scenarios'
+import { explorerHref, fractionToPercent, scenarioHref } from './scenarios'
 import {
   createScenario,
   createVersion,
@@ -32,23 +33,46 @@ import {
   updateVersion,
   type ProblemLine,
   type ScenarioDetail,
+  type ScenarioLimits,
   type TemplateField,
   type TemplateOut,
   type TemplatePage,
 } from './scenarios'
-import { buildShock, draftFromShock, editorProblems, fieldLabel, fieldProblem, hasProblems, isPercent, newShock, percentToFraction, type ShockDraft } from './editor'
+import {
+  buildShock,
+  draftFromShock,
+  editorProblems,
+  fieldLabel,
+  fieldProblem,
+  fractionScaleOf,
+  hasProblems,
+  isPercent,
+  newShock,
+  percentScale,
+  percentToFraction,
+  type ShockDraft,
+} from './editor'
 
 /** What the editor writes: a new scenario, a new version (optionally adapting `parent`) or a DRAFT's shocks. */
 export type EditorMode = { kind: 'create' } | { kind: 'version'; scenarioId: string; parent: number | null } | { kind: 'edit'; scenarioId: string; version: number }
 
 const selectClass = 'h-9 w-full rounded-md border border-input bg-background px-2 text-sm'
 
-type Inputs = { templates: TemplatePage; scenario: ScenarioDetail | null }
+/** FE-35.3: `limits` are the scenario bounds GET config/limits serves (text lengths, shock count, fraction scale). */
+type Inputs = { templates: TemplatePage; scenario: ScenarioDetail | null; limits: ScenarioLimits }
 
 const loadInputs = (mode: EditorMode) => async (signal: AbortSignal): Promise<Inputs> => {
-  const [templates, scenario] = await Promise.all([fetchTemplates()(signal), mode.kind === 'create' ? Promise.resolve(null) : fetchScenario(mode.scenarioId)(signal)])
-  return { templates, scenario }
+  const [templates, scenario, limits] = await Promise.all([
+    fetchTemplates()(signal),
+    mode.kind === 'create' ? Promise.resolve(null) : fetchScenario(mode.scenarioId)(signal),
+    fetchLimits(),
+  ])
+  return { templates, scenario, limits: limits.scenario }
 }
+
+/** The page description; the shock count is the server's (GET config/limits) once it is read. */
+const composeText = (limits: ScenarioLimits | null) =>
+  `Compose ${limits ? `${limits.min_shocks} to ${limits.max_shocks} shocks` : 'shocks'} from the approved templates. A scenario is data, never code: no formulas, no expressions.`
 
 const TITLES: Record<EditorMode['kind'], string> = { create: 'New scenario', version: 'New scenario version', edit: 'Edit draft' }
 
@@ -69,7 +93,7 @@ export function ScenarioEditor({ mode }: { mode: EditorMode }) {
   }, [loader])
 
   const title = TITLES[mode.kind]
-  const header = <PageHeader title={title} description="Compose 1 to 5 shocks from the approved templates. A scenario is data, never code: no formulas, no expressions." />
+  const header = <PageHeader title={title} description={composeText(state.kind === 'ready' ? state.value.limits : null)} />
   if (!has('scenario:propose'))
     return (
       <>
@@ -108,7 +132,7 @@ function initialShocks(mode: EditorMode, inputs: Inputs): ShockDraft[] | 'missin
 
 function EditorForm({ mode, inputs }: { mode: EditorMode; inputs: Inputs }) {
   const router = useRouter()
-  const { templates, scenario } = inputs
+  const { templates, scenario, limits } = inputs
   const catalogue = templates.items
   const byName = useMemo(() => new Map(catalogue.map((t) => [t.template, t])), [catalogue])
   const initial = useMemo(() => initialShocks(mode, inputs), [mode, inputs])
@@ -120,7 +144,7 @@ function EditorForm({ mode, inputs }: { mode: EditorMode; inputs: Inputs }) {
   const [busy, setBusy] = useState(false)
   const [refusal, setRefusal] = useState<{ refusal: Refusal; problems: ProblemLine[] } | null>(null)
 
-  const problems = editorProblems(catalogue, templates.max_shocks, shocks, {
+  const problems = editorProblems(catalogue, limits, shocks, {
     name: mode.kind === 'create' ? name : undefined,
     description: mode.kind === 'create' ? description : undefined,
     summary,
@@ -145,7 +169,7 @@ function EditorForm({ mode, inputs }: { mode: EditorMode; inputs: Inputs }) {
     if (blocked || busy) return
     setBusy(true)
     setRefusal(null)
-    const built = shocks.map((d) => buildShock(byName.get(d.template)!, d))
+    const built = shocks.map((d) => buildShock(byName.get(d.template)!, d, limits.fraction_scale))
     const changeSummary = summary.trim() || null
     try {
       if (mode.kind === 'create') {
@@ -184,12 +208,12 @@ function EditorForm({ mode, inputs }: { mode: EditorMode; inputs: Inputs }) {
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-1">
               <Label htmlFor="scenario-name">Name (required)</Label>
-              <Input id="scenario-name" value={name} maxLength={NAME_MAX} onChange={(e) => setName(e.target.value)} onBlur={() => setTouched(true)} data-testid="scenario-name" />
+              <Input id="scenario-name" value={name} maxLength={limits.max_name_length} onChange={(e) => setName(e.target.value)} onBlur={() => setTouched(true)} data-testid="scenario-name" />
               <FieldNote problem={show(problems.name)} testId="scenario-name-problem" />
             </div>
             <div className="space-y-1">
               <Label htmlFor="scenario-description">Description</Label>
-              <Textarea id="scenario-description" value={description} maxLength={DESCRIPTION_MAX} onChange={(e) => setDescription(e.target.value)} data-testid="scenario-description" />
+              <Textarea id="scenario-description" value={description} maxLength={limits.max_description_length} onChange={(e) => setDescription(e.target.value)} data-testid="scenario-description" />
               <FieldNote problem={show(problems.description)} />
             </div>
           </div>
@@ -216,6 +240,7 @@ function EditorForm({ mode, inputs }: { mode: EditorMode; inputs: Inputs }) {
                 index={i}
                 template={t}
                 draft={d}
+                limits={limits}
                 problems={problems.shocks[i] ?? {}}
                 touched={touched}
                 onChange={(change) => update(d.key, change)}
@@ -230,7 +255,7 @@ function EditorForm({ mode, inputs }: { mode: EditorMode; inputs: Inputs }) {
         <div className="space-y-3">
           <div className="space-y-1">
             <Label htmlFor="change-summary">Change summary</Label>
-            <Textarea id="change-summary" value={summary} maxLength={SUMMARY_MAX} onChange={(e) => setSummary(e.target.value)} placeholder="What this version explores" data-testid="change-summary" />
+            <Textarea id="change-summary" value={summary} maxLength={limits.max_change_summary_length} onChange={(e) => setSummary(e.target.value)} placeholder="What this version explores" data-testid="change-summary" />
             <FieldNote problem={show(problems.summary)} />
           </div>
           {refusal && <ScenarioRefusalNotice refusal={refusal.refusal} problems={refusal.problems} />}
@@ -303,6 +328,7 @@ function ShockCard({
   index,
   template,
   draft,
+  limits,
   problems,
   touched,
   onChange,
@@ -311,6 +337,7 @@ function ShockCard({
   index: number
   template: TemplateOut
   draft: ShockDraft
+  limits: ScenarioLimits
   problems: Record<string, string>
   touched: boolean
   onChange: (change: (d: ShockDraft) => ShockDraft) => void
@@ -340,6 +367,7 @@ function ShockCard({
               idPrefix={draft.key}
               path={`parameters.${f.name}`}
               field={f}
+              limits={limits}
               value={draft.parameters[f.name] ?? ''}
               problem={visible(`parameters.${f.name}`)}
               onChange={(v) => setParam(f.name, v)}
@@ -372,6 +400,7 @@ function ShockCard({
                   idPrefix={draft.key}
                   path={`selector.${f.name}`}
                   field={f}
+                  limits={limits}
                   value={draft.selector[f.name] ?? ''}
                   problem={visible(`selector.${f.name}`)}
                   onChange={(v) => setSel(f.name, v)}
@@ -391,6 +420,7 @@ function FieldInput({
   idPrefix,
   path,
   field,
+  limits,
   value,
   problem,
   onChange,
@@ -399,6 +429,7 @@ function FieldInput({
   idPrefix: string
   path: string
   field: TemplateField
+  limits: ScenarioLimits
   value: string
   problem: string | undefined
   onChange: (v: string) => void
@@ -428,7 +459,7 @@ function FieldInput({
           id={id}
           value={value}
           inputMode={field.kind === 'DECIMAL' ? 'decimal' : field.kind === 'INTEGER' ? 'numeric' : undefined}
-          maxLength={field.kind === 'CURRENCY' ? 3 : numeric ? 12 : 200}
+          maxLength={field.kind === 'CURRENCY' ? 3 : numeric ? 12 : limits.max_instrument_key_length}
           onChange={(e) => onChange(field.kind === 'CURRENCY' ? e.target.value.toUpperCase() : e.target.value)}
           onBlur={onBlur}
           aria-invalid={!!problem}
@@ -447,11 +478,11 @@ function FieldInput({
       </Label>
       {control}
       <p className="text-xs text-muted-foreground">
-        {boundsText(field)}
-        {percent && value.trim() && fieldProblem(field, value) === null && (
+        {boundsText(field, limits.fraction_scale)}
+        {percent && value.trim() && fieldProblem(field, value, limits.fraction_scale) === null && (
           <>
             {' '}
-            · stored as <span className="font-mono" data-testid={`stored-${name}`}>{percentToFraction(value.trim())}</span>
+            · stored as <span className="font-mono" data-testid={`stored-${name}`}>{percentToFraction(value.trim(), fractionScaleOf(field, limits.fraction_scale))}</span>
           </>
         )}
       </p>
@@ -460,11 +491,12 @@ function FieldInput({
   )
 }
 
-/** The server's bounds of a field, in the unit the analyst types. */
-function boundsText(field: TemplateField): string {
+/** The server's bounds of a field, in the unit the analyst types (`servedScale`: GET config/limits `fraction_scale`). */
+function boundsText(field: TemplateField, servedScale: number): string {
   if (isPercent(field)) {
     const pct = (b: string | null) => (b === null ? '' : `${fractionToPercent(b)}%`)
-    return `${field.min_exclusive ? 'More than' : 'From'} ${pct(field.min)} to ${pct(field.max)}, at most 2 decimals (scale ${field.scale ?? 4}).`
+    const scale = fractionScaleOf(field, servedScale)
+    return `${field.min_exclusive ? 'More than' : 'From'} ${pct(field.min)} to ${pct(field.max)}, at most ${percentScale(scale)} decimals (scale ${scale}).`
   }
   if (field.kind === 'INTEGER') return `${field.min ?? '0'} to ${field.max ?? '…'} ${field.unit ?? ''}`.trim() + '.'
   if (field.kind === 'ENUM' && field.values.length === 1) return `${field.values[0]} only in v1.`

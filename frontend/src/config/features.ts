@@ -177,3 +177,24 @@ export const RETRY_AFTER_UI_ENABLED = process.env.NEXT_PUBLIC_RETRY_AFTER_UI !==
  * responses exactly. See src/config/buildEnv.mjs. The FE-28.3 production-build guard
  * (NEXT_PUBLIC_API_BASE_URL required) has no off switch: it is a release control.
  */
+
+/**
+ * NEXT_PUBLIC_REAUTH_UI=off (FE-35.4): a 401 `token_expired` ends the session exactly as before
+ * Phase 35 (the token is cleared and the app goes to /login?next=<path>, without the query
+ * string), the sign-in page shows no "session expired" notice and an SSO session is never
+ * renewed silently. On, an expired session renews silently where the identity provider allows it
+ * (a refresh token), otherwise it redirects once, keeping the route (path, query and hash): to the
+ * provider in AUTH_MODE=oidc, to the persona sign-in in dev. A second expiry within
+ * REAUTH_WINDOW_MS of that redirect never redirects again (no loop). The server decides every
+ * request either way (D-04).
+ */
+export const REAUTH_UI_ENABLED = process.env.NEXT_PUBLIC_REAUTH_UI !== 'off'
+
+/**
+ * NEXT_PUBLIC_ROUTE_GATES_UI=off (FE-35.5): the (platform) layout no longer gates each route by
+ * the permission of its nav entry (src/config/navigation.ts `navEntryFor`), so a route shows
+ * whatever its own page shows, restoring the Phase 34 pages exactly. On, a signed-in user without
+ * the nav permission sees the 403 state for every route under that entry, /advanced/* included.
+ * Cosmetic either way: the API refuses with 403 (D-04).
+ */
+export const ROUTE_GATES_UI_ENABLED = process.env.NEXT_PUBLIC_ROUTE_GATES_UI !== 'off'

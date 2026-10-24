@@ -20,7 +20,6 @@ import {
   type ShockDraft,
 } from '@/components/advanced/editor'
 import {
-  COMMENT_MAX,
   MINE_STATUSES,
   SCENARIO_STATUS_STYLE,
   acknowledged,
@@ -43,6 +42,7 @@ import {
   type TemplateField,
   type TemplateOut,
 } from '@/components/advanced/scenarios'
+import { SERVED_LIMITS, servedWith } from '@/lib/__tests__/served-limits'
 
 /*
  * FE-24.2: the Agentic Stress-Test Explorer. Fixtures use the generated types (TemplateOut,
@@ -54,6 +54,10 @@ import {
 const openapi = JSON.parse(readFileSync(fileURLToPath(new URL('../../../../../backend/openapi.json', import.meta.url)), 'utf8'))
 const schemas = openapi.components.schemas
 const enumOf = (name: string): string[] => [...schemas[name].enum].sort()
+
+/** FE-35.3: the scenario bounds as GET config/limits serves them; the editor mirrors none of them. */
+const SCENARIO = SERVED_LIMITS.scenario
+const SCALE = SCENARIO.fraction_scale
 
 const ME = { user_id: '11111111-1111-4111-8111-111111111111' }
 const OTHER = '99999999-9999-4999-8999-999999999999'
@@ -169,43 +173,43 @@ describe('editor validation states (FE-24.2 Done-when)', () => {
   const pct = fraction('affected_fraction')
 
   it('bounds: a fraction typed as percent is 0 < f <= 100%', () => {
-    expect(fieldProblem(pct, '0')).toBe('Must be more than 0%.')
-    expect(fieldProblem(pct, '0.00')).toBe('Must be more than 0%.')
-    expect(fieldProblem(pct, '0.01')).toBeNull()
-    expect(fieldProblem(pct, '100')).toBeNull()
-    expect(fieldProblem(pct, '100.01')).toBe('At most 100%.')
-    expect(fieldProblem(pct, '150')).toBe('At most 100%.')
+    expect(fieldProblem(pct, '0', SCALE)).toBe('Must be more than 0%.')
+    expect(fieldProblem(pct, '0.00', SCALE)).toBe('Must be more than 0%.')
+    expect(fieldProblem(pct, '0.01', SCALE)).toBeNull()
+    expect(fieldProblem(pct, '100', SCALE)).toBeNull()
+    expect(fieldProblem(pct, '100.01', SCALE)).toBe('At most 100%.')
+    expect(fieldProblem(pct, '150', SCALE)).toBe('At most 100%.')
   })
 
   it('bounds: day counts come from the template (delay 1-3650, unavailable 1-365)', () => {
     const delay = DELAYED.parameters[2]
-    expect(fieldProblem(delay, '0')).toBe('Between 1 and 3650 calendar days.')
-    expect(fieldProblem(delay, '1')).toBeNull()
-    expect(fieldProblem(delay, '3650')).toBeNull()
-    expect(fieldProblem(delay, '3651')).toBe('Between 1 and 3650 calendar days.')
-    expect(fieldProblem(delay, '14.5')).toBe('Enter a whole number.')
-    expect(fieldProblem(FUNDING.parameters[0], '366')).toBe('Between 1 and 365 calendar days.')
+    expect(fieldProblem(delay, '0', SCALE)).toBe('Between 1 and 3650 calendar days.')
+    expect(fieldProblem(delay, '1', SCALE)).toBeNull()
+    expect(fieldProblem(delay, '3650', SCALE)).toBeNull()
+    expect(fieldProblem(delay, '3651', SCALE)).toBe('Between 1 and 3650 calendar days.')
+    expect(fieldProblem(delay, '14.5', SCALE)).toBe('Enter a whole number.')
+    expect(fieldProblem(FUNDING.parameters[0], '366', SCALE)).toBe('Between 1 and 365 calendar days.')
   })
 
   it('scale 4: at most 2 decimals in percent (4 as a fraction), never rounded', () => {
-    expect(fieldProblem(pct, '15.55')).toBeNull()
-    expect(fieldProblem(pct, '15.555')).toBe('At most 2 decimal places in percent (scale 4 as a fraction); never rounded.')
-    expect(percentToFraction('15.55')).toBe('0.1555')
+    expect(fieldProblem(pct, '15.55', SCALE)).toBeNull()
+    expect(fieldProblem(pct, '15.555', SCALE)).toBe('At most 2 decimal places in percent (scale 4 as a fraction); never rounded.')
+    expect(percentToFraction('15.55', SCALE)).toBe('0.1555')
   })
 
   it('no formulas, exponents or signs: only plain numbers', () => {
     for (const bad of ['amount*0.2', '2E-1', '-5', '+5', '1/5', ' 20 %', '0x10', '20,5'])
-      expect(fieldProblem(pct, bad), bad).toMatch(/^Enter a plain percentage/)
+      expect(fieldProblem(pct, bad, SCALE), bad).toMatch(/^Enter a plain percentage/)
   })
 
   it('required fields: empty required fields are refused; empty optional ones are fine', () => {
-    const problems = shockProblems(DELAYED, newShock(DELAYED))
+    const problems = shockProblems(DELAYED, newShock(DELAYED), SCALE)
     expect(problems).toEqual({
       'parameters.cashflow_type': 'Required.',
       'parameters.affected_fraction': 'Required.',
       'parameters.delay_days': 'Required.',
     })
-    expect(shockProblems(FUNDING, newShock(FUNDING))).toEqual({
+    expect(shockProblems(FUNDING, newShock(FUNDING), SCALE)).toEqual({
       'parameters.unavailable_days': 'Required.',
       'parameters.affected_fraction': 'Required.',
       'selector.instrument_type': 'Required.',
@@ -215,20 +219,20 @@ describe('editor validation states (FE-24.2 Done-when)', () => {
   it('CALENDAR_DAYS only: the calendar is prefilled and anything else is refused', () => {
     expect(newShock(DELAYED).parameters.delay_calendar).toBe('CALENDAR_DAYS')
     expect(newShock(FUNDING).parameters.delay_calendar).toBe('CALENDAR_DAYS')
-    expect(fieldProblem(CALENDAR, 'BUSINESS_DAYS')).toBe('Only CALENDAR_DAYS.')
-    expect(fieldProblem(CALENDAR, 'CALENDAR_DAYS')).toBeNull()
+    expect(fieldProblem(CALENDAR, 'BUSINESS_DAYS', SCALE)).toBe('Only CALENDAR_DAYS.')
+    expect(fieldProblem(CALENDAR, 'CALENDAR_DAYS', SCALE)).toBeNull()
   })
 
   it('instrument types: only those the ACTIVE rule lists with the template direction', () => {
-    expect(fieldProblem(WITHDRAWAL.parameters[0], 'LOAN')).toBe('Only DEPOSIT.')
-    expect(fieldProblem(DELAYED.parameters[0], 'DEPOSIT')).toBe('Only BOND or LOAN.')
-    expect(fieldProblem({ ...WITHDRAWAL.parameters[0], values: [] }, 'DEPOSIT')).toMatch(/No instrument type fits/)
+    expect(fieldProblem(WITHDRAWAL.parameters[0], 'LOAN', SCALE)).toBe('Only DEPOSIT.')
+    expect(fieldProblem(DELAYED.parameters[0], 'DEPOSIT', SCALE)).toBe('Only BOND or LOAN.')
+    expect(fieldProblem({ ...WITHDRAWAL.parameters[0], values: [] }, 'DEPOSIT', SCALE)).toMatch(/No instrument type fits/)
   })
 
   it('selectors: currency, the due window and the instrument picker limits', () => {
-    expect(fieldProblem(COMMON[0], 'eur')).toMatch(/three-letter/)
-    expect(fieldProblem(COMMON[0], 'EUR')).toBeNull()
-    const window = shockProblems(DELAYED, fill(DELAYED, { cashflow_type: 'LOAN', affected_fraction: '20', delay_days: '14' }, { due_from_day: '30', due_to_day: '7' }))
+    expect(fieldProblem(COMMON[0], 'eur', SCALE)).toMatch(/three-letter/)
+    expect(fieldProblem(COMMON[0], 'EUR', SCALE)).toBeNull()
+    const window = shockProblems(DELAYED, fill(DELAYED, { cashflow_type: 'LOAN', affected_fraction: '20', delay_days: '14' }, { due_from_day: '30', due_to_day: '7' }), SCALE)
     expect(window).toEqual({ 'selector.due_to_day': 'Not before "Due from day".' })
     const keys = FUNDING.selector[1]
     expect(keysProblem(keys, Array.from({ length: 50 }, (_, i) => `K${i}`))).toBeNull()
@@ -237,14 +241,33 @@ describe('editor validation states (FE-24.2 Done-when)', () => {
   })
 
   it('the editor needs a name and 1 to max_shocks shocks', () => {
-    const empty = editorProblems(CATALOGUE, 5, [], { name: ' ', summary: '' })
+    const empty = editorProblems(CATALOGUE, SCENARIO, [], { name: ' ', summary: '' })
     expect(empty.name).toBe('A name is required.')
     expect(empty.count).toBe('Add at least one shock.')
     expect(hasProblems(empty)).toBe(true)
     const six = Array.from({ length: 6 }, () => fill(WITHDRAWAL, { cashflow_type: 'DEPOSIT', increase_fraction: '15' }))
-    expect(editorProblems(CATALOGUE, 5, six, { name: 'x', summary: '' }).count).toBe('At most 5 shocks.')
+    expect(editorProblems(CATALOGUE, SCENARIO, six, { name: 'x', summary: '' }).count).toBe('At most 5 shocks.')
     // Editing a version: the name is not edited, so it is not checked.
-    expect(editorProblems(CATALOGUE, 5, six.slice(0, 1), { summary: '' }).name).toBeNull()
+    expect(editorProblems(CATALOGUE, SCENARIO, six.slice(0, 1), { summary: '' }).name).toBeNull()
+  })
+
+  it('checks against the served bounds (FE-35.3): lower served values refuse what the defaults allow', () => {
+    const two = Array.from({ length: 2 }, () => fill(WITHDRAWAL, { cashflow_type: 'DEPOSIT', increase_fraction: '15' }))
+    const text = { name: 'n'.repeat(SCENARIO.max_name_length), description: 'd'.repeat(SCENARIO.max_description_length), summary: 's'.repeat(SCENARIO.max_change_summary_length) }
+    expect(hasProblems(editorProblems(CATALOGUE, SCENARIO, two, text))).toBe(false)
+    const lower = servedWith({ scenario: { max_shocks: 1, max_name_length: 10, max_description_length: 20, max_change_summary_length: 30 } }).scenario
+    expect(editorProblems(CATALOGUE, lower, two, text)).toMatchObject({
+      name: 'At most 10 characters.',
+      description: 'At most 20 characters.',
+      summary: 'At most 30 characters.',
+      count: 'At most 1 shocks.',
+    })
+    expect(editorProblems(CATALOGUE, servedWith({ scenario: { min_shocks: 3 } }).scenario, two, text).count).toBe('Add at least 3 shocks.')
+    // A DECIMAL field without its own scale takes the served fraction_scale.
+    const unscaled = { ...fraction('affected_fraction'), scale: null }
+    expect(fieldProblem(unscaled, '15.55', SCALE)).toBeNull()
+    expect(fieldProblem(unscaled, '15.55', 3)).toBe('At most 1 decimal places in percent (scale 3 as a fraction); never rounded.')
+    expect(percentToFraction('15.5', 3)).toBe('0.155')
   })
 })
 
@@ -253,19 +276,19 @@ describe('the plan example as a payload (FE-24.2)', () => {
   const withdrawal = fill(WITHDRAWAL, { cashflow_type: 'DEPOSIT', increase_fraction: '15' })
 
   it('builds "Two-week loan repayment delay" with exact fraction text and no empty selector', () => {
-    const problems = editorProblems(CATALOGUE, 5, [delayed, withdrawal], { name: 'Two-week loan repayment delay', summary: '' })
+    const problems = editorProblems(CATALOGUE, SCENARIO, [delayed, withdrawal], { name: 'Two-week loan repayment delay', summary: '' })
     expect(hasProblems(problems)).toBe(false)
-    expect(buildShock(DELAYED, delayed)).toEqual({
+    expect(buildShock(DELAYED, delayed, SCALE)).toEqual({
       template: 'DELAYED_INFLOWS',
       parameters: { cashflow_type: 'LOAN', affected_fraction: '0.2000', delay_days: 14, delay_calendar: 'CALENDAR_DAYS' },
     })
-    expect(buildShock(WITHDRAWAL, withdrawal)).toEqual({ template: 'DEPOSIT_WITHDRAWAL', parameters: { cashflow_type: 'DEPOSIT', increase_fraction: '0.1500' } })
+    expect(buildShock(WITHDRAWAL, withdrawal, SCALE)).toEqual({ template: 'DEPOSIT_WITHDRAWAL', parameters: { cashflow_type: 'DEPOSIT', increase_fraction: '0.1500' } })
   })
 
   it('builds a funding shock with picked instruments and a selector', () => {
     const d = fill(FUNDING, { unavailable_days: '7', affected_fraction: '100' }, { instrument_type: 'LOAN', currency: 'EUR' }, ['L-1', 'L-2'])
-    expect(shockProblems(FUNDING, d)).toEqual({})
-    const shock = buildShock(FUNDING, d)
+    expect(shockProblems(FUNDING, d, SCALE)).toEqual({})
+    const shock = buildShock(FUNDING, d, SCALE)
     expect(shock).toEqual({
       template: 'FUNDING_UNAVAILABLE',
       parameters: { unavailable_days: 7, affected_fraction: '1.0000', delay_calendar: 'CALENDAR_DAYS' },
@@ -273,7 +296,7 @@ describe('the plan example as a payload (FE-24.2)', () => {
     })
     expect(describeShock(shock)).toBe('Funding unavailable: 100% of LOAN (2 picked instruments) inflows due within 7 days move to day 8')
     // Singular for one pick (P-11).
-    const one = buildShock(FUNDING, fill(FUNDING, { unavailable_days: '7', affected_fraction: '100' }, { instrument_type: 'LOAN', currency: 'EUR' }, ['L-1']))
+    const one = buildShock(FUNDING, fill(FUNDING, { unavailable_days: '7', affected_fraction: '100' }, { instrument_type: 'LOAN', currency: 'EUR' }, ['L-1']), SCALE)
     expect(describeShock(one)).toBe('Funding unavailable: 100% of LOAN (1 picked instrument) inflows due within 7 days move to day 8')
   })
 
@@ -287,27 +310,27 @@ describe('the plan example as a payload (FE-24.2)', () => {
     const d = draftFromShock(FUNDING, stored)
     expect(d.instrumentKeys).toEqual(['L-1'])
     expect(d.maskedKeys).toEqual([masked])
-    expect(shockProblems(FUNDING, d)['selector.instrument_keys']).toMatch(/masked for your role/)
+    expect(shockProblems(FUNDING, d, SCALE)['selector.instrument_keys']).toMatch(/masked for your role/)
     const cleared = { ...d, maskedKeys: [] }
-    expect(shockProblems(FUNDING, cleared)).toEqual({})
-    expect(JSON.stringify(buildShock(FUNDING, cleared))).not.toContain('masked')
-    expect(JSON.stringify(buildShock(FUNDING, d))).not.toContain('masked')
+    expect(shockProblems(FUNDING, cleared, SCALE)).toEqual({})
+    expect(JSON.stringify(buildShock(FUNDING, cleared, SCALE))).not.toContain('masked')
+    expect(JSON.stringify(buildShock(FUNDING, d, SCALE))).not.toContain('masked')
   })
 
   it('round-trips a stored shock into the editor (percent text) and back', () => {
-    const shock = buildShock(DELAYED, delayed)
+    const shock = buildShock(DELAYED, delayed, SCALE)
     const again = draftFromShock(DELAYED, shock)
     expect(again.parameters).toMatchObject({ cashflow_type: 'LOAN', affected_fraction: '20', delay_days: '14', delay_calendar: 'CALENDAR_DAYS' })
-    expect(buildShock(DELAYED, again)).toEqual(shock)
+    expect(buildShock(DELAYED, again, SCALE)).toEqual(shock)
     expect(describeShock(shock)).toBe('Delayed inflows: 20% of LOAN inflows move 14 calendar days later')
-    expect(describeShock(buildShock(WITHDRAWAL, withdrawal))).toBe('Deposit withdrawal: DEPOSIT outflows +15%')
+    expect(describeShock(buildShock(WITHDRAWAL, withdrawal, SCALE))).toBe('Deposit withdrawal: DEPOSIT outflows +15%')
   })
 
   it('moves the decimal point in text, never through a float', () => {
     expect(['0.2000', '0.1500', '0.0001', '1', '1.0000', '0.1555', '0.3333'].map(fractionToPercent)).toEqual(['20', '15', '0.01', '100', '100', '15.55', '33.33'])
-    expect(['20', '15', '0.01', '100', '15.55', '7.5'].map(percentToFraction)).toEqual(['0.2000', '0.1500', '0.0001', '1.0000', '0.1555', '0.0750'])
+    expect(['20', '15', '0.01', '100', '15.55', '7.5'].map((p) => percentToFraction(p, SCALE))).toEqual(['0.2000', '0.1500', '0.0001', '1.0000', '0.1555', '0.0750'])
     // 0.1 + 0.2 in binary floats is 0.30000000000000004; the text path stays exact.
-    expect(percentToFraction('30')).toBe('0.3000')
+    expect(percentToFraction('30', SCALE)).toBe('0.3000')
     expect(compareUnits('10000', '9999')).toBe(1)
     expect(compareUnits('0', '0')).toBe(0)
   })
@@ -352,14 +375,50 @@ describe('version gates (FE-24.2; the server decides, D-04)', () => {
     expect(decisionGate(version({ status: 'CONFIRMED_FOR_EXPLORATION', author_user_id: OTHER }), ME, approver)).toBe('not_in_review')
   })
 
-  it('a decision needs a comment of 1 to 1,000 characters (openapi.json)', () => {
-    expect(schemas.ScenarioVersionDecision.properties.comment.maxLength).toBe(COMMENT_MAX)
+  it('a decision needs a comment of 1 to the served max_comment_length characters (openapi.json; FE-35.3, Q20)', async () => {
+    // The submit, decision and close comments share one bound, the one GET config/limits serves.
+    const MAX = SCENARIO.max_comment_length
+    const bound = (p: { maxLength?: number; anyOf?: { maxLength?: number }[] }) => p.maxLength ?? p.anyOf?.find((a) => a.maxLength)?.maxLength
+    for (const name of ['ScenarioVersionDecision', 'ScenarioVersionSubmit', 'ScenarioVersionClose']) expect(bound(schemas[name].properties.comment), name).toBe(MAX)
     expect(schemas.ScenarioVersionDecision.required).toContain('comment')
     expect(commentProblem('  ')).toBe('A comment is required.')
     expect(commentProblem('', false)).toBeNull()
-    expect(commentProblem('x'.repeat(COMMENT_MAX + 1))).toMatch(/^At most 1,000 characters/)
-    expect(decisionBody('APPROVE', '  ok  ')).toEqual({ decision: 'APPROVE', comment: 'ok' })
-    expect(decisionBody('REJECT', '')).toBeNull()
+    expect(commentProblem('x'.repeat(MAX + 1), { max: MAX })).toMatch(/^At most 1,000 characters/)
+    expect(decisionBody('APPROVE', '  ok  ', MAX)).toEqual({ decision: 'APPROVE', comment: 'ok' })
+    expect(decisionBody('REJECT', '', MAX)).toBeNull()
+
+    // A deployment that serves a non-1000 bound: the dialogs' checks take the served value.
+    const GET = vi.fn(async () => ({ data: servedWith({ scenario: { max_comment_length: 250 } }), response: new Response('{}') }))
+    vi.doMock('@/api/client', async (actual) => ({ ...(await actual<typeof import('@/api/client')>()), api: { GET } }))
+    vi.resetModules()
+    try {
+      const served = await import('@/components/advanced/scenarios')
+      const max = await served.fetchCommentMax()
+      expect(max).toBe(250)
+      expect(GET).toHaveBeenCalledWith('/api/v1/config/limits')
+      expect(served.decisionBody('APPROVE', 'x'.repeat(250), max)).toEqual({ decision: 'APPROVE', comment: 'x'.repeat(250) })
+      expect(served.decisionBody('REJECT', 'x'.repeat(251), max)).toBeNull()
+      expect(served.commentProblem('x'.repeat(251), { required: false, max })).toBe('At most 250 characters (251 now).')
+      expect(served.commentProblem('', { required: false, max })).toBeNull()
+    } finally {
+      vi.doUnmock('@/api/client')
+    }
+    // The submit and decision dialogs bind that value and mirror no literal (there is no close dialog in the UI).
+    const dialogs = readFileSync(join(__dirname, '..', 'VersionActions.tsx'), 'utf8')
+    const reader = readFileSync(join(__dirname, '..', 'CommentLimit.tsx'), 'utf8')
+    expect(reader).toMatch(/fetchCommentMax\(\)/)
+    expect(dialogs).toMatch(/useCommentMax\(enabled && \(submit \|\| gate === 'allowed'\)\)/)
+    for (const text of [dialogs, reader]) expect(text).not.toMatch(/COMMENT_MAX|\b1_?000\b/)
+    expect(dialogs.match(/maxLength=\{max \?\? undefined\}/g)).toHaveLength(2)
+    expect(dialogs).toMatch(/commentProblem\(comment, \{ required: false, max \}\)/)
+    expect(dialogs).toMatch(/decisionBody\(decision, comment, max\)/)
+    expect(dialogs).toContain('{comment.trim().length}/{max ?? \'…\'}')
+    // Fail closed until the bound is read: a notice, and "Try again" after a failed read.
+    const { CommentLimitState } = await import('@/components/advanced/CommentLimit')
+    const notice = (max: number | null, failed: boolean) => renderToStaticMarkup(createElement(CommentLimitState, { limit: { max, failed, retry: () => undefined } }))
+    expect(notice(250, false)).toBe('')
+    expect(notice(null, false)).toContain('data-testid="comment-limit-loading"')
+    expect(notice(null, true)).toMatch(/data-testid="comment-limit-failed"[\s\S]*Try again/)
   })
 
   it('an AI_PROPOSED version needs the origin and every proposed default acknowledged', () => {
@@ -425,6 +484,7 @@ describe('explorer code hygiene (FE-24.2 Done-when)', () => {
     'components/advanced/ScenarioStatusPill.tsx',
     'components/advanced/ScenarioView.tsx',
     'components/advanced/VersionActions.tsx',
+    'components/advanced/CommentLimit.tsx',
     `${app}/layout.tsx`,
     `${app}/page.tsx`,
     `${app}/new/page.tsx`,

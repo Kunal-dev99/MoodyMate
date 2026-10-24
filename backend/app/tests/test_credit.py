@@ -1,32 +1,34 @@
-"""Phase 19 (BE-19.1 - BE-19.5, Feature 04, D-37, D-38, D-43): counterparty and credit-exposure
-data in the domain, in one essential test (D-26), in five parts:
+"""Phase 19 (BE-19.1 - BE-19.5, Feature 04, D-37, D-38, D-43) and Phase 20 (BE-20.1 - BE-20.3,
+D-39, D-40): counterparty and credit-exposure data in the domain, and the obligor rating
+workflow. D-60 §2 split the one D-26 test into focused functions; each builds its own state
+through the module helpers below (the `db` fixture cleans before and after every test):
 
-1. Seed (BE-19.1): migration 0022 seeds the ACTIVE `counterparty` v1 and `credit_exposure` v1
-   schemas (D-37 §1, classified per D-43 §1) with their `schema_dependency` rows, and the
-   PROVISIONAL `credit_vocabulary` (D-37 §5, neutral grade codes); every seed row carries the
-   `0022_credit_domain` tag.
+1. Seed (BE-19.1, BE-20.1): migration 0022 seeds the ACTIVE `counterparty` v1 and
+   `credit_exposure` v1 schemas (D-37 §1, classified per D-43 §1) with their
+   `schema_dependency` rows, and the PROVISIONAL `credit_vocabulary` (D-37 §5, neutral grade
+   codes); every seed row carries the `0022_credit_domain` tag; 0023's grants and frozen copies.
 2. Samples and projection (BE-19.2, BE-19.3): both synthetic samples cover the plan's cases and
    validate to COMPLETED with `accepted_count` = the row count; with
    CREDIT_PROJECTION_ENABLED off each is a 409 `projection_unsupported`, audited DENIED, with
    nothing written; on, each projects one row per accepted record, a second call writes
    nothing, every row resolves through `record_lineage` to its import, and no stored value is
-   a float (INTEGER DPD, BOOLEAN default flag).
+   a float (INTEGER DPD, BOOLEAN default flag); the exposure links (BE-31.4).
 3. Snapshots (BE-19.4): a credit snapshot (counterparty + credit_exposure) gets the same id for
    the same members, its content hash is the Feature 03 formula, and a duplicated counterparty
    key is a 409 `ambiguous_business_key`.
 4. Reads (BE-19.5): vocabularies, the counterparty and exposure catalogues with filters,
    `counterparty_name` and `drawn_amount` masked for risk_analyst and clear for data_steward,
    and one exposure version -> canonical record -> source row.
-5. Ratings (BE-20.2, BE-20.3, Phase 20, D-39, D-40): a proposal is IN_REVIEW and audited; an
-   unknown grade is a 422 `invalid_grade`, an absent counterparty a 404; a user holding both
-   roles cannot decide their own proposal (409 `self_approval`); approving makes the version
-   ACTIVE and the earlier one for the same counterparty and date SUPERSEDED, leaving exactly
-   one ACTIVE; `invalid_status` and `stale_version`; REJECT; RATING_CHANGE_ENABLED off is a 409
-   `rating_change_disabled` with nothing written; each refusal is audited DENIED; the reads
-   (list, filters, one, the counterparty's history) and "rating in effect at date" over
-   dates before, at, between and after two effective dates; and the rating in effect for
-   EXP-0008 is G05, 3 notches below its G02 origination.
-6. Guards (BE-19.1, BE-20.1): UPDATE, DELETE and TRUNCATE are refused on the four tables and on
+5. Rating decisions (BE-20.2, D-39, D-40): a proposal is IN_REVIEW and audited; an unknown
+   grade is a 422 `invalid_grade`, an absent counterparty a 404; a user holding both roles
+   cannot decide their own proposal (409 `self_approval`); approving makes the version ACTIVE
+   and the earlier one for the same counterparty and date SUPERSEDED, leaving exactly one
+   ACTIVE; `invalid_status` and `stale_version`; REJECT; each refusal is audited DENIED.
+6. Rating reads (BE-20.3): the list, filters, one version, the counterparty's history, and
+   "rating in effect at date" over dates before, at, between and after two effective dates;
+   the rating in effect for EXP-0008 is G05, 3 notches below its G02 origination;
+   RATING_CHANGE_ENABLED off is a 409 `rating_change_disabled` with nothing written.
+7. Guards (BE-19.1, BE-20.1): UPDATE, DELETE and TRUNCATE are refused on the four tables and on
    `credit_vocabulary`; the same-tenant and canonical-repeat insert checks hold; an unknown
    sixth `schema_code` is refused by both widened CHECKs; on `obligor_rating` a content
    UPDATE, an illegal move, DELETE and TRUNCATE are refused and a second ACTIVE for the same
@@ -128,6 +130,8 @@ RATING_TAG = "0023_credit_permissions"
 PLAN_CREDIT_GRANTS = {("risk_analyst", "rating:propose"), ("approver", "rating:approve")}
 RATING_CONTENT = ("rating_id", "counterparty_id", "grade", "effective_from", "proposed_at")
 DUP_COUNTRIES = ("DE", "US")
+# The rating test's effective dates: (first, second, rejected).
+RATING_DAYS = (date(2025, 6, 30), date(2026, 1, 1), date(2026, 3, 31))
 # D-37 §1 types and D-43 §1 classifications, written out from the decisions.
 FIELD_TYPES = {
     "counterparty": {"counterparty_id": "STRING", "counterparty_name": "STRING"},
@@ -303,10 +307,126 @@ def in_effect(db: str, counterparty_id: str, at: date) -> str | None:
     return str(getattr(found, "rating_id", None) or found.id)
 
 
+# --- shared setup (D-60 §2): each test builds its own state ----------------------------------
+
+
+def personas(api: TestClient) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
+    """(data_steward, approver, risk_analyst) dev tokens."""
+    return (
+        dev_token(api, "data_steward"),
+        dev_token(api, "approver"),
+        dev_token(api, "risk_analyst"),
+    )
+
+
+def vocabulary_and_grades(db: str) -> tuple[list[Any], dict[str, Any]]:
+    """The seeded credit_vocabulary rows, and its rating grades by code."""
+    vocabulary = sql(db, "SELECT * FROM credit_vocabulary")
+    return vocabulary, {v["code"]: v for v in vocabulary if v["vocabulary"] == "rating_grade"}
+
+
+def projected_samples(
+    api: TestClient,
+    db: str,
+    steward: dict[str, str],
+    approver: dict[str, str],
+    codes: tuple[str, ...] = CREDIT_CODES,
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    """The credit samples of `codes`, each validated on its own source and projected (201):
+    (the validate responses, the projections), by schema code."""
+    imports = {code: validated_credit(api, db, steward, approver, code) for code in codes}
+    projections: dict[str, dict[str, Any]] = {}
+    for code, imported in imports.items():
+        r = project(api, steward, imported["id"])
+        assert r.status_code == 201, r.text
+        projections[code] = dict(r.json())
+    return imports, projections
+
+
+def duplicated_counterparty(
+    api: TestClient,
+    db: str,
+    steward: dict[str, str],
+    approver: dict[str, str],
+    first: dict[str, str],
+) -> dict[str, Any]:
+    """One counterparty key twice in one import (the contract's key is id + country): `first`
+    as CP-DUP in each of DUP_COUNTRIES, on its own source, validated and projected."""
+    buffer = io.StringIO()
+    buffer.write("# ILLUSTRATIVE / SYNTHETIC duplicate key fixture. Not client data.\n")
+    writer = csv.DictWriter(buffer, fieldnames=list(first), lineterminator="\n")
+    writer.writeheader()
+    for country in DUP_COUNTRIES:
+        writer.writerow({**first, "counterparty_id": "CP-DUP", "country": country})
+    data = buffer.getvalue()
+    duplicated = validated_credit(
+        api,
+        db,
+        steward,
+        approver,
+        "counterparty",
+        data.encode(),
+        source_code="dup_counterparties",
+        key=["counterparty_id", "country"],
+    )
+    assert project(api, steward, duplicated["id"]).status_code == 201
+    return duplicated
+
+
+def counterparty_ids(api: TestClient, headers: dict[str, str]) -> dict[str, str]:
+    """Business key -> counterparty id, from the catalogue."""
+    page = api.get(COUNTERPARTIES, params={"limit": 200}, headers=headers)
+    assert page.status_code == 200, page.text
+    return {i["business_key"]: i["counterparty_id"] for i in page.json()["items"]}
+
+
+def rating_history(
+    api: TestClient,
+    db: str,
+    analyst: dict[str, str],
+    approver: dict[str, str],
+    cp8: str,
+) -> dict[str, dict[str, Any]]:
+    """The rating decisions test's history of CP-0008, replayed (its refusals write nothing
+    and are left out). By name: `first` SUPERSEDED, `own` IN_REVIEW (proposed by a user with
+    both roles), `second` ACTIVE, `stale` REJECTED, `earlier` ACTIVE, `rejected` REJECTED."""
+    first_day, second_day, reject_day = RATING_DAYS
+    both = token_for(db, "rating-maker-checker", ("risk_analyst", "approver"))
+    made: dict[str, dict[str, Any]] = {}
+    for name, headers, grade, day in (
+        ("first", analyst, "G04", second_day),
+        ("own", both, "G04", second_day),
+    ):
+        r, _ = propose(api, headers, cp8, grade, day)
+        assert r.status_code == 201, r.text
+        made[name] = dict(r.json())
+    r, _ = decide(api, approver, made["first"]["rating_id"], "APPROVE", "Grade supported.")
+    assert r.status_code == 200, r.text
+    for name in ("later", "stale"):
+        r, _ = propose(api, analyst, cp8, "G05", second_day)
+        assert r.status_code == 201, r.text
+        made[name] = dict(r.json())
+    r, _ = decide(api, approver, made.pop("later")["rating_id"], "APPROVE")
+    assert r.status_code == 200 and r.json()["status"] == "ACTIVE", r.text
+    made["second"] = dict(r.json())
+    r, _ = decide(
+        api, approver, made["stale"]["rating_id"], "REJECT", "Superseded by a later decision."
+    )
+    assert (r.status_code, r.json()["status"]) == (200, "REJECTED"), r.text
+    for name, grade, day, decision, comment in (
+        ("earlier", "G03", first_day, "APPROVE", "Reviewed (test)."),
+        ("rejected", "G06", reject_day, "REJECT", "Not supported by the file."),
+    ):
+        r, _ = propose(api, analyst, cp8, grade, day)
+        assert r.status_code == 201, r.text
+        r, _ = decide(api, approver, r.json()["rating_id"], decision, comment)
+        assert r.status_code == 200, r.text
+        made[name] = dict(r.json())
+    return made
+
+
 @pytest.mark.ws3
-def test_credit_domain_projection_snapshots_reads_and_guards(
-    api: TestClient, db: str, artifact_dir: Path
-) -> None:
+def test_credit_seed_schemas_vocabulary_and_rating_grants(db: str) -> None:
     # --- 1. Seed (BE-19.1) -------------------------------------------------------------------
     m0022 = migration("0022_credit_domain")
     assert (m0022.revision, m0022.down_revision, m0022.TAG) == ("0022", "0021", TAG)
@@ -390,6 +510,12 @@ def test_credit_domain_projection_snapshots_reads_and_guards(
         r.value: {p.value for p in ps} for r, ps in CREDIT_ROLE_PERMISSIONS.items() if ps
     }
 
+
+@pytest.mark.ws3
+def test_credit_samples_project_once_with_lineage_and_links(
+    api: TestClient, db: str, artifact_dir: Path
+) -> None:
+    vocabulary, _ = vocabulary_and_grades(db)
     # --- 2. Samples and projection (BE-19.2, BE-19.3) ------------------------------------------
     counterparties, exposures = (
         rows_of(CREDIT_SAMPLES["counterparty"]),
@@ -523,6 +649,12 @@ def test_credit_domain_projection_snapshots_reads_and_guards(
     second = reconcile(api, steward)
     assert second["links_written"] == 0 and without_written(second) == without_written(first)
 
+
+@pytest.mark.ws3
+def test_credit_snapshot_identity_hash_and_ambiguous_key(api: TestClient, db: str) -> None:
+    steward, approver, analyst = personas(api)
+    imports, _ = projected_samples(api, db, steward, approver)
+    counterparties = rows_of(CREDIT_SAMPLES["counterparty"])
     # --- 3. Snapshots (BE-19.4) ----------------------------------------------------------------
     cp_id, ce_id = imports["counterparty"]["id"], imports["credit_exposure"]["id"]
     c = cid()
@@ -557,29 +689,26 @@ def test_credit_domain_projection_snapshots_reads_and_guards(
     assert api.get(f"{SNAPSHOTS}/{snapshot['snapshot_id']}", headers=approver).json() == snapshot
     # One counterparty key twice in one import (the contract's key is id + country).
     first = counterparties[0]
-    buffer = io.StringIO()
-    buffer.write("# ILLUSTRATIVE / SYNTHETIC duplicate key fixture. Not client data.\n")
-    writer = csv.DictWriter(buffer, fieldnames=list(first), lineterminator="\n")
-    writer.writeheader()
-    for country in DUP_COUNTRIES:
-        writer.writerow({**first, "counterparty_id": "CP-DUP", "country": country})
-    data = buffer.getvalue()
-    duplicated = validated_credit(
-        api,
-        db,
-        steward,
-        approver,
-        "counterparty",
-        data.encode(),
-        source_code="dup_counterparties",
-        key=["counterparty_id", "country"],
-    )
-    assert project(api, steward, duplicated["id"]).status_code == 201
+    duplicated = duplicated_counterparty(api, db, steward, approver, first)
     c = cid()
     r = make_snapshot(api, analyst, [duplicated["id"], ce_id], **{"X-Correlation-ID": c})
     assert (r.status_code, r.json()["code"]) == (409, "ambiguous_business_key"), r.text
     [event] = events(db, c)
     assert (event["action"], event["outcome"]) == ("dataset_snapshot.create", "DENIED")
+
+
+@pytest.mark.ws3
+def test_credit_catalogue_reads_masking_and_lineage(api: TestClient, db: str) -> None:
+    steward, approver, analyst = personas(api)
+    vocabulary, _ = vocabulary_and_grades(db)
+    counterparties, exposures = (
+        rows_of(CREDIT_SAMPLES["counterparty"]),
+        rows_of(CREDIT_SAMPLES["credit_exposure"]),
+    )
+    imports, _ = projected_samples(api, db, steward, approver)
+    cp_id, ce_id = imports["counterparty"]["id"], imports["credit_exposure"]["id"]
+    first = counterparties[0]
+    duplicated = duplicated_counterparty(api, db, steward, approver, first)
 
     # --- 4. Reads (BE-19.5) --------------------------------------------------------------------
     vocab = no_float(api.get(VOCABULARIES, headers=analyst).text)["items"]
@@ -677,11 +806,16 @@ def test_credit_domain_projection_snapshots_reads_and_guards(
         r = api.get(absent, headers=analyst)
         assert (r.status_code, r.json()["code"]) == (404, "not_found"), absent
 
+
+@pytest.mark.ws3
+def test_credit_rating_proposals_decisions_and_supersede(api: TestClient, db: str) -> None:
+    steward, approver, analyst = personas(api)
+    vocabulary, grades = vocabulary_and_grades(db)
+    projected_samples(api, db, steward, approver, ("counterparty",))
     # --- 5. Ratings (BE-20.2, BE-20.3) ---------------------------------------------------------
-    auditor = dev_token(api, "auditor")
-    cp_of = {i["business_key"]: i["counterparty_id"] for i in page["items"]}
+    cp_of = counterparty_ids(api, analyst)
     cp8 = cp_of["CP-0008"]
-    first_day, second_day, reject_day = date(2025, 6, 30), date(2026, 1, 1), date(2026, 3, 31)
+    first_day, second_day, reject_day = RATING_DAYS
     both = token_for(db, "rating-maker-checker", ("risk_analyst", "approver"))
 
     # A proposal is written IN_REVIEW, audited obligor_rating.propose.
@@ -777,7 +911,6 @@ def test_credit_domain_projection_snapshots_reads_and_guards(
     assert r.status_code == 201, r.text
     r, c = decide(api, approver, r.json()["rating_id"], "APPROVE")
     assert r.status_code == 200 and r.json()["status"] == "ACTIVE", r.text
-    earlier_rating = r.json()
     assert ("obligor_rating.supersede", "SUCCESS") not in outcomes(db, c)
     # REJECT ends a version; it never governs and cannot be approved after.
     r, _ = propose(api, analyst, cp8, "G06", reject_day)
@@ -793,6 +926,27 @@ def test_credit_domain_projection_snapshots_reads_and_guards(
     r, c = decide(api, approver, rejected["rating_id"], "APPROVE")
     assert (r.status_code, r.json()["code"]) == (409, "invalid_status"), r.text
     assert_denied(db, c, "invalid_status", "obligor_rating.approve")
+
+
+@pytest.mark.ws3
+def test_credit_rating_reads_in_effect_and_switch(
+    api: TestClient, db: str, artifact_dir: Path
+) -> None:
+    steward, approver, analyst = personas(api)
+    _, grades = vocabulary_and_grades(db)
+    projected_samples(api, db, steward, approver, ("counterparty",))
+    exposures = rows_of(CREDIT_SAMPLES["credit_exposure"])
+    auditor = dev_token(api, "auditor")
+    cp_of = counterparty_ids(api, analyst)
+    cp8 = cp_of["CP-0008"]
+    first_day, second_day, reject_day = RATING_DAYS
+    made = rating_history(api, db, analyst, approver, cp8)
+    first_rating, own, second_rating = made["first"], made["own"], made["second"]
+    earlier_rating, rejected, stale_id = (
+        made["earlier"],
+        made["rejected"],
+        made["stale"]["rating_id"],
+    )
 
     # Reads: the list (filters, newest proposal first), one version, the counterparty history.
     statuses = {
@@ -881,6 +1035,19 @@ def test_credit_domain_projection_snapshots_reads_and_guards(
         shown = frozen.get(RATINGS, params={"counterparty_id": cp8}, headers=analyst)
         assert shown.status_code == 200 and shown.json()["total"] == len(statuses)
     assert ratings_state(db) == unchanged
+
+
+@pytest.mark.ws3
+def test_credit_append_only_guards_and_downgrade(api: TestClient, db: str) -> None:
+    steward, approver, analyst = personas(api)
+    vocabulary, _ = vocabulary_and_grades(db)
+    imports, projections = projected_samples(api, db, steward, approver)
+    # A credit snapshot: its members are the rows the widened member CHECK is tried on.
+    members = [imports["counterparty"]["id"], imports["credit_exposure"]["id"]]
+    assert make_snapshot(api, analyst, members).status_code == 201
+    made = rating_history(api, db, analyst, approver, counterparty_ids(api, analyst)["CP-0008"])
+    first_rating, own, second_rating = made["first"], made["own"], made["second"]
+    earlier_rating, rejected = made["earlier"], made["rejected"]
 
     # --- 6. Guards (BE-19.1, BE-20.1) ----------------------------------------------------------
     # obligor_rating: content frozen, only the D-39 §2 moves (once each), DELETE and TRUNCATE

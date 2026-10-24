@@ -15,6 +15,7 @@ from app.core.canonical import HashKind, sha256_for
 from app.core.classification import UNCLASSIFIED, mask_mapping
 from app.core.correlation import get_correlation_id
 from app.core.errors import ApiError
+from app.core.interfaces import AccountDenied, DenialDetails, Governance, bind_governance
 from app.core.principal import Principal
 from app.core.refusals import refuse
 from app.core.tokens import DevTokens, VerifiedIdentity
@@ -141,15 +142,6 @@ async def _principal(
     )
 
 
-class AccountDenied(ApiError):
-    """403 for a known account that may not sign in; carries what the audit row needs."""
-
-    def __init__(self, user: UserAccount, code: str, message: str) -> None:
-        super().__init__(403, code, message)
-        self.user_id = user.id
-        self.tenant_id = user.tenant_id
-
-
 @dataclass(frozen=True)
 class DevSession:
     access_token: str
@@ -199,10 +191,15 @@ class IdentityService:
             )
             await self.session.commit()
         if user.status != UserStatus.ACTIVE:
-            raise AccountDenied(user, "account_disabled", "Your account is disabled.")
+            raise AccountDenied(
+                user.id, user.tenant_id, "account_disabled", "Your account is disabled."
+            )
         if await self.repo.tenant_status(user.tenant_id) != TenantStatus.ACTIVE:
             raise AccountDenied(
-                user, "tenant_suspended", "Your organisation's access is suspended."
+                user.id,
+                user.tenant_id,
+                "tenant_suspended",
+                "Your organisation's access is suspended.",
             )
         return await _principal(user, self.repo, masking_enabled)
 
@@ -1040,3 +1037,53 @@ class SchemaChangeService:
         proposal.decided_by_user_id = self.principal.user_id
         proposal.decided_at = datetime.now(UTC)
         proposal.decision_comment = comment
+
+
+# --- BE-35.1: what app.core needs from governance, bound into core.interfaces --------------------
+
+
+async def _resolve_principal(
+    session: AsyncSession,
+    identity: VerifiedIdentity,
+    *,
+    can_self_provision: bool,
+    masking_enabled: bool,
+) -> Principal:
+    return await IdentityService(session).resolve_principal(
+        identity, can_self_provision=can_self_provision, masking_enabled=masking_enabled
+    )
+
+
+def _audit_denied(
+    session: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    actor: str,
+    actor_user_id: uuid.UUID | None,
+    action: str,
+    resource_type: str,
+    resource_id: str | None,
+    details: DenialDetails,
+) -> None:
+    """A DENIED event whose details are all PUBLIC (core.auth and core.ratelimit)."""
+    audit(
+        session,
+        tenant_id=tenant_id,
+        actor=actor,
+        actor_user_id=actor_user_id,
+        action=action,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        outcome=AuditOutcome.DENIED,
+        details=dict(details),
+        details_classification=dict.fromkeys(details, ClassificationCode.PUBLIC),
+    )
+
+
+bind_governance(
+    Governance(
+        resolve_principal=_resolve_principal,
+        audit_denied=_audit_denied,
+        record_denial=record_denial,
+    )
+)

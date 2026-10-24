@@ -76,6 +76,7 @@ from app.orchestration.constants import (
     DIRECTION_RULE,
     MAX_LARGEST_CHANGES,
     MAX_SHOCKS,
+    SCENARIO_BOUNDS,
     SCENARIO_STATEMENT,
     ApprovalLabel,
     ApprovalState,
@@ -84,6 +85,7 @@ from app.orchestration.constants import (
     ParameterKind,
     PartChange,
     ScenarioAction,
+    ScenarioBounds,
     ScenarioOrigin,
     ScenarioRefusal,
     ScenarioRunAction,
@@ -154,6 +156,12 @@ CLOSABLE = frozenset({S.CONFIRMED_FOR_EXPLORATION, S.IN_REVIEW, S.APPROVED_FOR_T
 SHARED_LIBRARY = (S.APPROVED_FOR_TEST,)
 LABELS = ScenarioLabels(statement=SCENARIO_STATEMENT)
 _BOUNDED = frozenset({ParameterKind.DECIMAL, ParameterKind.INTEGER})
+
+
+def scenario_limits() -> ScenarioBounds:
+    """The D-44 §1-4 bounds the template validator and the write schemas enforce (BE-35.3:
+    `GET config/limits` serves them)."""
+    return SCENARIO_BOUNDS
 
 
 def approval_label(status: str) -> ApprovalLabel | None:

@@ -31,8 +31,9 @@ def _resolve(scope: Scope) -> str:
     for name, value in scope.get("headers", []):
         if name.decode("latin-1").lower() == HEADER.lower():
             candidate: str = value.decode("latin-1")
-            # Reject anything that could inject into logs or headers.
-            if _SAFE_ID.match(candidate):
+            # Reject anything that could inject into logs or headers. fullmatch, not match:
+            # `$` also matches before a trailing newline, so "id\n" passed (BE-35.7).
+            if _SAFE_ID.fullmatch(candidate):
                 return candidate
             break
     return str(uuid.uuid4())

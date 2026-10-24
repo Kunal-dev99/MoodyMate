@@ -1,8 +1,9 @@
 import { api, call, callWithResponse, type Schemas } from '@/api/client'
-import { hasResults, type RunDetail, type RunPage, type RunSummary } from '@/components/calculations/calculations'
+import type { RunDetail, RunPage, RunSummary } from '@/components/calculations/calculations'
 import { newIdempotencyKey } from '@/lib/idempotency'
 import { truncationOf, type Truncation } from '@/lib/paging'
 import { refusalOf, type Refusal } from '@/lib/refusal'
+import { hasResults } from '@/lib/runs'
 import type { ScenarioVersion, ScenarioVersionStatus } from './scenarios'
 
 /*
@@ -21,7 +22,6 @@ export type ScenarioRunMember = Schemas['ScenarioRunMember']
 export type ScenarioValidation = Schemas['ScenarioValidationOut']
 export type ShockMatchCount = Schemas['ShockMatchCount']
 export type RunScenarioRef = Schemas['RunScenarioRef']
-export type ApprovalState = Schemas['ApprovalState']
 export type ApprovalLabel = Schemas['ApprovalLabel']
 type Has = (permission: Schemas['Permission']) => boolean
 
@@ -187,15 +187,11 @@ export const scenarioRunRefusal = (err: unknown, fallback = 'Could not run the s
 
 // --- labels -------------------------------------------------------------------------------------
 
-/** The badge of a stressed run: an exploration is never shown as approved (D-47 §3). */
-export const approvalVariant = (state: ApprovalState): 'warning' | 'success' => (state === 'APPROVED' ? 'success' : 'warning')
-
-/** A member run in words: "Shock 1 alone", or "Combined (shocks 1 + 2)". */
-export function memberLabel(m: Pick<ScenarioRunMember, 'combined' | 'shock_subset'>): string {
-  const subset = [...m.shock_subset].sort((a, b) => a - b)
-  if (m.combined) return subset.length === 1 ? `Shock ${subset[0]}` : `Combined (shocks ${subset.join(' + ')})`
-  return subset.length === 1 ? `Shock ${subset[0]} alone` : `Shocks ${subset.join(' + ')}`
-}
+/**
+ * The badge of a stressed run (an exploration is never shown as approved, D-47 §3) and a member
+ * run in words. FE-35.1: defined in '@/lib/runs' and re-exported for this workspace's files.
+ */
+export { approvalVariant, memberLabel } from '@/lib/runs'
 
 /** How many member runs the server reports in each status, e.g. "3 SUCCEEDED". Never inferred. */
 export function memberStatusText(members: readonly Pick<ScenarioRunMember, 'status'>[]): string {

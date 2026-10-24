@@ -1,5 +1,6 @@
 import { api, call, type Schemas } from '@/api/client'
 import { COMMENT_MAX, commentProblem } from '@/lib/forms'
+import type { RuleLimits } from '@/lib/limits'
 import { isAuthorOf, makerCheckerGate, type MakerCheckerGate } from '@/lib/maker-checker'
 import { refusalOf, type Refusal } from '@/lib/refusal'
 
@@ -38,8 +39,11 @@ export const RULE_STATUS_STYLE: Record<RuleVersionStatus, { label: string; class
   REJECTED: { label: 'Rejected', className: 'status-failed', description: 'The approver rejected it. Never used by a run.' },
 }
 
-/** The limits BE-16.1 enforces (backend rules.constants), mirrored for the cosmetic checks. */
-export const LIMITS = { maxBuckets: 50, maxMapEntries: 200, maxDecimalScale: 18, maxDays: 36_600, bucketCodeLength: 20 } as const
+/**
+ * The limits BE-16.1 enforces, as GET config/limits serves them (FE-35.3): the editor reads the
+ * server's values (`fetchLimits().rule`) and mirrors none of them.
+ */
+export type { RuleLimits }
 export { COMMENT_MAX }
 
 // --- decimal text, compared without parsing --------------------------------------------------
@@ -222,12 +226,12 @@ export function editBuckets(buckets: BucketDraft[], e: BucketEdit): BucketDraft[
 
 // --- cosmetic checks mirroring BE-16.1 -------------------------------------------------------
 
-function decimalProblems(label: string, value: string, spec: DecimalSpec): string[] {
+function decimalProblems(label: string, value: string, spec: DecimalSpec, limits: RuleLimits): string[] {
   const t = value.trim()
   if (t === '') return [`${label}: a value is required.`]
   if (!isDecimalText(t)) return [`${label}: must be decimal text, e.g. 0.10.`]
   const out: string[] = []
-  const maxScale = spec.scale ?? LIMITS.maxDecimalScale
+  const maxScale = spec.scale ?? limits.max_decimal_scale
   if (scaleOf(t) > maxScale) out.push(`${label}: at most ${maxScale} decimal places.`)
   if (spec.min !== null && compareDecimalText(t, spec.min) < 0) out.push(`${label}: at least ${spec.min}.`)
   if (spec.max !== null && compareDecimalText(t, spec.max) > 0) out.push(`${label}: at most ${spec.max}.`)
@@ -244,26 +248,26 @@ function integerProblems(label: string, value: string, min: string | null, max: 
   return out
 }
 
-function bucketProblems(buckets: BucketDraft[]): string[] {
+function bucketProblems(buckets: BucketDraft[], limits: RuleLimits): string[] {
   const out: string[] = []
   if (buckets.length === 0) return ['At least one bucket is required.']
-  if (buckets.length > LIMITS.maxBuckets) out.push(`At most ${LIMITS.maxBuckets} buckets.`)
+  if (buckets.length > limits.max_buckets) out.push(`At most ${limits.max_buckets} buckets.`)
   const seen = new Set<string>()
   buckets.forEach((b, i) => {
     const name = `Bucket ${i + 1}`
     const code = b.code.trim()
     if (!code) out.push(`${name}: a code is required.`)
-    else if (code.length > LIMITS.bucketCodeLength || !BUCKET_CODE.test(code))
-      out.push(`${name}: the code is letters, digits and _ only, at most ${LIMITS.bucketCodeLength}.`)
+    else if (code.length > limits.max_bucket_code_length || !BUCKET_CODE.test(code))
+      out.push(`${name}: the code is letters, digits and _ only, at most ${limits.max_bucket_code_length}.`)
     else if (seen.has(code)) out.push(`${name}: the code ${code} is used twice.`)
     seen.add(code)
     const last = i === buckets.length - 1
-    if (i === 0) out.push(...integerProblems(`${name} lower bound`, b.lower, '0', `${LIMITS.maxDays}`))
+    if (i === 0) out.push(...integerProblems(`${name} lower bound`, b.lower, '0', `${limits.max_days}`))
     if (last) {
       if (b.upper.trim() !== '') out.push(`${name}: the last bucket is open (no upper bound).`)
       return
     }
-    const upper = integerProblems(`${name} upper bound`, b.upper, '0', `${LIMITS.maxDays}`)
+    const upper = integerProblems(`${name} upper bound`, b.upper, '0', `${limits.max_days}`)
     out.push(...upper)
     if (upper.length === 0 && isIntegerText(b.lower.trim()) && compareDecimalText(b.upper.trim(), b.lower.trim()) <= 0)
       out.push(`${name}: the upper bound must be greater than the lower bound.`)
@@ -272,11 +276,16 @@ function bucketProblems(buckets: BucketDraft[]): string[] {
   return out
 }
 
-function mapProblems(entries: Record<string, string>, vocabulary: string[], check: (key: string, value: string) => string[]): string[] {
+function mapProblems(
+  entries: Record<string, string>,
+  vocabulary: string[],
+  check: (key: string, value: string) => string[],
+  limits: RuleLimits,
+): string[] {
   const set = Object.entries(entries).filter(([, v]) => v.trim() !== '')
   const out: string[] = []
   if (set.length === 0) out.push('At least one entry is required.')
-  if (set.length > LIMITS.maxMapEntries) out.push(`At most ${LIMITS.maxMapEntries} entries.`)
+  if (set.length > limits.max_map_entries) out.push(`At most ${limits.max_map_entries} entries.`)
   for (const [key, value] of set) {
     if (vocabulary.length > 0 && !vocabulary.includes(key)) out.push(`${key}: not in the key vocabulary.`)
     out.push(...check(key, value.trim()))
@@ -284,21 +293,24 @@ function mapProblems(entries: Record<string, string>, vocabulary: string[], chec
   return out
 }
 
-/** Why the form does not fit its kind (empty: it may be proposed). Cosmetic: BE-16.1 decides. */
-export function editorProblems(e: Editor): string[] {
+/**
+ * Why the form does not fit its kind (empty: it may be proposed), against the served `limits`.
+ * Cosmetic: BE-16.1 decides.
+ */
+export function editorProblems(e: Editor, limits: RuleLimits): string[] {
   switch (e.kind) {
     case 'DECIMAL':
-      return decimalProblems('Value', e.value, e.spec)
+      return decimalProblems('Value', e.value, e.spec, limits)
     case 'INTEGER':
       return integerProblems('Value', e.value, e.spec.min, e.spec.max)
     case 'ENUM':
       return e.values.includes(e.value) ? [] : ['Pick one of the allowed values.']
     case 'DAY_BUCKETS':
-      return bucketProblems(e.buckets)
+      return bucketProblems(e.buckets, limits)
     case 'ENUM_MAP':
-      return mapProblems(e.entries, e.vocabulary, (key, value) => (e.values.includes(value) ? [] : [`${key}: not an allowed value.`]))
+      return mapProblems(e.entries, e.vocabulary, (key, value) => (e.values.includes(value) ? [] : [`${key}: not an allowed value.`]), limits)
     case 'DECIMAL_MAP':
-      return mapProblems(e.entries, e.vocabulary, (key, value) => decimalProblems(key, value, e.spec))
+      return mapProblems(e.entries, e.vocabulary, (key, value) => decimalProblems(key, value, e.spec, limits), limits)
     case 'UNSUPPORTED':
       return [e.reason]
   }
@@ -312,8 +324,8 @@ const setEntries = (entries: Record<string, string>): [string, string][] =>
     .map(([k, v]) => [k, v.trim()])
 
 /** The full parameters the form describes, over the base version's (keys the form does not edit are kept). */
-export function parametersOf(e: Editor, base: Parameters): Parameters | null {
-  if (editorProblems(e).length > 0) return null
+export function parametersOf(e: Editor, base: Parameters, limits: RuleLimits): Parameters | null {
+  if (editorProblems(e, limits).length > 0) return null
   const p: Parameters = { ...asObject(base) }
   switch (e.kind) {
     case 'DECIMAL':
@@ -370,8 +382,8 @@ export function mergePatch(base: Record<string, unknown>, next: Record<string, u
 }
 
 /** The POST /rules/{id}/versions body; null while the form or the summary is not ready, or nothing changed. */
-export function proposalBody(e: Editor, base: Parameters, changeSummary: string): RuleVersionCreate | null {
-  const next = parametersOf(e, base)
+export function proposalBody(e: Editor, base: Parameters, changeSummary: string, limits: RuleLimits): RuleVersionCreate | null {
+  const next = parametersOf(e, base, limits)
   const summary = changeSummary.trim()
   if (!next || !summary || summary.length > COMMENT_MAX) return null
   const parameters_patch = mergePatch(asObject(base), asObject(next))
@@ -379,10 +391,10 @@ export function proposalBody(e: Editor, base: Parameters, changeSummary: string)
 }
 
 /** Why "Propose" is disabled (empty: it may be clicked). Cosmetic: the server decides. */
-export function proposalProblems(e: Editor, base: Parameters, changeSummary: string): string[] {
-  const out = editorProblems(e)
+export function proposalProblems(e: Editor, base: Parameters, changeSummary: string, limits: RuleLimits): string[] {
+  const out = editorProblems(e, limits)
   if (out.length === 0) {
-    const next = parametersOf(e, base)
+    const next = parametersOf(e, base, limits)
     if (next && Object.keys(mergePatch(asObject(base), asObject(next))).length === 0)
       out.push('Nothing changed from the ACTIVE version (the server refuses it: no_change).')
   }

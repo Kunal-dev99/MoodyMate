@@ -237,6 +237,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/config/limits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The rule, scenario and upload limits the server enforces */
+        get: operations["getConfigLimits"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/counterparties": {
         parameters: {
             query?: never;
@@ -2500,6 +2517,15 @@ export interface components {
          * @enum {string}
          */
         Compatibility: "ADDITIVE" | "COMPATIBLE" | "BREAKING";
+        /**
+         * ConfigLimits
+         * @description `GET /config/limits`: the bounds the server's own validators enforce (BE-35.3).
+         */
+        ConfigLimits: {
+            rule: components["schemas"]["RuleLimits"];
+            scenario: components["schemas"]["ScenarioLimits"];
+            upload: components["schemas"]["UploadLimits"];
+        };
         /** ConstantTransform */
         ConstantTransform: {
             /**
@@ -6967,6 +6993,37 @@ export interface components {
             /** Transform */
             transform?: components["schemas"]["CopyTransform"] | components["schemas"]["TrimTransform"] | components["schemas"]["UpperTransform"] | components["schemas"]["LowerTransform"] | components["schemas"]["ParseDecimalTransform"] | components["schemas"]["ScaleTransform"] | components["schemas"]["ParseDateTransform"] | components["schemas"]["ParseBooleanTransform"] | components["schemas"]["MapValuesTransform"] | components["schemas"]["DefaultTransform"] | components["schemas"]["ConstantTransform"];
         };
+        /**
+         * RuleLimits
+         * @description The rule-parameter bounds BE-16.1 enforces on a proposed rule version (D-32 §1).
+         */
+        RuleLimits: {
+            /**
+             * Max Bucket Code Length
+             * @description BUCKETS: a bucket code's maximum length.
+             */
+            max_bucket_code_length: number;
+            /**
+             * Max Buckets
+             * @description BUCKETS: at most this many buckets.
+             */
+            max_buckets: number;
+            /**
+             * Max Days
+             * @description BUCKETS: the largest lower or upper bound, in days.
+             */
+            max_days: number;
+            /**
+             * Max Decimal Scale
+             * @description DECIMAL: at most this many decimal places.
+             */
+            max_decimal_scale: number;
+            /**
+             * Max Map Entries
+             * @description ENUM_MAP / DECIMAL_MAP: at most this many keys.
+             */
+            max_map_entries: number;
+        };
         /** RuleModuleRef */
         RuleModuleRef: {
             /** Code */
@@ -7818,6 +7875,67 @@ export interface components {
              * @description D-44 §8: 'Illustrative stress exploration, not a regulatory stress test. Not a regulatory calculation; no parity with any vendor system is claimed.'
              */
             statement: string;
+        };
+        /**
+         * ScenarioLimits
+         * @description The scenario bounds the template validator and the write schemas enforce (D-44 §1-4).
+         */
+        ScenarioLimits: {
+            /**
+             * Fraction Scale
+             * @description DECIMAL fractions: at most this many places.
+             */
+            fraction_scale: number;
+            /**
+             * Max Change Summary Length
+             * @description `change_summary` maximum length.
+             */
+            max_change_summary_length: number;
+            /**
+             * Max Comment Length
+             * @description Submit / decision / close `comment` maximum.
+             */
+            max_comment_length: number;
+            /**
+             * Max Delay Days
+             * @description DELAYED_INFLOWS: the largest delay, in days.
+             */
+            max_delay_days: number;
+            /**
+             * Max Description Length
+             * @description ScenarioCreate `description` maximum length.
+             */
+            max_description_length: number;
+            /**
+             * Max Instrument Key Length
+             * @description An instrument key's maximum length.
+             */
+            max_instrument_key_length: number;
+            /**
+             * Max Instrument Keys
+             * @description INSTRUMENT_KEYS: at most this many keys.
+             */
+            max_instrument_keys: number;
+            /**
+             * Max Name Length
+             * @description ScenarioCreate `name` maximum length.
+             */
+            max_name_length: number;
+            /**
+             * Max Shocks
+             * @description A version carries at most this many shocks.
+             */
+            max_shocks: number;
+            /**
+             * Max Unavailable Days
+             * @description FUNDING_UNAVAILABLE: the longest unavailability, in days.
+             */
+            max_unavailable_days: number;
+            /**
+             * Min Shocks
+             * @description A version carries at least this many shocks.
+             */
+            min_shocks: number;
         };
         /**
          * ScenarioOrigin
@@ -8865,6 +8983,48 @@ export interface components {
             code: "TRIM";
             params?: components["schemas"]["NoParams"];
         };
+        /**
+         * UploadLimits
+         * @description The upload bounds `POST imports` enforces (D-16 §1, D-25 §1): the deployment's
+         *     `IMPORT_MAX_*` settings, each at most its hard ceiling. Field names are the adapter's.
+         */
+        UploadLimits: {
+            /**
+             * Max Bytes
+             * @description The largest file, in bytes (413 above it).
+             */
+            max_bytes: number;
+            /**
+             * Max Cell Chars
+             * @description A cell's maximum length, in characters.
+             */
+            max_cell_chars: number;
+            /**
+             * Max Columns
+             * @description At most this many columns.
+             */
+            max_columns: number;
+            /**
+             * Max Decoded Chars
+             * @description The largest total of decoded characters.
+             */
+            max_decoded_chars: number;
+            /**
+             * Max Rows
+             * @description At most this many data rows.
+             */
+            max_rows: number;
+            /**
+             * Max Xlsx Ratio
+             * @description XLSX: the largest compression ratio.
+             */
+            max_xlsx_ratio: number;
+            /**
+             * Max Xlsx Uncompressed Bytes
+             * @description XLSX: the largest total uncompressed size, in bytes.
+             */
+            max_xlsx_uncompressed_bytes: number;
+        };
         /** UpperTransform */
         UpperTransform: {
             /**
@@ -9568,6 +9728,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4). */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    getConfigLimits: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigLimits"];
                 };
             };
             /** @description Client error (standard envelope) */

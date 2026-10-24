@@ -1,5 +1,7 @@
 """Phase 15 (BE-15.1 – BE-15.5): the rule registry, dataset snapshots, a pinned run and the
-maturity ladder end to end, in one essential test (D-26), in six parts:
+maturity ladder end to end. BE-35.5 (D-60) split the one D-26 test into focused functions, one
+per part below; each builds its own state through the `world`, `ran` and `all_runs` fixtures,
+so each passes alone:
 
 1. Registry seed (BE-15.1): the frozen copies in migration 0018 equal the code (enums,
    transitions, seed, module contracts, hash function); module `maturity_ladder` v1 is
@@ -22,49 +24,61 @@ maturity ladder end to end, in one essential test (D-26), in six parts:
    same manifest_sha256 and result_sha256; module_not_available, a missing snapshot, a bad
    body, a role without calc:run, a BLOCKED run, and CALCULATIONS_ENABLED=false (409,
    audited, nothing written, reads still work).
-5. Reads (BE-15.5): the run list filters (and GET /imports' projected and schema_code
-   filters, for the new-run panel, in part 3); the manifest holds every pinned id and version and
-   its hash recomputes; every bucket total equals the sum of its contributions, and each
-   contribution resolves to a source row of a member import; contributions are masked for
-   risk_analyst, and so is every ladder figure built from fewer than CALC_MIN_AGGREGATE_COUNT
-   contributions (D-33 minimum aggregation: a reporting date that isolates one cash flow);
-   no JSON float anywhere. Also in part 4: a stale RUNNING run is ended FAILED on a replay of
-   its key, and an engine failure (even a cancellation-like exit) ends the run FAILED.
+5. Reads (BE-15.5): the run list filters (with part 4's runs, and GET /imports' projected and
+   schema_code filters, for the new-run panel, in part 3); the manifest holds every pinned id
+   and version and its hash recomputes; every bucket total equals the sum of its
+   contributions, and each contribution resolves to a source row of a member import;
+   contributions are masked for risk_analyst, and so is every ladder figure built from fewer
+   than CALC_MIN_AGGREGATE_COUNT contributions (D-33 minimum aggregation: a reporting date
+   that isolates one cash flow); no JSON float anywhere. Also in part 4: a stale RUNNING run
+   is ended FAILED on a replay of its key, and an engine failure (even a cancellation-like
+   exit) ends the run FAILED.
 6. Guards (BE-15.1, BE-15.2): rule and module versions outside DRAFT refuse UPDATE, DELETE
    and TRUNCATE; a DRAFT is editable until it leaves DRAFT; at most one ACTIVE version per
    rule (DB); snapshots and rule sets are append-only; a finished run refuses any change and
    any new output row; the downgrade refuses while a run or a non-seed registry row exists,
    and without them 0018 -> 0017 -> head removes and restores the tagged seed.
 
-Phase 17 (BE-17.1 – BE-17.3), folded in (+0): part 1 checks the 0020 frozen seed and the
-second module (`lcr_hqla` v1); part 2 runs it purely (levels, haircuts, uncapped L2 flagged,
-a zero denominator with outflows, a JSON-number parameter refused); part 5b runs the
-hand-computed LCR golden case (the lcr_hqla pack file, BE-18.2) and reads GET …/liquidity
-(HQLA total = its included asset rows, D-33 masking, a rerun's hashes, 404 for a run of
-another module); part 6
+Phase 17 (BE-17.1 – BE-17.3): part 1 checks the 0020 frozen seed and the second module
+(`lcr_hqla` v1); part 2 runs it purely (levels, haircuts, uncapped L2 flagged, a zero
+denominator with outflows, a JSON-number parameter refused); part 5b runs the hand-computed
+LCR golden case (the lcr_hqla pack file, BE-18.2) and reads GET …/liquidity (HQLA total = its
+included asset rows, D-33 masking, a rerun's hashes, 404 for a run of another module); part 6
 loops the output guards over hqla_asset_result and lcr_result, and 0020 refuses its downgrade
 while LCR results exist.
 
-Phase 25 (BE-25.1 - BE-25.4; D-45, D-46), folded in (+0, scenario_run_kit): part 2 runs the
-scenario overlay golden loop (the §5 worked example and the other engineering cases, stable
-part ids, the no-float and no-`app.ai` greps); part 5c runs scenarios against a baseline
-through the API (Feature 03 key sets for non-stressed runs, the §5 figures end to end, k + 1
-runs, conservation and a tampered part, approval labels, refusals, Idempotency-Key replay,
-re-runs after CLOSED) and reads the comparison and drill-down (exact deltas, turns-negative,
-breaks only combined, largest changes, distinct-flow masking, the summary, lineage); part 5b
-refuses an LCR baseline; part 6 loops the output guards over the three new run-output tables,
-proves scenario_run append-only, intermediate_value unchanged and the 0027 downgrade refusal.
+Phase 25 (BE-25.1 - BE-25.4; D-45, D-46; scenario_run_kit): part 2 runs the scenario overlay
+golden loop (the §5 worked example and the other engineering cases, stable part ids, the
+no-float and no-`app.ai` greps); part 5c runs scenarios against a baseline through the API
+(Feature 03 key sets for non-stressed runs, the §5 figures end to end, k + 1 runs,
+conservation and a tampered part, approval labels, refusals, Idempotency-Key replay, re-runs
+after CLOSED) and reads the comparison and drill-down (exact deltas, turns-negative, breaks
+only combined, largest changes, distinct-flow masking, the summary, lineage); part 5b refuses
+an LCR baseline; part 6 loops the output guards over the three new run-output tables, proves
+scenario_run append-only, intermediate_value unchanged and the 0027 downgrade refusal.
 
-Phase 30 (BE-30.2 - BE-30.4; D-56), folded in (+0, validation_kit): the `context` block of the
-run detail, the results page, the maturity ladder (part 4), the LCR read (5b) and the
-comparison (5c) equals the run's pins (units frozen per module), with validation_status
-ILLUSTRATIVE in the run list and every read; the Feature 03 run's stored manifest_sha256 and
-result_sha256 are recomputed from its stored rows, both documents keep the Feature 03 key sets
-and the re-run reproduces both hashes and its context; the boundary cases (ENGINEERING — awaiting
-domain-expert approval): LCR ratio ties on each side of ROUND_HALF_EVEN, inflows at the 75% cap
-and one minor unit above, zero net outflows (JSON ratio null, LCR_DENOMINATOR_ZERO) in 5b;
+Phase 30 (BE-30.2 - BE-30.4; D-56; validation_kit): the `context` block of the run detail, the
+results page, the maturity ladder (part 4), the LCR read (5b) and the comparison (5c) equals
+the run's pins (units frozen per module), with validation_status ILLUSTRATIVE in the run list
+and every read; the Feature 03 run's stored manifest_sha256 and result_sha256 are recomputed
+from its stored rows, both documents keep the Feature 03 key sets and the re-run reproduces
+both hashes and its context; the boundary cases (ENGINEERING — awaiting domain-expert
+approval): LCR ratio ties on each side of ROUND_HALF_EVEN, inflows at the 75% cap and one
+minor unit above, zero net outflows (JSON ratio null, LCR_DENOMINATOR_ZERO) in 5b;
 999999999999999999.99 exact through the ladder, a 3-dp amount (1.235) held at validation and a
 trailing-zero 3-dp amount (1.230) accepted as 1.23 in 5c.
+
+The functions (D-60 §2), in the parts' order: part 1
+`test_registry_seed_matches_the_code_and_the_catalogue`; part 2
+`test_modules_are_pure_exact_and_float_free`; part 3
+`test_snapshot_refusals_replay_and_content_hash`; part 4 (with the run-list filters)
+`test_runs_golden_ladder_replay_and_refusals`; Phase 33's executor
+`test_background_execution_matches_the_inline_run`; part 5
+`test_run_reads_manifest_contributions_and_masking`; part 5c (with Phase 33's cursor pages)
+`test_scenario_runs_comparison_boundaries_and_pages`; Phase 16
+`test_rule_change_pinning_and_reruns`; part 5b (with 5d, Phase 34's metrics)
+`test_lcr_golden_liquidity_masking_and_rule_change`; part 6
+`test_guards_refuse_changes_and_downgrades_round_trip_the_seed`.
 """
 
 import dataclasses
@@ -189,14 +203,18 @@ from app.tests.lcr_kit import (
 from app.tests.observability_kit import check_metrics_after_a_run_and_a_failed_import
 from app.tests.pagination_kit import check_cursor_pages, check_foreign_cursor
 from app.tests.scenario_run_kit import (
+    API_FLOWS,
+    CASE1_SHOCK,
     OVERLAY_GOLDEN,
     SCENARIO_OUTPUT_TABLES,
+    _ready,
     check_lcr_baseline,
     check_overlay_pure,
     check_scenario_append_only,
     check_scenario_runs,
     clear_scenario_runs,
     intermediate_value_shape,
+    run_scenario,
 )
 from app.tests.validation_kit import (
     check_context,
@@ -418,10 +436,231 @@ def cashflow_csv(rows: Sequence[tuple[Any, ...]], reporting: date) -> bytes:
     return ("\n".join(lines) + "\n").encode()
 
 
+def copy(table: str, changes: str, where: str = "true") -> str:
+    """INSERT a copy of one row of `table` with a new id and these jsonb changes."""
+    return (
+        f"INSERT INTO {table} SELECT * FROM (SELECT (jsonb_populate_record(NULL::{table},"
+        f" to_jsonb(t) || jsonb_build_object('id', gen_random_uuid(), {changes}))).*"
+        f" FROM {table} t WHERE {where} LIMIT 1) x RETURNING id"
+    )
+
+
+def seeded_rule_versions(db: str) -> dict[str, str]:
+    """{rule code: id} of the seeded rule versions (part 1 asserts they are the ACTIVE v1s)."""
+    rows = sql(
+        db,
+        "SELECT d.code, v.id FROM rule_version v JOIN rule_definition d"
+        " ON d.id = v.rule_definition_id WHERE v.seeded_by IS NOT NULL",
+    )
+    return {r["code"]: str(r["id"]) for r in rows}
+
+
+@dataclasses.dataclass
+class Loader:
+    """`load(source, data, **form)`, as the kits take it: upload, map (once per source: the
+    mapping is made ACTIVE against this import) and validate: COMPLETED."""
+
+    api: TestClient
+    db: str
+    steward: dict[str, str]
+    approver: dict[str, str]
+    instrument_source: dict[str, Any]
+    mapped: set[str] = dataclasses.field(default_factory=set)
+
+    def __call__(self, source: dict[str, Any], data: bytes, **form: Any) -> dict[str, Any]:
+        api, db, steward, approver = self.api, self.db, self.steward, self.approver
+        instrument_source, mapped = self.instrument_source, self.mapped
+        r = upload(api, steward, source["id"], data, filename="fixture.csv", **form)
+        assert r.status_code == 201, r.text
+        imported = r.json()
+        if source["id"] not in mapped:
+            schema, columns = (
+                ("position", POSITION_COLUMNS)
+                if source["code"] == "calc_positions"
+                else ("cashflow_event", CASHFLOW_COLUMNS)
+            )
+            rules = (
+                INSTRUMENT_RULES
+                if source is instrument_source
+                else sample_rules(api, db, steward, schema, columns)
+            )
+            body = {
+                "code": f"{source['code']}_map",
+                "name": f"{source['code']} (test)",
+                "source_contract_id": source["current_contract"]["id"],
+                "rules": rules,
+            }
+            r = api.post(MAPPINGS, json=body, headers=steward)
+            assert r.status_code == 201, r.text
+            activate_version(api, steward, approver, r.json()["versions"][0], imported["id"])
+            mapped.add(source["id"])
+        r = validate_import(api, steward, imported["id"])
+        assert r.status_code == 200 and r.json()["status"] == "COMPLETED", r.text
+        return dict(r.json())
+
+
+@dataclasses.dataclass
+class World:
+    """The shared setup of parts 4-6 (the `world`, `ran` and `all_runs` fixtures)."""
+
+    api: TestClient
+    db: str
+    steward: dict[str, str]
+    approver: dict[str, str]
+    analyst: dict[str, str]
+    instrument_source: dict[str, Any]
+    cash_source: dict[str, Any]
+    load: Loader
+    instruments: dict[str, Any]
+    cash: dict[str, Any]
+    snapshot: dict[str, Any]
+    module_id: str
+    body: dict[str, Any]
+    run: dict[str, Any] = dataclasses.field(default_factory=dict)
+    lcr_id: str = ""
+    stressed_id: str = ""
+
+
+@pytest.fixture
+def world(api: TestClient, db: str) -> World:
+    """GOLDEN[0]'s instrument and cash-flow imports, validated, projected and in one snapshot,
+    and the run body on it, as parts 3 and 4 build them."""
+    without_rate_limits(api)
+    steward, approver = dev_token(api, "data_steward"), dev_token(api, "approver")
+    analyst = dev_token(api, "risk_analyst")
+    instrument_source = csv_source(
+        api, db, steward, "calc_instruments", "instrument", INSTRUMENT_COLUMNS
+    )
+    cash_source = csv_source(
+        api, db, steward, "calc_cash_flows", "cashflow_event", CASHFLOW_COLUMNS
+    )
+    load = Loader(api, db, steward, approver, instrument_source)
+    case = GOLDEN[0]
+    instruments = load(instrument_source, instrument_csv(case["instruments"]))
+    cash = load(cash_source, cashflow_csv(case["cash_flows"], case["reporting_date"]))
+    for imported in (instruments, cash):
+        assert project(api, steward, imported["id"]).status_code == 201
+    r = make_snapshot(api, analyst, [instruments["id"], cash["id"]])
+    assert r.status_code == 201, r.text
+    snapshot = no_float(r.text)
+    module_id = module_version_id(api, analyst)
+    body = {
+        "dataset_snapshot_id": snapshot["snapshot_id"],
+        "module_version_id": module_id,
+        "reporting_date": case["reporting_date"].isoformat(),
+    }
+    return World(
+        api,
+        db,
+        steward,
+        approver,
+        analyst,
+        instrument_source,
+        cash_source,
+        load,
+        instruments,
+        cash,
+        snapshot,
+        module_id,
+        body,
+    )
+
+
+@pytest.fixture
+def ran(world: World) -> World:
+    """`world` and its golden run (part 4's first, key golden-0): the Feature 03 run."""
+    r = start_run(world.api, world.analyst, world.body, key="golden-0")
+    assert r.status_code == 201, r.text
+    return dataclasses.replace(world, run=no_float(r.text))
+
+
+def lcr_inputs(w: World) -> tuple[dict[str, Any], dict[str, Any], list[Any], dict[str, Any]]:
+    """Part 5b's setup: the lcr_hqla pack file's three imports, projected, in one snapshot.
+    Returns the case, the position source, the imports and the run body."""
+    api, db, steward, analyst, load = w.api, w.db, w.steward, w.analyst, w.load
+    instrument_source, cash_source = w.instrument_source, w.cash_source
+    [lcr] = LCR_GOLDEN_CASES  # the lcr_hqla v1 pack file (BE-18.2)
+    assert lcr["status"].startswith("ENGINEERING")
+    lcr_date = lcr["reporting_date"]
+    position_source = csv_source(api, db, steward, "calc_positions", "position", POSITION_COLUMNS)
+    lcr_imports = [
+        load(instrument_source, instrument_csv(lcr["instruments"])),
+        load(position_source, position_csv(lcr["positions"], lcr_date)),
+        load(cash_source, cashflow_csv(lcr["cash_flows"], lcr_date)),
+    ]
+    for imported in lcr_imports:
+        assert project(api, steward, imported["id"]).status_code == 201
+    r = make_snapshot(api, analyst, [i["id"] for i in lcr_imports])
+    assert r.status_code == 201, r.text
+    lcr_body = {
+        "dataset_snapshot_id": r.json()["snapshot_id"],
+        "module_version_id": module_version_id(api, analyst, LCR_HQLA),
+        "reporting_date": lcr_date.isoformat(),
+    }
+    return lcr, position_source, lcr_imports, lcr_body
+
+
+def stressed_run(w: World) -> str:
+    """A stressed run as part 5c's first (scenario_run_kit): the INR flows on the seeded
+    buckets, a non-stressed baseline and the §5 shock, CONFIRMED_FOR_EXPLORATION."""
+    reporting = date(2027, 3, 31)
+    instruments = w.load(
+        w.instrument_source,
+        instrument_csv([(i, t, "INR", a) for _, i, t, _, a in API_FLOWS]),
+    )
+    flows = w.load(
+        w.cash_source,
+        cashflow_csv(
+            [(k, i, d, a, "INR", "PRINCIPAL", "CONTRACTUAL") for k, i, _, d, a in API_FLOWS],
+            reporting,
+        ),
+    )
+    for imported in (instruments, flows):
+        assert project(w.api, w.steward, imported["id"]).status_code == 201
+    snapshot = make_snapshot(w.api, w.analyst, [instruments["id"], flows["id"]])
+    assert snapshot.status_code == 201, snapshot.text
+    baseline = start_run(
+        w.api,
+        w.analyst,
+        {
+            **w.body,
+            "dataset_snapshot_id": snapshot.json()["snapshot_id"],
+            "reporting_date": reporting.isoformat(),
+        },
+    )
+    assert baseline.status_code == 201, baseline.text
+    single = _ready(
+        w.api,
+        w.analyst,
+        w.approver,
+        "Section 5 loan delay",
+        [CASE1_SHOCK],
+        "CONFIRMED_FOR_EXPLORATION",
+    )
+    r, _ = run_scenario(w.api, w.analyst, single, baseline.json()["run_id"])
+    assert r.status_code == 201, r.text
+    [member] = r.json()["members"]
+    return str(member["calculation_run_id"])
+
+
+@pytest.fixture
+def all_runs(ran: World) -> World:
+    """`ran` plus a finished run of the other two kinds, each with output rows: the lcr_hqla
+    golden run (part 5b) and a stressed run (part 5c), for the guards and downgrades (part 6)."""
+    r = start_run(ran.api, ran.analyst, lcr_inputs(ran)[3])
+    assert r.status_code == 201, r.text
+    return dataclasses.replace(ran, lcr_id=r.json()["run_id"], stressed_id=stressed_run(ran))
+
+
+def run_ids(api: TestClient, headers: dict[str, str], **params: str) -> set[str]:
+    """GET /calculation-runs with these filters: the run ids."""
+    page = api.get(RUNS, params={**params, "limit": "200"}, headers=headers).json()
+    return {r["run_id"] for r in page["items"]}
+
+
 @pytest.mark.ws3
-def test_registry_snapshot_run_and_maturity_ladder(
-    api: TestClient, db: str, artifact_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_registry_seed_matches_the_code_and_the_catalogue(api: TestClient, db: str) -> None:
+    """Part 1 (BE-15.1, BE-17.1, BE-18.1): the frozen seeds equal the code; the catalogue."""
     without_rate_limits(api)
     # --- 1. The registry seed (BE-15.1) --------------------------------------------------------
     m18 = migration("0018_calculations")
@@ -556,8 +795,6 @@ def test_registry_snapshot_run_and_maturity_ladder(
     )
     assert "UNIQUE" in index["indexdef"] and "WHERE" in index["indexdef"]
 
-    steward, approver = dev_token(api, "data_steward"), dev_token(api, "approver")
-    analyst = dev_token(api, "risk_analyst")
     catalogue = no_float(api.get(MODULES, headers=dev_token(api, "auditor")).text)
     listed_modules = {
         m["code"]: m for m in catalogue["items"] if m["implementation_status"] == "AVAILABLE"
@@ -594,6 +831,10 @@ def test_registry_snapshot_run_and_maturity_ladder(
     assert all(r["active_version"]["illustrative"] for r in module["rules"])
     assert module["assumption_set"]["assumption_set_id"] == str(baseline["id"])
 
+
+@pytest.mark.ws3
+def test_modules_are_pure_exact_and_float_free() -> None:
+    """Part 2 (BE-15.4, BE-17.2, BE-25.2, BE-29.4): both modules and the overlay, purely."""
     # --- 2. Module purity (BE-15.4, D-31 §1-2, §8) ---------------------------------------------
     sources = [*sorted((APP / "calculations").rglob("*.py")), APP / "core" / "decimals.py"]
     assert len(sources) > 8 and APP / "calculations" / "modules" / "lcr_hqla.py" in sources
@@ -723,6 +964,15 @@ def test_registry_snapshot_run_and_maturity_ladder(
     )
     assert dormant_classes["outflows"] == dormant_classes["outflow_balance"] == "confidential"
 
+
+@pytest.mark.ws3
+def test_snapshot_refusals_replay_and_content_hash(
+    api: TestClient, db: str, artifact_dir: Path
+) -> None:
+    """Part 3 (BE-15.3): each refusal audited with nothing written; a replay; the hash."""
+    without_rate_limits(api)
+    steward, approver = dev_token(api, "data_steward"), dev_token(api, "approver")
+    analyst = dev_token(api, "risk_analyst")
     # --- 3. Snapshots (BE-15.3) ----------------------------------------------------------------
     instrument_source = csv_source(
         api, db, steward, "calc_instruments", "instrument", INSTRUMENT_COLUMNS
@@ -730,38 +980,7 @@ def test_registry_snapshot_run_and_maturity_ladder(
     cash_source = csv_source(
         api, db, steward, "calc_cash_flows", "cashflow_event", CASHFLOW_COLUMNS
     )
-    mapped: set[str] = set()
-
-    def load(source: dict[str, Any], data: bytes, **form: Any) -> dict[str, Any]:
-        """Upload, map (once per source: the mapping is made ACTIVE against this import) and
-        validate: COMPLETED."""
-        r = upload(api, steward, source["id"], data, filename="fixture.csv", **form)
-        assert r.status_code == 201, r.text
-        imported = r.json()
-        if source["id"] not in mapped:
-            schema, columns = (
-                ("position", POSITION_COLUMNS)
-                if source["code"] == "calc_positions"
-                else ("cashflow_event", CASHFLOW_COLUMNS)
-            )
-            rules = (
-                INSTRUMENT_RULES
-                if source is instrument_source
-                else sample_rules(api, db, steward, schema, columns)
-            )
-            body = {
-                "code": f"{source['code']}_map",
-                "name": f"{source['code']} (test)",
-                "source_contract_id": source["current_contract"]["id"],
-                "rules": rules,
-            }
-            r = api.post(MAPPINGS, json=body, headers=steward)
-            assert r.status_code == 201, r.text
-            activate_version(api, steward, approver, r.json()["versions"][0], imported["id"])
-            mapped.add(source["id"])
-        r = validate_import(api, steward, imported["id"])
-        assert r.status_code == 200 and r.json()["status"] == "COMPLETED", r.text
-        return dict(r.json())
+    load = Loader(api, db, steward, approver, instrument_source)
 
     def refused(import_ids: list[str], code: str, status: int = 409) -> None:
         c = cid()
@@ -851,13 +1070,22 @@ def test_registry_snapshot_run_and_maturity_ladder(
     assert all(m["reconciliation_outcome"] == "MATCHED" for m in snapshot["members"])
     assert api.get(f"{SNAPSHOTS}/{snapshot['snapshot_id']}", headers=approver).json() == snapshot
 
+
+@pytest.mark.ws3
+def test_runs_golden_ladder_replay_and_refusals(
+    world: World, artifact_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Part 4 (BE-15.4): the golden loop, replay, refusals, BLOCKED, the switch, failures; the
+    run-list filters over exactly these runs (part 5)."""
+    api, db, analyst, approver = world.api, world.db, world.analyst, world.approver
+    body, cash, spec = world.body, world.cash, maturity_ladder.SPEC
+    catalogue = no_float(api.get(MODULES, headers=dev_token(api, "auditor")).text)
+    planned = {m["code"]: m for m in catalogue["items"] if m["implementation_status"] == "PLANNED"}
+    off = Settings(
+        ENV="test", DATABASE_URL=db, ARTIFACT_STORE_DIR=artifact_dir, CALCULATIONS_ENABLED=False
+    )
+
     # --- 4. Runs (BE-15.4) ---------------------------------------------------------------------
-    module_id = module_version_id(api, analyst)
-    body = {
-        "dataset_snapshot_id": snapshot["snapshot_id"],
-        "module_version_id": module_id,
-        "reporting_date": case["reporting_date"].isoformat(),
-    }
     golden_runs = []
     for golden in GOLDEN:  # the golden loop, over the BE-18.2 pack files
         assert golden["status"].startswith("ENGINEERING")
@@ -1042,10 +1270,9 @@ def test_registry_snapshot_run_and_maturity_ladder(
     audited = sql(db, "SELECT details::text AS d FROM audit_event WHERE action LIKE 'calc%'")
     assert not any("SENTINEL" in a["d"] for a in audited)
 
-    # --- 5. Reads (BE-15.5) --------------------------------------------------------------------
+    # --- 5. Reads (BE-15.5): the run list filters, over this part's runs ----------------------
     def listed(**params: str) -> set[str]:
-        page = api.get(RUNS, params={**params, "limit": "200"}, headers=analyst).json()
-        return {r["run_id"] for r in page["items"]}
+        return run_ids(api, analyst, **params)
 
     assert listed(module_code="maturity_ladder", status="SUCCEEDED_WITH_WARNINGS") == {
         run_id,
@@ -1053,12 +1280,47 @@ def test_registry_snapshot_run_and_maturity_ladder(
     }
     assert listed(status="BLOCKED") == {blocked_run["run_id"]}
     assert listed(module_code="lcr_hqla") == set()
-    # Phase 33 (BE-33.1 - BE-33.3, D-59; executor_kit): Prefer: respond-async, the pool's
-    # equal hashes, a free event loop, workers_busy, a worker crash, the timeout, the retry
-    # and the sweeper. After the list filters above, which count this part's runs.
+
+
+@pytest.mark.ws3
+def test_background_execution_matches_the_inline_run(
+    ran: World, artifact_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Phase 33 (BE-33.1 - BE-33.3, D-59; executor_kit): Prefer: respond-async, the pool's
+    equal hashes, a free event loop, workers_busy, a worker crash, the timeout, the retry and
+    the sweeper, against the golden run (its own function: part 4's run-list filters count
+    only that part's runs)."""
     check_background_execution(
-        api, db, artifact_dir, monkeypatch, analyst=analyst, body=body, reference=run
+        ran.api,
+        ran.db,
+        artifact_dir,
+        monkeypatch,
+        analyst=ran.analyst,
+        body=ran.body,
+        reference=ran.run,
     )
+
+
+@pytest.mark.ws3
+def test_run_reads_manifest_contributions_and_masking(ran: World, artifact_dir: Path) -> None:
+    """Part 5 (BE-15.5, BE-30.2, BE-30.3): the detail and manifest, the contributions and
+    their lineage, D-33 masking and minimum aggregation."""
+    api, db, steward, approver, analyst = ran.api, ran.db, ran.steward, ran.approver, ran.analyst
+    run_id, snapshot, body, cash = ran.run["run_id"], ran.snapshot, ran.body, ran.cash
+    instruments, module_id, case = ran.instruments, ran.module_id, GOLDEN[0]
+    seeded = seeded_rule_versions(db)
+    seeded_versions = {code: seeded[code] for code in maturity_ladder.SPEC.rules}
+    [baseline] = sql(db, "SELECT * FROM assumption_set")
+    manifests = {
+        str(r["import_job_id"]): r
+        for r in sql(
+            db,
+            "SELECT * FROM import_manifest WHERE import_job_id = ANY($1::uuid[])",
+            [uuid.UUID(instruments["id"]), uuid.UUID(cash["id"])],
+        )
+    }
+
+    # --- 5. Reads (BE-15.5) --------------------------------------------------------------------
     detail = no_float(api.get(f"{RUNS}/{run_id}", headers=dev_token(api, "auditor")).text)
     manifest = detail["manifest"]
     check_context(detail, detail, "run detail")  # Phase 30 (BE-30.2, BE-30.3)
@@ -1191,7 +1453,7 @@ def test_registry_snapshot_run_and_maturity_ladder(
     # D-33, Phase 15 open item: a cumulative gap of exactly zero after a masked net gap stays
     # masked (masked wins over "zeros stay clear": a clear zero would reveal that the masked
     # amounts cancel). Only a figure with no contribution at all stays clear.
-    rows = [
+    rows: list[Any] = [
         SimpleNamespace(
             id=uuid.uuid4(), currency="EUR", bucket_sequence=i, classification="internal"
         )
@@ -1205,8 +1467,17 @@ def test_registry_snapshot_run_and_maturity_ladder(
     assert [classes[r.id]["cumulative_gap"] for r in rows] == ["confidential"] * 3
     assert classes[rows[2].id]["net_gap"] == classes[rows[2].id]["inflows"] == "internal"
 
+
+@pytest.mark.ws3
+def test_scenario_runs_comparison_boundaries_and_pages(
+    ran: World, artifact_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Part 5c (BE-25.3, BE-25.4, BE-30.3, BE-30.4) and Phase 33's cursor pages (BE-33.5)."""
+    api, db, steward, load = ran.api, ran.db, ran.steward, ran.load
+    instrument_source, cash_source = ran.instrument_source, ran.cash_source
+    run_id, module_id = ran.run["run_id"], ran.module_id
     # --- 5c. Phase 25 (BE-25.3, BE-25.4): stressed runs and the comparison, on the seeded
-    # buckets (before Phase 16 below changes them) ------------------------------------------------
+    # buckets (this function changes no rule) ------------------------------------------------------
     stressed_ids = check_scenario_runs(
         api,
         db,
@@ -1267,6 +1538,14 @@ def test_registry_snapshot_run_and_maturity_ladder(
         db, "dev:p33-outsider", ("data_steward",), tenant_id=insert_tenant(db, "p33-outsider")
     )
     check_foreign_cursor(api, steward, outsider, RUNS)
+
+
+@pytest.mark.ws3
+def test_rule_change_pinning_and_reruns(ran: World) -> None:
+    """Phase 16 (BE-16.3): pinning across a rule change, re-runs, JSON fractions refused."""
+    api, db, analyst, approver, body = ran.api, ran.db, ran.analyst, ran.approver, ran.body
+    run = ran.run
+    run_id = run["run_id"]
 
     # --- Phase 16 (BE-16.3): pinning across a rule change, and re-runs --------------------------
     def run_rows(run: str) -> str:
@@ -1394,28 +1673,30 @@ def test_registry_snapshot_run_and_maturity_ladder(
     for stored in sql(db, "SELECT parameters::text AS p FROM rule_version"):
         assert exact_json(no_float(stored["p"]))
 
+
+@pytest.mark.ws3
+def test_lcr_golden_liquidity_masking_and_rule_change(ran: World) -> None:
+    """Part 5b (BE-17.1 – BE-17.3, BE-25.3, BE-30.3, BE-30.4) and 5d (BE-34.4, the metrics)."""
+    api, db, steward, approver, analyst = ran.api, ran.db, ran.steward, ran.approver, ran.analyst
+    instrument_source, cash_source = ran.instrument_source, ran.cash_source
+    load, run_id = ran.load, ran.run["run_id"]
+    seeded = seeded_rule_versions(db)
+    lcr_versions = {code: seeded[code] for code in lcr_hqla.SPEC.rules}
+
+    def listed(**params: str) -> set[str]:
+        return run_ids(api, analyst, **params)
+
+    # A scenario (CONFIRMED_FOR_EXPLORATION, as part 5c's first) for the LCR baseline refusal.
+    scenario = _ready(
+        api, analyst, approver, "LCR baseline", [CASE1_SHOCK], "CONFIRMED_FOR_EXPLORATION"
+    )
+
     # --- 5b. LCR/HQLA prototype (BE-17.1 – BE-17.3) -------------------------------------------
     # The golden case (hand-computed, D-35 §4) over its own snapshot of three projected
     # imports: an ineligible asset, the inflow cap binding, a zero denominator, mixed
     # currencies, the horizon edge and a ratio tie that only ROUND_HALF_EVEN rounds down.
-    [lcr] = LCR_GOLDEN_CASES  # the lcr_hqla v1 pack file (BE-18.2)
-    assert lcr["status"].startswith("ENGINEERING")
+    lcr, position_source, lcr_imports, lcr_body = lcr_inputs(ran)  # the pack file, projected
     lcr_date = lcr["reporting_date"]
-    position_source = csv_source(api, db, steward, "calc_positions", "position", POSITION_COLUMNS)
-    lcr_imports = [
-        load(instrument_source, instrument_csv(lcr["instruments"])),
-        load(position_source, position_csv(lcr["positions"], lcr_date)),
-        load(cash_source, cashflow_csv(lcr["cash_flows"], lcr_date)),
-    ]
-    for imported in lcr_imports:
-        assert project(api, steward, imported["id"]).status_code == 201
-    r = make_snapshot(api, analyst, [i["id"] for i in lcr_imports])
-    assert r.status_code == 201, r.text
-    lcr_body = {
-        "dataset_snapshot_id": r.json()["snapshot_id"],
-        "module_version_id": module_version_id(api, analyst, LCR_HQLA),
-        "reporting_date": lcr_date.isoformat(),
-    }
     c = cid()
     r = start_run(api, analyst, lcr_body, **{"X-Correlation-ID": c})
     assert r.status_code == 201, r.text
@@ -1508,7 +1789,7 @@ def test_registry_snapshot_run_and_maturity_ladder(
     for key in ("manifest_sha256", "result_sha256", "rule_set_id", "status"):
         assert lcr_again[key] == lcr_run[key], key
     assert listed(module_code=LCR_HQLA) == {lcr_id, lcr_again["run_id"]}
-    check_lcr_baseline(api, db, stressed_ids["scenario_id"], lcr_id, calc_counts)  # BE-25.3
+    check_lcr_baseline(api, db, scenario["scenario_id"], lcr_id, calc_counts)  # BE-25.3
     # Phase 30 (BE-30.4): the LCR boundary cases (validation_kit), on the 0020 seed.
     check_lcr_boundaries(
         api,
@@ -1587,8 +1868,41 @@ def test_registry_snapshot_run_and_maturity_ladder(
     assert (failed.status_code, failed.json()["code"]) == (422, "csv_malformed"), failed.text
     check_metrics_after_a_run_and_a_failed_import(api, "csv_malformed")
 
+
+@pytest.mark.ws3
+def test_guards_refuse_changes_and_downgrades_round_trip_the_seed(all_runs: World) -> None:
+    """Part 6 (BE-15.1, BE-15.2, BE-17.1, BE-25.1): the registry, snapshot and run guards;
+    each downgrade refuses while its rows exist, then round-trips the tagged seed. One
+    function: the downgrades need the same three finished runs (`all_runs`)."""
+    api, db, analyst, approver = all_runs.api, all_runs.db, all_runs.analyst, all_runs.approver
+    run_id, lcr_id = all_runs.run["run_id"], all_runs.lcr_id
+    # Phase 16's change, as test_rule_change_pinning_and_reruns asserts it: an approved
+    # two-bucket version supersedes the seeded one (asserted below).
+    bucket_rule = f"{RULES}/{rule_id(db, MATURITY_BUCKETS)}"
+    patch = {
+        "buckets": [
+            {"code": "B01", "lower_exclusive": -1, "upper_inclusive": 7},
+            {"code": "B02", "lower_exclusive": 7, "upper_inclusive": None},
+        ]
+    }
+    r = api.post(
+        f"{bucket_rule}/versions",
+        json={"parameters_patch": patch, "change_summary": "Two buckets."},
+        headers=analyst,
+    )
+    assert r.status_code == 201, r.text
+    version = f"{bucket_rule}/versions/{r.json()['version']}"
+    assert api.post(f"{version}/submit", json={}, headers=analyst).status_code == 200
+    r = api.post(
+        f"{version}/approval",
+        json={"decision": "APPROVE", "comment": "Engineering check."},
+        headers=approver,
+    )
+    assert r.status_code == 200 and r.json()["status"] == "ACTIVE", r.text
+
     # --- 6. Guards (BE-15.1, BE-15.2) ----------------------------------------------------------
-    bucket_version = uuid.UUID(seeded_versions[MATURITY_BUCKETS])
+    all_versions = seeded_rule_versions(db)
+    bucket_version = uuid.UUID(all_versions[MATURITY_BUCKETS])
     for statement, match in (
         ("UPDATE rule_version SET parameters = '{}'::jsonb WHERE id = $1", "leaves DRAFT"),
         ("UPDATE rule_version SET status = 'DRAFT' WHERE id = $1", "not allowed"),
@@ -1614,14 +1928,6 @@ def test_registry_snapshot_run_and_maturity_ladder(
         with pytest.raises(IMMUTABLE, match="TRUNCATE"):
             sql(db, f"TRUNCATE {table} CASCADE")
         assert sql(db, f"SELECT * FROM {table} WHERE id = $1", row["id"]) == [row], table
-
-    def copy(table: str, changes: str, where: str = "true") -> str:
-        """INSERT a copy of one row of `table` with a new id and these jsonb changes."""
-        return (
-            f"INSERT INTO {table} SELECT * FROM (SELECT (jsonb_populate_record(NULL::{table},"
-            f" to_jsonb(t) || jsonb_build_object('id', gen_random_uuid(), {changes}))).*"
-            f" FROM {table} t WHERE {where} LIMIT 1) x RETURNING id"
-        )
 
     # A new version is DRAFT; it is editable only while DRAFT; at most one ACTIVE (DB).
     with pytest.raises(IMMUTABLE, match="is DRAFT"):
@@ -1701,7 +2007,7 @@ def test_registry_snapshot_run_and_maturity_ladder(
         sql(db, copy("calculation_run", "'idempotency_key', 'copy'", "id = $1"), run_uuid)
     assert sql(db, "SELECT * FROM calculation_run WHERE id = $1", run_uuid) == before_run
     lcr_uuid = uuid.UUID(lcr_id)
-    stressed_uuid = uuid.UUID(stressed_ids["stressed_run_id"])
+    stressed_uuid = uuid.UUID(all_runs.stressed_id)
     for table, owner in (
         *((t, run_uuid) for t in OUTPUT_TABLES),
         *((t, lcr_uuid) for t in LCR_OUTPUT_TABLES),  # BE-17.1: the LCR outputs, alike
@@ -1722,6 +2028,7 @@ def test_registry_snapshot_run_and_maturity_ladder(
             sql(db, f"TRUNCATE {table} CASCADE")
         assert sql(db, f"SELECT * FROM {table} WHERE id = $1", row["id"]) == [row], table
 
+    m20 = migration("0020_lcr_results")
     # The downgrade refuses while a run (or a non-seed registry row) exists, in one
     # transaction: nothing changes; 0020 alone refuses while LCR results exist (BE-17.1).
     # Without them, head -> 0017 -> head.

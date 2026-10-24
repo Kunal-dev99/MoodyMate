@@ -253,3 +253,31 @@ export const domainSections: WorkspaceSection[] =
 export function findWorkspace(slug: string): Workspace | undefined {
   return [...mainWorkspaces, ...advancedWorkspaces, ...adminWorkspaces].find((w) => w.slug === slug)
 }
+
+/** What a route is gated by (FE-35.5): a workspace, or one of a workspace's tabs. */
+export interface NavEntry {
+  href: string
+  label: string
+  /** Undefined: the entry is open to every signed-in user (Overview, Access & Roles, a planned workspace). */
+  permission?: Schemas['Permission']
+}
+
+/** Every nav entry a route can sit under: the three sidebar sections and the workspace tab strips. */
+export function navEntries(): NavEntry[] {
+  return [...mainWorkspaces, ...advancedWorkspaces, ...adminWorkspaces, ...domainSections]
+}
+
+const isUnder = (pathname: string, href: string) => pathname === href || pathname.startsWith(`${href}/`)
+
+/**
+ * FE-35.5: the nav entry that gates `pathname`: the longest nav href it sits under, segment by
+ * segment, so a tab (/domain/rules, `rule:read`) wins over its workspace (/domain, `domain:read`)
+ * and every /advanced/* route takes its Advanced workspace's permission. Undefined for a path
+ * under no entry, such as the /advanced redirect or a route whose feature switch is off: that page
+ * decides (a redirect or a 404). Cosmetic: the API enforces each route's permission (D-04).
+ */
+export function navEntryFor(pathname: string): NavEntry | undefined {
+  let best: NavEntry | undefined
+  for (const entry of navEntries()) if (isUnder(pathname, entry.href) && (!best || entry.href.length > best.href.length)) best = entry
+  return best
+}

@@ -59,6 +59,8 @@ from app.tests.helpers import (
     import_sample,
     instrument_mapping,
     sample,
+    seeded_source_id,
+    upload,
     validate_import,
     without_rate_limits,
 )
@@ -421,6 +423,39 @@ def test_validate_statuses_issues_and_identical_payloads(api: TestClient, db: st
     steward, approver = dev_token(api, "data_steward"), dev_token(api, "approver")
     early = import_sample(api, steward, db, sample("instrument.csv"))
     assert early["status"] == "MAPPING_REQUIRED"
+
+    # BE-35.8 (Phase 29 Q5): DECIMAL_TEXT's `\d` means ASCII digits (ECMA-262), so a control
+    # total in any other script's digits is a 422 and nothing is written; ASCII still passes.
+    written = (
+        "SELECT (SELECT count(*) FROM import_job) AS jobs,"
+        " (SELECT count(*) FROM import_artifact) AS artifacts"
+    )
+    before = sql(db, written)[0]
+    for unicode_total in (
+        "\u0661\u0662\u0663",
+        "\uff11\uff12",
+        "12\u0663.5",
+        "1.\u0665",
+        "-\u0967",
+    ):
+        r = upload(
+            api,
+            steward,
+            seeded_source_id(db),
+            sample("instrument.csv"),
+            control_totals=json.dumps({"notional": unicode_total}),
+        )
+        assert r.status_code == 422, (unicode_total.encode("unicode_escape"), r.text)
+        assert set(r.json()) >= {"code", "message", "details", "correlation_id"}, r.text
+        assert unicode_total not in r.text  # the refused value is not echoed back
+    assert sql(db, written)[0] == before
+    ascii_total = json.dumps({"notional": "-123.45"})
+    assert (
+        upload(
+            api, steward, seeded_source_id(db), b"a\n1\n", control_totals=ascii_total
+        ).status_code
+        == 201
+    )
 
     # No usable mapping version: 409 mapping_required (audited), nothing written.
     c = cid()

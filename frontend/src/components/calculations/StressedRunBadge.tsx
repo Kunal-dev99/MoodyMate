@@ -1,11 +1,9 @@
 import Link from 'next/link'
 import { FlaskConical } from 'lucide-react'
-import { approvalVariant, memberLabel, type RunScenarioRef } from '@/components/advanced/scenario-runs'
-import { scenarioHref } from '@/components/advanced/scenarios'
 import { Badge } from '@/components/ui/badge'
 import { STRESS_EXPLORER_UI_ENABLED } from '@/config/features'
+import { approvalVariant, memberLabel, runHref, scenarioHref, type RunScenarioRef } from '@/lib/runs'
 import { cn } from '@/lib/utils'
-import { runHref } from './calculations'
 
 /**
  * FE-25.1: the label of a stressed run (`scenario` set, Phase 25), on the run list and the run

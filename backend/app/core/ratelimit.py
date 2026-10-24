@@ -28,11 +28,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth import PrincipalDependency, _audit_session, require_permission
 from app.core.config import Settings
 from app.core.errors import ApiError, ErrorEnvelope
+from app.core.interfaces import audit_denied_by
 from app.core.principal import Principal
 from app.core.routes import route_template
 from app.db.session import get_session
-from app.governance.constants import AuditOutcome, ClassificationCode
-from app.governance.service import audit_by
 
 RATE_LIMITED = "rate_limited"
 RETRY_AFTER = "Retry-After"
@@ -119,18 +118,13 @@ def rate_limited(
         if retry_after is None:
             return principal
         async with _audit_session(request, session) as audit_session:
-            audit_by(
+            audit_denied_by(
                 audit_session,
                 principal,
                 action or f"{request.method} {template}",
                 "endpoint",
-                outcome=AuditOutcome.DENIED,
-                resource_id=template,
-                details={"reason": RATE_LIMITED, "retry_after_seconds": retry_after},
-                details_classification={
-                    "reason": ClassificationCode.PUBLIC,
-                    "retry_after_seconds": ClassificationCode.PUBLIC,
-                },
+                template,
+                {"reason": RATE_LIMITED, "retry_after_seconds": retry_after},
             )
         raise ApiError(
             429,

@@ -1,13 +1,16 @@
 import type { Schemas } from '@/api/client'
 import { isMasked } from '@/components/common/MaskedValue'
-import { DESCRIPTION_MAX, NAME_MAX, SUMMARY_MAX, fractionToPercent, type Shock, type TemplateField, type TemplateOut, type ScenarioTemplate } from './scenarios'
+import type { ScenarioLimits } from '@/lib/limits'
+import { fractionToPercent, type Shock, type TemplateField, type TemplateOut, type ScenarioTemplate } from './scenarios'
 
 /*
  * FE-24.2: the scenario editor's pure model. Every field and bound comes from GET
- * scenario-templates (D-44 §2-4); nothing here invents a template or a limit. A fraction is
- * typed as a percentage and stored as exact text at scale 4 ("20" -> "0.2000"): the decimal
- * point is moved in the text, never through a binary float. There is no formula field: a value
- * that is not a plain number is refused here and, again, by the server (422 invalid_shock).
+ * scenario-templates (D-44 §2-4) and, since FE-35.3, GET config/limits (the text lengths, the
+ * shock count and the fraction scale a field without its own scale falls back to); nothing here
+ * invents a template or a limit. A fraction is typed as a percentage and stored as exact text at
+ * the field's scale (4 in v1: "20" -> "0.2000"): the decimal point is moved in the text, never
+ * through a binary float. There is no formula field: a value that is not a plain number is
+ * refused here and, again, by the server (422 invalid_shock).
  */
 
 /** One shock being edited: the text of each field (empty while unset) and the picked instruments. */
@@ -31,9 +34,10 @@ export type FieldProblems = Record<string, string>
 const PLAIN = /^\d+(\.\d+)?$/
 const INTEGER = /^\d+$/
 const CURRENCY = /^[A-Z]{3}$/
-/** A fraction's scale in the contract, and so a percentage's: 4 - 2 places. */
-export const FRACTION_SCALE = 4
-export const PERCENT_SCALE = FRACTION_SCALE - 2
+/** A percentage's places: its fraction's scale less the two the percent sign moves. */
+export const percentScale = (fractionScale: number) => Math.max(0, fractionScale - 2)
+/** The fraction scale of `field`: its own, else the served `fraction_scale` (GET config/limits). */
+export const fractionScaleOf = (field: Pick<TemplateField, 'scale'>, servedScale: number) => field.scale ?? servedScale
 
 let counter = 0
 const nextKey = () => `shock-${++counter}`
@@ -53,10 +57,10 @@ export function compareUnits(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0
 }
 
-/** Percent text ("20", "15.5") as the exact fraction text the API stores ("0.2000", "0.1550"). */
-export function percentToFraction(percent: string): string {
-  const units = unitsOf(percent, PERCENT_SCALE).padStart(FRACTION_SCALE + 1, '0')
-  return `${units.slice(0, -FRACTION_SCALE).replace(/^0+(?=\d)/, '')}.${units.slice(-FRACTION_SCALE)}`
+/** Percent text ("20", "15.5") as the exact fraction text the API stores at `scale` ("0.2000", "0.1550" at 4). */
+export function percentToFraction(percent: string, scale: number): string {
+  const units = unitsOf(percent, percentScale(scale)).padStart(scale + 1, '0')
+  return `${units.slice(0, -scale).replace(/^0+(?=\d)/, '')}.${units.slice(-scale)}`
 }
 
 const humanName: Record<string, string> = {
@@ -83,22 +87,24 @@ const percentBound = (fraction: string | null) => (fraction === null ? '' : `${f
 
 /**
  * Why one field's text cannot be sent, or null. Bounds, scale and allowed values come from the
- * template field; an empty optional field is fine.
+ * template field; a field without a scale uses the served `fraction_scale` (`servedScale`). An
+ * empty optional field is fine.
  */
-export function fieldProblem(field: TemplateField, raw: string): string | null {
+export function fieldProblem(field: TemplateField, raw: string, servedScale: number): string | null {
   const text = raw.trim()
   if (!text) return field.required ? 'Required.' : null
   switch (field.kind) {
     case 'DECIMAL': {
       const percent = isPercent(field)
-      const scale = percent ? PERCENT_SCALE : field.scale ?? FRACTION_SCALE
+      const fractionScale = fractionScaleOf(field, servedScale)
+      const scale = percent ? percentScale(fractionScale) : fractionScale
       if (!PLAIN.test(text)) return percent ? 'Enter a plain percentage, e.g. 20 or 15.5: no formulas, signs or exponents.' : 'Enter a plain decimal number: no formulas, signs or exponents.'
       if (placesOf(text) > scale)
         return percent
-          ? `At most ${scale} decimal places in percent (scale ${field.scale ?? FRACTION_SCALE} as a fraction); never rounded.`
+          ? `At most ${scale} decimal places in percent (scale ${fractionScale} as a fraction); never rounded.`
           : `At most ${scale} decimal places; never rounded.`
       const value = unitsOf(text, scale)
-      const bound = (b: string) => (percent ? unitsOf(b, FRACTION_SCALE) : unitsOf(b, scale))
+      const bound = (b: string) => (percent ? unitsOf(b, fractionScale) : unitsOf(b, scale))
       const show = (b: string | null) => (percent ? percentBound(b) : b ?? '')
       if (field.min !== null) {
         const c = compareUnits(value, bound(field.min))
@@ -152,15 +158,15 @@ export function newShock(template: TemplateOut): ShockDraft {
   return { key: nextKey(), template: template.template, parameters: prefill(template.parameters), selector: prefill(template.selector), instrumentKeys: [], maskedKeys: [] }
 }
 
-/** The problems of one shock against its template, by field path. */
-export function shockProblems(template: TemplateOut, draft: ShockDraft): FieldProblems {
+/** The problems of one shock against its template, by field path (`servedScale`: the served `fraction_scale`). */
+export function shockProblems(template: TemplateOut, draft: ShockDraft, servedScale: number): FieldProblems {
   const problems: FieldProblems = {}
   for (const f of template.parameters) {
-    const p = fieldProblem(f, draft.parameters[f.name] ?? '')
+    const p = fieldProblem(f, draft.parameters[f.name] ?? '', servedScale)
     if (p) problems[`parameters.${f.name}`] = p
   }
   for (const f of template.selector) {
-    const p = f.kind === 'INSTRUMENT_KEYS' ? maskedKeysProblem(draft.maskedKeys) ?? keysProblem(f, draft.instrumentKeys) : fieldProblem(f, draft.selector[f.name] ?? '')
+    const p = f.kind === 'INSTRUMENT_KEYS' ? maskedKeysProblem(draft.maskedKeys) ?? keysProblem(f, draft.instrumentKeys) : fieldProblem(f, draft.selector[f.name] ?? '', servedScale)
     if (p) problems[`selector.${f.name}`] = p
   }
   const from = (draft.selector.due_from_day ?? '').trim()
@@ -178,17 +184,29 @@ export interface EditorProblems {
   shocks: FieldProblems[]
 }
 
-/** Everything the editor would refuse before sending; `name` is checked only when it is edited. */
+/**
+ * Everything the editor would refuse before sending, against the served `limits` (GET
+ * config/limits: text lengths, shock count, fraction scale); `name` is checked only when it is
+ * edited.
+ */
 export function editorProblems(
   catalogue: TemplateOut[],
-  maxShocks: number,
+  limits: ScenarioLimits,
   shocks: ShockDraft[],
   text: { name?: string; description?: string; summary: string },
 ): EditorProblems {
-  const name = text.name === undefined ? null : !text.name.trim() ? 'A name is required.' : text.name.trim().length > NAME_MAX ? `At most ${NAME_MAX} characters.` : null
-  const description = text.description !== undefined && text.description.trim().length > DESCRIPTION_MAX ? `At most ${DESCRIPTION_MAX} characters.` : null
-  const summary = text.summary.trim().length > SUMMARY_MAX ? `At most ${SUMMARY_MAX} characters.` : null
-  const count = shocks.length === 0 ? 'Add at least one shock.' : shocks.length > maxShocks ? `At most ${maxShocks} shocks.` : null
+  const { max_name_length: nameMax, max_description_length: descriptionMax, max_change_summary_length: summaryMax, min_shocks: minShocks, max_shocks: maxShocks } = limits
+  const name = text.name === undefined ? null : !text.name.trim() ? 'A name is required.' : text.name.trim().length > nameMax ? `At most ${nameMax} characters.` : null
+  const description = text.description !== undefined && text.description.trim().length > descriptionMax ? `At most ${descriptionMax} characters.` : null
+  const summary = text.summary.trim().length > summaryMax ? `At most ${summaryMax} characters.` : null
+  const count =
+    shocks.length < minShocks
+      ? minShocks === 1
+        ? 'Add at least one shock.'
+        : `Add at least ${minShocks} shocks.`
+      : shocks.length > maxShocks
+        ? `At most ${maxShocks} shocks.`
+        : null
   const byName = new Map(catalogue.map((t) => [t.template, t]))
   return {
     name,
@@ -197,7 +215,7 @@ export function editorProblems(
     count,
     shocks: shocks.map((s) => {
       const t = byName.get(s.template)
-      return t ? shockProblems(t, s) : { template: 'This template is not offered by the server.' }
+      return t ? shockProblems(t, s, limits.fraction_scale) : { template: 'This template is not offered by the server.' }
     }),
   }
 }
@@ -205,10 +223,10 @@ export function editorProblems(
 export const hasProblems = (p: EditorProblems) => !!(p.name || p.description || p.summary || p.count || p.shocks.some((s) => Object.keys(s).length > 0))
 
 /** One field's text as the value the API takes; null leaves an optional field out. */
-function valueOf(field: TemplateField, raw: string): string | number | null {
+function valueOf(field: TemplateField, raw: string, servedScale: number): string | number | null {
   const text = raw.trim()
   if (!text) return null
-  if (field.kind === 'DECIMAL') return isPercent(field) ? percentToFraction(text) : text
+  if (field.kind === 'DECIMAL') return isPercent(field) ? percentToFraction(text, fractionScaleOf(field, servedScale)) : text
   if (field.kind === 'INTEGER') return parseInt(text, 10)
   return text
 }
@@ -217,10 +235,10 @@ function valueOf(field: TemplateField, raw: string): string | number | null {
  * A valid draft as the generated `Shock` (call only when `shockProblems` is empty). The server
  * validates it again; the selector is left out when nothing selects.
  */
-export function buildShock(template: TemplateOut, draft: ShockDraft): Shock {
+export function buildShock(template: TemplateOut, draft: ShockDraft, servedScale: number): Shock {
   const parameters: Record<string, string | number> = {}
   for (const f of template.parameters) {
-    const v = valueOf(f, draft.parameters[f.name] ?? '')
+    const v = valueOf(f, draft.parameters[f.name] ?? '', servedScale)
     if (v !== null) parameters[f.name] = v
   }
   const selector: Record<string, string | number | string[]> = {}
@@ -229,7 +247,7 @@ export function buildShock(template: TemplateOut, draft: ShockDraft): Shock {
       if (draft.instrumentKeys.length) selector[f.name] = [...draft.instrumentKeys]
       continue
     }
-    const v = valueOf(f, draft.selector[f.name] ?? '')
+    const v = valueOf(f, draft.selector[f.name] ?? '', servedScale)
     if (v !== null) selector[f.name] = v
   }
   const shock = Object.keys(selector).length ? { template: template.template, parameters, selector } : { template: template.template, parameters }

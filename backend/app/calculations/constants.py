@@ -183,6 +183,18 @@ MANIFEST_VERSION = 1
 # contributions carry the most sensitive classification among the fields they read.
 AGGREGATE_CLASSIFICATION = ClassificationCode.INTERNAL.value
 
+# BE-17.3: what the lcr_hqla read states it does not model (GET .../liquidity `limitations`).
+LCR_LIMITATIONS = [
+    "Level 2A/2B caps are not applied (LCR_LEVEL_CAPS_NOT_APPLIED when a Level 2 asset is "
+    "included).",
+    "The value of an asset is its position balance: the schema has no market value "
+    "(PROVISIONAL).",
+    "Per currency, with no FX conversion and no all-currency total.",
+    "Inflows are cash flows due (0, horizon] calendar days after the reporting date; "
+    "outflows are position balances x run-off. No other LCR categories are modelled.",
+]
+
+
 # --- Phase 30: the result context's units (BE-30.3, D-56 §5) ---------------------------------
 # Labels of what a result read's figures are measured in, as the engine computes them: they
 # describe the code as built (decimals.py, the module implementations) and change nothing.
@@ -192,3 +204,57 @@ CONTEXT_AMOUNT_UNIT = "Exact decimal, in the ISO 4217 currency of its row (no FX
 CONTEXT_DAYS_UNIT = "Calendar days after the reporting date"
 # Per module code: only lcr_hqla reports a ratio; every other module reads None.
 CONTEXT_RATIO_UNITS = {"lcr_hqla": "Dimensionless fraction, 4 dp ROUND_HALF_EVEN"}
+
+
+# --- BE-35.1: the scenario shock contract the engine applies (D-44, D-45, D-46) ---------------
+# Moved here from app.orchestration.constants, which re-exports every name: the overlay
+# (scenario_overlay.py) and the run views read them, so calculations never imports
+# orchestration. Values unchanged, so every shock, manifest and result hash is unchanged.
+
+
+class ScenarioTemplate(StrEnum):
+    """The closed template list (D-44 §2, design §8). A new template needs code, tests and an
+    appended decision."""
+
+    DELAYED_INFLOWS = "DELAYED_INFLOWS"
+    DEPOSIT_WITHDRAWAL = "DEPOSIT_WITHDRAWAL"
+    FUNDING_UNAVAILABLE = "FUNDING_UNAVAILABLE"
+
+
+# D-44 §1: a version carries MIN_SHOCKS..MAX_SHOCKS shocks (the 0026/0027 CHECKs hold copies).
+MIN_SHOCKS = 1
+MAX_SHOCKS = 5
+
+
+class ApprovalLabel(StrEnum):
+    """D-44 §8: what a version (and its runs) is labelled with."""
+
+    EXPLORATION = "Exploration, not approved"
+    APPROVED = "Approved scenario (illustrative)"
+
+
+class ApprovalState(StrEnum):
+    """D-45 §4: the approval state a stressed run pins (from its version's status at run
+    time). EXPLORATION runs are never authoritative (D-47 §3)."""
+
+    EXPLORATION = "EXPLORATION"  # CONFIRMED_FOR_EXPLORATION
+    APPROVED = "APPROVED"  # APPROVED_FOR_TEST
+
+
+APPROVAL_LABELS: dict[ApprovalState, ApprovalLabel] = {
+    ApprovalState.EXPLORATION: ApprovalLabel.EXPLORATION,
+    ApprovalState.APPROVED: ApprovalLabel.APPROVED,
+}
+
+
+class PartChange(StrEnum):
+    """D-46 §4: what a shock did to one part of a cash flow (the drill-down)."""
+
+    MOVED = "MOVED"  # the delayed or unavailable fraction, now due later
+    STAYED = "STAYED"  # the remainder, due as before
+    ADDED = "ADDED"  # the extra outflow of DEPOSIT_WITHDRAWAL
+    UNCHANGED = "UNCHANGED"  # matched no shock (never listed by the drill-down)
+
+
+# D-45 §2: overlay bounds.
+MAX_PARTS_PER_FLOW = 32

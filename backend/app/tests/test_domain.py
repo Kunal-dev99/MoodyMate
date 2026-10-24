@@ -1,18 +1,27 @@
-"""Phase 14 (BE-14.2 – BE-14.4): the WS3 domain projection and the instrument catalogue, in one
-essential test (D-26), in four parts:
+"""Phase 14 (BE-14.2 – BE-14.4) and Phases 31-32: the WS3 domain projection and the instrument
+catalogue. D-60 §2 split the one D-26 test into focused functions; each builds its own state
+through the module helpers below (the `db` fixture cleans before and after every test):
 
 1. Seed: the WS3 role grants in the database equal WS3_ROLE_PERMISSIONS (and the plan's
-   matrix); the frozen copies in migration 0017 equal the code; the PROVISIONAL instrument
-   types are seeded and tagged.
-2. Projection: each refusal (not_validated, projection_unsupported, the switch off) is a 409
-   with its DENIED audit event and writes nothing; the synthetic instrument, position and
-   cash-flow imports project one row per accepted record (= the manifest's accepted count),
-   a second call writes nothing, every row resolves through `record_lineage` to its import,
-   and no stored or returned value is a float. A second instrument import adds versions.
-3. Catalogue: filters, `notional` and `payload_sha256` masked for risk_analyst and clear
-   for data_steward, and the version -> canonical record -> source row chain of one
-   instrument, with the cash flows of its own source only.
-4. Guards: UPDATE, DELETE and TRUNCATE are refused on every domain table; an insert into
+   matrix); the frozen copies in migrations 0017, 0022 and 0031 equal the code; the PROVISIONAL
+   instrument types are seeded and tagged; the projector holds no float, and a typed-path
+   defect never carries the value.
+2. Refusals: each refusal (not_validated, projection_unsupported, not_found, the switch off)
+   is a 409 or 404 with its DENIED audit event and writes nothing.
+3. v1 projection: the synthetic instrument, position and cash-flow imports project one row per
+   accepted record (= the manifest's accepted count) equal to the pre-Phase-31 golden, a
+   second call writes nothing, every row resolves through `record_lineage` to its import, and
+   no stored or returned value is a float; a ladder run equals its golden (BE-31.3 (a)); the
+   identity-link reconcile and its switch (BE-31.4); a second instrument import adds versions.
+4. Catalogue: filters, `notional` and `payload_sha256` masked for risk_analyst and clear for
+   data_steward, and the version -> canonical record -> source row chain of one instrument,
+   with the cash flows of its own source only.
+5. Typed maturity (BE-31.2): the frozen contract, published through the governed path and
+   matched by hash; projector v2 and its switch; the typed edge cases.
+6. Typed runs and ambiguous keys: BE-31.3 (b) and (c); the typed sample's keys on a second
+   source make existing links `linked_now_ambiguous` and new ones LINK_AMBIGUOUS (BE-31.4).
+7. Rate terms (BE-32.2), effective dating (BE-32.3) and the FX status (BE-32.4).
+8. Guards: UPDATE, DELETE and TRUNCATE are refused on every domain table; an insert into
    another tenant, with another tenant's instrument type, with a schema code that is not
    the import's, or under a projection of another schema code is refused; and the
    downgrade refuses while a projection exists; without one, 0017 -> 0016 -> 0017 removes
@@ -287,11 +296,90 @@ def other_schema_import(api: TestClient, db: str, steward: dict[str, str]) -> st
     return str(r.json()["id"])
 
 
+def personas(api: TestClient) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
+    """(data_steward, approver, risk_analyst) dev tokens."""
+    return (
+        dev_token(api, "data_steward"),
+        dev_token(api, "approver"),
+        dev_token(api, "risk_analyst"),
+    )
+
+
+def v1_imports(
+    api: TestClient,
+    db: str,
+    steward: dict[str, str],
+    approver: dict[str, str],
+    codes: tuple[str, ...] = ("instrument", "position", "cashflow_event"),
+) -> dict[str, dict[str, Any]]:
+    """The v1 samples validated (COMPLETED), in this order: the instrument CSV on the seeded
+    source (its core mapping ACTIVE), the position (XLSX) and cash-flow (JSON) samples each on
+    its own source."""
+    imports: dict[str, dict[str, Any]] = {}
+    for code in codes:
+        if code == "instrument":
+            imports[code], _ = validated_instruments(api, db, steward, approver)
+        else:
+            imports[code] = validated_sample(api, db, steward, approver, code)
+    return imports
+
+
+def projected(
+    api: TestClient, steward: dict[str, str], imports: dict[str, dict[str, Any]]
+) -> dict[str, dict[str, Any]]:
+    """Each import projected (201) in order, instruments first, so that positions and cash
+    flows link to them (IDENTITY_LINKS_ENABLED on). Returns the projections by schema code."""
+    bodies: dict[str, dict[str, Any]] = {}
+    for code, imported in imports.items():
+        r = project(api, steward, imported["id"])
+        assert r.status_code == 201, r.text
+        bodies[code] = dict(r.json())
+    return bodies
+
+
+def ladder_run(
+    api: TestClient, reader: dict[str, str], import_ids: list[str]
+) -> tuple[dict[str, str], dict[str, Any]]:
+    """A snapshot of these imports and a maturity-ladder run on it: (the run body, the run)."""
+    snapshot = make_snapshot(api, reader, import_ids)
+    assert snapshot.status_code == 201, snapshot.text
+    ladder = {
+        "dataset_snapshot_id": snapshot.json()["snapshot_id"],
+        "module_version_id": module_version_id(api, reader),
+        "reporting_date": "2026-12-31",
+    }
+    run = start_run(api, reader, ladder).json()
+    assert run["result_sha256"], run
+    return ladder, dict(run)
+
+
+def publish_typed(
+    api: TestClient, db: str, steward: dict[str, str], approver: dict[str, str]
+) -> dict[int, dict[str, Any]]:
+    """INSTRUMENT_TYPED_MATURITY published through the governed path (BREAKING, the core
+    mapping a dependent, approved by a second person). Returns the instrument versions."""
+    approve_proposal(
+        api, steward, approver, db, list(INSTRUMENT_TYPED_MATURITY), INSTRUMENT_TYPED_MATURITY_TITLE
+    )
+    return schema_versions(db)
+
+
+def versions_by_key(db: str, import_id: str) -> dict[str, Any]:
+    """Business key -> (instrument id, maturity_date, interest_rate) of the import's versions."""
+    return {
+        r["business_key"]: r
+        for r in sql(
+            db,
+            "SELECT i.id, i.business_key, v.maturity_date, v.interest_rate"
+            " FROM instrument_version v"
+            " JOIN instrument i ON i.id = v.instrument_id WHERE v.import_job_id = $1",
+            uuid.UUID(import_id),
+        )
+    }
+
+
 @pytest.mark.ws3
-def test_domain_projection_catalogue_and_guards(
-    api: TestClient, db: str, artifact_dir: Path
-) -> None:
-    without_rate_limits(api)
+def test_domain_seed_matrix_frozen_copies_and_typed_defects(db: str) -> None:
     # --- 1. Seed: the WS3 matrix, the frozen copies, the instrument types (BE-14.2) ------------
     grants = sql(
         db,
@@ -351,6 +439,12 @@ def test_domain_projection_catalogue_and_guards(
         shown = error.__cause__ or (None if error.__suppress_context__ else error.__context__)
         assert "SENTINEL" not in str(shown or ""), kind  # what a traceback would print
 
+
+@pytest.mark.ws3
+def test_domain_projection_refusals_and_switch_off_write_nothing(
+    api: TestClient, db: str, artifact_dir: Path
+) -> None:
+    without_rate_limits(api)
     # --- 2. Projection (BE-14.3) -------------------------------------------------------------
     steward, approver = dev_token(api, "data_steward"), dev_token(api, "approver")
     reader = dev_token(api, "risk_analyst")
@@ -374,12 +468,7 @@ def test_domain_projection_catalogue_and_guards(
     denied(db, c, "not_found")
     assert domain_counts(db) == {**dict.fromkeys(DOMAIN_TABLES, 0), "instrument_type": 3}
 
-    instruments, _ = validated_instruments(api, db, steward, approver)
-    imports = {
-        "instrument": instruments,
-        "position": validated_sample(api, db, steward, approver, "position"),
-        "cashflow_event": validated_sample(api, db, steward, approver, "cashflow_event"),
-    }
+    imports = v1_imports(api, db, steward, approver)
     # The switch off: 409, audited, nothing written; reads still work.
     off = Settings(
         ENV="test",
@@ -395,6 +484,14 @@ def test_domain_projection_catalogue_and_guards(
             denied(db, c, "domain_projection_disabled")
         assert switched.get(INSTRUMENTS, headers=reader).json()["total"] == 0
     assert domain_counts(db) == {**dict.fromkeys(DOMAIN_TABLES, 0), "instrument_type": 3}
+
+
+@pytest.mark.ws3
+def test_domain_v1_projection_matches_golden_and_links(api: TestClient, db: str) -> None:
+    without_rate_limits(api)
+    steward, approver, reader = personas(api)
+    imports = v1_imports(api, db, steward, approver)
+    instruments = imports["instrument"]
 
     # BE-31.4 (D-58 §4, ruling Q11): with IDENTITY_LINKS_ENABLED off the projections write no
     # legal entity and no link, and their summaries are unchanged (the golden below).
@@ -462,15 +559,7 @@ def test_domain_projection_catalogue_and_guards(
     assert identity_counts(db) == dict.fromkeys(IDENTITY_TABLES, 0)
     state.settings = links_on
     # A fixture ladder run (v1 instruments + the cash flows) before any link exists.
-    snapshot = make_snapshot(api, reader, [instruments["id"], imports["cashflow_event"]["id"]])
-    assert snapshot.status_code == 201, snapshot.text
-    ladder = {
-        "dataset_snapshot_id": snapshot.json()["snapshot_id"],
-        "module_version_id": module_version_id(api, reader),
-        "reporting_date": "2026-12-31",
-    }
-    v1_run = start_run(api, reader, ladder).json()
-    assert v1_run["result_sha256"], v1_run
+    ladder, v1_run = ladder_run(api, reader, [instruments["id"], imports["cashflow_event"]["id"]])
     # BE-31.3 (a): the run equals the golden captured on the pre-phase code (56dec79) once each
     # row id is its stable key (result_sha256 hashes row ids, which differ per database).
     v1_document = run_document_by_key(db, v1_run["run_id"])
@@ -571,6 +660,24 @@ def test_domain_projection_catalogue_and_guards(
     assert own_links[0]["n"] == 25
     assert identity_counts(db)["domain_identity_link"] == kept["domain_identity_link"] + 25
 
+
+@pytest.mark.ws3
+def test_domain_instrument_catalogue_filters_masking_and_lineage(api: TestClient, db: str) -> None:
+    without_rate_limits(api)
+    steward, approver, reader = personas(api)
+    imports = v1_imports(api, db, steward, approver)
+    instruments = imports["instrument"]
+    projected(api, steward, imports)
+    # As in the v1 projection test: a later import of the same keys adds version 2 of each
+    # instrument, and the same cash flows come from the instruments' own source too.
+    again = upload(api, steward, str(instruments["source_id"]), sample("instrument.csv"))
+    assert again.status_code == 201, again.text
+    second = validate_import(api, steward, again.json()["id"]).json()
+    assert project(api, steward, second["id"]).status_code == 201
+    source_id = str(instruments["source_id"])
+    own_flows = same_source_cash_flows(api, db, steward, approver, source_id)
+    assert project(api, steward, own_flows).status_code == 201
+
     # --- 3. The catalogue (BE-14.4) ----------------------------------------------------------
     page = no_float(api.get(INSTRUMENTS, params={"limit": 200}, headers=reader).text)
     assert page["total"] == 25 and len(page["items"]) == 25
@@ -653,7 +760,16 @@ def test_domain_projection_catalogue_and_guards(
         assert json.loads(chain["raw"])["instrument_id"] == key
         assert chain["notional"] == v["notional"]  # exact text, not rounded
 
-    # --- 5. Phase 31: typed maturity (BE-31.2, BE-31.3) and ambiguous keys (BE-31.4) --------
+
+@pytest.mark.ws3
+def test_domain_typed_maturity_contract_and_projector_v2(api: TestClient, db: str) -> None:
+    without_rate_limits(api)
+    steward, approver, _ = personas(api)
+    validated_instruments(api, db, steward, approver)  # the core mapping: a dependent
+    state = cast(FastAPI, api.app).state
+    links_on = state.settings
+
+    # --- 5. Phase 31: typed maturity (BE-31.2, BE-31.3); typed runs and ambiguous keys next --
     # The frozen contract: its hash is the code's (ruling Q10), and it is instrument v1 with
     # exactly `maturity_date` DATE and `interest_rate` (11,6).
     frozen = [
@@ -670,10 +786,7 @@ def test_domain_projection_catalogue_and_guards(
     # Published only through the governed path: BREAKING with the mapping a dependent, a
     # second person approves; the new version is ACTIVE at max + 1, v1 DEPRECATED, and the
     # seeded v2 DRAFT is untouched.
-    approve_proposal(
-        api, steward, approver, db, list(INSTRUMENT_TYPED_MATURITY), INSTRUMENT_TYPED_MATURITY_TITLE
-    )
-    versions_after = schema_versions(db)
+    versions_after = publish_typed(api, db, steward, approver)
     typed_version = max(versions_before) + 1
     assert {n: v["status"] for n, v in versions_after.items()} == {
         1: "DEPRECATED",
@@ -741,16 +854,7 @@ def test_domain_projection_catalogue_and_guards(
     assert body["summary"]["missing_values"] == {"maturity_date": 1}  # ruling Q9
     assert body["summary"]["type_not_projected"] == {}
     assert body["summary"]["records"] == body["summary"]["rows_projected"] == 2
-    stored = {
-        r["business_key"]: r
-        for r in sql(
-            db,
-            "SELECT i.id, i.business_key, v.maturity_date, v.interest_rate"
-            " FROM instrument_version v"
-            " JOIN instrument i ON i.id = v.instrument_id WHERE v.import_job_id = $1",
-            uuid.UUID(edge["id"]),
-        )
-    }
+    stored = versions_by_key(db, edge["id"])
     assert set(stored) == {"TM-1", "TM-5"}  # TM-2, TM-3 and TM-4 never projected
     assert stored["TM-1"]["maturity_date"] == date(2030, 6, 30)
     assert stored["TM-5"]["maturity_date"] is None  # missing: NULL, and counted above
@@ -764,6 +868,32 @@ def test_domain_projection_catalogue_and_guards(
         "2030-06-30",
         "2.123456",
     )
+    # BE-32.2: the BE-31.3 v2 summary is unchanged by Phase 32 (no term keys on projector 2).
+    assert set(body["summary"]) == {
+        "records", "rows_projected", "new_identities", "attribute_values",
+        "type_not_projected", "unknown_values", "canonical_only_fields", "missing_values",
+    }  # fmt: skip
+
+
+@pytest.mark.ws3
+def test_domain_typed_runs_match_v1_and_keys_turn_ambiguous(api: TestClient, db: str) -> None:
+    without_rate_limits(api)
+    steward, approver, reader = personas(api)
+    imports = v1_imports(api, db, steward, approver)
+    projected(api, steward, imports)  # positions and cash flows linked to the instruments
+    ladder, v1_run = ladder_run(
+        api, reader, [imports["instrument"]["id"], imports["cashflow_event"]["id"]]
+    )
+    # The same cash flows from the instruments' own source (linked), then the typed contract
+    # published and the sample imported under it on a second source.
+    own_flows = same_source_cash_flows(
+        api, db, steward, approver, str(imports["instrument"]["source_id"])
+    )
+    assert project(api, steward, own_flows).status_code == 201
+    publish_typed(api, db, steward, approver)
+    typed = typed_source(api, db, steward)
+    typed_sample = typed_import(api, db, steward, approver, typed, sample("instrument.csv"))
+    assert typed_sample["status"] == "COMPLETED", typed_sample
     # A ladder run over a typed-instrument snapshot (the sample under the typed contract)
     # gives the same result as over the v1 one: the same status and outputs. Its
     # result_sha256 differs by the instrument version ids alone, which D-31 §4 hashes (an
@@ -832,11 +962,29 @@ def test_domain_projection_catalogue_and_guards(
         assert link_pair["linked_now_ambiguous"] == link_pair["linked"] > 0, link_pair
     assert pairs[("POSITION_VERSION", "LEGAL_ENTITY")]["linked_now_ambiguous"] == 0
     assert without_written(reconcile(api, steward)) == without_written(third)
-    # BE-32.2: the BE-31.3 v2 summary is unchanged by Phase 32 (no term keys on projector 2).
-    assert set(body["summary"]) == {
-        "records", "rows_projected", "new_identities", "attribute_values",
-        "type_not_projected", "unknown_values", "canonical_only_fields", "missing_values",
-    }  # fmt: skip
+
+
+@pytest.mark.ws3
+def test_domain_rate_terms_effective_dating_and_fx_status(api: TestClient, db: str) -> None:
+    without_rate_limits(api)
+    steward, approver, reader = personas(api)
+    imports = v1_imports(api, db, steward, approver, ("instrument", "cashflow_event"))
+    projected(api, steward, imports)
+    _, v1_run = ladder_run(
+        api, reader, [imports["instrument"]["id"], imports["cashflow_event"]["id"]]
+    )
+    # The typed-maturity contract published; its edge import (TM-1 typed, no rate terms)
+    # projected on a second source (the sample first: its mapping is made ACTIVE against it).
+    versions_after = publish_typed(api, db, steward, approver)
+    typed_version = max(versions_after)
+    vid = versions_after[typed_version]["id"]
+    typed = typed_source(api, db, steward)
+    typed_import(api, db, steward, approver, typed, sample("instrument.csv"))
+    edge = typed_import(api, db, steward, approver, typed, TYPED_EDGE_CSV)
+    assert project(api, steward, edge["id"]).status_code == 201
+    stored = versions_by_key(db, edge["id"])
+    state = cast(FastAPI, api.app).state
+    links_on = state.settings
 
     # --- 6. Phase 32: rate terms (BE-32.2), effective dating (BE-32.3), FX status (BE-32.4) -
     # The frozen contract (typed maturity + eleven optional terms), matched by hash.
@@ -964,6 +1112,13 @@ def test_domain_projection_catalogue_and_guards(
         assert ctx["consolidation"] == "BLOCKED", read
     # The term rows are append-only too (the seeded 0031 tables are checked in the WS1 test).
     check_terms_append_only(db, ("instrument_term_version",))
+
+
+@pytest.mark.ws3
+def test_domain_append_only_guards_and_downgrade(api: TestClient, db: str) -> None:
+    without_rate_limits(api)
+    steward, approver, _ = personas(api)
+    projections = projected(api, steward, v1_imports(api, db, steward, approver))
     # Part 4 checks 0017's own refusal: the runs, links and terms (each guarded by its own
     # migration's downgrade) go first.
     script(db, _CALC_CLEANUP)

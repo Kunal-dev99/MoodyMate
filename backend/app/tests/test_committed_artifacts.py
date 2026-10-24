@@ -1,16 +1,23 @@
 """Committed artefacts and migration hygiene: the OpenAPI contract (D-05) and the synthetic
-samples match the code that generates them; every migration is additive (D-01) and has a
-downgrade (D-02). No database needed."""
+samples match the code that generates them; the import graph and the file and test-function
+sizes keep their bounds (BE-35.1, BE-35.2, BE-35.5); every migration is additive (D-01) and has
+a downgrade (D-02). No database needed."""
 
+import ast
 import inspect
 import json
 from datetime import date
+from pathlib import Path
 from typing import Any
 
+import pytest
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from openapi_spec_validator import validate
 
+from app.core import interfaces
+from app.core.config import Settings
+from app.main import create_app
 from app.tests.observability_kit import check_triggers_doc
 from scripts import check_audit_allowlist, export_openapi
 from scripts.make_synthetic_samples import OUT, build
@@ -45,6 +52,105 @@ def test_committed_openapi_and_samples_are_current() -> None:
     ]
     # BE-34.7: docs/ops/TRIGGERS.md lists every trigger a migration creates, by migration.
     check_triggers_doc()
+
+
+def test_import_graph_and_size_bounds(monkeypatch: pytest.MonkeyPatch) -> None:
+    """BE-35.1 / BE-35.2 / BE-35.5 (D-60 §2): the import graph, file and test-function sizes.
+    Its own function (D-60 lifts the cap), so a size failure never masks the contract and
+    sample drift checks above."""
+    # BE-35.1 (Q3 ruling): the core -> governance port is checked when the app is built, so
+    # an unbound port fails the startup, never a later request.
+    monkeypatch.setattr(interfaces, "_bound", [])
+    with pytest.raises(RuntimeError, match="no governance implementation is bound"):
+        create_app(Settings(ENV="test", DATABASE_URL=NO_DATABASE))
+    monkeypatch.undo()
+    assert isinstance(interfaces.governance(), interfaces.Governance)
+    _maintainability_bounds()
+
+
+APP = Path(__file__).resolve().parents[1]  # backend/app
+# Never connected to: create_app builds its engine lazily.
+NO_DATABASE = "postgresql+asyncpg://unused:unused@localhost:9/unused"
+# BE-35.1: the two targeted cycles (calculations <-> orchestration, core <-> governance).
+CYCLE_FREE = ("calculations", "orchestration", "core", "governance")
+SPLIT_PACKAGES = ("calculations", "ingestion")  # BE-35.2: no file over 800 lines
+MAX_SPLIT_FILE_LINES = 800
+MAX_TEST_FUNCTION_LINES = 300  # D-60 §2 (BE-35.5)
+
+
+def _imported_packages(path: Path) -> set[str]:
+    """The `app.<package>` names a module imports anywhere in its body (ast): top-level,
+    function-level and TYPE_CHECKING imports alike, absolute or relative."""
+    parts = path.relative_to(APP).with_suffix("").parts
+    found: set[str] = set()
+    for node in ast.walk(ast.parse(path.read_text())):
+        if isinstance(node, ast.Import):
+            names = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.level:
+            package = ["app", *parts[: len(parts) - node.level]]
+            names = [".".join([*package, *([node.module] if node.module else [])])]
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            names = [node.module]
+        else:
+            continue
+        found |= {n.split(".")[1] for n in names if n.startswith("app.") and n.count(".") >= 1}
+    return found
+
+
+def import_graph() -> dict[str, set[str]]:
+    """`app/` package -> the other `app` packages its modules import (tests excluded)."""
+    graph: dict[str, set[str]] = {}
+    for path in sorted(APP.rglob("*.py")):
+        rel = path.relative_to(APP).parts
+        if len(rel) < 2 or rel[0] == "tests":
+            continue
+        graph.setdefault(rel[0], set()).update(_imported_packages(path) - {rel[0]})
+    return graph
+
+
+def _reachable(graph: dict[str, set[str]], start: str) -> set[str]:
+    seen: set[str] = set()
+    todo = list(graph.get(start, ()))
+    while todo:
+        node = todo.pop()
+        if node not in seen:
+            seen.add(node)
+            todo.extend(graph.get(node, ()))
+    return seen
+
+
+def _maintainability_bounds() -> None:
+    graph = import_graph()
+    # BE-35.1: no path leads from one of the four packages to another and back, through any
+    # package; and app.core imports only app.db.
+    reach = {package: _reachable(graph, package) for package in CYCLE_FREE}
+    cycles = sorted(
+        f"{a} <-> {b}"
+        for a in CYCLE_FREE
+        for b in CYCLE_FREE
+        if a < b and b in reach[a] and a in reach[b]
+    )
+    assert cycles == [], cycles
+    assert graph["core"] <= {"db"}, f"app.core imports {sorted(graph['core'])}"
+    # BE-35.2: the split packages keep every file at or under 800 lines.
+    oversized = {
+        str(path.relative_to(APP)): n
+        for package in SPLIT_PACKAGES
+        for path in sorted((APP / package).rglob("*.py"))
+        if (n := len(path.read_text().splitlines())) > MAX_SPLIT_FILE_LINES
+    }
+    assert oversized == {}, oversized
+    # BE-35.5 (D-60 §2): no test function is over 300 lines.
+    long_tests = {
+        f"{path.name}::{node.name}": node.end_lineno - node.lineno + 1
+        for path in sorted((APP / "tests").glob("test_*.py"))
+        for node in ast.parse(path.read_text()).body
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+        and node.name.startswith("test")
+        and node.end_lineno is not None
+        and node.end_lineno - node.lineno + 1 > MAX_TEST_FUNCTION_LINES
+    }
+    assert long_tests == {}, long_tests
 
 
 BASE_OPENAPI = export_openapi.OUT.with_name("openapi.base.json")

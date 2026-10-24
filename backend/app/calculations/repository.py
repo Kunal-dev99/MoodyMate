@@ -30,7 +30,6 @@ from app.calculations.models import (
     LcrResult,
     LiquidityGapResult,
     ScenarioContribution,
-    ScenarioShockApplication,
 )
 from app.core.locks import advisory_xact_lock
 from app.db.base import Base
@@ -431,6 +430,3 @@ class CalculationRepository(_Writes[CalculationRun]):
         total = await self.session.scalar(select(func.count()).select_from(query.subquery()))
         result = await self.session.execute(query.order_by(sc.sequence).limit(limit).offset(offset))
         return list(result.scalars()), int(total or 0)
-
-    async def shock_applications(self, run_id: uuid.UUID) -> list[ScenarioShockApplication]:
-        return await self._of_run(ScenarioShockApplication, run_id)

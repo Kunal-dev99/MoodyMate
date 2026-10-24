@@ -308,10 +308,6 @@ class RunExecutor:
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
-    @property
-    def background(self) -> frozenset["asyncio.Task[None]"]:
-        return frozenset(self._tasks)
-
     async def aclose(self, grace: int = SHUTDOWN_GRACE_SECONDS) -> None:
         """Wait up to `grace` seconds for background runs, cancel the rest (each ends FAILED
         with ENGINE_ERROR as it unwinds), then stop every worker."""

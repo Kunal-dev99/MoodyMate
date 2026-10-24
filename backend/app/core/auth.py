@@ -22,12 +22,11 @@ from starlette.concurrency import run_in_threadpool
 from starlette.routing import BaseRoute, Host, Mount
 
 from app.core.errors import ApiError
+from app.core.interfaces import AccountDenied, audit_denied_by, governance
 from app.core.principal import Principal
 from app.core.routes import ServedRoute, route_template, served_route, served_routes
 from app.core.tokens import InvalidToken, ProviderUnavailable, TokenExpired
 from app.db.session import Database, get_session
-from app.governance.constants import AuditOutcome, ClassificationCode
-from app.governance.service import AccountDenied, IdentityService, audit, audit_by
 
 # Deliberately unauthenticated endpoints. Adding to this set is a security decision
 # (the health probes are recorded in D-62 §1).
@@ -98,7 +97,8 @@ async def get_principal(
         ) from exc
     settings = request.app.state.settings
     try:
-        principal = await IdentityService(session).resolve_principal(
+        principal = await governance().resolve_principal(
+            session,
             identity,
             can_self_provision=settings.can_self_provision,
             masking_enabled=settings.MASKING_ENABLED,
@@ -106,7 +106,7 @@ async def get_principal(
     except AccountDenied as exc:
         # BE-3.2: a known but disabled/suspended account leaves a trace on every attempt.
         async with _audit_session(request, session) as audit_session:
-            audit(
+            governance().audit_denied(
                 audit_session,
                 tenant_id=exc.tenant_id,
                 actor=f"user:{exc.user_id}",
@@ -114,9 +114,7 @@ async def get_principal(
                 action="auth.access",
                 resource_type="user",
                 resource_id=str(exc.user_id),
-                outcome=AuditOutcome.DENIED,
                 details={"reason": exc.code},
-                details_classification={"reason": ClassificationCode.PUBLIC},
             )
         raise
     request.state.principal = principal
@@ -158,15 +156,13 @@ def require_permission(permission: str) -> PrincipalDependency:
             # else pending in the request's session is committed by a refusal.
             endpoint = route_template(request)
             async with _audit_session(request, session) as audit_session:
-                audit_by(
+                audit_denied_by(
                     audit_session,
                     principal,
                     f"{request.method} {endpoint}",
                     "endpoint",
-                    outcome=AuditOutcome.DENIED,
-                    resource_id=endpoint,
-                    details={"required_permission": permission},
-                    details_classification={"required_permission": ClassificationCode.PUBLIC},
+                    endpoint,
+                    {"required_permission": permission},
                 )
             raise ApiError(
                 403,

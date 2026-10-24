@@ -15,6 +15,10 @@ import {
   type Editor,
   type RuleDetail,
 } from '@/components/rules/rules'
+import { SERVED_LIMITS, servedWith } from '@/lib/__tests__/served-limits'
+
+// FE-35.3: the bounds are the ones GET config/limits serves, never a constant of rules.ts.
+const LIMITS = SERVED_LIMITS.rule
 
 // The OpenAPI document the types are generated from: enums are tested against it (D-23).
 const openapi = JSON.parse(readFileSync(fileURLToPath(new URL('../../../../../backend/openapi.json', import.meta.url)), 'utf8'))
@@ -60,10 +64,10 @@ describe('decimal text is compared as text, never parsed', () => {
 
   it('a DECIMAL value goes to the patch as the exact text typed, checked by text against min, max and scale', () => {
     const e = editorFor(decimal, { value: '0.10' })
-    expect(editorProblems({ ...e, value: '0.125' } as Editor)).toEqual(['Value: at most 2 decimal places.'])
-    expect(editorProblems({ ...e, value: '1.01' } as Editor)).toEqual(['Value: at most 1.'])
-    expect(editorProblems({ ...e, value: '1e-2' } as Editor)).toEqual(['Value: must be decimal text, e.g. 0.10.'])
-    const body = proposalBody({ ...e, value: '0.50' } as Editor, { value: '0.10' }, 'Raise the run-off')
+    expect(editorProblems({ ...e, value: '0.125' } as Editor, LIMITS)).toEqual(['Value: at most 2 decimal places.'])
+    expect(editorProblems({ ...e, value: '1.01' } as Editor, LIMITS)).toEqual(['Value: at most 1.'])
+    expect(editorProblems({ ...e, value: '1e-2' } as Editor, LIMITS)).toEqual(['Value: must be decimal text, e.g. 0.10.'])
+    const body = proposalBody({ ...e, value: '0.50' } as Editor, { value: '0.10' }, 'Raise the run-off', LIMITS)
     expect(body?.parameters_patch).toEqual({ value: '0.50' })
     expect(typeof body?.parameters_patch.value).toBe('string')
   })
@@ -76,14 +80,14 @@ describe('DAY_BUCKETS editor', () => {
   it('is filled from the ACTIVE version, the last bucket open', () => {
     expect(e.buckets).toHaveLength(8)
     expect(e.buckets[7]).toEqual({ code: 'B08', lower: '730', upper: '' })
-    expect(editorProblems(e)).toEqual([])
+    expect(editorProblems(e, LIMITS)).toEqual([])
   })
 
   it('keeps buckets contiguous: a new upper bound moves the next lower bound', () => {
     const moved = editBuckets(e.buckets, { type: 'upper', index: 1, value: '14' })
     expect(moved[1]).toEqual({ code: 'B02', lower: '1', upper: '14' })
     expect(moved[2].lower).toBe('14')
-    const body = proposalBody({ ...e, buckets: moved }, SEEDED, 'Two-week second bucket')
+    const body = proposalBody({ ...e, buckets: moved }, SEEDED, 'Two-week second bucket', LIMITS)
     expect(Object.keys(body!.parameters_patch)).toEqual(['buckets'])
     const sent = body!.parameters_patch.buckets as (typeof SEEDED)['buckets']
     expect(sent[1]).toEqual({ code: 'B02', label: '(1,14]', lower_exclusive: 1, upper_inclusive: 14 })
@@ -91,19 +95,33 @@ describe('DAY_BUCKETS editor', () => {
   })
 
   it('flags what BE-16.1 refuses: bounds out of order, duplicate codes, a missing bound', () => {
-    expect(editorProblems({ ...e, buckets: editBuckets(e.buckets, { type: 'upper', index: 1, value: '40' }) })).toContain(
+    expect(editorProblems({ ...e, buckets: editBuckets(e.buckets, { type: 'upper', index: 1, value: '40' }) }, LIMITS)).toContain(
       'Bucket 3: the upper bound must be greater than the lower bound.',
     )
-    expect(editorProblems({ ...e, buckets: editBuckets(e.buckets, { type: 'code', index: 1, value: 'B01' }) })).toContain('Bucket 2: the code B01 is used twice.')
+    expect(editorProblems({ ...e, buckets: editBuckets(e.buckets, { type: 'code', index: 1, value: 'B01' }) }, LIMITS)).toContain('Bucket 2: the code B01 is used twice.')
     const added = editBuckets(e.buckets, { type: 'add' })
     expect(added).toHaveLength(9)
     expect(added[8]).toEqual({ code: 'B08', lower: '', upper: '' })
-    expect(editorProblems({ ...e, buckets: added })).toContain('Bucket 8 upper bound: a whole number is required.')
+    expect(editorProblems({ ...e, buckets: added }, LIMITS)).toContain('Bucket 8 upper bound: a whole number is required.')
+  })
+
+  it('checks against the served bounds (FE-35.3): a deployment serving lower ones refuses what the defaults allow', () => {
+    expect(editorProblems(e, LIMITS)).toEqual([])
+    const lower = servedWith({ rule: { max_buckets: 7, max_days: 700, max_bucket_code_length: 2 } }).rule
+    const problems = editorProblems(e, lower)
+    expect(problems).toContain('At most 7 buckets.')
+    expect(problems).toContain('Bucket 7 upper bound: at most 700.')
+    expect(problems).toContain('Bucket 1: the code is letters, digits and _ only, at most 2.')
+    expect(proposalBody({ ...e, buckets: editBuckets(e.buckets, { type: 'upper', index: 1, value: '14' }) }, SEEDED, 'Two-week second bucket', lower)).toBeNull()
+    // A DECIMAL without its own scale takes the served max_decimal_scale.
+    const open = editorFor({ parameter_schema: { kind: 'DECIMAL', min: '0', max: '1' }, vocabulary: [] }, { value: '0.10' })
+    expect(editorProblems({ ...open, value: '0.123' } as Editor, servedWith({ rule: { max_decimal_scale: 2 } }).rule)).toEqual(['Value: at most 2 decimal places.'])
+    expect(editorProblems({ ...open, value: '0.123' } as Editor, LIMITS)).toEqual([])
   })
 
   it('refuses no change and a missing summary before the server does', () => {
-    expect(proposalBody(e, SEEDED, 'x')).toBeNull()
-    expect(proposalProblems(e, SEEDED, '')).toEqual([
+    expect(proposalBody(e, SEEDED, 'x', LIMITS)).toBeNull()
+    expect(proposalProblems(e, SEEDED, '', LIMITS)).toEqual([
       'Nothing changed from the ACTIVE version (the server refuses it: no_change).',
       'A change summary is required.',
     ])

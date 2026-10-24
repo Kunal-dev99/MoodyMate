@@ -11,9 +11,9 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { CommentLimitState, useCommentMax, type CommentLimit } from './CommentLimit'
 import { ScenarioRefusalNotice } from './ScenarioRefusalNotice'
 import {
-  COMMENT_MAX,
   acknowledged,
   acknowledgement,
   canAdapt,
@@ -78,7 +78,19 @@ function AiAcknowledgement({
 }
 
 /** "Confirm for exploration" and "Submit for approval": the author's own steps, each in a dialog. */
-function AuthorStep({ scenarioId, version, step, onDone }: { scenarioId: string; version: ScenarioVersion; step: 'confirm' | 'submit'; onDone: (verb: StepVerb, v: ScenarioVersion) => void }) {
+function AuthorStep({
+  scenarioId,
+  version,
+  step,
+  limit,
+  onDone,
+}: {
+  scenarioId: string
+  version: ScenarioVersion
+  step: 'confirm' | 'submit'
+  limit: CommentLimit
+  onDone: (verb: StepVerb, v: ScenarioVersion) => void
+}) {
   const [open, setOpen] = useState(false)
   const [comment, setComment] = useState('')
   const [aiOrigin, setAiOrigin] = useState(false)
@@ -86,8 +98,9 @@ function AuthorStep({ scenarioId, version, step, onDone }: { scenarioId: string;
   const [busy, setBusy] = useState(false)
   const [refusal, setRefusal] = useState<Refusal | null>(null)
   const confirm = step === 'confirm'
-  const problem = confirm ? null : commentProblem(comment, false)
-  const ready = !problem && acknowledged(version, aiOrigin, defaults)
+  const max = limit.max
+  const problem = confirm || max === null ? null : commentProblem(comment, { required: false, max })
+  const ready = (confirm || max !== null) && !problem && acknowledged(version, aiOrigin, defaults)
 
   const change = (next: boolean) => {
     if (busy) return
@@ -147,13 +160,14 @@ function AuthorStep({ scenarioId, version, step, onDone }: { scenarioId: string;
             <Textarea
               id={`submit-comment-${version.scenario_version_id}`}
               value={comment}
-              maxLength={COMMENT_MAX}
+              maxLength={max ?? undefined}
               disabled={busy}
               onChange={(e) => setComment(e.target.value)}
               placeholder="What the approver should check"
               data-testid="submit-comment"
             />
             {problem && <p className="text-xs text-destructive">{problem}</p>}
+            <CommentLimitState limit={limit} />
           </div>
         )}
         <AiAcknowledgement version={version} aiOrigin={aiOrigin} defaults={defaults} onAiOrigin={setAiOrigin} onDefaults={setDefaults} />
@@ -182,14 +196,28 @@ const DECISION_TEXT: Record<Decision, { title: string; action: string; busy: str
 }
 
 /** Maker-checker promotion with its required comment (D-44 §6). The server decides and audits. */
-function DecisionDialog({ scenarioId, version, decision, onDone }: { scenarioId: string; version: ScenarioVersion; decision: Decision; onDone: (verb: StepVerb, v: ScenarioVersion) => void }) {
+function DecisionDialog({
+  scenarioId,
+  version,
+  decision,
+  limit,
+  onDone,
+}: {
+  scenarioId: string
+  version: ScenarioVersion
+  decision: Decision
+  limit: CommentLimit
+  onDone: (verb: StepVerb, v: ScenarioVersion) => void
+}) {
   const [open, setOpen] = useState(false)
   const [comment, setComment] = useState('')
   const [touched, setTouched] = useState(false)
   const [busy, setBusy] = useState(false)
   const [refusal, setRefusal] = useState<Refusal | null>(null)
   const text = DECISION_TEXT[decision]
-  const problem = commentProblem(comment)
+  const max = limit.max
+  const problem = max === null ? null : commentProblem(comment, { max })
+  const blocked = max === null || !!problem
 
   const change = (next: boolean) => {
     if (busy) return
@@ -202,7 +230,7 @@ function DecisionDialog({ scenarioId, version, decision, onDone }: { scenarioId:
   }
 
   async function send() {
-    const body = decisionBody(decision, comment)
+    const body = max === null ? null : decisionBody(decision, comment, max)
     if (!body || busy) return
     setBusy(true)
     setRefusal(null)
@@ -240,7 +268,7 @@ function DecisionDialog({ scenarioId, version, decision, onDone }: { scenarioId:
           <Textarea
             id={`decision-comment-${version.scenario_version_id}`}
             value={comment}
-            maxLength={COMMENT_MAX}
+            maxLength={max ?? undefined}
             disabled={busy}
             onChange={(e) => setComment(e.target.value)}
             onBlur={() => setTouched(true)}
@@ -252,16 +280,17 @@ function DecisionDialog({ scenarioId, version, decision, onDone }: { scenarioId:
               {touched && problem}
             </span>
             <span className="font-mono text-muted-foreground" data-testid="decision-comment-count">
-              {comment.trim().length}/{COMMENT_MAX}
+              {comment.trim().length}/{max ?? '…'}
             </span>
           </div>
+          <CommentLimitState limit={limit} />
         </div>
         {refusal && <ScenarioRefusalNotice refusal={refusal} />}
         <DialogFooter>
           <Button variant="outline" onClick={() => change(false)} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={send} disabled={!!problem || busy} variant={decision === 'REJECT' ? 'destructive' : 'default'} data-testid="decision-confirm">
+          <Button onClick={send} disabled={blocked || busy} variant={decision === 'REJECT' ? 'destructive' : 'default'} data-testid="decision-confirm">
             {busy ? text.busy : text.action}
           </Button>
         </DialogFooter>
@@ -275,6 +304,7 @@ function DecisionDialog({ scenarioId, version, decision, onDone }: { scenarioId:
  * approval" show to the author only; Approve and Reject to an approver who is not the author.
  * Run actions live in ScenarioRunPanel (FE-25.1), not here. Every gate is cosmetic: the server checks each step
  * (403, 409 `not_author` / `self_approval` / `invalid_status` / `scenarios_disabled`, D-04).
+ * FE-35.3 (Q20): the submit and decision comments are bounded by the served `max_comment_length`.
  */
 export function VersionActions({
   scenarioId,
@@ -289,6 +319,9 @@ export function VersionActions({
 }) {
   const { me, has } = useCurrentSession()
   const gate = decisionGate(version, me, has)
+  const submit = canSubmit(version, me, has)
+  // Read only where a comment dialog shows (submit, approve, reject); GET config/limits is read once per page life.
+  const limit = useCommentMax(enabled && (submit || gate === 'allowed'))
   return (
     <div className="space-y-2" data-testid="version-actions" data-gate={gate}>
       {enabled && (
@@ -301,12 +334,12 @@ export function VersionActions({
               </Link>
             </Button>
           )}
-          {canConfirm(version, me, has) && <AuthorStep scenarioId={scenarioId} version={version} step="confirm" onDone={onDone} />}
-          {canSubmit(version, me, has) && <AuthorStep scenarioId={scenarioId} version={version} step="submit" onDone={onDone} />}
+          {canConfirm(version, me, has) && <AuthorStep scenarioId={scenarioId} version={version} step="confirm" limit={limit} onDone={onDone} />}
+          {submit && <AuthorStep scenarioId={scenarioId} version={version} step="submit" limit={limit} onDone={onDone} />}
           {gate === 'allowed' && (
             <>
-              <DecisionDialog scenarioId={scenarioId} version={version} decision="APPROVE" onDone={onDone} />
-              <DecisionDialog scenarioId={scenarioId} version={version} decision="REJECT" onDone={onDone} />
+              <DecisionDialog scenarioId={scenarioId} version={version} decision="APPROVE" limit={limit} onDone={onDone} />
+              <DecisionDialog scenarioId={scenarioId} version={version} decision="REJECT" limit={limit} onDone={onDone} />
             </>
           )}
           {canAdapt(has) && (

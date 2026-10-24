@@ -3780,7 +3780,7 @@ records the hashing policy, D-53…D-55 the Phase 28 policies, D-56…D-62 the l
 | 32 | D2 rate terms, effective dating, lifecycle, currency/FX reference (§8) | 0031 | `INSTRUMENT_TERMS_PROJECTION_ENABLED`, `NEXT_PUBLIC_INSTRUMENT_TERMS_UI` |
 | 33 | E background execution, data scale (§9) | none | `CALC_EXECUTION_MODE=inline`, `ARTIFACT_STORE_KIND=filesystem` |
 | 34 | G deployment, observability (§11) | none | `METRICS_ENABLED` (default off), `ACCESS_LOG_ENABLED` |
-| 35 | F maintainability + G test items (§10, §11) | none | n/a (refactor; contracts unchanged) |
+| 35 | F maintainability + G test items (§10, §11) | none | ~~n/a (refactor; contracts unchanged)~~ `NEXT_PUBLIC_REAUTH_UI`, `NEXT_PUBLIC_ROUTE_GATES_UI` (FE-35.4, FE-35.5; `off` restores Phase 34). The refactors, `GET config/limits` (additive) and the demo removal (reverted from git) have no switch. *(2026-10-24, Phase 35 Q21, auto-resolved)* |
 
 **Dependencies.** 28 first. 29 and 30 in parallel after 28. 31 after 28, then 32 after 31.
 33 after 29. 34 after 33. 35 last.
@@ -4692,26 +4692,77 @@ Goal: no targeted cycles, smaller services and pages, limits served by the API, 
 path, consistent UI gates, the Agent demo retired, and the test suite restructured under D-60.
 API contracts and financial results do not change.
 
-- [ ] **BE-35.1** Break the calculations ↔ orchestration and core ↔ governance cycles. For
+- [x] **BE-35.1** Break the calculations ↔ orchestration and core ↔ governance cycles. For
   example, `core/auth.py:28-29` imports governance; that moves to core interfaces.
-  - *Done-when:* the committed-artifacts fold builds the `app/` import graph (ast) and finds no
-    cycle among the four packages, and `app.core` imports only `app.db`.
-- [ ] **BE-35.2** Split `calculations/service.py` (snapshots, runs, execution, results,
+  - *Done-when:* ~~the committed-artifacts fold builds the `app/` import graph (ast) and finds no
+    cycle among the four packages, and `app.core` imports only `app.db`.~~ reworded 2026-10-24
+    (Phase 35 Q10, auto-resolved; the check is stricter than the old wording): the
+    committed-artifacts fold builds the `app/` import graph (ast) and no import path
+    (module-level, function-level or TYPE_CHECKING, through any package) joins two of the four
+    packages in both directions, and `app.core` imports only `app.db`.
+  - *Evidence (2026-10-24, architect-verified):* `test_committed_artifacts.py:122-134`
+    (`_maintainability_bounds`, called from `test_import_graph_and_size_bounds` :57-68): the
+    graph counts every `Import`/`ImportFrom` anywhere in a module body (:81-97), reachability
+    goes through any package (:111-119), `assert cycles == []` (:133) and
+    `assert graph["core"] <= {"db"}` (:134). In the fix round's final run that function fails
+    only at :153 (the BE-35.5 size bound), so :133 and :134 passed; the engineer's run of the
+    same fold: `cycles among the four: []`, `app.core imports: ['db']`. Architect grep: no
+    `app.core` module imports anything outside `app.core`/`app.db` (the HASH_SITES module
+    names in `core/canonical.py:176-277` are strings). Implementation: the port
+    `app/core/interfaces.py:81-101` (unbound raises `RuntimeError`), bound at
+    `governance/service.py:1083`, checked at startup `main.py:100-103` (Q3; asserted
+    `test_committed_artifacts.py:61-67`); the shock contract in `calculations/constants.py`
+    (:210 on), re-exported by `orchestration/constants.py:14-21`. The containing test
+    function stays red until BE-35.5 lands.
+- [x] **BE-35.2** Split `calculations/service.py` (snapshots, runs, execution, results,
   queries) and `ingestion/service.py` (contracts, uploads, profiling, validation, manifests).
   `service.py` re-exports for one release.
   - *Done-when:*
     - no file in either package is over 800 lines;
     - `export_openapi --check` shows no diff;
     - every golden and re-run hash is unchanged.
-- [ ] **BE-35.3** `GET config/limits` (`authenticated`) serves the rule, scenario and upload
+  - *Evidence (2026-10-24, architect-verified):* `test_committed_artifacts.py:135-142` asserts
+    no `.py` file in either package over 800 lines and passed in the fix round's final run
+    (its failure is at :153); engineer: largest `(792, 'calculations/router.py')`,
+    `(790, 'ingestion/router.py')`. `python -m scripts.export_openapi --check` →
+    `openapi.json is up to date (exit=0)`; `test_committed_openapi_and_samples_are_current`
+    PASSED (fix round). Golden and re-run hashes: `test_calculations` (golden pack loop and
+    re-run hashes, :277-350, :606), `test_validation`, `test_profiling` passed in the engineer's
+    targeted run (`2 failed, 27 passed`, both failures elsewhere); `test_domain` and
+    `test_credit` passed in the fix round's baseline on the split code (`2 failed, 8 passed`,
+    failures elsewhere); no golden file was edited. Both `service.py` files are re-export
+    modules with an explicit `__all__` (`calculations/service.py:59-163`,
+    `ingestion/service.py:25-155`); the AST move check reports 115/149/43 original definitions
+    with none missing and one deliberate change (`QuarantineService.imports` is `ImportReads`).
+    Removing the re-exports is in Deferred (Q4).
+- [x] **BE-35.3** `GET config/limits` (`authenticated`) serves the rule, scenario and upload
   limits from the validators' own objects.
   - *Done-when:*
     - the WS1 matrix gives 200 for every role and 401 without a token;
     - the values are the validator objects (an identity check);
     - lowering `IMPORT_MAX_ROWS` changes the response.
-- [ ] **BE-35.4** Remove dead backend helpers, each one confirmed unused (dynamic use
+  - *Evidence (2026-10-24, architect-verified):* `test_ws1_verification.py:424-429`: the
+    matrix row has permission `authenticated` and 200 for every role (printed:
+    `GET /api/v1/config/limits  authenticated  200 200 200 200 200`); the no-token loop
+    (:179-182) asserts 401 on every protected route. `limits_kit.py:75-143`: the route's own
+    return value is found through `served_routes` (:53-61, Q1); the services return the
+    constants' bounds objects (`is`, :86-87); every rule, scenario and upload value `is` the
+    object its validator or setting reads, and the field sets equal the bounds dataclasses
+    (:89-129, Q9); the bucket-code bound is the validator's at its boundary (:103-104); an app
+    with `IMPORT_MAX_ROWS=7` serves 7 with nothing else changed (:131-143). Run after the
+    `_max_length` fix: `1 passed, 1 warning in 19.22s`. Implementation:
+    `api/v1/config.py:91-108` (included at `api/v1/router.py:37`), `RULE_PARAMETER_LIMITS`
+    (`rules/constants.py:337`), `SCENARIO_BOUNDS` (`orchestration/constants.py:213`),
+    `limits_from` (`ingestion/imports.py:99`). Small-int caching limits what `is` alone shows;
+    the container identity, field-set and boundary checks cover that (report LOW 1).
+- [x] **BE-35.4** Remove dead backend helpers, each one confirmed unused (dynamic use
   included).
   - *Done-when:* the list and its grep evidence are in the report, and the suite is green.
+  - *Ticked 2026-10-24 (coordinator); note at build time:* the list of nine removals, their grep evidence and the
+    "kept" table (Q6) are in `docs/evidence/phase-35/REPORT.md`; an architect grep finds no
+    remaining reference to any of the nine. **Was missing at build time:** a green suite. The full backend suite
+    has not run, and `test_import_graph_and_size_bounds` fails until BE-35.5 lands.
+    **Closed:** the full suite on the merged tree is green: `86 passed, 1 warning in 406.14s`, `test_import_graph_and_size_bounds` included.
 - [ ] **BE-35.5** D-60: split the oversized test functions by calculation boundaries,
   permissions, lifecycle and errors. Parametrise only for isolated cases.
   - *Done-when:*
@@ -4719,7 +4770,28 @@ API contracts and financial results do not change.
     - no test function is over 300 lines (ast check);
     - the suite runs within D-60's budget (`--durations`);
     - an old-hunk → new-test mapping is in the report (architect spot-check).
-- [ ] **BE-35.6** OIDC/JWKS tests (`test_auth.py`) using `httpx.MockTransport` and no network:
+  - *Not yet ticked (2026-10-24):* the ast check exists (`test_committed_artifacts.py:143-153`)
+    and fails: `test_calculations.py::test_registry_snapshot_run_and_maturity_ladder` 1379,
+    `test_domain.py::test_domain_projection_catalogue_and_guards` 763,
+    `test_credit.py::test_credit_domain_projection_snapshots_reads_and_guards` 710,
+    `test_rules.py::test_governed_rule_changes_and_pinning` 499,
+    `test_ws1_verification.py::test_another_tenant_sees_and_changes_nothing_here` 328.
+    **Missing:** the splits, the final `--collect-only` count (59 before the splits), a
+    `--durations` run of the full suite within 180 s, and the old-hunk → new-test mapping. Per
+    Q8 this is a separate test-writer run (or runs, each owning distinct files) inside Phase
+    35, before the PR merges.
+  - *Status 2026-10-24 (coordinator), still not ticked:* three of the four Done-when items hold.
+    - The five functions are split into 32 focused tests, and the longest is 235 lines
+      (`test_import_graph_and_size_bounds` passes).
+    - `--collect-only`: `86 tests collected` (59 before the splits).
+    - The old-hunk → new-test mapping is in `docs/evidence/phase-35/REPORT.md`, and an ast
+      comparison shows every old assertion still present.
+    - **Not met:** the 180 s budget. The full suite on the merged tree gives
+      `86 passed, 1 warning in 406.14s` locally (CI's figure is in the PR run). The splits cost
+      time because each test now builds its own state, and the `db` fixture cleans before and
+      after every test. Meeting the budget is the deferred item "parallel backend tests"
+      below; no test was weakened or folded back to save time.
+- [x] **BE-35.6** OIDC/JWKS tests (`test_auth.py`) using `httpx.MockTransport` and no network:
   - key rotation (an unknown `kid` refetches once; a removed key is refused);
   - `alg: none` and HS256-with-the-public-key are refused;
   - `exp`/`nbf` leeway;
@@ -4728,39 +4800,121 @@ API contracts and financial results do not change.
   - JWKS down gives `ProviderUnavailable`;
   - malformed tokens.
   - *Done-when:* the focused functions pass.
-- [ ] **BE-35.7** Security tests:
+  - *Evidence (2026-10-24, architect-verified):* `test_auth.py`: `MockIdp` on
+    `httpx.MockTransport` through `JwksKeys`' `fetch`/`clock` seams (:283-334);
+    `test_jwks_key_rotation_refetches_once_and_refuses_a_removed_key` (:357; one refetch,
+    removed key `InvalidToken` after one refetch, forged kids fetch nothing),
+    `test_oidc_refuses_alg_none_and_hs256_signed_with_the_public_key` (:400),
+    `test_oidc_exp_nbf_leeway_issuer_and_audience` (:429; 30 s either way, issuer, audience,
+    missing claims), `test_jwks_token_without_kid` (:461),
+    `test_jwks_down_is_provider_unavailable` (:481; 503 `auth_provider_unavailable`
+    retryable, `urlopen` replaced so no socket opens), `test_oidc_malformed_tokens_are_invalid`
+    (:557). Runs: test writer `10 passed, 1 warning in 14.73s`; fix round `PASSED
+    app/tests/test_auth.py` (all 10 functions).
+- [x] **BE-35.7** Security tests:
   - upload bombs and malformed archives;
   - formula-like cells stored as text;
-  - CRLF in `Idempotency-Key` or the correlation id refused;
+  - ~~CRLF in `Idempotency-Key` or the correlation id refused;~~ reworded 2026-10-24 (Phase 35
+    Q11, auto-resolved; BE-1.4, D-62 §6): CRLF in `Idempotency-Key` refused with 422; an unsafe
+    correlation id is never accepted (replaced by a generated id, BE-1.4);
   - rate limits;
   - tenant and authorization boundaries not already covered by WS1.
   - *Done-when:* the functions are listed in the report and pass.
-- [ ] **FE-35.1** Move `approvalVariant`, `memberLabel`, `scenarioHref`, `runHref` and
+  - *Evidence (2026-10-24, architect-verified):* `test_security.py`:
+    `test_malformed_archives_are_refused_with_an_upload_refusal` (:59),
+    `test_formula_like_cells_are_stored_as_text` (:94),
+    `test_crlf_in_idempotency_key_or_correlation_id_is_refused` (:112; six unsafe keys give 422
+    with nothing written, an unsafe correlation id is replaced by a fresh UUID and reaches no
+    audit row, and the Q2 `fullmatch` folds for rule codes, S3 settings and artifact refs).
+    Held by existing functions, listed in the report: upload bombs
+    (`test_adapters.py::test_bad_files_and_limits_are_refused_with_their_own_code` :63), rate
+    limits (`test_auth.py::test_missing_permission_is_403_with_a_denied_audit_event` via
+    :185-224), tenant boundaries (`test_ws1_verification.py:436`, `test_quarantine.py:121-136`).
+    Fix round: all three `test_security` functions PASSED. Implementation:
+    `core/correlation.py:36` (`fullmatch`). The fold does not send the exact trailing-LF case
+    `"c\n"` and does not check log records (report LOW 5).
+- [x] **FE-35.1** Move `approvalVariant`, `memberLabel`, `scenarioHref`, `runHref` and
   `hasResults` into `src/lib/runs.ts`, which breaks the calculations ↔ advanced cycle.
+  *(2026-10-24, Phase 35 Q12, auto-resolved:)* `scenarioHref` and `explorerHref` are defined in
+  the leaf `src/lib/scenario-links.ts` and re-exported by `src/lib/runs.ts`; the FE-24.2
+  hygiene guard (`advanced.test.ts`, `/runs\b`) is unchanged.
   - *Done-when:* a vitest import-graph check finds no cycle.
-- [ ] **FE-35.2** Split the mapping workbench (`ingestion/mappings/[mappingId]/page.tsx`) and
+  - *Evidence (2026-10-24, architect-verified):* `src/lib/__tests__/runs.test.ts:108-163`
+    (graph from TypeScript's preprocessor: no file-level cycle :119, no calculations ↔
+    advanced cycle direct or through another folder :123, `lib/runs.ts` imports only the API
+    types and the leaf :136, cross-workspace callers import from `@/lib/runs` :142) and the Q16
+    folder-level assert; it fails with the edge named when an advanced import is put back in
+    `StressedRunBadge.tsx` (`1 failed | 8 passed (9)`, then restored). `src/lib/runs.ts`,
+    `src/lib/scenario-links.ts` (imports nothing). Full vitest `Test Files 52 passed (52)`,
+    `Tests 945 passed (945)`.
+- [x] **FE-35.2** Split the mapping workbench (`ingestion/mappings/[mappingId]/page.tsx`) and
   `ComparisonView.tsx` into components and hooks.
   - *Done-when:* no file is over 300 lines, and the existing vitests and Playwright specs pass
     unchanged.
-- [ ] **FE-35.3** Read the limits from `GET config/limits`.
+  - *Evidence (2026-10-24, architect-verified):* the line limit is a vitest:
+    `mapping-workbench.test.ts:74-75` and `comparison-parts.test.ts:42-43`
+    (`toBeLessThanOrEqual(300)`); page 761 → 47 lines, `ComparisonView.tsx` 657 → 170, largest
+    part 283. `comparison.test.ts` and `mappings.test.ts` are unchanged (git diff empty) and
+    pass in the full vitest (`945 passed`); `e2e/mappings.spec.ts` (FE-10.1, FE-10.2) and
+    `e2e/scenario-compare.spec.ts` (FE-25.2) are unchanged and passed in the e2e run
+    (`19 passed`, the one failure is FE-35.6). The full Playwright run is CI's.
+- [x] **FE-35.3** Read the limits from `GET config/limits`.
   - *Done-when:* a grep finds none of the bound literals in `src/components`, and the editor
     vitests use the served values.
-- [ ] **FE-35.4** Re-auth: OIDC silent renew where the IdP allows it; otherwise one redirect on
+  - *Evidence (2026-10-24, architect-verified):* the grep is a vitest,
+    `src/lib/__tests__/limits.test.ts:27-88`, scoped to the served fields (Q15) with the four
+    unserved mapping and contract `maxLength`s listed in `UNSERVED` (:45) and checked against
+    the contract; it also bars `COMMENT_MAX` and `maxLength={1000}` under `components/advanced/`
+    (:37, Q20). The fixture's values equal the backend constants and its fields equal
+    `openapi.json` `ConfigLimits` (:97-160). The rules, advanced and imports editor vitests
+    read `served-limits.ts`, each with a lowered-value case; the scenario comment test serves
+    250. Engineer grep over `src/components`: exit 1 (no match). Full vitest `945 passed`.
+- [x] **FE-35.4** Re-auth: OIDC silent renew where the IdP allows it; otherwise one redirect on
   401 `token_expired` that keeps the route; in dev, back to persona sign-in.
   - *Done-when:*
     - a vitest shows one redirect and no loop;
-    - a Playwright test with a short dev TTL re-authenticates and returns to the route.
-- [ ] **FE-35.5** Every `(platform)` route is gated by its nav permission, including
+    - ~~a Playwright test with a short dev TTL re-authenticates and returns to the route.~~
+      reworded 2026-10-24 (Phase 35 Q17, auto-resolved; no backend TTL setting is added): a
+      Playwright test with a dev token re-signed with a short TTL re-authenticates and returns
+      to the route.
+  - *Evidence (2026-10-24, architect-verified):* `src/lib/__tests__/reauth.test.ts` (16 tests;
+    one redirect for concurrent 401s :61, no loop :114-176, the client hand-off :178-237,
+    `NEXT_PUBLIC_REAUTH_UI=off` :221, :252). `e2e/reauth.spec.ts:59` (`test.slow()` :61; the
+    first refusal must be `{ status: 401, code: 'token_expired' }` :106): `✓ ... FE-35.4: a
+    short-lived dev session expires, redirects once to the persona sign-in and returns to the
+    route (35.5s)`, and again after the Q17 changes (35.6s).
+- [x] **FE-35.5** Every `(platform)` route is gated by its nav permission, including
   `/advanced/*`.
   - *Done-when:* a vitest enumerates the route files and asserts each one is gated.
-- [ ] **FE-35.6** Retire the Agent demo (route, components, tests and links). Liquidity
+  - *Evidence (2026-10-24, architect-verified):* `src/config/__tests__/route-gates.test.ts`
+    enumerates every `page.tsx` under `app/(platform)` (:24-29), fails on an unclassified route,
+    renders the gate with and without the permission per route (`/advanced/stress-explorer/*`
+    :68-74), and asserts the layout wraps every route (:114-115):
+    `route-gates.test.ts (90 tests)` passed; full vitest `945 passed`. The gate is cosmetic and
+    the API stays authoritative (D-04; the imports/mappings divergence is recorded in the
+    report, Q22).
+- [x] **FE-35.6** Retire the Agent demo (route, components, tests and links). Liquidity
   Intelligence stays, labelled.
   - *Done-when:*
     - `/advanced/stress-explorer/agent-demo` gives 404 (Playwright);
     - no reference remains (grep).
-- [ ] **FE-35.7** Remove dead frontend helpers, each one confirmed unused.
+  - *Ticked 2026-10-24 (coordinator); note at build time:* the grep half holds (`grep -rniE "agent[-_ ]?demo"
+    frontend/src` exit 1; in `frontend/e2e` only the 404 check itself). **Was missing at build time:** the 404.
+    `e2e/advanced-nav.spec.ts:52` fails, `Expected: 404 Received: 200`, in both e2e runs; curl
+    gives 200 for `agent-demo`, `not-a-scenario` and a well-formed UUID under the explorer. The
+    page shown is Next's not-found page, but the status is 200: the `notFound()` in
+    `[scenarioId]/layout.tsx:14` is not reached while the server renders the HTML (reported
+    cause: `SessionProvider` renders only its loading block on the server). The spec is not
+    to be weakened.
+    **Closed:** `src/middleware.ts` (matched on `/advanced/stress-explorer/:segment/:path*`) rewrites a non-UUID, non-`new` segment to Next's not-found page with no-store caching, before rendering. curl: `agent-demo`, `not-a-scenario` and `agent-demo/runs` give 404 with the security headers; a UUID, an upper-case UUID, `<uuid>/runs`, `new` and the explorer root give 200. `e2e/advanced-nav.spec.ts` and `security-headers.spec.ts` pass (`3 passed`), and the explorer, scenario-run and scenario-compare specs pass (`8 passed`); vitest pins the pattern and the static-sibling list (`946 passed`). The grep half still holds.
+- [x] **FE-35.7** Remove dead frontend helpers, each one confirmed unused.
   - *Done-when:* the list is in the report, and vitest is green.
-- [ ] **BE-35.8** *(added 2026-10-24, Phase 29 Q5, auto-resolved)* Add a server-side ASCII-digit
+  - *Evidence (2026-10-24, architect-verified):* the removed list, how "unused" was confirmed,
+    and the kept list (bundle copies confirmed identical to `fp_design_system_template/`, Q14)
+    are in `docs/evidence/phase-35/REPORT.md`; full vitest `Test Files 52 passed (52)`,
+    `Tests 945 passed (945)`. The 13 type-only aliases kept under Q13 are still to be listed
+    in the report by the frontend engineer (report open item).
+- [x] **BE-35.8** *(added 2026-10-24, Phase 29 Q5, auto-resolved)* Add a server-side ASCII-digit
   check on `control_totals` values for `POST imports` (permission unchanged). The published
   pattern `DECIMAL_TEXT` (`ingestion/schemas.py:184`) means ASCII digits under ECMA-262 `\d`,
   but the server's Python `\d` accepts Unicode digits today. Refuse such values with 422. Do not
@@ -4768,12 +4922,28 @@ API contracts and financial results do not change.
   - *Done-when:* a fold in `test_validation.py::test_validate_statuses_issues_and_identical_payloads`
     posts a Unicode-digit control total and gets 422 with nothing written, and
     `export_openapi --check` shows no diff.
+  - *Evidence (2026-10-24, architect-verified):* `test_validation.py:427-458`: five
+    Unicode-digit totals (Arabic-Indic, full-width, mixed, Devanagari) each give 422 with the
+    envelope and no echo of the value, the `import_job` and `import_artifact` counts are
+    unchanged, and ASCII `-123.45` gives 201. It passed in the engineer's targeted run
+    (`test_validation` among the 27 passed). Implementation: `ingestion/schemas.py:190-200`
+    (`AfterValidator(_ascii_digits)`; `DECIMAL_TEXT` text unchanged at :187).
+    `export_openapi --check` → `openapi.json is up to date`.
 
-*Test budget:* 49 → the recorded D-60 count.
+*Test budget:* 49 → the recorded D-60 count. *(2026-10-24: 59 collected before BE-35.5; the
+recorded count is the post-split `--collect-only` figure, Q7.)* *(Recorded 2026-10-24: **86** collected after BE-35.5.)*
 *Reversibility:* refactors keep `openapi.json` and every hash unchanged; `config/limits` is
-additive; the demo removal is reverted from git.
+additive; the demo removal is reverted from git. *(2026-10-24, Q21:)* `NEXT_PUBLIC_REAUTH_UI=off`
+and `NEXT_PUBLIC_ROUTE_GATES_UI=off` restore the Phase 34 behaviour.
 
 ### Deferred (out of scope for Feature 06)
+
+- **Parallel backend tests (D-60 §2 budget, added 2026-10-24).** The suite is 406 s locally
+  after the BE-35.5 splits; D-60 asks for at most 180 s in CI. Two steps get there:
+  - `pytest-xdist` with one test database per worker (created from the migrated template);
+  - removing the `db` fixture's duplicate clean (the teardown repeats the next setup's clean,
+    about 0.75 s per test).
+  BE-35.5 is ticked once a CI `--durations` run shows the budget met.
 
 - A **shared rate-limit store**, Postgres- or Redis-backed. It is needed before more than one
   API instance runs (D-53 §5). The compose `prod` profile runs one instance.
@@ -4793,6 +4963,13 @@ additive; the demo removal is reverted from git.
 - **Liquidity Intelligence rebuilt on the real LCR API** (user plan §14).
 - **Financial statements, and the company/credit intelligence expansion** (user plan §12 stage
   7).
+- **Removing the BE-35.2 `service.py` re-exports.** In the next feature's first backend phase,
+  remove the re-exports in `calculations/service.py` and `ingestion/service.py` and repoint
+  every caller (orchestration, rules, mapping, domain, reconciliation, `main.py`,
+  `scripts/perf_run.py`, tests) to the defining submodule. A missed import then fails at
+  collection with an ImportError (the Phase 29 Q10 precedent). Code added from Phase 35 on
+  imports the defining submodule, so the list does not grow *(added 2026-10-24, Phase 35 Q4,
+  auto-resolved)*.
 
 ### Hard stops and open items for the user (Feature 06)
 

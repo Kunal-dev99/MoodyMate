@@ -17,6 +17,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { fetchLimits } from '@/lib/limits'
 import { ParameterEditor } from './ParameterEditor'
 import { RuleRefusalNotice, RuleVersionActions } from './RuleVersionActions'
 import { RuleVersionStatusPill } from './RuleVersionStatusPill'
@@ -33,8 +34,16 @@ import {
   ruleRefusal,
   type Editor,
   type RuleDetail,
+  type RuleLimits,
   type RuleVersion,
 } from './rules'
+
+/** FE-35.3: the rule and the parameter bounds the server serves (GET config/limits), read together. */
+type Inputs = { rule: RuleDetail; limits: RuleLimits }
+const loadInputs = (ruleId: string) => async (signal: AbortSignal): Promise<Inputs> => {
+  const [rule, limits] = await Promise.all([fetchRule(ruleId)(signal), fetchLimits()])
+  return { rule, limits: limits.rule }
+}
 
 const crumbs = (rule?: RuleDetail) => [
   { label: 'Financial Domain', href: '/domain' },
@@ -43,14 +52,14 @@ const crumbs = (rule?: RuleDetail) => [
   { label: 'Propose' },
 ]
 
-function ProposeForm({ rule, active, onProposed }: { rule: RuleDetail; active: RuleVersion; onProposed: () => void }) {
+function ProposeForm({ rule, active, limits, onProposed }: { rule: RuleDetail; active: RuleVersion; limits: RuleLimits; onProposed: () => void }) {
   const [editor, setEditor] = useState<Editor>(() => editorFor(rule, active.parameters))
   const [summary, setSummary] = useState('')
   const [busy, setBusy] = useState(false)
   const [proposed, setProposed] = useState<RuleVersion | null>(null)
   const [refusal, setRefusal] = useState<Refusal | null>(null)
-  const problems = proposalProblems(editor, active.parameters, summary)
-  const body = proposalBody(editor, active.parameters, summary)
+  const problems = proposalProblems(editor, active.parameters, summary, limits)
+  const body = proposalBody(editor, active.parameters, summary, limits)
 
   const edit = (e: Editor) => {
     setEditor(e)
@@ -139,16 +148,16 @@ function ProposeForm({ rule, active, onProposed }: { rule: RuleDetail; active: R
 /** FE-16.2: propose a new version of one rule, then submit it (the open versions below). */
 export function ProposeRuleVersion({ ruleId }: { ruleId: string }) {
   const { has } = useCurrentSession()
-  const [state, setState] = useState<Loaded<RuleDetail>>({ kind: 'loading' })
+  const [state, setState] = useState<Loaded<Inputs>>({ kind: 'loading' })
   // Bumped after a proposal so the open versions (and their Submit button) reload.
   const [generation, setGeneration] = useState(0)
-  const loader = useMemo(() => createLoader(fetchRule(ruleId), setState, 'Could not load the rule'), [ruleId])
+  const loader = useMemo(() => createLoader(loadInputs(ruleId), setState, 'Could not load the rule'), [ruleId])
   useEffect(() => {
     loader.load()
     return loader.abort
   }, [loader])
 
-  const rule = state.kind === 'ready' ? state.value : undefined
+  const rule = state.kind === 'ready' ? state.value.rule : undefined
   const header = <PageHeader title={rule ? `Propose a change: ${rule.name}` : 'Propose a rule change'} breadcrumbs={crumbs(rule)} />
 
   let body
@@ -157,7 +166,7 @@ export function ProposeRuleVersion({ ruleId }: { ruleId: string }) {
   else if (state.kind === 'not_found') body = <EmptyState icon={SlidersHorizontal} title="Rule not found" description="It does not exist in your tenant." />
   else if (state.kind === 'failed') body = <LoadFailed icon={SlidersHorizontal} title="Could not load the rule" cid={state.cid} onRetry={loader.load} />
   else {
-    const r = state.value
+    const r = state.value.rule
     const active = activeVersionOf(r)
     body = (
       <div className="space-y-6">
@@ -179,7 +188,7 @@ export function ProposeRuleVersion({ ruleId }: { ruleId: string }) {
             }
           />
         ) : (
-          <ProposeForm rule={r} active={active} onProposed={() => setGeneration((g) => g + 1)} />
+          <ProposeForm rule={r} active={active} limits={state.value.limits} onProposed={() => setGeneration((g) => g + 1)} />
         )}
         <RuleVersionActions key={generation} ruleId={r.rule_id} />
       </div>

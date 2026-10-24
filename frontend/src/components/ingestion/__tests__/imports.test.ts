@@ -7,7 +7,6 @@ import { ApiError, dataClassOf, multipart, toFormData } from '@/api/client'
 import { ImportStatusPill } from '@/components/ingestion/ImportStatusPill'
 import {
   IMPORT_ERROR_CODES,
-  IMPORT_MAX_BYTES,
   IMPORT_STATUSES,
   IMPORT_STATUS_STYLE,
   attestationRequired,
@@ -22,6 +21,10 @@ import {
   type ImportDraft,
   type ImportStatus,
 } from '@/components/ingestion/imports'
+import { SERVED_LIMITS } from '@/lib/__tests__/served-limits'
+
+/** FE-35.3: the upload limit GET config/limits serves (the deployment's IMPORT_MAX_BYTES). */
+const MAX_BYTES = SERVED_LIMITS.upload.max_bytes
 
 // The OpenAPI document the types are generated from: the pill is tested against its enum (D-23).
 const openapi = JSON.parse(readFileSync(fileURLToPath(new URL('../../../../../backend/openapi.json', import.meta.url)), 'utf8'))
@@ -73,19 +76,25 @@ describe('ImportStatusPill (FE-8.2)', () => {
 })
 
 describe('client-side size pre-check (D-16)', () => {
-  it('allows up to 10 MiB and refuses anything larger or empty', () => {
-    expect(IMPORT_MAX_BYTES).toBe(10 * 1024 * 1024)
-    expect(sizeProblem(1)).toBeNull()
-    expect(sizeProblem(IMPORT_MAX_BYTES)).toBeNull()
-    expect(sizeProblem(IMPORT_MAX_BYTES + 1)).toMatch(/limit is 10\.00 MiB/)
-    expect(sizeProblem(0)).toBe('The file is empty.')
+  it('allows up to the served max_bytes (10 MiB by default) and refuses anything larger or empty', () => {
+    expect(MAX_BYTES).toBe(10 * 1024 * 1024)
+    expect(sizeProblem(1, MAX_BYTES)).toBeNull()
+    expect(sizeProblem(MAX_BYTES, MAX_BYTES)).toBeNull()
+    expect(sizeProblem(MAX_BYTES + 1, MAX_BYTES)).toMatch(/limit is 10\.00 MiB/)
+    expect(sizeProblem(0, MAX_BYTES)).toBe('The file is empty.')
   })
 
   it('blocks the upload of an oversize file', () => {
-    const big = new File([new Uint8Array(IMPORT_MAX_BYTES + 1)], 'big.csv')
-    expect(importProblems(draftWith(big), 'synthetic')).toEqual([expect.stringMatching(/limit is 10\.00 MiB/)])
+    const big = new File([new Uint8Array(MAX_BYTES + 1)], 'big.csv')
+    expect(importProblems(draftWith(big), 'synthetic', MAX_BYTES)).toEqual([expect.stringMatching(/limit is 10\.00 MiB/)])
     const ok = new File(['a,b\n1,2\n'], 'ok.csv')
-    expect(importProblems(draftWith(ok), 'synthetic')).toEqual([])
+    expect(importProblems(draftWith(ok), 'synthetic', MAX_BYTES)).toEqual([])
+  })
+
+  it('follows a lowered served limit (FE-35.3): a deployment with IMPORT_MAX_BYTES=1024 refuses 1025 bytes', () => {
+    const file = new File([new Uint8Array(1025)], 'small.csv')
+    expect(importProblems(draftWith(file), 'synthetic', MAX_BYTES)).toEqual([])
+    expect(importProblems(draftWith(file), 'synthetic', 1024)).toEqual(['The file is 1.0 KiB; the limit is 1.0 KiB.'])
   })
 })
 
@@ -96,22 +105,22 @@ describe('import form checks', () => {
     expect(attestationRequired('synthetic')).toBe(true)
     expect(attestationRequired(null)).toBe(true)
     expect(attestationRequired('client')).toBe(false)
-    expect(importProblems(draftWith(file, { attested: false }), 'synthetic')).toContain('Confirm that the file holds synthetic data only.')
-    expect(importProblems(draftWith(file, { attested: false }), null)).toContain('Confirm that the file holds synthetic data only.')
-    expect(importProblems(draftWith(file, { attested: false }), 'client')).toEqual([])
+    expect(importProblems(draftWith(file, { attested: false }), 'synthetic', MAX_BYTES)).toContain('Confirm that the file holds synthetic data only.')
+    expect(importProblems(draftWith(file, { attested: false }), null, MAX_BYTES)).toContain('Confirm that the file holds synthetic data only.')
+    expect(importProblems(draftWith(file, { attested: false }), 'client', MAX_BYTES)).toEqual([])
   })
 
   it('checks the source, the file, the row count and decimal control totals', () => {
-    expect(importProblems(emptyImportDraft(), 'client')).toEqual(['Choose a source.', 'Choose a file.'])
-    expect(importProblems(draftWith(file, { expectedRowCount: '-1' }), 'synthetic')).toEqual([
+    expect(importProblems(emptyImportDraft(), 'client', MAX_BYTES)).toEqual(['Choose a source.', 'Choose a file.'])
+    expect(importProblems(draftWith(file, { expectedRowCount: '-1' }), 'synthetic', MAX_BYTES)).toEqual([
       'Expected row count: a whole number, 0 or more.',
     ])
-    expect(importProblems(draftWith(file, { expectedRowCount: '2.5' }), 'synthetic')).toHaveLength(1)
-    expect(importProblems(draftWith(file, { expectedRowCount: ' 25 ' }), 'synthetic')).toEqual([])
-    expect(importProblems(draftWith(file, { controlTotals: { notional: '1e5' } }), 'synthetic')).toEqual([
+    expect(importProblems(draftWith(file, { expectedRowCount: '2.5' }), 'synthetic', MAX_BYTES)).toHaveLength(1)
+    expect(importProblems(draftWith(file, { expectedRowCount: ' 25 ' }), 'synthetic', MAX_BYTES)).toEqual([])
+    expect(importProblems(draftWith(file, { controlTotals: { notional: '1e5' } }), 'synthetic', MAX_BYTES)).toEqual([
       'Control total notional: a decimal number such as 1234.50.',
     ])
-    expect(importProblems(draftWith(file, { controlTotals: { notional: '-1234.50', other: '' } }), 'synthetic')).toEqual([])
+    expect(importProblems(draftWith(file, { controlTotals: { notional: '-1234.50', other: '' } }), 'synthetic', MAX_BYTES)).toEqual([])
   })
 })
 

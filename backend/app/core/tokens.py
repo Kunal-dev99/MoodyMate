@@ -19,7 +19,11 @@ from typing import Any, Protocol
 import jwt
 
 from app.core.config import Settings
-from app.governance.constants import DEV_AUDIENCE, DEV_ISSUER
+
+# The issuer and audience of dev-mode tokens (BE-2.3). Defined here, in core, since BE-35.1:
+# app.governance.constants re-exports them (governance -> core is the only direction).
+DEV_ISSUER = "moodymate-dev"
+DEV_AUDIENCE = "moodymate-api"
 
 ASYMMETRIC_ALGORITHMS = ["RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384"]
 

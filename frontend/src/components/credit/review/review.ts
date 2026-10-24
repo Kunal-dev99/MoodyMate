@@ -1,6 +1,6 @@
 import { api, call, type Schemas } from '@/api/client'
 import type { operations } from '@/api/schema'
-import { RATING_STATUSES, isProposer, type ObligorRating, type ObligorRatingStatus } from '@/components/credit/ratings/ratings'
+import { RATING_STATUSES, type ObligorRating, type ObligorRatingStatus } from '@/components/credit/ratings/ratings'
 import { commentProblem } from '@/lib/forms'
 import { makerCheckerGate, type MakerCheckerGate } from '@/lib/maker-checker'
 
@@ -19,7 +19,6 @@ export type RatingQuery = NonNullable<operations['listObligorRatings']['paramete
 type Me = Schemas['Me']
 type Has = (permission: Schemas['Permission']) => boolean
 
-export const ratingsHref = '/domain/ratings'
 export const PAGE_SIZE = 50
 
 /** The limit BE-20.2 enforces (ObligorRatingDecision.comment maxLength; a test reads openapi.json). */

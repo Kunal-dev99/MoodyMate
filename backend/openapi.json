@@ -1531,6 +1531,28 @@
         "title": "Compatibility",
         "type": "string"
       },
+      "ConfigLimits": {
+        "additionalProperties": false,
+        "description": "`GET /config/limits`: the bounds the server's own validators enforce (BE-35.3).",
+        "properties": {
+          "rule": {
+            "$ref": "#/components/schemas/RuleLimits"
+          },
+          "scenario": {
+            "$ref": "#/components/schemas/ScenarioLimits"
+          },
+          "upload": {
+            "$ref": "#/components/schemas/UploadLimits"
+          }
+        },
+        "required": [
+          "rule",
+          "scenario",
+          "upload"
+        ],
+        "title": "ConfigLimits",
+        "type": "object"
+      },
       "ConstantTransform": {
         "properties": {
           "code": {
@@ -11185,6 +11207,46 @@
         "title": "RuleIn",
         "type": "object"
       },
+      "RuleLimits": {
+        "additionalProperties": false,
+        "description": "The rule-parameter bounds BE-16.1 enforces on a proposed rule version (D-32 \u00a71).",
+        "properties": {
+          "max_bucket_code_length": {
+            "description": "BUCKETS: a bucket code's maximum length.",
+            "title": "Max Bucket Code Length",
+            "type": "integer"
+          },
+          "max_buckets": {
+            "description": "BUCKETS: at most this many buckets.",
+            "title": "Max Buckets",
+            "type": "integer"
+          },
+          "max_days": {
+            "description": "BUCKETS: the largest lower or upper bound, in days.",
+            "title": "Max Days",
+            "type": "integer"
+          },
+          "max_decimal_scale": {
+            "description": "DECIMAL: at most this many decimal places.",
+            "title": "Max Decimal Scale",
+            "type": "integer"
+          },
+          "max_map_entries": {
+            "description": "ENUM_MAP / DECIMAL_MAP: at most this many keys.",
+            "title": "Max Map Entries",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "max_buckets",
+          "max_map_entries",
+          "max_decimal_scale",
+          "max_days",
+          "max_bucket_code_length"
+        ],
+        "title": "RuleLimits",
+        "type": "object"
+      },
       "RuleModuleRef": {
         "properties": {
           "code": {
@@ -13067,6 +13129,82 @@
           "statement"
         ],
         "title": "ScenarioLabels",
+        "type": "object"
+      },
+      "ScenarioLimits": {
+        "additionalProperties": false,
+        "description": "The scenario bounds the template validator and the write schemas enforce (D-44 \u00a71-4).",
+        "properties": {
+          "fraction_scale": {
+            "description": "DECIMAL fractions: at most this many places.",
+            "title": "Fraction Scale",
+            "type": "integer"
+          },
+          "max_change_summary_length": {
+            "description": "`change_summary` maximum length.",
+            "title": "Max Change Summary Length",
+            "type": "integer"
+          },
+          "max_comment_length": {
+            "description": "Submit / decision / close `comment` maximum.",
+            "title": "Max Comment Length",
+            "type": "integer"
+          },
+          "max_delay_days": {
+            "description": "DELAYED_INFLOWS: the largest delay, in days.",
+            "title": "Max Delay Days",
+            "type": "integer"
+          },
+          "max_description_length": {
+            "description": "ScenarioCreate `description` maximum length.",
+            "title": "Max Description Length",
+            "type": "integer"
+          },
+          "max_instrument_key_length": {
+            "description": "An instrument key's maximum length.",
+            "title": "Max Instrument Key Length",
+            "type": "integer"
+          },
+          "max_instrument_keys": {
+            "description": "INSTRUMENT_KEYS: at most this many keys.",
+            "title": "Max Instrument Keys",
+            "type": "integer"
+          },
+          "max_name_length": {
+            "description": "ScenarioCreate `name` maximum length.",
+            "title": "Max Name Length",
+            "type": "integer"
+          },
+          "max_shocks": {
+            "description": "A version carries at most this many shocks.",
+            "title": "Max Shocks",
+            "type": "integer"
+          },
+          "max_unavailable_days": {
+            "description": "FUNDING_UNAVAILABLE: the longest unavailability, in days.",
+            "title": "Max Unavailable Days",
+            "type": "integer"
+          },
+          "min_shocks": {
+            "description": "A version carries at least this many shocks.",
+            "title": "Min Shocks",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "min_shocks",
+          "max_shocks",
+          "max_instrument_keys",
+          "max_instrument_key_length",
+          "fraction_scale",
+          "max_delay_days",
+          "max_unavailable_days",
+          "max_name_length",
+          "max_description_length",
+          "max_change_summary_length",
+          "max_comment_length"
+        ],
+        "title": "ScenarioLimits",
         "type": "object"
       },
       "ScenarioOrigin": {
@@ -15592,6 +15730,58 @@
         "title": "TrimTransform",
         "type": "object"
       },
+      "UploadLimits": {
+        "additionalProperties": false,
+        "description": "The upload bounds `POST imports` enforces (D-16 \u00a71, D-25 \u00a71): the deployment's\n`IMPORT_MAX_*` settings, each at most its hard ceiling. Field names are the adapter's.",
+        "properties": {
+          "max_bytes": {
+            "description": "The largest file, in bytes (413 above it).",
+            "title": "Max Bytes",
+            "type": "integer"
+          },
+          "max_cell_chars": {
+            "description": "A cell's maximum length, in characters.",
+            "title": "Max Cell Chars",
+            "type": "integer"
+          },
+          "max_columns": {
+            "description": "At most this many columns.",
+            "title": "Max Columns",
+            "type": "integer"
+          },
+          "max_decoded_chars": {
+            "description": "The largest total of decoded characters.",
+            "title": "Max Decoded Chars",
+            "type": "integer"
+          },
+          "max_rows": {
+            "description": "At most this many data rows.",
+            "title": "Max Rows",
+            "type": "integer"
+          },
+          "max_xlsx_ratio": {
+            "description": "XLSX: the largest compression ratio.",
+            "title": "Max Xlsx Ratio",
+            "type": "integer"
+          },
+          "max_xlsx_uncompressed_bytes": {
+            "description": "XLSX: the largest total uncompressed size, in bytes.",
+            "title": "Max Xlsx Uncompressed Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "max_bytes",
+          "max_rows",
+          "max_columns",
+          "max_cell_chars",
+          "max_xlsx_uncompressed_bytes",
+          "max_xlsx_ratio",
+          "max_decoded_chars"
+        ],
+        "title": "UploadLimits",
+        "type": "object"
+      },
       "UpperTransform": {
         "properties": {
           "code": {
@@ -17093,6 +17283,52 @@
         "summary": "Get Calculation Run Results",
         "tags": [
           "calculations"
+        ]
+      }
+    },
+    "/api/v1/config/limits": {
+      "get": {
+        "operationId": "getConfigLimits",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigLimits"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "The rule, scenario and upload limits the server enforces",
+        "tags": [
+          "platform"
         ]
       }
     },

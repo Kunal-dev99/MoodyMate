@@ -8,6 +8,8 @@ import uuid
 from enum import StrEnum
 
 from app.core.classification import SENSITIVITY
+from app.core.tokens import DEV_AUDIENCE as DEV_AUDIENCE  # BE-35.1: defined in core
+from app.core.tokens import DEV_ISSUER as DEV_ISSUER
 
 
 class Permission(StrEnum):
@@ -165,9 +167,6 @@ ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
 
 DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-4000-8000-000000000001")
 SEED_TAG = "0003_identity_seed"
-
-DEV_ISSUER = "moodymate-dev"
-DEV_AUDIENCE = "moodymate-api"
 
 
 class AuditOutcome(StrEnum):

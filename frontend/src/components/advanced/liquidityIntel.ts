@@ -6,6 +6,15 @@
  * deposit outflows are the deposit balances: no run-off rate is applied to them.
  */
 
+/** Shown on the page (FE-28.4, FE-35.6): its numbers do not come from the calculation engine. */
+export const DEMO_BANNER = 'Illustrative mock: browser arithmetic on synthetic data, not the calculation engine'
+
+/** Zero guard for every ratio on the page: null when the denominator is 0 or not finite. */
+export function ratio(num: number, den: number): number | null {
+  if (den === 0 || !Number.isFinite(den) || !Number.isFinite(num)) return null
+  return num / den
+}
+
 export interface LcrInputs {
   hqla: number
   depositOutflows: number

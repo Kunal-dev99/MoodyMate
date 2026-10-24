@@ -185,7 +185,19 @@ class SourcePage(BaseModel):
 # A control total as exact decimal text (never a float): optional sign, up to 28 digits
 # before and 18 after the point.
 DECIMAL_TEXT = r"^-?\d{1,28}(\.\d{1,18})?$"
-DecimalText = Annotated[str, StringConstraints(pattern=DECIMAL_TEXT)]
+
+
+def _ascii_digits(value: str) -> str:
+    """BE-35.8: the published pattern's `\\d` means ASCII digits (ECMA-262), but the server's
+    regex `\\d` also matches other scripts' digits. Those are refused here (422, nothing
+    written), so the server accepts exactly what the pattern promises; the pattern text is
+    unchanged. The message names no value."""
+    if not value.isascii():
+        raise ValueError("A control total must be decimal text in ASCII digits (0-9).")
+    return value
+
+
+DecimalText = Annotated[str, StringConstraints(pattern=DECIMAL_TEXT), AfterValidator(_ascii_digits)]
 
 
 class ImportForm(BaseModel):

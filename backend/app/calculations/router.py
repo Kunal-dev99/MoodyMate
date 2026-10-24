@@ -32,10 +32,13 @@ from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.calculations.constants import (
+    APPROVAL_LABELS,
     CREATE_RUN,
+    LCR_LIMITATIONS,
     PREFER_HEADER,
     PREFERENCE_APPLIED_HEADER,
     RESPOND_ASYNC,
+    ApprovalState,
     CalculationRunStatus,
     CalculationWarningCode,
     HqlaExclusionReason,
@@ -103,7 +106,6 @@ from app.core.ratelimit import RATE_LIMITED_RESPONSE, LimitedRoute, rate_limited
 from app.db.session import get_session
 from app.domain.constants import CashflowOrigin, DomainSchemaCode
 from app.governance.constants import Permission
-from app.orchestration.constants import APPROVAL_LABELS, ApprovalState
 from app.reconciliation.constants import ReconciliationOutcome
 from app.rules.constants import ILLUSTRATIVE_STATEMENT, CashflowDirection, HqlaLevel
 
@@ -641,16 +643,6 @@ async def get_maturity_ladder(
 
 
 # --- liquidity: the lcr_hqla read (BE-17.3) ---------------------------------------------------
-
-LCR_LIMITATIONS = [
-    "Level 2A/2B caps are not applied (LCR_LEVEL_CAPS_NOT_APPLIED when a Level 2 asset is "
-    "included).",
-    "The value of an asset is its position balance: the schema has no market value "
-    "(PROVISIONAL).",
-    "Per currency, with no FX conversion and no all-currency total.",
-    "Inflows are cash flows due (0, horizon] calendar days after the reporting date; "
-    "outflows are position balances x run-off. No other LCR categories are modelled.",
-]
 
 
 def _asset(a: AssetRow, clear: frozenset[str]) -> HqlaAssetOut:

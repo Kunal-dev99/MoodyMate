@@ -2,8 +2,9 @@
 
 `refuse(...)` (BE-29.3): the one refusal path of a write. It rolls back the request's own
 work, audits the attempt DENIED with the error code as its reason (in its own session,
-through `app.governance.service.record_denial`, BE-3.2), and raises the error, so the client
-gets the envelope and nothing else is committed with the audit row.
+through the governance module's `record_denial`, bound in `app.core.interfaces`, BE-3.2;
+BE-35.1), and raises the error, so the client gets the envelope and nothing else is
+committed with the audit row.
 
 Modules keep a thin `_refuse` that names their action and resource type; every one of them
 ends here. `refuse_endpoint` is the same for a route-level switch: the action is
@@ -17,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
 
 from app.core.errors import ApiError
+from app.core.interfaces import governance
 from app.core.principal import Principal
 from app.core.routes import route_template
 
@@ -31,10 +33,7 @@ async def refuse(
     resource_id: uuid.UUID | str | None = None,
 ) -> NoReturn:
     """Roll back, audit the refusal (DENIED, reason = the error code) and raise `error`."""
-    # Imported here: governance itself refuses through this function (no import cycle).
-    from app.governance.service import record_denial
-
-    await record_denial(
+    await governance().record_denial(
         session,
         principal,
         action,
