@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import type { components } from '../src/api/schema'
+import { expectedRunStatus, settledRun } from './calc-support'
 import { API, bearer, cashflowImportReady, ensureActiveMapping, groupDecimal, registerInstrumentSource, signIn, uploadSample, validateAndProject } from './support'
 
 /**
@@ -154,13 +155,14 @@ test('FE-15.1: risk_analyst builds a snapshot, reviews the pins and submits a ru
   await expect(pins.locator('[data-testid="pin-row"][data-kind="REPORTING_DATE"]').getByTestId('pin-version')).toHaveText(REPORTING_DATE)
   if (process.env.CALC_SCREENSHOT) await page.screenshot({ path: `${process.env.CALC_SCREENSHOT}/new-run.png`, fullPage: true })
 
-  // 5. Submit: the server runs synchronously and ends the run; the page opens it in that status.
+  // 5. Submit: the server ends the run (synchronously, or in the background and polled, FE-33.1);
+  //    the page opens it in that status.
   const submitted = isPost(page, `${API}/api/v1/calculation-runs`)
   await page.getByTestId('run-submit').click()
   const runResponse = await submitted
-  expect(runResponse.status(), await runResponse.text()).toBe(201)
+  expect(runResponse.status(), await runResponse.text()).toBe(expectedRunStatus())
   expect(runResponse.request().headers()['idempotency-key']).toBeTruthy()
-  run = await runResponse.json()
+  run = await settledRun(page, runResponse)
   expect(['SUCCEEDED', 'SUCCEEDED_WITH_WARNINGS']).toContain(run!.status)
   expect(run!.dataset_snapshot_id).toBe(snapshot.snapshot_id)
   expect(run!.reporting_date).toBe(REPORTING_DATE)

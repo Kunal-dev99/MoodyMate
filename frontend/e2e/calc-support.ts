@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { expect, type APIRequestContext } from '@playwright/test'
+import { expect, type APIRequestContext, type Page, type Response } from '@playwright/test'
 import type { components } from '../src/api/schema'
 import { API, SAMPLES, bearer, ensureActiveMapping, uploadSample } from './support'
 
@@ -44,6 +44,43 @@ export function sumDecimals(values: string[]): string {
   const digits = (negative ? -total : total).toString().padStart(scale + 1, '0')
   const text = scale === 0 ? digits : `${digits.slice(0, -scale)}.${digits.slice(-scale)}`
   return negative ? `-${text}` : text
+}
+
+// --- a submitted run, once the server has ended it (FE-33.1) -----------------------------------
+
+const PENDING: readonly string[] = ['RUNNING', 'QUEUED']
+
+/**
+ * The status "Submit run" gets for a new run under this build (Q20): 202 with background runs on
+ * (the default: `Prefer: respond-async`, D-59 §2), 201 with NEXT_PUBLIC_BACKGROUND_RUNS_UI=off
+ * (the Phase 32 request exactly). Run the suite with the same value the frontend was built with.
+ */
+export function expectedRunStatus(): 201 | 202 {
+  return process.env.NEXT_PUBLIC_BACKGROUND_RUNS_UI === 'off' ? 201 : 202
+}
+
+/**
+ * The run a "Submit run" POST wrote, in the terminal status the server reports. A synchronous
+ * answer (201, Phase 32 and NEXT_PUBLIC_BACKGROUND_RUNS_UI=off) is the terminal run itself. A
+ * background answer (202, `Prefer: respond-async`, D-59 §2) is the run RUNNING; the browser then
+ * polls GET /calculation-runs/{run_id}, and the first read the server answers with a terminal
+ * status is returned. Call it as soon as the POST resolves (the first poll waits 0.5 s).
+ */
+export async function settledRun(page: Page, response: Response): Promise<Schemas['RunDetail']> {
+  const body: Schemas['RunDetail'] = await response.json()
+  if (response.status() !== 202) {
+    expect(response.status(), JSON.stringify(body)).toBe(201)
+    return body
+  }
+  expect(response.request().headers()['prefer']).toBe('respond-async')
+  expect(response.headers()['preference-applied']).toBe('respond-async')
+  expect(body.status, 'a background run is accepted RUNNING, never as an outcome').toBe('RUNNING')
+  const url = `${API}/api/v1/calculation-runs/${body.run_id}`
+  const ended = await page.waitForResponse(
+    async (r) => r.request().method() === 'GET' && r.url() === url && r.ok() && !PENDING.includes(((await r.json()) as Schemas['RunDetail']).status),
+    { timeout: 60_000 },
+  )
+  return ended.json()
 }
 
 // --- projected synthetic imports -------------------------------------------------------------

@@ -57,17 +57,39 @@ api.use(authMiddleware)
 export class ApiError extends Error {
   readonly status: number
   readonly envelope: ErrorEnvelope
+  /**
+   * FE-33.1: the response's `Retry-After` in whole seconds (429 `rate_limited`, 503
+   * `workers_busy` / `db_pool_exhausted`), or null when it sent none. The backend exposes the
+   * header to the browser (CORS `expose_headers`).
+   */
+  readonly retryAfterSeconds: number | null
 
-  constructor(status: number, envelope: ErrorEnvelope) {
+  constructor(status: number, envelope: ErrorEnvelope, retryAfterSeconds: number | null = null) {
     super(envelope.message)
     this.name = 'ApiError'
     this.status = status
     this.envelope = envelope
+    this.retryAfterSeconds = retryAfterSeconds
   }
 
   get correlationId(): string | null {
     return this.envelope.correlation_id ?? null
   }
+}
+
+export const RETRY_AFTER_HEADER = 'Retry-After'
+
+/**
+ * `Retry-After` as whole seconds (RFC 9110: delay-seconds or an HTTP date); null when absent
+ * or unreadable. A date in the past is 0.
+ */
+export function parseRetryAfter(value: string | null, now: number = Date.now()): number | null {
+  if (value === null) return null
+  const text = value.trim()
+  if (/^\d+$/.test(text)) return Number(text)
+  const at = Date.parse(text)
+  if (Number.isNaN(at) || !/[a-z]/i.test(text)) return null
+  return Math.max(0, Math.ceil((at - now) / 1000))
 }
 
 function isEnvelope(value: unknown): value is ErrorEnvelope {
@@ -96,7 +118,7 @@ export function unwrap<T>(result: { data?: T; error?: unknown; response: Respons
         correlation_id: response.headers.get(CORRELATION_HEADER),
         retryable: response.status >= 500,
       }
-  throw new ApiError(response.status, envelope)
+  throw new ApiError(response.status, envelope, parseRetryAfter(response.headers.get(RETRY_AFTER_HEADER)))
 }
 
 /**

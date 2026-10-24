@@ -11,6 +11,9 @@ import { LoadFailed } from '@/components/common/LoadFailed'
 import { LoadingBlock } from '@/components/common/LoadingBlock'
 import { PageSection } from '@/components/common/PageSection'
 import { startLoad, type LoadFailure } from '@/components/common/load'
+import { ListPager, cursorRefusedBody, useCursorPaging } from '@/components/common/ListPager'
+import { LIST_PAGING_UI_ENABLED } from '@/config/features'
+import { cursorQuery } from '@/lib/paging'
 import { ImportStatusPill } from '@/components/ingestion/ImportStatusPill'
 import { IMPORT_STATUSES, IMPORT_STATUS_STYLE, formatBytes, type ImportPage, type ImportStatus } from '@/components/ingestion/imports'
 import { Badge } from '@/components/ui/badge'
@@ -45,6 +48,9 @@ function ImportsList() {
   const [status, setStatus] = useState<ImportStatus | ''>('')
   const [state, setState] = useState<State>({ kind: 'loading' })
   const request = useRef<AbortController | null>(null)
+  // FE-33.1: the server's next_cursor, bound to the status filter (NEXT_PUBLIC_LIST_PAGING_UI=off: offsets).
+  const cursorPaging = useCursorPaging(status)
+  const cursor = LIST_PAGING_UI_ENABLED ? cursorPaging.cursor : null
 
   const load = useCallback(() => {
     // Another page or filter cancels the previous request; a late answer never lands.
@@ -52,14 +58,14 @@ function ImportsList() {
       (signal) =>
         call(() =>
           api.GET('/api/v1/imports', {
-            params: { query: { limit: PAGE_SIZE, offset, ...(status ? { status } : {}) } },
+            params: { query: { limit: PAGE_SIZE, ...(LIST_PAGING_UI_ENABLED ? cursorQuery(cursor) : { offset }), ...(status ? { status } : {}) } },
             signal,
           }),
         ),
       { onReady: (page) => setState({ kind: 'ready', page }), onFailure: setState, failureTitle: 'Could not load imports' },
       request.current,
     )
-  }, [offset, status])
+  }, [offset, status, cursor])
 
   useEffect(() => {
     setState({ kind: 'loading' })
@@ -104,7 +110,7 @@ function ImportsList() {
       />
     )
   if (state.kind === 'not_found')
-    return (
+    return cursorRefusedBody(state, cursorPaging, 'import-pager') ?? (
       <EmptyState
         icon={FileUp}
         title="Imports could not be listed"
@@ -178,7 +184,8 @@ function ImportsList() {
           </TableBody>
         </Table>
       )}
-      {page.total > PAGE_SIZE && (
+      {LIST_PAGING_UI_ENABLED && page.items.length > 0 && <ListPager page={page} paging={cursorPaging} testId="import-pager" />}
+      {!LIST_PAGING_UI_ENABLED && page.total > PAGE_SIZE && (
         <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
           <span>
             {page.offset + 1}–{page.offset + page.items.length} of {page.total}

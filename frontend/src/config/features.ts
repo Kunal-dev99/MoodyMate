@@ -133,6 +133,31 @@ export const STRESS_COMPARE_UI_ENABLED = STRESS_EXPLORER_UI_ENABLED && process.e
  */
 export const DOMAIN_LINKS_UI_ENABLED = DOMAIN_UI_ENABLED && process.env.NEXT_PUBLIC_DOMAIN_LINKS_UI !== 'off'
 
+/**
+ * NEXT_PUBLIC_LIST_PAGING_UI=off (FE-33.1): every capped list shows its Phase 32 pager again
+ * (offset Previous/Next, only past one page) instead of "Showing n of total" and the
+ * `next_cursor` control, and no list sends `cursor`. The backend's pagination fields are
+ * additive (D-59 §6): `offset` keeps working either way.
+ */
+export const LIST_PAGING_UI_ENABLED = process.env.NEXT_PUBLIC_LIST_PAGING_UI !== 'off'
+
+/**
+ * NEXT_PUBLIC_BACKGROUND_RUNS_UI=off (FE-33.1): "Submit run" no longer sends
+ * `Prefer: respond-async`, so the request waits for the terminal run exactly as in Phase 32, and
+ * neither the New-run panel nor the run page polls a RUNNING run. The backend's own reversal is
+ * CALC_EXECUTION_MODE=inline; without `Prefer` its contract is unchanged (D-59 §2). Only
+ * meaningful while NEXT_PUBLIC_CALCULATIONS_UI is on, so off there means off here.
+ */
+export const BACKGROUND_RUNS_UI_ENABLED = CALCULATIONS_UI_ENABLED && process.env.NEXT_PUBLIC_BACKGROUND_RUNS_UI !== 'off'
+
+/**
+ * NEXT_PUBLIC_RETRY_AFTER_UI=off (FE-33.1): refusals and error toasts no longer add the retry
+ * time the server sent in `Retry-After` (429 `rate_limited`, 503 `workers_busy` /
+ * `db_pool_exhausted`), and those codes lose their titles, restoring the Phase 32 wording
+ * exactly. The server enforces the wait either way (D-04).
+ */
+export const RETRY_AFTER_UI_ENABLED = process.env.NEXT_PUBLIC_RETRY_AFTER_UI !== 'off'
+
 /*
  * Build-time server switch (FE-28.5), listed here for discoverability; no NEXT_PUBLIC_ value,
  * nothing reaches the browser: NEXT_SECURITY_HEADERS=off at `next build` drops the security

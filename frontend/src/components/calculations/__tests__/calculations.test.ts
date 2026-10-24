@@ -8,6 +8,9 @@ import { ApiError, api } from '@/api/client'
 import type { ImportSummary } from '@/components/ingestion/imports'
 import { IllustrativeBanner } from '@/components/calculations/IllustrativeBanner'
 import { LadderFigureValue } from '@/components/calculations/LadderFigure'
+import { LiquidityView } from '@/components/calculations/LiquidityView'
+import { MaturityLadderView } from '@/components/calculations/MaturityLadderView'
+import { followsRun } from '@/components/calculations/polling'
 import { RunIdentity } from '@/components/calculations/RunIdentity'
 import { ImplementationPill, RunStatusPill } from '@/components/calculations/RunStatusPill'
 import { SnapshotMembers } from '@/components/calculations/SnapshotMembers'
@@ -59,6 +62,8 @@ import {
 // Refusals are toasted (FE-1.4): the toasts are captured to check the correlation ID is shown.
 const toasts = vi.hoisted(() => [] as { title?: string; description?: string; variant?: string }[])
 vi.mock('@/components/ui/use-toast', () => ({ toast: (t: { title?: string; description?: string }) => toasts.push(t) }))
+// The result panels read the drill-down from the URL; rendered here outside the app router.
+vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams(), useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }))
 
 // The OpenAPI document the types are generated from: enums are tested against it (D-23).
 const openapi = JSON.parse(readFileSync(fileURLToPath(new URL('../../../../../backend/openapi.json', import.meta.url)), 'utf8'))
@@ -460,16 +465,105 @@ describe('New-run panel requests and refusals (FE-15.1)', () => {
     expect(s.events).toEqual([])
   })
 
-  it('POSTs the run with an Idempotency-Key; the status shown is the server’s', async () => {
+  it('POSTs the run with an Idempotency-Key; the status shown is the server’s (background runs off: the Phase 32 request exactly)', async () => {
     const post = vi.spyOn(api, 'POST').mockResolvedValue(respond({ status: 201, body: run({ status: 'SUCCEEDED' }) }) as never)
     const s = store(ready())
-    const out = await submitRun(s.state, [moduleVersion()], s.dispatch, () => 'key-1')
+    const out = await submitRun(s.state, [moduleVersion()], s.dispatch, () => 'key-1', false)
     expect(out?.run_id).toBe(RUN_ID)
     expect(post).toHaveBeenCalledWith('/api/v1/calculation-runs', {
       params: { header: { 'Idempotency-Key': 'key-1' } },
       body: { dataset_snapshot_id: SNAPSHOT_ID, module_version_id: MODULE_VERSION_ID, reporting_date: '2026-12-31' },
     })
     expect(s.state.submit).toMatchObject({ kind: 'submitted', origin: 'created', run: { status: 'SUCCEEDED' } })
+  })
+
+  it('FE-33.1: background runs send Prefer: respond-async; a 202 RUNNING run is "created", followed, and never a result', async () => {
+    const post = vi.spyOn(api, 'POST').mockResolvedValue(respond({ status: 202, body: run({ status: 'RUNNING', outcome: null, ended_at: null }) }) as never)
+    const s = store(ready())
+    const out = await submitRun(s.state, [moduleVersion()], s.dispatch, () => 'key-1', true)
+    expect(post).toHaveBeenCalledWith('/api/v1/calculation-runs', {
+      params: { header: { 'Idempotency-Key': 'key-1', Prefer: 'respond-async' } },
+      body: { dataset_snapshot_id: SNAPSHOT_ID, module_version_id: MODULE_VERSION_ID, reporting_date: '2026-12-31' },
+    })
+    expect(out?.status).toBe('RUNNING')
+    expect(s.state.submit).toMatchObject({ kind: 'submitted', origin: 'created', run: { status: 'RUNNING' } })
+    expect(hasResults('RUNNING')).toBe(false)
+    // A later read of the same run replaces it; a read of another run never does.
+    const later = panelReducer(s.state, { type: 'run_polled', run: run({ status: 'SUCCEEDED' }) })
+    expect(later.submit).toMatchObject({ kind: 'submitted', origin: 'created', run: { status: 'SUCCEEDED' } })
+    expect(panelReducer(s.state, { type: 'run_polled', run: run({ run_id: 'other-run', status: 'FAILED' }) })).toBe(s.state)
+    expect(panelReducer(INITIAL_PANEL, { type: 'run_polled', run: run() })).toBe(INITIAL_PANEL)
+  })
+
+  it.each([
+    { status: 503, code: 'workers_busy', title: 'Every calculation worker is busy', retryAfter: '7' },
+    { status: 429, code: 'rate_limited', title: 'Too many requests: wait before retrying', retryAfter: '30' },
+  ])('FE-33.1: a $status $code refusal shows its retry time from Retry-After; no run is shown', async ({ status, code, title, retryAfter }) => {
+    const body = { ...envelope(code), retryable: true, details: { retry_after_seconds: 999 } }
+    vi.spyOn(api, 'POST').mockResolvedValue({ data: undefined, error: body, response: new Response(null, { status, headers: { 'Retry-After': retryAfter } }) } as never)
+    const s = store(ready())
+    expect(await submitRun(s.state, [moduleVersion()], s.dispatch, () => 'k', true)).toBeNull()
+    // The header wins over the envelope's details.
+    expect(s.state.submit).toEqual({
+      kind: 'refused',
+      refusal: { title, status, code, message: `${code} message`, cid: CID, retryAfterSeconds: Number(retryAfter) },
+    })
+    expect(toasts).toEqual([{ variant: 'destructive', title, description: `${code} message Retry in ${retryAfter} s. Correlation ID: ${CID}` }])
+    // A retry of the same body reuses the attempt key (the refusal wrote no run).
+    expect(s.state.attemptKey).toBe('k')
+  })
+
+  it('FE-33.1: a RUNNING run\'s ladder and liquidity panels read nothing and say results appear when it ends; RunView keys them on the status', () => {
+    const running = run({ status: 'RUNNING', outcome: null, ended_at: null })
+    expect(followsRun(running)).toBe(true)
+    expect(followsRun(run({ status: 'SUCCEEDED' }))).toBe(false)
+    expect(followsRun(null)).toBe(false)
+    const panels = [
+      [MaturityLadderView, 'ladder-pending'],
+      [LiquidityView, 'liquidity-pending'],
+    ] as const
+    for (const [View, testId] of panels) {
+      const html = renderToStaticMarkup(createElement(View as typeof LiquidityView, { run: running }))
+      expect(html, testId).toContain(`data-testid="${testId}" data-status="RUNNING"`)
+      expect(html).toContain('Results appear when the run ends')
+      // The panel keeps the run's identity; it never shows a figure or a success.
+      expect(html).toContain(RUN_ID)
+      expect(html).not.toContain('ladder-none')
+      // A run the server ended reads its results instead (still loading in a static render).
+      expect(renderToStaticMarkup(createElement(View as typeof LiquidityView, { run: run({ status: 'SUCCEEDED' }) }))).not.toContain(testId)
+    }
+    // Polling moves the run to its terminal status; the new key remounts the panel, which then reads.
+    const source = readFileSync(join(__dirname, '..', 'RunView.tsx'), 'utf8')
+    expect(source).toContain('<LiquidityView key={`${run.run_id}:${run.status}`} run={run} />')
+    expect(source).toContain('<MaturityLadderView key={`${run.run_id}:${run.status}`} run={run} />')
+  })
+
+  it('FE-33.1 NEXT_PUBLIC_BACKGROUND_RUNS_UI=off: no Prefer header, no polling, and a RUNNING run\'s panels as in Phase 32', async () => {
+    vi.stubEnv('NEXT_PUBLIC_BACKGROUND_RUNS_UI', 'off')
+    vi.resetModules()
+    try {
+      const features = await import('@/config/features')
+      const client = await import('@/api/client')
+      const calc = await import('@/components/calculations/calculations')
+      const polling = await import('@/components/calculations/polling')
+      const ladder = await import('@/components/calculations/MaturityLadderView')
+      expect(features.BACKGROUND_RUNS_UI_ENABLED).toBe(false)
+      const post = vi.spyOn(client.api, 'POST').mockResolvedValue(respond({ status: 201, body: run({ status: 'SUCCEEDED' }) }) as never)
+      const s = store(ready())
+      // The switch's default: no respondAsync argument.
+      expect((await calc.submitRun(s.state, [moduleVersion()], s.dispatch, () => 'key-off'))?.status).toBe('SUCCEEDED')
+      expect(post).toHaveBeenCalledWith('/api/v1/calculation-runs', {
+        params: { header: { 'Idempotency-Key': 'key-off' } },
+        body: { dataset_snapshot_id: SNAPSHOT_ID, module_version_id: MODULE_VERSION_ID, reporting_date: '2026-12-31' },
+      })
+      // No polling: the poller's gate (useRunPolling, and the run page's panels) follows no run, RUNNING included.
+      expect(polling.followsRun(run({ status: 'RUNNING' }))).toBe(false)
+      expect(polling.followsRun(run({ status: 'QUEUED' }))).toBe(false)
+      expect(renderToStaticMarkup(createElement(ladder.MaturityLadderView, { run: run({ status: 'RUNNING' }) }))).not.toContain('ladder-pending')
+    } finally {
+      vi.unstubAllEnvs()
+      vi.resetModules()
+    }
   })
 
   it('a BLOCKED or FAILED run is shown as the server ended it, never as success', async () => {

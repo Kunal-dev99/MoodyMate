@@ -10,6 +10,7 @@ from typing import Annotated, Literal
 from pydantic import AfterValidator, BaseModel, Field, StringConstraints, model_validator
 
 from app.core.classification import MaskedValue
+from app.core.pagination import HasMore, NextCursor
 from app.core.text import SafeMultilineText, SafeText, single_line
 from app.governance.constants import FieldType
 from app.ingestion.constants import (
@@ -175,6 +176,8 @@ class SourcePage(BaseModel):
     total: int
     limit: int
     offset: int
+    has_more: HasMore
+    next_cursor: NextCursor
 
 
 # --- Phase 8: imports (BE-8.4) ------------------------------------------------------------------
@@ -319,6 +322,8 @@ class ImportPage(BaseModel):
     total: int
     limit: int
     offset: int
+    has_more: HasMore
+    next_cursor: NextCursor
 
 
 # --- Phase 9: profiles (BE-9.3) -------------------------------------------------------------
@@ -442,6 +447,8 @@ class IssuePage(BaseModel):
     severity_counts: dict[str, int] = Field(
         description="Severity -> issues of this import (unfiltered)."
     )
+    has_more: HasMore
+    next_cursor: NextCursor
 
 
 QuarantineCell = str | MaskedValue
@@ -484,6 +491,8 @@ class QuarantineBatch(BaseModel):
     limit: int
     offset: int
     status_counts: dict[str, int] = Field(description="Status -> items of this batch.")
+    has_more: HasMore
+    next_cursor: NextCursor
 
 
 class DispositionIn(BaseModel):

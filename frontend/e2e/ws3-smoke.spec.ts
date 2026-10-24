@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 import type { components } from '../src/api/schema'
-import { sameDecimal, sumDecimals } from './calc-support'
+import { expectedRunStatus, sameDecimal, settledRun, sumDecimals } from './calc-support'
 import { API, SAMPLES, bearer, ensureActiveMapping, groupDecimal, signIn, uploadSample } from './support'
 
 /**
@@ -211,8 +211,9 @@ async function submitRunInBrowser(page: Page, moduleVersionId: string, reporting
   const submitted = isPost(page, `${API}/api/v1/calculation-runs`)
   await page.getByTestId('run-submit').click()
   const response = await submitted
-  expect(response.status(), await response.text()).toBe(201)
-  const run: Schemas['RunDetail'] = await response.json()
+  expect(response.status(), await response.text()).toBe(expectedRunStatus())
+  // FE-33.1: a background run (202) is polled until the server ends it.
+  const run: Schemas['RunDetail'] = await settledRun(page, response)
   // Never shown as a success before the server says so: the page opens in the server's status.
   await page.waitForURL(`**/calculations/runs/${run.run_id}`)
   await expect(page.getByTestId('run-detail-status')).toHaveAttribute('data-status', run.status)

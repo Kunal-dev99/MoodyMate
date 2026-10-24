@@ -25,6 +25,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { MAPPING_UI_ENABLED } from '@/config/features'
+import { TruncationNote } from '@/components/common/ListPager'
+import { truncationOf, type Truncation } from '@/lib/paging'
 
 const CRUMBS = [
   { label: 'Ingestion Workbench', href: '/ingestion' },
@@ -41,8 +43,14 @@ type Ready = {
   /** True when the columns come from an import's profile (suggestions available). */
   profiled: boolean
   existing: MappingSummary | null
+  /** Q18: the existing-mapping check read one capped page of the source's mappings; set when the server cut it. */
+  mappingsNote: Truncation | null
 }
-type State = { kind: 'loading' } | { kind: 'choose'; sources: { id: string; code: string; name: string }[] } | ({ kind: 'ready' } & Ready) | LoadFailure
+type State =
+  | { kind: 'loading' }
+  | { kind: 'choose'; sources: { id: string; code: string; name: string }[]; sourcesNote: Truncation | null }
+  | ({ kind: 'ready' } & Ready)
+  | LoadFailure
 
 /** Loads what a new mapping starts from: the import's profile, else the source's current contract. */
 async function loadStart(sourceId: string | null, importId: string | null, signal: AbortSignal): Promise<State> {
@@ -61,7 +69,7 @@ async function loadStart(sourceId: string | null, importId: string | null, signa
   }
   if (!sourceId) {
     const page = await call(() => api.GET('/api/v1/sources', { params: { query: { limit: 200 } }, signal }))
-    return { kind: 'choose', sources: page.items.map((s) => ({ id: s.id, code: s.code, name: s.name })) }
+    return { kind: 'choose', sources: page.items.map((s) => ({ id: s.id, code: s.code, name: s.name })), sourcesNote: truncationOf(page, 'sources') }
   }
   const source = await call(() => api.GET('/api/v1/sources/{source_id}', { params: { path: { source_id: sourceId } }, signal }))
   const contract = source.contracts.find((c) => c.id === contractId) ?? source.current_contract
@@ -74,6 +82,7 @@ async function loadStart(sourceId: string | null, importId: string | null, signa
     columns: columns ?? contract.expected_columns.map((c) => ({ name: c.name, suggested_target_field: null })),
     profiled: columns !== null,
     existing: mappings.items.find((m) => m.source_contract_id === contract.id) ?? null,
+    mappingsNote: truncationOf(mappings, 'mappings of this source'),
   }
 }
 
@@ -84,7 +93,7 @@ function defaultCode(source: SourceDetail, contractId: string): string {
 
 function CreateForm({ ready, importId }: { ready: Ready; importId: string | null }) {
   const router = useRouter()
-  const { source, contractId, columns, profiled } = ready
+  const { source, contractId, columns, profiled, mappingsNote } = ready
   const contract = source.contracts.find((c) => c.id === contractId)
   const [code, setCode] = useState(() => defaultCode(source, contractId))
   const [name, setName] = useState(`${source.name} to ${contract?.schema_code ?? 'schema'}`)
@@ -181,6 +190,8 @@ function CreateForm({ ready, importId }: { ready: Ready; importId: string | null
           </ul>
         )}
         {refusal && <RefusalNotice refusal={refusal} />}
+        {/* Q18: an existing mapping beyond the page read is not found here; the server still refuses a duplicate. */}
+        <TruncationNote note={mappingsNote} testId="mapping-existing-truncated" />
         <div>
           <Button onClick={create} disabled={saving || problems.length > 0} data-testid="mapping-create">
             Create mapping
@@ -248,6 +259,7 @@ function NewMapping() {
             </option>
           ))}
         </select>
+        <TruncationNote note={state.sourcesNote} testId="mapping-source-truncated" className="mt-2" />
       </PageSection>
     )
   if (state.existing)

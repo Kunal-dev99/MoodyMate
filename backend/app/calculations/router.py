@@ -28,11 +28,14 @@ one. Every run is labelled with the D-35 statement.
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.calculations.constants import (
     CREATE_RUN,
+    PREFER_HEADER,
+    PREFERENCE_APPLIED_HEADER,
+    RESPOND_ASYNC,
     CalculationRunStatus,
     CalculationWarningCode,
     HqlaExclusionReason,
@@ -42,6 +45,8 @@ from app.calculations.constants import (
     WarningSeverity,
 )
 from app.calculations.schemas import (
+    RUN_ACCEPTED_RESPONSE,
+    WORKERS_BUSY_RESPONSE,
     BucketOut,
     ContributionLineage,
     HqlaAssetLineage,
@@ -86,6 +91,13 @@ from app.core.auth import require_permission
 from app.core.classification import UNCLASSIFIED, mask_mapping, mask_value
 from app.core.decimals import decimal_text
 from app.core.idempotency import idempotency_key_header, mark_replayed
+from app.core.pagination import (
+    INVALID_CURSOR_RESPONSE,
+    NO_FILTERS,
+    Cursor,
+    continuation,
+    page_offset,
+)
 from app.core.principal import Principal
 from app.core.ratelimit import RATE_LIMITED_RESPONSE, LimitedRoute, rate_limited
 from app.db.session import get_session
@@ -173,17 +185,29 @@ async def create_dataset_snapshot(
     return _snapshot(view)
 
 
-@router.get("/dataset-snapshots", response_model=SnapshotPage, operation_id="listDatasetSnapshots")
+@router.get(
+    "/dataset-snapshots",
+    response_model=SnapshotPage,
+    operation_id="listDatasetSnapshots",
+    responses=INVALID_CURSOR_RESPONSE,
+)
 async def list_dataset_snapshots(
     principal: CalcReader,
     session: SessionDep,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    cursor: Cursor = None,
 ) -> SnapshotPage:
     """The caller's tenant's snapshots, newest first."""
+    listing, filters = "listDatasetSnapshots", NO_FILTERS
+    offset = page_offset(principal, listing, filters, offset, cursor)
     views, total = await SnapshotService(session, principal).page(limit, offset)
     return SnapshotPage(
-        items=[_snapshot(v) for v in views], total=total, limit=limit, offset=offset
+        items=[_snapshot(v) for v in views],
+        total=total,
+        limit=limit,
+        offset=offset,
+        **continuation(principal, listing, filters, limit, offset, len(views), total),
     )
 
 
@@ -307,7 +331,9 @@ def _detail(row: RunRow, manifest: dict[str, Any]) -> RunDetail:
             "description": "Idempotent replay: this key was used for the same request; the "
             "original run is returned (header Idempotent-Replayed: true).",
         },
+        **RUN_ACCEPTED_RESPONSE,
         **RATE_LIMITED_RESPONSE,
+        **WORKERS_BUSY_RESPONSE,
     },
 )
 async def create_calculation_run(
@@ -324,6 +350,16 @@ async def create_calculation_run(
             "idempotency_conflict (D-31 §5)."
         ),
     ],
+    prefer: Annotated[
+        str | None,
+        Header(
+            alias=PREFER_HEADER,
+            max_length=200,
+            description="RFC 7240. `respond-async`: answer 202 with the RUNNING run, Location "
+            "and Preference-Applied, and run in the background (D-59 §2). Absent (or without "
+            "respond-async): the request waits and returns the terminal run, unchanged.",
+        ),
+    ] = None,
 ) -> RunDetail:
     """Run a module on a dataset snapshot for a reporting date, synchronously (D-31). The
     engine pins the ACTIVE rule versions (as a content-addressed rule set), the baseline
@@ -338,27 +374,53 @@ async def create_calculation_run(
     replay whose run is still RUNNING after CALC_RUN_STALE_SECONDS ends it FAILED
     (ENGINE_ERROR) and returns it. A re-run of a stressed run (Phase 25, D-45 §8) re-pins its
     scenario version and shock subset, even once the version is CLOSED; while
-    SCENARIOS_ENABLED is off it is refused 409 `scenarios_disabled`."""
+    SCENARIOS_ENABLED is off it is refused 409 `scenarios_disabled`. Phase 33 (D-59): the
+    module executes in a bounded worker pool (CALC_EXECUTION_MODE=pool) with the same
+    hashes; a full queue is 503 `workers_busy` (retryable, Retry-After, audited DENIED, no
+    run); a worker crash or CALC_RUN_TIMEOUT_SECONDS ends the run FAILED (ENGINE_ERROR)."""
     settings = request.app.state.settings
+    respond_async = prefers_async(prefer)
     spec: RunSpec | RerunSpec = (
         RerunSpec(body.rerun_of)
         if isinstance(body, RunRerun)
         else RunSpec(body.dataset_snapshot_id, body.module_version_id, body.reporting_date)
     )
-    service = CalculationService(session, principal)
+    service = CalculationService(session, principal, request.app.state.run_executor)
     row, created = await service.create(
         spec,
         idempotency_key,
         settings.CALCULATIONS_ENABLED,
         settings.CALC_RUN_STALE_SECONDS,
         settings.SCENARIOS_ENABLED,
+        respond_async=respond_async,
     )
     if not created:
         mark_replayed(response)
+    elif respond_async:  # D-59 §2: accepted, RUNNING; poll Location
+        response.status_code = 202
+        # The run's own URL (GET getCalculationRun): this route's path plus the run id.
+        response.headers["Location"] = f"{request.url.path.rstrip('/')}/{row.run.id}"
+        response.headers[PREFERENCE_APPLIED_HEADER] = RESPOND_ASYNC
     return _detail(row, await service.shown_manifest(row.run))
 
 
-@router.get("/calculation-runs", response_model=RunPage, operation_id="listCalculationRuns")
+def prefers_async(prefer: str | None) -> bool:
+    """RFC 7240: the Prefer header holds the `respond-async` preference (a token, any case,
+    among comma-separated preferences, each possibly with parameters)."""
+    if prefer is None:
+        return False
+    return any(
+        part.split(";", 1)[0].split("=", 1)[0].strip().lower() == RESPOND_ASYNC
+        for part in prefer.split(",")
+    )
+
+
+@router.get(
+    "/calculation-runs",
+    response_model=RunPage,
+    operation_id="listCalculationRuns",
+    responses=INVALID_CURSOR_RESPONSE,
+)
 async def list_calculation_runs(
     principal: CalcReader,
     session: SessionDep,
@@ -375,12 +437,26 @@ async def list_calculation_runs(
             "only (e.g. a baseline picker); omitted: every run."
         ),
     ] = None,
+    cursor: Cursor = None,
 ) -> RunPage:
     """The caller's tenant's runs, newest first."""
+    listing = "listCalculationRuns"
+    filters = {
+        "module_code": module_code,
+        "status": status,
+        "stressed": stressed,
+    }
+    offset = page_offset(principal, listing, filters, offset, cursor)
     rows, total = await CalculationService(session, principal).page(
         limit, offset, module_code, status, stressed
     )
-    return RunPage(items=[_summary(r) for r in rows], total=total, limit=limit, offset=offset)
+    return RunPage(
+        items=[_summary(r) for r in rows],
+        total=total,
+        limit=limit,
+        offset=offset,
+        **continuation(principal, listing, filters, limit, offset, len(rows), total),
+    )
 
 
 @router.get(
@@ -455,6 +531,7 @@ def _contribution(c: ContributionRow, clear: frozenset[str]) -> ResultItem:
     "/calculation-runs/{run_id}/results",
     response_model=ResultPage,
     operation_id="getCalculationRunResults",
+    responses=INVALID_CURSOR_RESPONSE,
 )
 async def get_calculation_run_results(
     run_id: uuid.UUID,
@@ -464,11 +541,19 @@ async def get_calculation_run_results(
     bucket_code: Annotated[str | None, Query(max_length=20)] = None,
     limit: Annotated[int, Query(ge=1, le=1000)] = 200,
     offset: Annotated[int, Query(ge=0)] = 0,
+    cursor: Cursor = None,
 ) -> ResultPage:
     """The run's intermediate values (one contribution per bucketed cash flow), each with its
     lineage: cash-flow event -> canonical record -> import and source row (D-31 §6). Filter
     by currency and bucket to drill down from a ladder row. The value is masked unless the
     caller is cleared for the most sensitive field it reads (D-33)."""
+    listing = "getCalculationRunResults"
+    filters = {
+        "run_id": run_id,
+        "currency": currency,
+        "bucket_code": bucket_code,
+    }
+    offset = page_offset(principal, listing, filters, offset, cursor)
     view = await CalculationService(session, principal).results(
         run_id, currency, bucket_code, limit, offset
     )
@@ -480,6 +565,7 @@ async def get_calculation_run_results(
         total=view.total,
         limit=limit,
         offset=offset,
+        **continuation(principal, listing, filters, limit, offset, len(view.items), view.total),
         statement=ILLUSTRATIVE_STATEMENT,
         validation_status=CalculationService.validation_status(view.run),
         context=ResultContext.model_validate(CalculationService.result_context(view.run)),

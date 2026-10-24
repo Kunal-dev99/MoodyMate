@@ -80,6 +80,7 @@ from app.rules.constants import (
     SEEDED_RULES,
 )
 from app.tests.conftest import sql
+from app.tests.executor_kit import check_pool_scenario_run
 from app.tests.helpers import cid, events, make_snapshot, project, start_run
 from app.tests.scenario_kit import (
     SCENARIOS,
@@ -987,6 +988,12 @@ def check_scenario_runs(
             # existing stressed runs stay readable
             assert off.get(cpath, params=params, headers=analyst).status_code == 200
     assert (calc_counts(db), scenario_run_counts(db)) == before_all
+
+    # --- Phase 33 (BE-33.1, Q11 ruling): the k + 1 member runs in the pool give the inline
+    # members' hashes (executor_kit) -------------------------------------------------------------
+    check_pool_scenario_run(
+        db, artifact_dir, analyst, combined["scenario_id"], baseline_id, three["members"]
+    )
 
     # --- after CLOSED, re-running each member reproduces both hashes (D-45 §8) ----------------
     r = api.post(f"{version_path(combined, 1)}/close", json={}, headers=approver)

@@ -12,6 +12,7 @@ from datetime import date, datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.classification import MaskedValue
+from app.core.pagination import HasMore, NextCursor
 from app.core.text import SafeMultilineText
 from app.domain.constants import (
     RATING_COMMENT_MAX,
@@ -107,6 +108,8 @@ class InstrumentPage(BaseModel):
     instrument_types: list[InstrumentTypeOut] = Field(
         description="The instrument type vocabulary of the caller's tenant (for filters)."
     )
+    has_more: HasMore
+    next_cursor: NextCursor
 
 
 class AttributeOut(BaseModel):
@@ -235,6 +238,8 @@ class CounterpartyPage(BaseModel):
     total: int
     limit: int
     offset: int
+    has_more: HasMore
+    next_cursor: NextCursor
 
 
 class CounterpartyVersionOut(BaseModel):
@@ -381,6 +386,8 @@ class ObligorRatingPage(BaseModel):
     total: int
     limit: int
     offset: int
+    has_more: HasMore
+    next_cursor: NextCursor
 
 
 class CounterpartyDetail(BaseModel):
@@ -424,6 +431,8 @@ class CreditExposurePage(BaseModel):
     total: int
     limit: int
     offset: int
+    has_more: HasMore
+    next_cursor: NextCursor
 
 
 class CreditExposureDetail(BaseModel):
@@ -461,6 +470,8 @@ class LegalEntityPage(BaseModel):
     total: int
     limit: int
     offset: int
+    has_more: HasMore
+    next_cursor: NextCursor
 
 
 class LegalEntityDetail(LegalEntityOut):
@@ -494,6 +505,8 @@ class IdentityLinkPage(BaseModel):
     total: int
     limit: int
     offset: int
+    has_more: HasMore
+    next_cursor: NextCursor
 
 
 class IdentityLinkKindCount(BaseModel):

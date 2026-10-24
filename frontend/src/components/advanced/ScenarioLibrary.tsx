@@ -11,6 +11,8 @@ import { LoadFailed } from '@/components/common/LoadFailed'
 import { LoadingBlock } from '@/components/common/LoadingBlock'
 import { PageSection } from '@/components/common/PageSection'
 import { createLoader, type Loaded } from '@/components/common/load'
+import { ListPager, cursorRefusedBody, useCursorPaging, type CursorPaging } from '@/components/common/ListPager'
+import { LIST_PAGING_UI_ENABLED } from '@/config/features'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -58,7 +60,10 @@ export function ScenarioLibrary() {
   const [offset, setOffset] = useState(0)
   const [showClosed, setShowClosed] = useState(false)
   const [state, setState] = useState<Loaded<ScenarioPage>>({ kind: 'loading' })
-  const query = useMemo(() => libraryQuery(tab, offset, showClosed), [tab, offset, showClosed])
+  // FE-33.1: the server's next_cursor, bound to the tab's filters (NEXT_PUBLIC_LIST_PAGING_UI=off: offsets).
+  const cursorPaging = useCursorPaging(`${tab}|${showClosed}`)
+  const cursor = LIST_PAGING_UI_ENABLED ? cursorPaging.cursor : null
+  const query = useMemo(() => libraryQuery(tab, offset, showClosed, cursor), [tab, offset, showClosed, cursor])
   const loader = useMemo(() => createLoader(fetchScenarios(query), setState, 'Could not load the scenarios'), [query])
   useEffect(() => {
     loader.load()
@@ -112,14 +117,29 @@ export function ScenarioLibrary() {
         {state.kind === 'loading' && <LoadingBlock rows={4} />}
         {state.kind === 'failed' && <LoadFailed icon={Library} title="Could not load the scenarios" cid={state.cid} onRetry={loader.load} />}
         {state.kind === 'forbidden' && <Forbidden permission="calc:read" correlationId={state.cid} />}
-        {state.kind === 'not_found' && <EmptyState icon={Library} title="The scenario list was refused" description={state.cid ? `Correlation ID: ${state.cid}` : undefined} />}
-        {state.kind === 'ready' && <LibraryTable page={state.value} tab={tab} empty={text.empty} onPage={setOffset} />}
+        {state.kind === 'not_found' &&
+          (cursorRefusedBody(state, cursorPaging, 'scenario-pager') ?? <EmptyState icon={Library} title="The scenario list was refused" description={state.cid ? `Correlation ID: ${state.cid}` : undefined} />)}
+        {state.kind === 'ready' && (
+          <LibraryTable page={state.value} tab={tab} empty={text.empty} onPage={setOffset} cursorPaging={LIST_PAGING_UI_ENABLED ? cursorPaging : null} />
+        )}
       </PageSection>
     </div>
   )
 }
 
-function LibraryTable({ page, tab, empty, onPage }: { page: ScenarioPage; tab: ExplorerTab; empty: string; onPage: (offset: number) => void }) {
+function LibraryTable({
+  page,
+  tab,
+  empty,
+  onPage,
+  cursorPaging,
+}: {
+  page: ScenarioPage
+  tab: ExplorerTab
+  empty: string
+  onPage: (offset: number) => void
+  cursorPaging: CursorPaging | null
+}) {
   if (page.items.length === 0) return <EmptyState icon={EMPTY_ICON[tab]} title={empty} />
   return (
     <div className="space-y-3">
@@ -175,7 +195,8 @@ function LibraryTable({ page, tab, empty, onPage }: { page: ScenarioPage; tab: E
           ))}
         </TableBody>
       </Table>
-      {page.total > page.limit && (
+      {cursorPaging && <ListPager page={page} paging={cursorPaging} testId="scenario-pager" />}
+      {!cursorPaging && page.total > page.limit && (
         <div className="flex items-center justify-between text-xs text-muted-foreground">
           <span>
             {page.offset + 1}–{Math.min(page.offset + page.items.length, page.total)} of {page.total}

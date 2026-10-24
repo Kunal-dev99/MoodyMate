@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth import get_principal, require_permission
 from app.core.classification import mask_mapping
 from app.core.errors import ApiError
+from app.core.pagination import INVALID_CURSOR_RESPONSE, Cursor, continuation, page_offset
 from app.core.principal import Principal
 from app.core.refusals import refuse_endpoint
 from app.db.session import get_session
@@ -196,7 +197,12 @@ def _detail(m: FieldMapping, labels: MappingLabels) -> MappingDetail:
     )
 
 
-@router.get("/mappings", response_model=MappingPage, operation_id="listMappings")
+@router.get(
+    "/mappings",
+    response_model=MappingPage,
+    operation_id="listMappings",
+    responses=INVALID_CURSOR_RESPONSE,
+)
 async def list_mappings(
     principal: MappingReader,
     session: SessionDep,
@@ -204,13 +210,20 @@ async def list_mappings(
     offset: Annotated[int, Query(ge=0)] = 0,
     source_id: uuid.UUID | None = None,
     schema_id: uuid.UUID | None = None,
+    cursor: Cursor = None,
 ) -> MappingPage:
     """Mappings by code; filter by source and target schema."""
+    listing, filters = "listMappings", {"source_id": source_id, "schema_id": schema_id}
+    offset = page_offset(principal, listing, filters, offset, cursor)
     service = MappingService(session, principal)
     mappings, total = await service.page(limit, offset, source_id, schema_id)
     labels = await service.labels(mappings)
     return MappingPage(
-        items=[_summary(m, labels) for m in mappings], total=total, limit=limit, offset=offset
+        items=[_summary(m, labels) for m in mappings],
+        total=total,
+        limit=limit,
+        offset=offset,
+        **continuation(principal, listing, filters, limit, offset, len(mappings), total),
     )
 
 

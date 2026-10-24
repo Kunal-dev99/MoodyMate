@@ -44,6 +44,8 @@ import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import { MAPPING_UI_ENABLED } from '@/config/features'
+import { TruncationNote } from '@/components/common/ListPager'
+import { truncationOf, type Truncation } from '@/lib/paging'
 import { cn } from '@/lib/utils'
 import { formatTimestamp } from '@/lib/format'
 import { isAuthorOf } from '@/lib/maker-checker'
@@ -163,6 +165,8 @@ function Workbench({ mappingId }: { mappingId: string }) {
   const scope = useRef(new RequestScope())
 
   const [imports, setImports] = useState<ImportSummary[] | null>(null)
+  // Q18: the imports are one capped page of the source's imports; set when the server cut it.
+  const [importsNote, setImportsNote] = useState<Truncation | null>(null)
   const [fields, setFields] = useState<Record<string, SchemaField[]> | null>(null)
   const [profile, setProfile] = useState<ProfileState>({ kind: 'none' })
   const [rows, setRows] = useState<DraftRule[]>([])
@@ -202,7 +206,11 @@ function Workbench({ mappingId }: { mappingId: string }) {
     if (!sourceId) return
     const controller = new AbortController()
     call(() => api.GET('/api/v1/imports', { params: { query: { source_id: sourceId, limit: 100 } }, signal: controller.signal }))
-      .then((page) => !controller.signal.aborted && setImports(page.items.filter((i) => i.source_contract_id === contractId)))
+      .then((page) => {
+        if (controller.signal.aborted) return
+        setImports(page.items.filter((i) => i.source_contract_id === contractId))
+        setImportsNote(truncationOf(page, 'imports of this source (newest first)'))
+      })
       .catch((err: unknown) => {
         if (controller.signal.aborted) return
         setImports([])
@@ -527,6 +535,7 @@ function Workbench({ mappingId }: { mappingId: string }) {
                   </option>
                 ))}
               </select>
+              <TruncationNote note={importsNote} testId="mapping-import-truncated" />
             </div>
             )}
             {selectedImport && (

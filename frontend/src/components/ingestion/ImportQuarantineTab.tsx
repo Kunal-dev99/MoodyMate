@@ -13,6 +13,9 @@ import { MaskedValue, isMasked } from '@/components/common/MaskedValue'
 import { PageSection } from '@/components/common/PageSection'
 import { toastApiError } from '@/components/common/api-error-toast'
 import { startLoad, type LoadFailure } from '@/components/common/load'
+import { ListPager, cursorRefusedBody, useCursorPaging } from '@/components/common/ListPager'
+import { LIST_PAGING_UI_ENABLED } from '@/config/features'
+import { cursorQuery } from '@/lib/paging'
 import { QuarantineStatusPill } from '@/components/ingestion/QuarantineStatusPill'
 import { RefusalNotice } from '@/components/ingestion/RefusalNotice'
 import type { ImportDetail } from '@/components/ingestion/imports'
@@ -88,15 +91,18 @@ function BatchItems({ batchId, batchNumber }: { batchId: string; batchNumber: nu
   const [state, setState] = useState<State>({ kind: 'loading' })
   const [refusal, setRefusal] = useState<Refusal | null>(null)
   const request = useRef<AbortController | null>(null)
+  // FE-33.1: the server's next_cursor, bound to the status filter (NEXT_PUBLIC_LIST_PAGING_UI=off: offsets).
+  const cursorPaging = useCursorPaging(status)
+  const cursor = LIST_PAGING_UI_ENABLED ? cursorPaging.cursor : null
 
   const load = useCallback(() => {
-    const query = { limit: PAGE, offset, ...(status ? { status } : {}) }
+    const query = { limit: PAGE, ...(LIST_PAGING_UI_ENABLED ? cursorQuery(cursor) : { offset }), ...(status ? { status } : {}) }
     request.current = startLoad(
       (signal) => call(() => api.GET('/api/v1/quarantine/{batch_id}', { params: { path: { batch_id: batchId }, query }, signal })),
       { onReady: (batch) => setState({ kind: 'ready', batch }), onFailure: setState, failureTitle: 'Could not load the quarantine' },
       request.current,
     )
-  }, [batchId, status, offset])
+  }, [batchId, status, offset, cursor])
 
   useEffect(() => {
     setState({ kind: 'loading' })
@@ -120,7 +126,7 @@ function BatchItems({ batchId, batchNumber }: { batchId: string; batchNumber: nu
       />
     )
   if (state.kind === 'not_found')
-    return <EmptyState icon={ShieldAlert} title="Batch not found" description={`It does not exist or is not visible to you.${state.cid ? ` Correlation ID: ${state.cid}` : ''}`} />
+    return cursorRefusedBody(state, cursorPaging, 'quarantine-pager') ?? <EmptyState icon={ShieldAlert} title="Batch not found" description={`It does not exist or is not visible to you.${state.cid ? ` Correlation ID: ${state.cid}` : ''}`} />
 
   const { batch } = state
   const last = Math.min(batch.offset + batch.items.length, batch.total)
@@ -191,19 +197,23 @@ function BatchItems({ batchId, batchNumber }: { batchId: string; batchNumber: nu
             </TableBody>
           </Table>
         </div>
-        <div className="mt-3 flex items-center justify-between text-sm">
-          <span className="text-muted-foreground">
-            {batch.offset + 1}–{last} of {batch.total}
-          </span>
-          <div className="flex gap-2">
-            <Button size="sm" variant="outline" disabled={batch.offset === 0} onClick={() => setOffset(Math.max(0, batch.offset - PAGE))}>
-              Previous
-            </Button>
-            <Button size="sm" variant="outline" disabled={last >= batch.total} onClick={() => setOffset(batch.offset + PAGE)}>
-              Next
-            </Button>
+        {LIST_PAGING_UI_ENABLED ? (
+          <ListPager page={batch} paging={cursorPaging} testId="quarantine-pager" />
+        ) : (
+          <div className="mt-3 flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">
+              {batch.offset + 1}–{last} of {batch.total}
+            </span>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" disabled={batch.offset === 0} onClick={() => setOffset(Math.max(0, batch.offset - PAGE))}>
+                Previous
+              </Button>
+              <Button size="sm" variant="outline" disabled={last >= batch.total} onClick={() => setOffset(batch.offset + PAGE)}>
+                Next
+              </Button>
+            </div>
           </div>
-        </div>
+        )}
       </>
     )
 

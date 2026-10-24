@@ -354,6 +354,12 @@ describe('the drill-down and the "what if" (FE-25.2)', () => {
     expect(attrsOf(none, 'what-if-no-run')[0]['data-parent-version']).toBe('1')
     expect(none).toContain('No run of parent v1 on this baseline')
     expect(none).not.toContain('what-if-table')
+    expect(none).not.toContain('what-if-truncated')
+    // Q18: the search read one capped page of scenario runs; when the server cut it, the empty state says so.
+    const truncation = { shown: 200, total: 250, text: 'Showing the first 200 of 250 scenario runs on this baseline; the rest are not listed here.' }
+    const cut = renderToStaticMarkup(createElement(WhatIfBody, { scenarioId: SCENARIO, comparison: child, state: { kind: 'ready', value: { kind: 'no_parent_run', parentVersion: 1, truncation } } }))
+    expect(attrsOf(cut, 'what-if-truncated')[0]['data-total']).toBe('250')
+    expect(cut).toContain(truncation.text)
   })
 
   it('sets the combined deltas side by side, masked ones as "masked"', () => {

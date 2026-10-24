@@ -679,6 +679,11 @@
       },
       "AuditEventPage": {
         "properties": {
+          "has_more": {
+            "description": "True when rows exist after this page: the list is truncated (D-59 \u00a76).",
+            "title": "Has More",
+            "type": "boolean"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/AuditEventOut"
@@ -689,6 +694,18 @@
           "limit": {
             "title": "Limit",
             "type": "integer"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 \u00a76).",
+            "title": "Next Cursor"
           },
           "offset": {
             "title": "Offset",
@@ -703,7 +720,9 @@
           "items",
           "total",
           "limit",
-          "offset"
+          "offset",
+          "has_more",
+          "next_cursor"
         ],
         "title": "AuditEventPage",
         "type": "object"
@@ -2069,6 +2088,11 @@
       },
       "CounterpartyPage": {
         "properties": {
+          "has_more": {
+            "description": "True when rows exist after this page: the list is truncated (D-59 \u00a76).",
+            "title": "Has More",
+            "type": "boolean"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/CounterpartySummary"
@@ -2079,6 +2103,18 @@
           "limit": {
             "title": "Limit",
             "type": "integer"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 \u00a76).",
+            "title": "Next Cursor"
           },
           "offset": {
             "title": "Offset",
@@ -2093,7 +2129,9 @@
           "items",
           "total",
           "limit",
-          "offset"
+          "offset",
+          "has_more",
+          "next_cursor"
         ],
         "title": "CounterpartyPage",
         "type": "object"
@@ -2400,6 +2438,11 @@
       },
       "CreditExposurePage": {
         "properties": {
+          "has_more": {
+            "description": "True when rows exist after this page: the list is truncated (D-59 \u00a76).",
+            "title": "Has More",
+            "type": "boolean"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/CreditExposureSummary"
@@ -2410,6 +2453,18 @@
           "limit": {
             "title": "Limit",
             "type": "integer"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 \u00a76).",
+            "title": "Next Cursor"
           },
           "offset": {
             "title": "Offset",
@@ -2424,7 +2479,9 @@
           "items",
           "total",
           "limit",
-          "offset"
+          "offset",
+          "has_more",
+          "next_cursor"
         ],
         "title": "CreditExposurePage",
         "type": "object"
@@ -4446,6 +4503,11 @@
       },
       "IdentityLinkPage": {
         "properties": {
+          "has_more": {
+            "description": "True when rows exist after this page: the list is truncated (D-59 \u00a76).",
+            "title": "Has More",
+            "type": "boolean"
+          },
           "items": {
             "description": "Oldest first (created_at, then link_id). An empty page for a source row means its text key is unresolved or ambiguous ('Unresolved (text key)').",
             "items": {
@@ -4457,6 +4519,18 @@
           "limit": {
             "title": "Limit",
             "type": "integer"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 \u00a76).",
+            "title": "Next Cursor"
           },
           "offset": {
             "title": "Offset",
@@ -4471,7 +4545,9 @@
           "items",
           "total",
           "limit",
-          "offset"
+          "offset",
+          "has_more",
+          "next_cursor"
         ],
         "title": "IdentityLinkPage",
         "type": "object"
@@ -5032,6 +5108,11 @@
       },
       "ImportPage": {
         "properties": {
+          "has_more": {
+            "description": "True when rows exist after this page: the list is truncated (D-59 \u00a76).",
+            "title": "Has More",
+            "type": "boolean"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/ImportSummary"
@@ -5042,6 +5123,18 @@
           "limit": {
             "title": "Limit",
             "type": "integer"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 \u00a76).",
+            "title": "Next Cursor"
           },
           "offset": {
             "title": "Offset",
@@ -5056,7 +5149,9 @@
           "items",
           "total",
           "limit",
-          "offset"
+          "offset",
+          "has_more",
+          "next_cursor"
         ],
         "title": "ImportPage",
         "type": "object"
@@ -5495,6 +5590,11 @@
       },
       "InstrumentPage": {
         "properties": {
+          "has_more": {
+            "description": "True when rows exist after this page: the list is truncated (D-59 \u00a76).",
+            "title": "Has More",
+            "type": "boolean"
+          },
           "instrument_types": {
             "description": "The instrument type vocabulary of the caller's tenant (for filters).",
             "items": {
@@ -5514,6 +5614,18 @@
             "title": "Limit",
             "type": "integer"
           },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 \u00a76).",
+            "title": "Next Cursor"
+          },
           "offset": {
             "title": "Offset",
             "type": "integer"
@@ -5528,7 +5640,9 @@
           "total",
           "limit",
           "offset",
-          "instrument_types"
+          "instrument_types",
+          "has_more",
+          "next_cursor"
         ],
         "title": "InstrumentPage",
         "type": "object"
@@ -5998,6 +6112,11 @@
       },
       "IssuePage": {
         "properties": {
+          "has_more": {
+            "description": "True when rows exist after this page: the list is truncated (D-59 \u00a76).",
+            "title": "Has More",
+            "type": "boolean"
+          },
           "import_id": {
             "format": "uuid",
             "title": "Import Id",
@@ -6016,6 +6135,18 @@
           "limit": {
             "title": "Limit",
             "type": "integer"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 \u00a76).",
+            "title": "Next Cursor"
           },
           "offset": {
             "title": "Offset",
@@ -6041,7 +6172,9 @@
           "total",
           "limit",
           "offset",
-          "severity_counts"
+          "severity_counts",
+          "has_more",
+          "next_cursor"
         ],
         "title": "IssuePage",
         "type": "object"
@@ -6395,6 +6528,11 @@
       },
       "LegalEntityPage": {
         "properties": {
+          "has_more": {
+            "description": "True when rows exist after this page: the list is truncated (D-59 \u00a76).",
+            "title": "Has More",
+            "type": "boolean"
+          },
           "items": {
             "description": "By code, then source.",
             "items": {
@@ -6406,6 +6544,18 @@
           "limit": {
             "title": "Limit",
             "type": "integer"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 \u00a76).",
+            "title": "Next Cursor"
           },
           "offset": {
             "title": "Offset",
@@ -6420,7 +6570,9 @@
           "items",
           "total",
           "limit",
-          "offset"
+          "offset",
+          "has_more",
+          "next_cursor"
         ],
         "title": "LegalEntityPage",
         "type": "object"
@@ -7428,6 +7580,11 @@
       },
       "MappingPage": {
         "properties": {
+          "has_more": {
+            "description": "True when rows exist after this page: the list is truncated (D-59 \u00a76).",
+            "title": "Has More",
+            "type": "boolean"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/MappingSummary"
@@ -7438,6 +7595,18 @@
           "limit": {
             "title": "Limit",
             "type": "integer"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 \u00a76).",
+            "title": "Next Cursor"
           },
           "offset": {
             "title": "Offset",
@@ -7452,7 +7621,9 @@
           "items",
           "total",
           "limit",
-          "offset"
+          "offset",
+          "has_more",
+          "next_cursor"
         ],
         "title": "MappingPage",
         "type": "object"
@@ -8545,6 +8716,11 @@
       },
       "ObligorRatingPage": {
         "properties": {
+          "has_more": {
+            "description": "True when rows exist after this page: the list is truncated (D-59 \u00a76).",
+            "title": "Has More",
+            "type": "boolean"
+          },
           "items": {
             "description": "Newest proposal first (proposed_at descending, then rating_id).",
             "items": {
@@ -8556,6 +8732,18 @@
           "limit": {
             "title": "Limit",
             "type": "integer"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 \u00a76).",
+            "title": "Next Cursor"
           },
           "offset": {
             "title": "Offset",
@@ -8570,7 +8758,9 @@
           "items",
           "total",
           "limit",
-          "offset"
+          "offset",
+          "has_more",
+          "next_cursor"
         ],
         "title": "ObligorRatingPage",
         "type": "object"
@@ -9325,12 +9515,29 @@
       },
       "ProposalList": {
         "properties": {
+          "has_more": {
+            "description": "True when rows exist after this page: the list is truncated (D-59 \u00a76).",
+            "title": "Has More",
+            "type": "boolean"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/ProposalOut"
             },
             "title": "Items",
             "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 \u00a76).",
+            "title": "Next Cursor"
           },
           "total": {
             "title": "Total",
@@ -9339,7 +9546,9 @@
         },
         "required": [
           "items",
-          "total"
+          "total",
+          "has_more",
+          "next_cursor"
         ],
         "title": "ProposalList",
         "type": "object"
@@ -9573,6 +9782,11 @@
             "title": "Columns",
             "type": "array"
           },
+          "has_more": {
+            "description": "True when rows exist after this page: the list is truncated (D-59 \u00a76).",
+            "title": "Has More",
+            "type": "boolean"
+          },
           "import_id": {
             "format": "uuid",
             "title": "Import Id",
@@ -9591,6 +9805,18 @@
           "limit": {
             "title": "Limit",
             "type": "integer"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 \u00a76).",
+            "title": "Next Cursor"
           },
           "offset": {
             "title": "Offset",
@@ -9626,7 +9852,9 @@
           "total",
           "limit",
           "offset",
-          "status_counts"
+          "status_counts",
+          "has_more",
+          "next_cursor"
         ],
         "title": "QuarantineBatch",
         "type": "object"
@@ -10142,6 +10370,11 @@
             "$ref": "#/components/schemas/ResultContext",
             "description": "D-56 \u00a75: units, currency, as-of date, methodology pins, validation status and the D-35 statement, from the run's pins."
           },
+          "has_more": {
+            "description": "True when rows exist after this page: the list is truncated (D-59 \u00a76).",
+            "title": "Has More",
+            "type": "boolean"
+          },
           "items": {
             "description": "In run order.",
             "items": {
@@ -10153,6 +10386,18 @@
           "limit": {
             "title": "Limit",
             "type": "integer"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 \u00a76).",
+            "title": "Next Cursor"
           },
           "offset": {
             "title": "Offset",
@@ -10188,7 +10433,9 @@
           "offset",
           "statement",
           "validation_status",
-          "context"
+          "context",
+          "has_more",
+          "next_cursor"
         ],
         "title": "ResultPage",
         "type": "object"
@@ -11517,6 +11764,11 @@
       },
       "RunPage": {
         "properties": {
+          "has_more": {
+            "description": "True when rows exist after this page: the list is truncated (D-59 \u00a76).",
+            "title": "Has More",
+            "type": "boolean"
+          },
           "items": {
             "description": "Newest first.",
             "items": {
@@ -11528,6 +11780,18 @@
           "limit": {
             "title": "Limit",
             "type": "integer"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 \u00a76).",
+            "title": "Next Cursor"
           },
           "offset": {
             "title": "Offset",
@@ -11542,7 +11806,9 @@
           "items",
           "total",
           "limit",
-          "offset"
+          "offset",
+          "has_more",
+          "next_cursor"
         ],
         "title": "RunPage",
         "type": "object"
@@ -12102,6 +12368,11 @@
       },
       "ScenarioContributionPage": {
         "properties": {
+          "has_more": {
+            "description": "True when rows exist after this page: the list is truncated (D-59 \u00a76).",
+            "title": "Has More",
+            "type": "boolean"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/ScenarioContributionOut"
@@ -12115,6 +12386,18 @@
           "limit": {
             "title": "Limit",
             "type": "integer"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 \u00a76).",
+            "title": "Next Cursor"
           },
           "offset": {
             "title": "Offset",
@@ -12136,7 +12419,9 @@
           "total",
           "limit",
           "offset",
-          "labels"
+          "labels",
+          "has_more",
+          "next_cursor"
         ],
         "title": "ScenarioContributionPage",
         "type": "object"
@@ -12316,6 +12601,11 @@
       },
       "ScenarioPage": {
         "properties": {
+          "has_more": {
+            "description": "True when rows exist after this page: the list is truncated (D-59 \u00a76).",
+            "title": "Has More",
+            "type": "boolean"
+          },
           "items": {
             "description": "Newest first.",
             "items": {
@@ -12331,6 +12621,18 @@
             "title": "Limit",
             "type": "integer"
           },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 \u00a76).",
+            "title": "Next Cursor"
+          },
           "offset": {
             "title": "Offset",
             "type": "integer"
@@ -12345,7 +12647,9 @@
           "total",
           "limit",
           "offset",
-          "labels"
+          "labels",
+          "has_more",
+          "next_cursor"
         ],
         "title": "ScenarioPage",
         "type": "object"
@@ -12538,6 +12842,11 @@
       },
       "ScenarioRunPage": {
         "properties": {
+          "has_more": {
+            "description": "True when rows exist after this page: the list is truncated (D-59 \u00a76).",
+            "title": "Has More",
+            "type": "boolean"
+          },
           "items": {
             "description": "Newest first.",
             "items": {
@@ -12553,6 +12862,18 @@
             "title": "Limit",
             "type": "integer"
           },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 \u00a76).",
+            "title": "Next Cursor"
+          },
           "offset": {
             "title": "Offset",
             "type": "integer"
@@ -12567,7 +12888,9 @@
           "total",
           "limit",
           "offset",
-          "labels"
+          "labels",
+          "has_more",
+          "next_cursor"
         ],
         "title": "ScenarioRunPage",
         "type": "object"
@@ -14163,6 +14486,11 @@
       },
       "SnapshotPage": {
         "properties": {
+          "has_more": {
+            "description": "True when rows exist after this page: the list is truncated (D-59 \u00a76).",
+            "title": "Has More",
+            "type": "boolean"
+          },
           "items": {
             "description": "Newest first.",
             "items": {
@@ -14174,6 +14502,18 @@
           "limit": {
             "title": "Limit",
             "type": "integer"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 \u00a76).",
+            "title": "Next Cursor"
           },
           "offset": {
             "title": "Offset",
@@ -14188,7 +14528,9 @@
           "items",
           "total",
           "limit",
-          "offset"
+          "offset",
+          "has_more",
+          "next_cursor"
         ],
         "title": "SnapshotPage",
         "type": "object"
@@ -14359,6 +14701,11 @@
       },
       "SourcePage": {
         "properties": {
+          "has_more": {
+            "description": "True when rows exist after this page: the list is truncated (D-59 \u00a76).",
+            "title": "Has More",
+            "type": "boolean"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/SourceSummary"
@@ -14369,6 +14716,18 @@
           "limit": {
             "title": "Limit",
             "type": "integer"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 \u00a76).",
+            "title": "Next Cursor"
           },
           "offset": {
             "title": "Offset",
@@ -14383,7 +14742,9 @@
           "items",
           "total",
           "limit",
-          "offset"
+          "offset",
+          "has_more",
+          "next_cursor"
         ],
         "title": "SourcePage",
         "type": "object"
@@ -14772,6 +15133,11 @@
       },
       "UserPage": {
         "properties": {
+          "has_more": {
+            "description": "True when rows exist after this page: the list is truncated (D-59 \u00a76).",
+            "title": "Has More",
+            "type": "boolean"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/UserSummary"
@@ -14782,6 +15148,18 @@
           "limit": {
             "title": "Limit",
             "type": "integer"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 \u00a76).",
+            "title": "Next Cursor"
           },
           "offset": {
             "title": "Offset",
@@ -14796,7 +15174,9 @@
           "items",
           "total",
           "limit",
-          "offset"
+          "offset",
+          "has_more",
+          "next_cursor"
         ],
         "title": "UserPage",
         "type": "object"
@@ -15184,7 +15564,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -15243,7 +15623,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -15421,6 +15801,27 @@
               "description": "Return events older than this event id (stable keyset paging).",
               "title": "Before"
             }
+          },
+          {
+            "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_\\-.]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+              "title": "Cursor"
+            }
           }
         ],
         "responses": {
@@ -15433,6 +15834,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 \u00a76). Nothing is read."
           },
           "4XX": {
             "content": {
@@ -15452,7 +15863,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -15498,7 +15909,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "summary": "Auth Config",
@@ -15540,7 +15951,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -15634,6 +16045,27 @@
               "description": "true: stressed runs only (Phase 25, D-45 \u00a74); false: non-stressed runs only (e.g. a baseline picker); omitted: every run.",
               "title": "Stressed"
             }
+          },
+          {
+            "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_\\-.]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+              "title": "Cursor"
+            }
           }
         ],
         "responses": {
@@ -15646,6 +16078,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 \u00a76). Nothing is read."
           },
           "4XX": {
             "content": {
@@ -15665,7 +16107,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -15679,7 +16121,7 @@
         ]
       },
       "post": {
-        "description": "Run a module on a dataset snapshot for a reporting date, synchronously (D-31). The\nengine pins the ACTIVE rule versions (as a content-addressed rule set), the baseline\nassumption set, the module and engine versions and the snapshot's members, writes the\nrun RUNNING with its manifest, runs the module and the post-checks, and ends it\nSUCCEEDED, SUCCEEDED_WITH_WARNINGS, FAILED (a post-check failed) or BLOCKED (the input\ncontract was not met). No AI is involved. A body of `rerun_of` alone re-runs that run on\nits exact original pins (BE-16.3), recording `rerun_of_run_id`. Refusals: 404 `not_found`\n(snapshot, or the run to re-run), 409 `rerun_not_reproducible`, 409\n`module_not_available` (absent, PLANNED, not implemented, or a rule without an ACTIVE\nversion), 409 `calculations_disabled`, 409 `idempotency_conflict`; each audited DENIED. A\nreplay whose run is still RUNNING after CALC_RUN_STALE_SECONDS ends it FAILED\n(ENGINE_ERROR) and returns it. A re-run of a stressed run (Phase 25, D-45 \u00a78) re-pins its\nscenario version and shock subset, even once the version is CLOSED; while\nSCENARIOS_ENABLED is off it is refused 409 `scenarios_disabled`.",
+        "description": "Run a module on a dataset snapshot for a reporting date, synchronously (D-31). The\nengine pins the ACTIVE rule versions (as a content-addressed rule set), the baseline\nassumption set, the module and engine versions and the snapshot's members, writes the\nrun RUNNING with its manifest, runs the module and the post-checks, and ends it\nSUCCEEDED, SUCCEEDED_WITH_WARNINGS, FAILED (a post-check failed) or BLOCKED (the input\ncontract was not met). No AI is involved. A body of `rerun_of` alone re-runs that run on\nits exact original pins (BE-16.3), recording `rerun_of_run_id`. Refusals: 404 `not_found`\n(snapshot, or the run to re-run), 409 `rerun_not_reproducible`, 409\n`module_not_available` (absent, PLANNED, not implemented, or a rule without an ACTIVE\nversion), 409 `calculations_disabled`, 409 `idempotency_conflict`; each audited DENIED. A\nreplay whose run is still RUNNING after CALC_RUN_STALE_SECONDS ends it FAILED\n(ENGINE_ERROR) and returns it. A re-run of a stressed run (Phase 25, D-45 \u00a78) re-pins its\nscenario version and shock subset, even once the version is CLOSED; while\nSCENARIOS_ENABLED is off it is refused 409 `scenarios_disabled`. Phase 33 (D-59): the\nmodule executes in a bounded worker pool (CALC_EXECUTION_MODE=pool) with the same\nhashes; a full queue is 503 `workers_busy` (retryable, Retry-After, audited DENIED, no\nrun); a worker crash or CALC_RUN_TIMEOUT_SECONDS ends the run FAILED (ENGINE_ERROR).",
         "operationId": "createCalculationRun",
         "parameters": [
           {
@@ -15694,6 +16136,25 @@
               "pattern": "^[!-~]+$",
               "title": "Idempotency-Key",
               "type": "string"
+            }
+          },
+          {
+            "description": "RFC 7240. `respond-async`: answer 202 with the RUNNING run, Location and Preference-Applied, and run in the background (D-59 \u00a72). Absent (or without respond-async): the request waits and returns the terminal run, unchanged.",
+            "in": "header",
+            "name": "Prefer",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "RFC 7240. `respond-async`: answer 202 with the RUNNING run, Location and Preference-Applied, and run in the background (D-59 \u00a72). Absent (or without respond-async): the request waits and returns the terminal run, unchanged.",
+              "title": "Prefer"
             }
           }
         ],
@@ -15736,6 +16197,33 @@
             },
             "description": "Successful Response"
           },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunDetail"
+                }
+              }
+            },
+            "description": "Prefer: respond-async (D-59 \u00a72): the run is written RUNNING (manifest pinned) and executes in the background; poll Location until a terminal status. A replay of the key answers 200 with the same run, whatever its status.",
+            "headers": {
+              "Location": {
+                "description": "The run's URL: /api/v1/calculation-runs/{run_id}.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Preference-Applied": {
+                "description": "respond-async",
+                "schema": {
+                  "enum": [
+                    "respond-async"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
           "429": {
             "content": {
               "application/json": {
@@ -15765,6 +16253,25 @@
             },
             "description": "Client error (standard envelope)"
           },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "workers_busy: the bounded calculation worker queue is full (D-59 \u00a74); retryable, audited DENIED, no run written. Also db_pool_exhausted (BE-33.4) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS; retryable.",
+            "headers": {
+              "Retry-After": {
+                "description": "Whole seconds before retrying.",
+                "schema": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              }
+            }
+          },
           "5XX": {
             "content": {
               "application/json": {
@@ -15773,7 +16280,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -15832,7 +16339,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -15891,7 +16398,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -15950,7 +16457,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -16035,6 +16542,27 @@
               "title": "Offset",
               "type": "integer"
             }
+          },
+          {
+            "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_\\-.]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+              "title": "Cursor"
+            }
           }
         ],
         "responses": {
@@ -16047,6 +16575,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 \u00a76). Nothing is read."
           },
           "4XX": {
             "content": {
@@ -16066,7 +16604,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -16181,6 +16719,27 @@
               "description": "Counterparties with a version from this import.",
               "title": "Import Id"
             }
+          },
+          {
+            "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_\\-.]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+              "title": "Cursor"
+            }
           }
         ],
         "responses": {
@@ -16193,6 +16752,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 \u00a76). Nothing is read."
           },
           "4XX": {
             "content": {
@@ -16212,7 +16781,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -16271,7 +16840,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -16340,7 +16909,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -16474,6 +17043,27 @@
               "description": "Exposures with a version from this import.",
               "title": "Import Id"
             }
+          },
+          {
+            "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_\\-.]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+              "title": "Cursor"
+            }
           }
         ],
         "responses": {
@@ -16486,6 +17076,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 \u00a76). Nothing is read."
           },
           "4XX": {
             "content": {
@@ -16505,7 +17105,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -16564,7 +17164,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -16611,7 +17211,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -16652,6 +17252,27 @@
               "title": "Offset",
               "type": "integer"
             }
+          },
+          {
+            "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_\\-.]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+              "title": "Cursor"
+            }
           }
         ],
         "responses": {
@@ -16664,6 +17285,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 \u00a76). Nothing is read."
           },
           "4XX": {
             "content": {
@@ -16683,7 +17314,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -16748,7 +17379,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -16807,7 +17438,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -16857,7 +17488,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "summary": "Dev Personas",
@@ -16908,7 +17539,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "summary": "Dev Session",
@@ -16972,7 +17603,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -17018,7 +17649,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "summary": "Health",
@@ -17128,6 +17759,27 @@
               "description": "Only links to this identity.",
               "title": "Target Id"
             }
+          },
+          {
+            "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_\\-.]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+              "title": "Cursor"
+            }
           }
         ],
         "responses": {
@@ -17140,6 +17792,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 \u00a76). Nothing is read."
           },
           "4XX": {
             "content": {
@@ -17159,7 +17821,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -17206,7 +17868,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -17317,6 +17979,27 @@
               "description": "true: imports projected into the WS3 domain (D-29); false: imports not projected. Omitted: both.",
               "title": "Projected"
             }
+          },
+          {
+            "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_\\-.]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+              "title": "Cursor"
+            }
           }
         ],
         "responses": {
@@ -17329,6 +18012,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 \u00a76). Nothing is read."
           },
           "4XX": {
             "content": {
@@ -17348,7 +18041,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -17482,7 +18175,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -17541,7 +18234,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -17600,7 +18293,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -17703,6 +18396,27 @@
               "description": "A schema field or source column name (exact).",
               "title": "Field"
             }
+          },
+          {
+            "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_\\-.]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+              "title": "Cursor"
+            }
           }
         ],
         "responses": {
@@ -17715,6 +18429,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 \u00a76). Nothing is read."
           },
           "4XX": {
             "content": {
@@ -17734,7 +18458,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -17803,7 +18527,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -17862,7 +18586,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -17921,7 +18645,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -17988,7 +18712,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -18047,7 +18771,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -18125,7 +18849,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -18240,6 +18964,27 @@
               "description": "Instruments with a version from this import.",
               "title": "Import Id"
             }
+          },
+          {
+            "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_\\-.]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+              "title": "Cursor"
+            }
           }
         ],
         "responses": {
@@ -18252,6 +18997,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 \u00a76). Nothing is read."
           },
           "4XX": {
             "content": {
@@ -18271,7 +19026,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -18330,7 +19085,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -18388,6 +19143,27 @@
               ],
               "title": "Source Id"
             }
+          },
+          {
+            "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_\\-.]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+              "title": "Cursor"
+            }
           }
         ],
         "responses": {
@@ -18400,6 +19176,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 \u00a76). Nothing is read."
           },
           "4XX": {
             "content": {
@@ -18419,7 +19205,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -18478,7 +19264,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -18553,6 +19339,27 @@
               ],
               "title": "Schema Id"
             }
+          },
+          {
+            "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_\\-.]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+              "title": "Cursor"
+            }
           }
         ],
         "responses": {
@@ -18565,6 +19372,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 \u00a76). Nothing is read."
           },
           "4XX": {
             "content": {
@@ -18584,7 +19401,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -18639,7 +19456,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -18698,7 +19515,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -18767,7 +19584,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -18847,7 +19664,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -18927,7 +19744,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -18973,7 +19790,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -19019,7 +19836,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -19097,6 +19914,27 @@
               "description": "Only this counterparty's versions.",
               "title": "Counterparty Id"
             }
+          },
+          {
+            "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_\\-.]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+              "title": "Cursor"
+            }
           }
         ],
         "responses": {
@@ -19109,6 +19947,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 \u00a76). Nothing is read."
           },
           "4XX": {
             "content": {
@@ -19128,7 +19976,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -19187,7 +20035,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -19256,7 +20104,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -19323,6 +20171,27 @@
               ],
               "title": "Status"
             }
+          },
+          {
+            "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_\\-.]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+              "title": "Cursor"
+            }
           }
         ],
         "responses": {
@@ -19335,6 +20204,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 \u00a76). Nothing is read."
           },
           "4XX": {
             "content": {
@@ -19354,7 +20233,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -19433,7 +20312,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -19480,7 +20359,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -19539,7 +20418,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -19608,7 +20487,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -19688,7 +20567,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -19768,7 +20647,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -19859,6 +20738,27 @@
               "title": "Offset",
               "type": "integer"
             }
+          },
+          {
+            "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_\\-.]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+              "title": "Cursor"
+            }
           }
         ],
         "responses": {
@@ -19871,6 +20771,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 \u00a76). Nothing is read."
           },
           "4XX": {
             "content": {
@@ -19890,7 +20800,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -19937,7 +20847,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -20027,6 +20937,27 @@
               "title": "Offset",
               "type": "integer"
             }
+          },
+          {
+            "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_\\-.]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+              "title": "Cursor"
+            }
           }
         ],
         "responses": {
@@ -20039,6 +20970,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 \u00a76). Nothing is read."
           },
           "4XX": {
             "content": {
@@ -20058,7 +20999,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -20113,7 +21054,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -20172,7 +21113,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -20241,7 +21182,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -20359,6 +21300,27 @@
               "title": "Offset",
               "type": "integer"
             }
+          },
+          {
+            "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_\\-.]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+              "title": "Cursor"
+            }
           }
         ],
         "responses": {
@@ -20371,6 +21333,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 \u00a76). Nothing is read."
           },
           "4XX": {
             "content": {
@@ -20390,7 +21362,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -20494,6 +21466,25 @@
             },
             "description": "Client error (standard envelope)"
           },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "workers_busy: the bounded calculation worker queue is full (D-59 \u00a74); retryable, audited DENIED, no run written. Also db_pool_exhausted (BE-33.4) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS; retryable.",
+            "headers": {
+              "Retry-After": {
+                "description": "Whole seconds before retrying.",
+                "schema": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              }
+            }
+          },
           "5XX": {
             "content": {
               "application/json": {
@@ -20502,7 +21493,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -20571,7 +21562,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -20651,7 +21642,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -20731,7 +21722,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -20811,7 +21802,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -20891,7 +21882,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -20971,7 +21962,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -21072,7 +22063,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -21145,6 +22136,27 @@
               "title": "Offset",
               "type": "integer"
             }
+          },
+          {
+            "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_\\-.]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+              "title": "Cursor"
+            }
           }
         ],
         "responses": {
@@ -21157,6 +22169,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 \u00a76). Nothing is read."
           },
           "4XX": {
             "content": {
@@ -21176,7 +22198,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -21230,7 +22252,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -21288,7 +22310,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -21356,7 +22378,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -21414,7 +22436,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -21472,7 +22494,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -21540,7 +22562,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -21586,7 +22608,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -21668,7 +22690,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -21726,7 +22748,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -21766,6 +22788,27 @@
               "title": "Offset",
               "type": "integer"
             }
+          },
+          {
+            "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_\\-.]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+              "title": "Cursor"
+            }
           }
         ],
         "responses": {
@@ -21778,6 +22821,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 \u00a76). Nothing is read."
           },
           "4XX": {
             "content": {
@@ -21797,7 +22850,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -21851,7 +22904,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -21909,7 +22962,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -21977,7 +23030,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -22017,6 +23070,27 @@
               "title": "Offset",
               "type": "integer"
             }
+          },
+          {
+            "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_\\-.]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 \u00a76).",
+              "title": "Cursor"
+            }
           }
         ],
         "responses": {
@@ -22029,6 +23103,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 \u00a76). Nothing is read."
           },
           "4XX": {
             "content": {
@@ -22048,7 +23132,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [
@@ -22106,7 +23190,7 @@
                 }
               }
             },
-            "description": "Server error (standard envelope)"
+            "description": "Server error (standard envelope). Any route may answer 503 db_pool_exhausted (retryable, Retry-After) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
           }
         },
         "security": [

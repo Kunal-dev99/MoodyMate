@@ -20,6 +20,7 @@ import { ManifestPanel } from './ManifestPanel'
 import { ResultContextPanel } from './ResultContextPanel'
 import { MaturityLadderView } from './MaturityLadderView'
 import { RunIdentity } from './RunIdentity'
+import { RunPollingNotice, useRunPolling } from './RunPolling'
 import { RunStatusPill } from './RunStatusPill'
 import { StressedRunBadge } from './StressedRunBadge'
 import { ValidationStatusBadge } from './ValidationStatusBadge'
@@ -206,6 +207,9 @@ export function RunView({ runId }: { runId: string }) {
     loader.load()
     return () => loader.abort()
   }, [loader])
+  // FE-33.1: a RUNNING run is read again, with backoff, until the server ends it
+  // (NEXT_PUBLIC_BACKGROUND_RUNS_UI=off: shown as loaded, as in Phase 32).
+  const poll = useRunPolling(state.kind === 'ready' ? state.value : null, (run) => setState({ kind: 'ready', value: run }))
 
   const wrap = (body: ReactNode) => (
     <>
@@ -247,6 +251,7 @@ export function RunView({ runId }: { runId: string }) {
         <IllustrativeBanner statement={run.statement} />
         <RunIdentity run={run} />
         <StatusNotice run={run} />
+        <RunPollingNotice view={poll} />
         <PageSection icon={Calculator} title="Run" description="Immutable: the run moved once, from RUNNING to the status the server set.">
           <dl className="grid grid-cols-[200px_1fr] gap-y-1 text-sm" data-testid="run-fields">
             <Field label="Run ID" testId="run-id">
@@ -299,7 +304,9 @@ export function RunView({ runId }: { runId: string }) {
         {/* FE-30.1: the server's context block (D-56 §5), checked against this run's own pins. */}
         <ResultContextPanel context={run.context} pins={run} source="run" />
         <Outcome run={run} />
-        {showsLiquidity(run) ? <LiquidityView run={run} /> : <MaturityLadderView run={run} />}
+        {/* FE-33.1: keyed on the server's status, so a run that polling sees end reads its results then
+            (a RUNNING run's panels read nothing; off: the status never changes here, as in Phase 32). */}
+        {showsLiquidity(run) ? <LiquidityView key={`${run.run_id}:${run.status}`} run={run} /> : <MaturityLadderView key={`${run.run_id}:${run.status}`} run={run} />}
         <Warnings warnings={run.warnings} />
         <ManifestPanel run={run} />
       </div>

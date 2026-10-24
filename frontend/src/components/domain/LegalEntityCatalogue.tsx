@@ -10,6 +10,9 @@ import { LoadFailed } from '@/components/common/LoadFailed'
 import { LoadingBlock } from '@/components/common/LoadingBlock'
 import { PageSection } from '@/components/common/PageSection'
 import { createLoader, type Loaded } from '@/components/common/load'
+import { ListPager, cursorRefusedBody, useCursorPaging } from '@/components/common/ListPager'
+import { LIST_PAGING_UI_ENABLED } from '@/config/features'
+import { cursorQuery } from '@/lib/paging'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { formatTimestamp } from '@/lib/format'
@@ -19,8 +22,13 @@ import { legalEntityHref, type LegalEntityPage } from './identity'
 
 const PAGE_SIZE = 50
 
-const fetchPage = (offset: number) => (signal: AbortSignal) =>
-  call(() => api.GET('/api/v1/legal-entities', { params: { query: { limit: PAGE_SIZE, offset } }, signal }))
+const fetchPage = (offset: number, cursor: string | null) => (signal: AbortSignal) =>
+  call(() =>
+    api.GET('/api/v1/legal-entities', {
+      params: { query: { limit: PAGE_SIZE, ...(LIST_PAGING_UI_ENABLED ? cursorQuery(cursor) : { offset }) } },
+      signal,
+    }),
+  )
 
 /**
  * FE-31.1 (D-58 §2): the tenant's legal entity identities (GET /legal-entities), by code then
@@ -29,8 +37,11 @@ const fetchPage = (offset: number) => (signal: AbortSignal) =>
  */
 export function LegalEntityCatalogue() {
   const [offset, setOffset] = useState(0)
+  // FE-33.1: the server's next_cursor (NEXT_PUBLIC_LIST_PAGING_UI=off: offsets).
+  const cursorPaging = useCursorPaging('legal-entities')
+  const cursor = LIST_PAGING_UI_ENABLED ? cursorPaging.cursor : null
   const [state, setState] = useState<Loaded<LegalEntityPage>>({ kind: 'loading' })
-  const loader = useMemo(() => createLoader(fetchPage(offset), setState, 'Could not load the legal entities'), [offset])
+  const loader = useMemo(() => createLoader(fetchPage(offset, cursor), setState, 'Could not load the legal entities'), [offset, cursor])
 
   useEffect(() => {
     loader.load()
@@ -41,7 +52,7 @@ export function LegalEntityCatalogue() {
   if (state.kind === 'forbidden') return <Forbidden permission="domain:read" correlationId={state.cid} />
   if (state.kind === 'failed') return <LoadFailed icon={Building} title="The legal entities could not be loaded" cid={state.cid} onRetry={loader.load} />
   if (state.kind === 'not_found')
-    return (
+    return cursorRefusedBody(state, cursorPaging, 'legal-entity-pager') ?? (
       <EmptyState
         icon={Building}
         title="The legal entities could not be listed"
@@ -97,7 +108,8 @@ export function LegalEntityCatalogue() {
               ))}
             </TableBody>
           </Table>
-          {page.total > PAGE_SIZE && (
+          {LIST_PAGING_UI_ENABLED && <ListPager page={page} paging={cursorPaging} testId="legal-entity-pager" />}
+          {!LIST_PAGING_UI_ENABLED && page.total > PAGE_SIZE && (
             <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
               <span data-testid="legal-entity-range">
                 {offset + 1}–{offset + page.items.length} of {page.total}

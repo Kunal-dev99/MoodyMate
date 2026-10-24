@@ -129,7 +129,10 @@ export interface paths {
          *     replay whose run is still RUNNING after CALC_RUN_STALE_SECONDS ends it FAILED
          *     (ENGINE_ERROR) and returns it. A re-run of a stressed run (Phase 25, D-45 §8) re-pins its
          *     scenario version and shock subset, even once the version is CLOSED; while
-         *     SCENARIOS_ENABLED is off it is refused 409 `scenarios_disabled`.
+         *     SCENARIOS_ENABLED is off it is refused 409 `scenarios_disabled`. Phase 33 (D-59): the
+         *     module executes in a bounded worker pool (CALC_EXECUTION_MODE=pool) with the same
+         *     hashes; a full queue is 503 `workers_busy` (retryable, Retry-After, audited DENIED, no
+         *     run); a worker crash or CALC_RUN_TIMEOUT_SECONDS ends the run FAILED (ENGINE_ERROR).
          */
         post: operations["createCalculationRun"];
         delete?: never;
@@ -2031,10 +2034,20 @@ export interface components {
         };
         /** AuditEventPage */
         AuditEventPage: {
+            /**
+             * Has More
+             * @description True when rows exist after this page: the list is truncated (D-59 §6).
+             */
+            has_more: boolean;
             /** Items */
             items: components["schemas"]["AuditEventOut"][];
             /** Limit */
             limit: number;
+            /**
+             * Next Cursor
+             * @description Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 §6).
+             */
+            next_cursor: string | null;
             /** Offset */
             offset: number;
             /** Total */
@@ -2675,10 +2688,20 @@ export interface components {
         };
         /** CounterpartyPage */
         CounterpartyPage: {
+            /**
+             * Has More
+             * @description True when rows exist after this page: the list is truncated (D-59 §6).
+             */
+            has_more: boolean;
             /** Items */
             items: components["schemas"]["CounterpartySummary"][];
             /** Limit */
             limit: number;
+            /**
+             * Next Cursor
+             * @description Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 §6).
+             */
+            next_cursor: string | null;
             /** Offset */
             offset: number;
             /** Total */
@@ -2838,10 +2861,20 @@ export interface components {
         };
         /** CreditExposurePage */
         CreditExposurePage: {
+            /**
+             * Has More
+             * @description True when rows exist after this page: the list is truncated (D-59 §6).
+             */
+            has_more: boolean;
             /** Items */
             items: components["schemas"]["CreditExposureSummary"][];
             /** Limit */
             limit: number;
+            /**
+             * Next Cursor
+             * @description Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 §6).
+             */
+            next_cursor: string | null;
             /** Offset */
             offset: number;
             /** Total */
@@ -3713,12 +3746,22 @@ export interface components {
         /** IdentityLinkPage */
         IdentityLinkPage: {
             /**
+             * Has More
+             * @description True when rows exist after this page: the list is truncated (D-59 §6).
+             */
+            has_more: boolean;
+            /**
              * Items
              * @description Oldest first (created_at, then link_id). An empty page for a source row means its text key is unresolved or ambiguous ('Unresolved (text key)').
              */
             items: components["schemas"]["IdentityLinkOut"][];
             /** Limit */
             limit: number;
+            /**
+             * Next Cursor
+             * @description Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 §6).
+             */
+            next_cursor: string | null;
             /** Offset */
             offset: number;
             /** Total */
@@ -3989,10 +4032,20 @@ export interface components {
         };
         /** ImportPage */
         ImportPage: {
+            /**
+             * Has More
+             * @description True when rows exist after this page: the list is truncated (D-59 §6).
+             */
+            has_more: boolean;
             /** Items */
             items: components["schemas"]["ImportSummary"][];
             /** Limit */
             limit: number;
+            /**
+             * Next Cursor
+             * @description Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 §6).
+             */
+            next_cursor: string | null;
             /** Offset */
             offset: number;
             /** Total */
@@ -4197,6 +4250,11 @@ export interface components {
         /** InstrumentPage */
         InstrumentPage: {
             /**
+             * Has More
+             * @description True when rows exist after this page: the list is truncated (D-59 §6).
+             */
+            has_more: boolean;
+            /**
              * Instrument Types
              * @description The instrument type vocabulary of the caller's tenant (for filters).
              */
@@ -4205,6 +4263,11 @@ export interface components {
             items: components["schemas"]["InstrumentSummary"][];
             /** Limit */
             limit: number;
+            /**
+             * Next Cursor
+             * @description Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 §6).
+             */
+            next_cursor: string | null;
             /** Offset */
             offset: number;
             /** Total */
@@ -4436,6 +4499,11 @@ export interface components {
         /** IssuePage */
         IssuePage: {
             /**
+             * Has More
+             * @description True when rows exist after this page: the list is truncated (D-59 §6).
+             */
+            has_more: boolean;
+            /**
              * Import Id
              * Format: uuid
              */
@@ -4445,6 +4513,11 @@ export interface components {
             items: components["schemas"]["IssueOut"][];
             /** Limit */
             limit: number;
+            /**
+             * Next Cursor
+             * @description Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 §6).
+             */
+            next_cursor: string | null;
             /** Offset */
             offset: number;
             /**
@@ -4628,12 +4701,22 @@ export interface components {
         /** LegalEntityPage */
         LegalEntityPage: {
             /**
+             * Has More
+             * @description True when rows exist after this page: the list is truncated (D-59 §6).
+             */
+            has_more: boolean;
+            /**
              * Items
              * @description By code, then source.
              */
             items: components["schemas"]["LegalEntityOut"][];
             /** Limit */
             limit: number;
+            /**
+             * Next Cursor
+             * @description Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 §6).
+             */
+            next_cursor: string | null;
             /** Offset */
             offset: number;
             /** Total */
@@ -5130,10 +5213,20 @@ export interface components {
         };
         /** MappingPage */
         MappingPage: {
+            /**
+             * Has More
+             * @description True when rows exist after this page: the list is truncated (D-59 §6).
+             */
+            has_more: boolean;
             /** Items */
             items: components["schemas"]["MappingSummary"][];
             /** Limit */
             limit: number;
+            /**
+             * Next Cursor
+             * @description Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 §6).
+             */
+            next_cursor: string | null;
             /** Offset */
             offset: number;
             /** Total */
@@ -5646,12 +5739,22 @@ export interface components {
         /** ObligorRatingPage */
         ObligorRatingPage: {
             /**
+             * Has More
+             * @description True when rows exist after this page: the list is truncated (D-59 §6).
+             */
+            has_more: boolean;
+            /**
              * Items
              * @description Newest proposal first (proposed_at descending, then rating_id).
              */
             items: components["schemas"]["ObligorRatingOut"][];
             /** Limit */
             limit: number;
+            /**
+             * Next Cursor
+             * @description Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 §6).
+             */
+            next_cursor: string | null;
             /** Offset */
             offset: number;
             /** Total */
@@ -6019,8 +6122,18 @@ export interface components {
         };
         /** ProposalList */
         ProposalList: {
+            /**
+             * Has More
+             * @description True when rows exist after this page: the list is truncated (D-59 §6).
+             */
+            has_more: boolean;
             /** Items */
             items: components["schemas"]["ProposalOut"][];
+            /**
+             * Next Cursor
+             * @description Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 §6).
+             */
+            next_cursor: string | null;
             /** Total */
             total: number;
         };
@@ -6109,6 +6222,11 @@ export interface components {
              */
             columns: string[];
             /**
+             * Has More
+             * @description True when rows exist after this page: the list is truncated (D-59 §6).
+             */
+            has_more: boolean;
+            /**
              * Import Id
              * Format: uuid
              */
@@ -6118,6 +6236,11 @@ export interface components {
             items: components["schemas"]["QuarantineItemOut"][];
             /** Limit */
             limit: number;
+            /**
+             * Next Cursor
+             * @description Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 §6).
+             */
+            next_cursor: string | null;
             /** Offset */
             offset: number;
             /**
@@ -6403,12 +6526,22 @@ export interface components {
             /** @description D-56 §5: units, currency, as-of date, methodology pins, validation status and the D-35 statement, from the run's pins. */
             context: components["schemas"]["ResultContext"];
             /**
+             * Has More
+             * @description True when rows exist after this page: the list is truncated (D-59 §6).
+             */
+            has_more: boolean;
+            /**
              * Items
              * @description In run order.
              */
             items: components["schemas"]["ResultItem"][];
             /** Limit */
             limit: number;
+            /**
+             * Next Cursor
+             * @description Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 §6).
+             */
+            next_cursor: string | null;
             /** Offset */
             offset: number;
             /**
@@ -6982,12 +7115,22 @@ export interface components {
         /** RunPage */
         RunPage: {
             /**
+             * Has More
+             * @description True when rows exist after this page: the list is truncated (D-59 §6).
+             */
+            has_more: boolean;
+            /**
              * Items
              * @description Newest first.
              */
             items: components["schemas"]["RunSummary"][];
             /** Limit */
             limit: number;
+            /**
+             * Next Cursor
+             * @description Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 §6).
+             */
+            next_cursor: string | null;
             /** Offset */
             offset: number;
             /** Total */
@@ -7280,11 +7423,21 @@ export interface components {
         };
         /** ScenarioContributionPage */
         ScenarioContributionPage: {
+            /**
+             * Has More
+             * @description True when rows exist after this page: the list is truncated (D-59 §6).
+             */
+            has_more: boolean;
             /** Items */
             items: components["schemas"]["ScenarioContributionOut"][];
             labels: components["schemas"]["ScenarioLabels"];
             /** Limit */
             limit: number;
+            /**
+             * Next Cursor
+             * @description Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 §6).
+             */
+            next_cursor: string | null;
             /** Offset */
             offset: number;
             /**
@@ -7365,6 +7518,11 @@ export interface components {
         /** ScenarioPage */
         ScenarioPage: {
             /**
+             * Has More
+             * @description True when rows exist after this page: the list is truncated (D-59 §6).
+             */
+            has_more: boolean;
+            /**
              * Items
              * @description Newest first.
              */
@@ -7372,6 +7530,11 @@ export interface components {
             labels: components["schemas"]["ScenarioLabels"];
             /** Limit */
             limit: number;
+            /**
+             * Next Cursor
+             * @description Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 §6).
+             */
+            next_cursor: string | null;
             /** Offset */
             offset: number;
             /** Total */
@@ -7480,6 +7643,11 @@ export interface components {
         /** ScenarioRunPage */
         ScenarioRunPage: {
             /**
+             * Has More
+             * @description True when rows exist after this page: the list is truncated (D-59 §6).
+             */
+            has_more: boolean;
+            /**
              * Items
              * @description Newest first.
              */
@@ -7487,6 +7655,11 @@ export interface components {
             labels: components["schemas"]["ScenarioLabels"];
             /** Limit */
             limit: number;
+            /**
+             * Next Cursor
+             * @description Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 §6).
+             */
+            next_cursor: string | null;
             /** Offset */
             offset: number;
             /** Total */
@@ -8114,12 +8287,22 @@ export interface components {
         /** SnapshotPage */
         SnapshotPage: {
             /**
+             * Has More
+             * @description True when rows exist after this page: the list is truncated (D-59 §6).
+             */
+            has_more: boolean;
+            /**
              * Items
              * @description Newest first.
              */
             items: components["schemas"]["SnapshotOut"][];
             /** Limit */
             limit: number;
+            /**
+             * Next Cursor
+             * @description Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 §6).
+             */
+            next_cursor: string | null;
             /** Offset */
             offset: number;
             /** Total */
@@ -8201,10 +8384,20 @@ export interface components {
         SourceKind: "FILE_DROP" | "WAREHOUSE" | "APPLICATION" | "FEED";
         /** SourcePage */
         SourcePage: {
+            /**
+             * Has More
+             * @description True when rows exist after this page: the list is truncated (D-59 §6).
+             */
+            has_more: boolean;
             /** Items */
             items: components["schemas"]["SourceSummary"][];
             /** Limit */
             limit: number;
+            /**
+             * Next Cursor
+             * @description Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 §6).
+             */
+            next_cursor: string | null;
             /** Offset */
             offset: number;
             /** Total */
@@ -8374,10 +8567,20 @@ export interface components {
         };
         /** UserPage */
         UserPage: {
+            /**
+             * Has More
+             * @description True when rows exist after this page: the list is truncated (D-59 §6).
+             */
+            has_more: boolean;
             /** Items */
             items: components["schemas"]["UserSummary"][];
             /** Limit */
             limit: number;
+            /**
+             * Next Cursor
+             * @description Opaque cursor for the next page (pass it as `cursor`), bound to the caller's tenant, this list and its filters; null on the last page (D-59 §6).
+             */
+            next_cursor: string | null;
             /** Offset */
             offset: number;
             /** Total */
@@ -8631,6 +8834,8 @@ export interface operations {
                 offset?: number;
                 /** @description Return events older than this event id (stable keyset paging). */
                 before?: string | null;
+                /** @description Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 §6). */
+                cursor?: string | null;
             };
             header?: never;
             path?: never;
@@ -8645,6 +8850,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AuditEventPage"];
+                };
+            };
+            /** @description invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 §6). Nothing is read. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
             /** @description Client error (standard envelope) */
@@ -8753,6 +8967,8 @@ export interface operations {
                 status?: components["schemas"]["CalculationRunStatus"] | null;
                 /** @description true: stressed runs only (Phase 25, D-45 §4); false: non-stressed runs only (e.g. a baseline picker); omitted: every run. */
                 stressed?: boolean | null;
+                /** @description Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 §6). */
+                cursor?: string | null;
             };
             header?: never;
             path?: never;
@@ -8767,6 +8983,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RunPage"];
+                };
+            };
+            /** @description invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 §6). Nothing is read. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
             /** @description Client error (standard envelope) */
@@ -8795,6 +9020,8 @@ export interface operations {
             header: {
                 /** @description Unique per run request (per user). A retry with the same key and the same body returns the original run; with a different body, 409 idempotency_conflict (D-31 §5). */
                 "Idempotency-Key": string;
+                /** @description RFC 7240. `respond-async`: answer 202 with the RUNNING run, Location and Preference-Applied, and run in the background (D-59 §2). Absent (or without respond-async): the request waits and returns the terminal run, unchanged. */
+                Prefer?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -8823,10 +9050,34 @@ export interface operations {
                     "application/json": components["schemas"]["RunDetail"];
                 };
             };
+            /** @description Prefer: respond-async (D-59 §2): the run is written RUNNING (manifest pinned) and executes in the background; poll Location until a terminal status. A replay of the key answers 200 with the same run, whatever its status. */
+            202: {
+                headers: {
+                    /** @description The run's URL: /api/v1/calculation-runs/{run_id}. */
+                    Location?: string;
+                    /** @description respond-async */
+                    "Preference-Applied"?: "respond-async";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunDetail"];
+                };
+            };
             /** @description rate_limited: this principal's bucket for the route is empty (D-53); retryable, audited DENIED, nothing written. */
             429: {
                 headers: {
                     /** @description Whole seconds until a request can be served again. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description workers_busy: the bounded calculation worker queue is full (D-59 §4); retryable, audited DENIED, no run written. Also db_pool_exhausted (BE-33.4) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS; retryable. */
+            503: {
+                headers: {
+                    /** @description Whole seconds before retrying. */
                     "Retry-After"?: number;
                     [name: string]: unknown;
                 };
@@ -8981,6 +9232,8 @@ export interface operations {
                 bucket_code?: string | null;
                 limit?: number;
                 offset?: number;
+                /** @description Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 §6). */
+                cursor?: string | null;
             };
             header?: never;
             path: {
@@ -8997,6 +9250,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ResultPage"];
+                };
+            };
+            /** @description invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 §6). Nothing is read. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
             /** @description Client error (standard envelope) */
@@ -9031,6 +9293,8 @@ export interface operations {
                 source_id?: string | null;
                 /** @description Counterparties with a version from this import. */
                 import_id?: string | null;
+                /** @description Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 §6). */
+                cursor?: string | null;
             };
             header?: never;
             path?: never;
@@ -9045,6 +9309,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CounterpartyPage"];
+                };
+            };
+            /** @description invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 §6). Nothing is read. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
             /** @description Client error (standard envelope) */
@@ -9165,6 +9438,8 @@ export interface operations {
                 source_id?: string | null;
                 /** @description Exposures with a version from this import. */
                 import_id?: string | null;
+                /** @description Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 §6). */
+                cursor?: string | null;
             };
             header?: never;
             path?: never;
@@ -9179,6 +9454,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CreditExposurePage"];
+                };
+            };
+            /** @description invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 §6). Nothing is read. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
             /** @description Client error (standard envelope) */
@@ -9284,6 +9568,8 @@ export interface operations {
             query?: {
                 limit?: number;
                 offset?: number;
+                /** @description Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 §6). */
+                cursor?: string | null;
             };
             header?: never;
             path?: never;
@@ -9298,6 +9584,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SnapshotPage"];
+                };
+            };
+            /** @description invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 §6). Nothing is read. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
             /** @description Client error (standard envelope) */
@@ -9586,6 +9881,8 @@ export interface operations {
                 target_kind?: components["schemas"]["IdentityTargetKind"] | null;
                 /** @description Only links to this identity. */
                 target_id?: string | null;
+                /** @description Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 §6). */
+                cursor?: string | null;
             };
             header?: never;
             path?: never;
@@ -9600,6 +9897,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IdentityLinkPage"];
+                };
+            };
+            /** @description invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 §6). Nothing is read. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
             /** @description Client error (standard envelope) */
@@ -9671,6 +9977,8 @@ export interface operations {
                 schema_code?: string | null;
                 /** @description true: imports projected into the WS3 domain (D-29); false: imports not projected. Omitted: both. */
                 projected?: boolean | null;
+                /** @description Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 §6). */
+                cursor?: string | null;
             };
             header?: never;
             path?: never;
@@ -9685,6 +9993,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ImportPage"];
+                };
+            };
+            /** @description invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 §6). Nothing is read. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
             /** @description Client error (standard envelope) */
@@ -9882,6 +10199,8 @@ export interface operations {
                 code?: components["schemas"]["ValidationCode"] | null;
                 /** @description A schema field or source column name (exact). */
                 field?: string | null;
+                /** @description Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 §6). */
+                cursor?: string | null;
             };
             header?: never;
             path: {
@@ -9898,6 +10217,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IssuePage"];
+                };
+            };
+            /** @description invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 §6). Nothing is read. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
             /** @description Client error (standard envelope) */
@@ -10196,6 +10524,8 @@ export interface operations {
                 source_id?: string | null;
                 /** @description Instruments with a version from this import. */
                 import_id?: string | null;
+                /** @description Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 §6). */
+                cursor?: string | null;
             };
             header?: never;
             path?: never;
@@ -10210,6 +10540,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InstrumentPage"];
+                };
+            };
+            /** @description invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 §6). Nothing is read. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
             /** @description Client error (standard envelope) */
@@ -10278,6 +10617,8 @@ export interface operations {
                 limit?: number;
                 offset?: number;
                 source_id?: string | null;
+                /** @description Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 §6). */
+                cursor?: string | null;
             };
             header?: never;
             path?: never;
@@ -10292,6 +10633,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LegalEntityPage"];
+                };
+            };
+            /** @description invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 §6). Nothing is read. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
             /** @description Client error (standard envelope) */
@@ -10361,6 +10711,8 @@ export interface operations {
                 offset?: number;
                 source_id?: string | null;
                 schema_id?: string | null;
+                /** @description Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 §6). */
+                cursor?: string | null;
             };
             header?: never;
             path?: never;
@@ -10375,6 +10727,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MappingPage"];
+                };
+            };
+            /** @description invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 §6). Nothing is read. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
             /** @description Client error (standard envelope) */
@@ -10698,6 +11059,8 @@ export interface operations {
                 status?: components["schemas"]["ObligorRatingStatus"] | null;
                 /** @description Only this counterparty's versions. */
                 counterparty_id?: string | null;
+                /** @description Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 §6). */
+                cursor?: string | null;
             };
             header?: never;
             path?: never;
@@ -10712,6 +11075,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ObligorRatingPage"];
+                };
+            };
+            /** @description invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 §6). Nothing is read. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
             /** @description Client error (standard envelope) */
@@ -10824,6 +11196,8 @@ export interface operations {
                 limit?: number;
                 offset?: number;
                 status?: components["schemas"]["QuarantineStatus"] | null;
+                /** @description Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 §6). */
+                cursor?: string | null;
             };
             header?: never;
             path: {
@@ -10840,6 +11214,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QuarantineBatch"];
+                };
+            };
+            /** @description invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 §6). Nothing is read. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
             /** @description Client error (standard envelope) */
@@ -11127,6 +11510,8 @@ export interface operations {
                 approval_state?: components["schemas"]["ApprovalState"] | null;
                 limit?: number;
                 offset?: number;
+                /** @description Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 §6). */
+                cursor?: string | null;
             };
             header?: never;
             path?: never;
@@ -11141,6 +11526,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ScenarioRunPage"];
+                };
+            };
+            /** @description invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 §6). Nothing is read. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
             /** @description Client error (standard envelope) */
@@ -11211,6 +11605,8 @@ export interface operations {
                 mine?: boolean;
                 limit?: number;
                 offset?: number;
+                /** @description Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 §6). */
+                cursor?: string | null;
             };
             header?: never;
             path?: never;
@@ -11225,6 +11621,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ScenarioPage"];
+                };
+            };
+            /** @description invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 §6). Nothing is read. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
             /** @description Client error (standard envelope) */
@@ -11381,6 +11786,8 @@ export interface operations {
                 shock_subset?: number[] | null;
                 limit?: number;
                 offset?: number;
+                /** @description Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 §6). */
+                cursor?: string | null;
             };
             header?: never;
             path: {
@@ -11397,6 +11804,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ScenarioContributionPage"];
+                };
+            };
+            /** @description invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 §6). Nothing is read. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
             /** @description Client error (standard envelope) */
@@ -11459,6 +11875,17 @@ export interface operations {
             429: {
                 headers: {
                     /** @description Whole seconds until a request can be served again. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description workers_busy: the bounded calculation worker queue is full (D-59 §4); retryable, audited DENIED, no run written. Also db_pool_exhausted (BE-33.4) when no database connection frees up within DB_POOL_TIMEOUT_SECONDS; retryable. */
+            503: {
+                headers: {
+                    /** @description Whole seconds before retrying. */
                     "Retry-After"?: number;
                     [name: string]: unknown;
                 };
@@ -11817,6 +12244,8 @@ export interface operations {
                 schema_id?: string | null;
                 limit?: number;
                 offset?: number;
+                /** @description Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 §6). */
+                cursor?: string | null;
             };
             header?: never;
             path?: never;
@@ -11831,6 +12260,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProposalList"];
+                };
+            };
+            /** @description invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 §6). Nothing is read. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
             /** @description Client error (standard envelope) */
@@ -12231,6 +12669,8 @@ export interface operations {
             query?: {
                 limit?: number;
                 offset?: number;
+                /** @description Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 §6). */
+                cursor?: string | null;
             };
             header?: never;
             path?: never;
@@ -12245,6 +12685,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SourcePage"];
+                };
+            };
+            /** @description invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 §6). Nothing is read. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
             /** @description Client error (standard envelope) */
@@ -12398,6 +12847,8 @@ export interface operations {
             query?: {
                 limit?: number;
                 offset?: number;
+                /** @description Opaque continuation: a previous page's `next_cursor`, sent with the same filters. It replaces `offset`. A cursor of another tenant, another list or other filters, or a tampered one, is 400 invalid_cursor (D-59 §6). */
+                cursor?: string | null;
             };
             header?: never;
             path?: never;
@@ -12412,6 +12863,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserPage"];
+                };
+            };
+            /** @description invalid_cursor: the cursor is malformed, tampered, of another tenant, or of another list or filter set (D-59 §6). Nothing is read. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
             /** @description Client error (standard envelope) */

@@ -31,6 +31,13 @@ from app.core.classification import mask_mapping, mask_value
 from app.core.config import Settings
 from app.core.errors import ApiError
 from app.core.idempotency import idempotency_key_header, mark_replayed
+from app.core.pagination import (
+    INVALID_CURSOR_RESPONSE,
+    NO_FILTERS,
+    Cursor,
+    continuation,
+    page_offset,
+)
 from app.core.principal import Principal
 from app.core.ratelimit import RATE_LIMITED_RESPONSE, LimitedRoute, rate_limited
 from app.core.refusals import refuse_endpoint
@@ -199,18 +206,30 @@ def _detail(s: SourceSystem, codes: dict[uuid.UUID, str]) -> SourceDetail:
     )
 
 
-@router.get("/sources", response_model=SourcePage, operation_id="listSources")
+@router.get(
+    "/sources",
+    response_model=SourcePage,
+    operation_id="listSources",
+    responses=INVALID_CURSOR_RESPONSE,
+)
 async def list_sources(
     principal: SourceReader,
     session: SessionDep,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    cursor: Cursor = None,
 ) -> SourcePage:
+    listing, filters = "listSources", NO_FILTERS
+    offset = page_offset(principal, listing, filters, offset, cursor)
     service = SourceService(session, principal)
     sources, total = await service.page(limit, offset)
     codes = await service.schema_codes()
     return SourcePage(
-        items=[_summary_fields(s, codes) for s in sources], total=total, limit=limit, offset=offset
+        items=[_summary_fields(s, codes) for s in sources],
+        total=total,
+        limit=limit,
+        offset=offset,
+        **continuation(principal, listing, filters, limit, offset, len(sources), total),
     )
 
 
@@ -568,7 +587,12 @@ async def create_import(
     return _import_detail(job, await service.labels([job]), principal)
 
 
-@router.get("/imports", response_model=ImportPage, operation_id="listImports")
+@router.get(
+    "/imports",
+    response_model=ImportPage,
+    operation_id="listImports",
+    responses=INVALID_CURSOR_RESPONSE,
+)
 async def list_imports(
     principal: ImportReader,
     session: SessionDep,
@@ -587,9 +611,18 @@ async def list_imports(
             "not projected. Omitted: both."
         ),
     ] = None,
+    cursor: Cursor = None,
 ) -> ImportPage:
     """Newest first; filter by source, status, schema code and projection (the Phase 15
     new-run panel lists projected imports per schema with one call)."""
+    listing = "listImports"
+    filters = {
+        "source_id": source_id,
+        "status": status,
+        "schema_code": schema_code,
+        "projected": projected,
+    }
+    offset = page_offset(principal, listing, filters, offset, cursor)
     service = ImportService(session, principal)
     projected_ids = None
     if projected is not None:
@@ -604,6 +637,7 @@ async def list_imports(
         total=total,
         limit=limit,
         offset=offset,
+        **continuation(principal, listing, filters, limit, offset, len(jobs), total),
     )
 
 
@@ -741,7 +775,10 @@ def _issue(issue: ValidationIssue) -> IssueOut:
 
 
 @router.get(
-    "/imports/{import_id}/issues", response_model=IssuePage, operation_id="listImportIssues"
+    "/imports/{import_id}/issues",
+    response_model=IssuePage,
+    operation_id="listImportIssues",
+    responses=INVALID_CURSOR_RESPONSE,
 )
 async def list_import_issues(
     import_id: uuid.UUID,
@@ -759,9 +796,13 @@ async def list_import_issues(
             description="A schema field or source column name (exact).",
         ),
     ] = None,
+    cursor: Cursor = None,
 ) -> IssuePage:
     """The import's validation issues, file-level first then by row, filtered by severity,
     code and field. Issues carry no values."""
+    listing = "listImportIssues"
+    filters = {"import_id": import_id, "severity": severity, "code": code, "field": field}
+    offset = page_offset(principal, listing, filters, offset, cursor)
     job, items, total, counts = await ImportService(session, principal).issues(
         import_id, severity, code, field, limit, offset
     )
@@ -773,6 +814,7 @@ async def list_import_issues(
         limit=limit,
         offset=offset,
         severity_counts=counts,
+        **continuation(principal, listing, filters, limit, offset, len(items), total),
     )
 
 
@@ -808,7 +850,12 @@ def _quarantine_item(
     )
 
 
-@router.get("/quarantine/{batch_id}", response_model=QuarantineBatch, operation_id="getQuarantine")
+@router.get(
+    "/quarantine/{batch_id}",
+    response_model=QuarantineBatch,
+    operation_id="getQuarantine",
+    responses=INVALID_CURSOR_RESPONSE,
+)
 async def get_quarantine(
     batch_id: uuid.UUID,
     principal: QuarantineReader,
@@ -816,9 +863,12 @@ async def get_quarantine(
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
     status: QuarantineStatus | None = None,
+    cursor: Cursor = None,
 ) -> QuarantineBatch:
     """A batch's quarantined and rejected rows (D-20), by row, with their values masked by
     classification. Nothing here is ever deleted."""
+    listing, filters = "getQuarantine", {"batch_id": batch_id, "status": status}
+    offset = page_offset(principal, listing, filters, offset, cursor)
     view = await QuarantineService(session, principal).batch_view(batch_id, status, limit, offset)
     clear = principal.clear_classifications
     return QuarantineBatch(
@@ -834,6 +884,7 @@ async def get_quarantine(
         limit=limit,
         offset=offset,
         status_counts=view.status_counts,
+        **continuation(principal, listing, filters, limit, offset, len(view.items), view.total),
     )
 
 

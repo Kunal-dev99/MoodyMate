@@ -12,6 +12,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 from app.core.classification import MaskedValue
+from app.core.pagination import HasMore, NextCursor
 from app.core.text import SafeMultilineText, SafeText
 from app.governance.constants import FieldType, ProposalDecision
 from app.mapping.constants import (
@@ -252,6 +253,8 @@ class MappingPage(BaseModel):
     total: int
     limit: int
     offset: int
+    has_more: HasMore
+    next_cursor: NextCursor
 
 
 class ValidationIssue(BaseModel):

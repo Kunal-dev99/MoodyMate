@@ -67,6 +67,18 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
 - **Consequences:** every repository query receives the principal's scope. An endpoint
   without a declared permission fails tests. Frontend visibility is cosmetic only
   (WS1 cross-cutting rule: server-side authorization is authoritative).
+- **Amendment (2026-10-24, Phase 33 build, auto-resolved; Q9):** one narrow, named exception
+  for a system job. The stale-run sweeper (BE-33.3, D-59 §4) has to find RUNNING runs across
+  tenants, so `StaleRunRepository.stale_runs` is a cross-tenant read. No request can reach
+  it, which is D-04's concern. Its conditions:
+  - it returns only (run id, tenant id);
+  - no route, and no service reachable from a request, calls it;
+  - each run found is ended through a repository scoped to that run's own tenant, by the
+    guarded single terminal move;
+  - the audit actor is `system:run-sweeper`, with `actor_user_id` NULL;
+  - the system principal holds no role or permission, and its nil user id is never written.
+
+  Roles, permissions and approvals are unchanged. The exception covers the sweeper only.
 
 ## D-05 Endpoint naming source of truth
 
@@ -2338,6 +2350,47 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
        library and test fake are recorded here when chosen.
   7. **Supported size** is documented from Phase 33 measurements. The client confirms the
      target.
+- **Amendment (2026-10-24, Phase 33 build, auto-resolved):** §1, §6 and §7 made precise
+  (Q3, Q4, Q5, Q6, Q13, Q17).
+  - **S3 client library and test fake (§6; Q3, Q13).** The client is boto3, as the optional
+    `s3` extra of `backend/pyproject.toml` (`boto3>=1.35.2,<2`; 1.35.2 is the first release
+    whose PutObject takes `IfNoneMatch`, which the write-once put relies on). It is not a core
+    dependency, so the default filesystem install is unchanged (D-02, D-12). It is imported
+    only when `ARTIFACT_STORE_KIND=s3`; startup then refuses, naming no setting value, if the
+    extra is missing or the installed botocore lacks `IfNoneMatch`. boto3 talks to any
+    S3-compatible endpoint, so this chooses no host or vendor. `S3ArtifactStore(client,
+    bucket, prefix="")` uses only `put_object`, `get_object` and `head_object` (its client
+    protocol has no delete); a missing object is `NoSuchKey` or a 404/`NotFound` error code.
+    The test fake is `FakeS3Client` in `backend/app/tests/test_artifacts.py`: in memory, the
+    same three calls, honouring `IfNoneMatch="*"`, and every delete call raises. CI's audited
+    install includes the extra (D-55 §4), and the lockfile adds the boto3 set additively.
+  - **S3 settings (§6, D-13, D-15; Q5).** `ARTIFACT_S3_BUCKET` is required whenever the kind
+    is s3. Outside local/test, `ARTIFACT_S3_REGION` is required and `ARTIFACT_S3_ENDPOINT_URL`,
+    when set, must be https. The access-key pair is both or neither; neither means the
+    client's default credential chain (for example an instance role), which keeps a
+    long-lived secret out of the environment (D-50 §2). Both keys are SecretStr and never
+    appear in a repr or a log. `ARTIFACT_STORE_DIR` is not required outside local/test when
+    the kind is s3, but is still validated if set. Object keys are global and
+    content-addressed, as in the filesystem store; per-tenant key prefixes (deferred in
+    Phase 8) are not adopted, and are an open item before any shared multi-tenant production
+    bucket.
+  - **Cursor signing key (§6; Q6).** `CURSOR_SIGNING_KEY` is SecretStr, at least 32
+    characters, required outside local/test, and refused there if it equals the published
+    development key; local/test use that fixed development key. Each app sets it once at
+    startup. Rotating it invalidates outstanding cursors, which then get 400
+    `invalid_cursor`. Scope still comes from the principal (D-04), so a forged cursor can
+    never widen access.
+  - **Audit timeline (§6; Q17).** `listAuditEvents` returns `has_more` and `next_cursor` like
+    every capped list. The UI pages the audit timeline by its stable `before` keyset instead,
+    because every audit read appends an audit event (D-10) and an offset cursor would shift
+    rows. It is the one list the UI does not page by `next_cursor`.
+  - **Execution mode (§1, §7; Q4).** The code default stays `CALC_EXECUTION_MODE=inline`
+    (D-02; the Phase 33 reversibility note), and startup does not refuse inline outside
+    local/test. `pool` is the recommended setting for deployed environments, because it is the
+    bounded option: a module cannot block the event loop, runs time out, and overload is
+    refused with 503. Phase 34's `.env.production.example` (BE-34.2) sets `pool` explicitly,
+    with `CALC_WORKERS` and `CALC_WORKER_QUEUE_MAX` taken from `docs/PERFORMANCE.md`. Those
+    values stay PROVISIONAL until the client confirms the target (§7).
 
 ## D-60 Test budget after Feature 06 (amends D-26)
 

@@ -1,6 +1,6 @@
 import { ApiError, api, call, callWithResponse, type Schemas } from '@/api/client'
 import { toastApiError } from '@/components/common/api-error-toast'
-import { LIQUIDITY_UI_ENABLED } from '@/config/features'
+import { BACKGROUND_RUNS_UI_ENABLED, LIQUIDITY_UI_ENABLED } from '@/config/features'
 import { isMasked } from '@/components/common/MaskedValue'
 import { DOMAIN_SCHEMA_CODES, type DomainSchemaCode } from '@/components/domain/domain'
 import type { ImportSummary } from '@/components/ingestion/imports'
@@ -61,7 +61,14 @@ export const ILLUSTRATIVE_STATEMENT =
  * shown as finished with a result; RUNNING is "in progress", never success.
  */
 export const RUN_STATUS_STYLE: Record<RunStatus, { label: string; className: string; description: string }> = {
-  QUEUED: { label: 'Queued', className: 'status-draft', description: 'Reserved for a later release: runs are synchronous in this release.' },
+  QUEUED: {
+    label: 'Queued',
+    className: 'status-draft',
+    // FE-33.1: still reserved (D-59 §3); a background run is written RUNNING, never QUEUED.
+    description: BACKGROUND_RUNS_UI_ENABLED
+      ? 'Reserved for a later release: a background run is written RUNNING, never QUEUED.'
+      : 'Reserved for a later release: runs are synchronous in this release.',
+  },
   RUNNING: {
     label: 'Running',
     className: 'status-building',
@@ -432,6 +439,8 @@ export type PanelEvent =
   | { type: 'submit_started'; key: string }
   | { type: 'submitted'; run: RunDetail; status: number }
   | { type: 'submit_refused'; refusal: Refusal }
+  /** FE-33.1: a later read of the submitted background run (its status as the server reports it now). */
+  | { type: 'run_polled'; run: RunDetail }
 
 export const INITIAL_PANEL: PanelState = {
   selection: {},
@@ -509,6 +518,10 @@ export function panelReducer(s: PanelState, e: PanelEvent): PanelState {
     case 'submit_refused':
       if (s.submit.kind !== 'submitting') return s
       return { ...s, submit: { kind: 'refused', refusal: e.refusal } }
+    case 'run_polled':
+      // Only the run this panel submitted, and only while it is still the panel's.
+      if (s.submit.kind !== 'submitted' || s.submit.run.run_id !== e.run.run_id) return s
+      return { ...s, submit: { ...s.submit, run: e.run } }
   }
 }
 
@@ -567,16 +580,24 @@ export async function buildSnapshot(state: PanelState, dispatch: (e: PanelEvent)
 /** A fresh `Idempotency-Key` for one run request (1–255 visible ASCII), as the import wizard makes them. */
 export const newRunKey = (): string => `run-${newIdempotencyKey()}`
 
+/** RFC 7240 preference for a background run (D-59 §2). */
+export const RESPOND_ASYNC = 'respond-async'
+
 /**
  * POST /calculation-runs with the panel's body and its attempt key (a retry of the same body
  * reuses it): 201 a new run, 200 the original run of this key. The run's status is the
  * server's; a refusal is toasted with its correlation ID and kept in the panel.
+ * FE-33.1: with `respondAsync` (NEXT_PUBLIC_BACKGROUND_RUNS_UI, on by default) the request sends
+ * `Prefer: respond-async`, and the server answers 202 with the run RUNNING, which the panel then
+ * follows; without it the request is exactly Phase 32's. A 503 `workers_busy` or 429
+ * `rate_limited` is a refusal with its retry time; no run was written.
  */
 export async function submitRun(
   state: PanelState,
   modules: readonly ModuleVersion[],
   dispatch: (e: PanelEvent) => void,
   newKey: () => string = newRunKey,
+  respondAsync: boolean = BACKGROUND_RUNS_UI_ENABLED,
 ): Promise<RunDetail | null> {
   const body = runBody(state)
   if (!body || submitProblems(state, modules).length > 0) return null
@@ -584,7 +605,7 @@ export async function submitRun(
   dispatch({ type: 'submit_started', key })
   try {
     const { data, response } = await callWithResponse(() =>
-      api.POST('/api/v1/calculation-runs', { params: { header: { 'Idempotency-Key': key } }, body }),
+      api.POST('/api/v1/calculation-runs', { params: { header: { 'Idempotency-Key': key, ...(respondAsync ? { Prefer: RESPOND_ASYNC } : {}) } }, body }),
     )
     dispatch({ type: 'submitted', run: data, status: response.status })
     return data

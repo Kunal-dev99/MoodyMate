@@ -22,6 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field, WithJsonSchema
 
 from app.calculations.constants import CalculationRunStatus
 from app.core.classification import MaskedValue
+from app.core.pagination import HasMore, NextCursor
 from app.core.text import SafeMultilineText, SafeText
 from app.governance.constants import ProposalDecision
 from app.orchestration.constants import (
@@ -394,6 +395,8 @@ class ScenarioPage(BaseModel):
     limit: int
     offset: int
     labels: ScenarioLabels
+    has_more: HasMore
+    next_cursor: NextCursor
 
 
 class ScenarioDetail(BaseModel):
@@ -517,6 +520,8 @@ class ScenarioRunPage(BaseModel):
     limit: int
     offset: int
     labels: ScenarioLabels
+    has_more: HasMore
+    next_cursor: NextCursor
 
 
 class ComparisonBucket(BaseModel):
@@ -705,3 +710,5 @@ class ScenarioContributionPage(BaseModel):
     limit: int
     offset: int
     labels: ScenarioLabels
+    has_more: HasMore
+    next_cursor: NextCursor

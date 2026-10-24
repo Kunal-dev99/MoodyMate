@@ -146,7 +146,16 @@ from app.rules.constants import (
 )
 from app.rules.service import check_parameters, check_schema, exact_json
 from app.tests.canonical_kit import check_overlay_properties
-from app.tests.conftest import _IDENTITY_CLEANUP, alembic_config, clean, dev_token, script, sql
+from app.tests.conftest import (
+    _IDENTITY_CLEANUP,
+    alembic_config,
+    clean,
+    dev_token,
+    insert_tenant,
+    script,
+    sql,
+)
+from app.tests.executor_kit import check_background_execution
 from app.tests.helpers import (
     IMPORTS,
     MAPPINGS,
@@ -167,6 +176,7 @@ from app.tests.helpers import (
     sample_rules,
     source_body,
     start_run,
+    token_for,
     upload,
     validate_import,
     without_rate_limits,
@@ -176,6 +186,7 @@ from app.tests.lcr_kit import (
     POSITION_COLUMNS,
     position_csv,
 )
+from app.tests.pagination_kit import check_cursor_pages, check_foreign_cursor
 from app.tests.scenario_run_kit import (
     OVERLAY_GOLDEN,
     SCENARIO_OUTPUT_TABLES,
@@ -1041,6 +1052,12 @@ def test_registry_snapshot_run_and_maturity_ladder(
     }
     assert listed(status="BLOCKED") == {blocked_run["run_id"]}
     assert listed(module_code="lcr_hqla") == set()
+    # Phase 33 (BE-33.1 - BE-33.3, D-59; executor_kit): Prefer: respond-async, the pool's
+    # equal hashes, a free event loop, workers_busy, a worker crash, the timeout, the retry
+    # and the sweeper. After the list filters above, which count this part's runs.
+    check_background_execution(
+        api, db, artifact_dir, monkeypatch, analyst=analyst, body=body, reference=run
+    )
     detail = no_float(api.get(f"{RUNS}/{run_id}", headers=dev_token(api, "auditor")).text)
     manifest = detail["manifest"]
     check_context(detail, detail, "run detail")  # Phase 30 (BE-30.2, BE-30.3)
@@ -1224,6 +1241,31 @@ def test_registry_snapshot_run_and_maturity_ladder(
         cashflow_csv=cashflow_csv,
         module_id=module_id,
     )
+
+    # Phase 33 (BE-33.5, D-59 §6; pagination_kit): one loop over the capped-list inventory,
+    # each list read by a role that holds its permission; a cursor is tenant-bound.
+    paged = check_cursor_pages(
+        api,
+        {
+            "*": steward,
+            "listAuditEvents": dev_token(api, "auditor"),
+            "listUsers": dev_token(api, "platform_admin"),
+        },
+        {
+            "run_id": run_id,
+            "scenario_id": stressed_ids["scenario_id"],
+            "scenario_run_id": stressed_ids["scenario_run_id"],
+        },
+        {"listCalculationRuns": {"module_code": "lcr_hqla"}},
+        # Each audit read appends an audit.read event: page a set the reads do not grow.
+        fixed={"listAuditEvents": {"action": "scenario.run"}},
+    )
+    assert {"listCalculationRuns", "getCalculationRunResults", "listImports"} <= paged, paged
+    assert "listAuditEvents" in paged, paged
+    outsider = token_for(
+        db, "dev:p33-outsider", ("data_steward",), tenant_id=insert_tenant(db, "p33-outsider")
+    )
+    check_foreign_cursor(api, steward, outsider, RUNS)
 
     # --- Phase 16 (BE-16.3): pinning across a rule change, and re-runs --------------------------
     def run_rows(run: str) -> str:

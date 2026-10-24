@@ -10,6 +10,8 @@ import { LoadingBlock } from '@/components/common/LoadingBlock'
 import { MaskedValue, isMasked } from '@/components/common/MaskedValue'
 import { PageSection } from '@/components/common/PageSection'
 import { createLoader, type Loaded } from '@/components/common/load'
+import { ListPager, cursorRefusedBody, useCursorPaging } from '@/components/common/ListPager'
+import { LIST_PAGING_UI_ENABLED } from '@/config/features'
 import { importHref } from '@/components/domain/domain'
 import { ShownValue } from '@/components/domain/ShownValue'
 import { Badge } from '@/components/ui/badge'
@@ -115,8 +117,14 @@ const FILTERS: readonly ChangeFilter[] = ['ALL', 'MOVED', 'STAYED', 'ADDED']
 export function ComparisonDrilldown({ scenarioId, scenarioRunId, target, onClose }: { scenarioId: string; scenarioRunId: string; target: DrillTarget; onClose: () => void }) {
   const [offset, setOffset] = useState(0)
   const [filter, setFilter] = useState<ChangeFilter>('ALL')
+  // FE-33.1: the server's next_cursor, bound to this cell (NEXT_PUBLIC_LIST_PAGING_UI=off: offsets).
+  const cursorPaging = useCursorPaging(JSON.stringify([scenarioId, scenarioRunId, target.currency, target.bucketCode, target.shockSubset]))
+  const cursor = LIST_PAGING_UI_ENABLED ? cursorPaging.cursor : null
   const [state, setState] = useState<Loaded<ScenarioContributionPage>>({ kind: 'loading' })
-  const loader = useMemo(() => createLoader(fetchParts(scenarioId, scenarioRunId, target, offset), setState, 'Could not load the changed parts'), [scenarioId, scenarioRunId, target, offset])
+  const loader = useMemo(
+    () => createLoader(fetchParts(scenarioId, scenarioRunId, target, offset, cursor), setState, 'Could not load the changed parts'),
+    [scenarioId, scenarioRunId, target, offset, cursor],
+  )
   useEffect(() => {
     loader.load()
     return loader.abort
@@ -132,7 +140,7 @@ export function ComparisonDrilldown({ scenarioId, scenarioRunId, target, onClose
   if (state.kind === 'loading') body = <LoadingBlock rows={3} />
   else if (state.kind === 'failed') body = <LoadFailed icon={ListTree} title="Could not load the changed parts" cid={state.cid} onRetry={loader.load} />
   else if (state.kind === 'forbidden') body = <Forbidden permission="calc:read" correlationId={state.cid} />
-  else if (state.kind === 'not_found') body = <EmptyState icon={ListTree} title="Member run not found" description={`The server has no such member run for this scenario run.${state.cid ? ` Correlation ID: ${state.cid}` : ''}`} />
+  else if (state.kind === 'not_found') body = cursorRefusedBody(state, cursorPaging, 'parts-pager') ?? <EmptyState icon={ListTree} title="Member run not found" description={`The server has no such member run for this scenario run.${state.cid ? ` Correlation ID: ${state.cid}` : ''}`} />
   else {
     const page = state.value
     const counts = changeCounts(page.items)
@@ -168,7 +176,8 @@ export function ComparisonDrilldown({ scenarioId, scenarioRunId, target, onClose
               ))}
             </TableBody>
           </Table>
-          {page.total > PARTS_PAGE && (
+          {LIST_PAGING_UI_ENABLED && <ListPager page={page} paging={cursorPaging} testId="parts-pager" />}
+          {!LIST_PAGING_UI_ENABLED && page.total > PARTS_PAGE && (
             <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
               <span data-testid="parts-range">
                 {page.offset + 1}–{page.offset + page.items.length} of {page.total}

@@ -12,6 +12,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.correlation import get_correlation_id
@@ -113,15 +114,44 @@ async def _validation_error_handler(_: Request, exc: Exception) -> JSONResponse:
     return _envelope(422, "validation_error", "Request validation failed.", details)
 
 
+# BE-33.4 (D-59 §6): no pooled connection freed up within DB_POOL_TIMEOUT_SECONDS.
+DB_POOL_EXHAUSTED = "db_pool_exhausted"
+DB_POOL_RETRY_AFTER_SECONDS = 1
+
+
+async def _pool_timeout_handler(_: Request, exc: Exception) -> JSONResponse:
+    """503 `db_pool_exhausted`, retryable with Retry-After: the request waited its
+    DB_POOL_TIMEOUT_SECONDS for a connection and was answered rather than left hanging. The
+    pool's own message (sizes, timeouts) is not echoed."""
+    assert isinstance(exc, PoolTimeoutError)
+    response = _envelope(
+        503,
+        DB_POOL_EXHAUSTED,
+        "The service is busy: no database connection was free. Retry after the time in "
+        "Retry-After.",
+        retryable=True,
+    )
+    response.headers["Retry-After"] = str(DB_POOL_RETRY_AFTER_SECONDS)
+    return response
+
+
 def register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(ApiError, _api_error_handler)
     app.add_exception_handler(StarletteHTTPException, _http_error_handler)
     app.add_exception_handler(RequestValidationError, _validation_error_handler)
+    app.add_exception_handler(PoolTimeoutError, _pool_timeout_handler)
     # Unhandled exceptions are enveloped by CorrelationIdMiddleware so that the
     # correlation header survives; see app.core.correlation.
 
 
 ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     "4XX": {"model": ErrorEnvelope, "description": "Client error (standard envelope)"},
-    "5XX": {"model": ErrorEnvelope, "description": "Server error (standard envelope)"},
+    "5XX": {
+        "model": ErrorEnvelope,
+        "description": (
+            "Server error (standard envelope). Any route may answer 503 db_pool_exhausted "
+            "(retryable, Retry-After) when no database connection frees up within "
+            "DB_POOL_TIMEOUT_SECONDS (BE-33.4)."
+        ),
+    },
 }

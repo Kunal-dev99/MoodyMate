@@ -40,9 +40,12 @@ export function statusFilterOf(raw: string | null): StatusFilter {
   return (RATING_STATUSES as string[]).includes(raw ?? '') ? (raw as ObligorRatingStatus) : DEFAULT_STATUS
 }
 
-/** The GET /obligor-ratings query for a filter and page. */
-export function queueQuery(status: StatusFilter, offset: number): RatingQuery {
-  const query: RatingQuery = { limit: PAGE_SIZE, offset }
+/**
+ * The GET /obligor-ratings query for a filter and page. FE-33.1: past the first page the
+ * server's `next_cursor` replaces the offset (the two are never sent together).
+ */
+export function queueQuery(status: StatusFilter, offset: number, cursor: string | null = null): RatingQuery {
+  const query: RatingQuery = cursor ? { limit: PAGE_SIZE, cursor } : { limit: PAGE_SIZE, offset }
   if (status !== 'ALL') query.status = status
   return query
 }

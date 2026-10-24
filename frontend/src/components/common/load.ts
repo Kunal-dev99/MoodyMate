@@ -1,8 +1,12 @@
 import { ApiError } from '@/api/client'
 import { toastApiError } from '@/components/common/api-error-toast'
+import { INVALID_CURSOR } from '@/lib/paging'
 
-/** Why a page-level load did not produce data. */
-type Failure<K extends string> = { kind: K; status: number | null; cid: string | null }
+/**
+ * Why a page-level load did not produce data. `code` is kept only for the refusal a list acts on:
+ * 400 `invalid_cursor` (Q19), where the list offers "Back to first page".
+ */
+type Failure<K extends string> = { kind: K; status: number | null; cid: string | null; code?: typeof INVALID_CURSOR }
 export type LoadFailure = Failure<'forbidden'> | Failure<'not_found'> | Failure<'failed'>
 
 /**
@@ -13,7 +17,7 @@ export type LoadFailure = Failure<'forbidden'> | Failure<'not_found'> | Failure<
 export function loadFailure(err: unknown): LoadFailure {
   if (!(err instanceof ApiError)) return { kind: 'failed', status: null, cid: null }
   const retryable = err.status === 0 || err.status >= 500 || err.envelope.retryable
-  const at = { status: err.status, cid: err.correlationId }
+  const at = { status: err.status, cid: err.correlationId, ...(err.status === 400 && err.envelope.code === INVALID_CURSOR ? { code: INVALID_CURSOR } : {}) }
   if (err.status === 403) return { kind: 'forbidden', ...at }
   return retryable ? { kind: 'failed', ...at } : { kind: 'not_found', ...at }
 }

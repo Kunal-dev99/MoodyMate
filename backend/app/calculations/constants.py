@@ -157,6 +157,19 @@ class RunRefusal(StrEnum):
     SCENARIOS_DISABLED = "scenarios_disabled"
 
 
+class RunUnavailable(StrEnum):
+    """503 refusals of a run request (D-59 §4, BE-33.1): retryable, with Retry-After, audited
+    DENIED under the route's action; no run is written."""
+
+    WORKERS_BUSY = "workers_busy"  # the bounded worker queue is full (CALC_WORKER_QUEUE_MAX)
+
+
+# D-59 §2 (BE-33.2): `Prefer: respond-async` (RFC 7240) answers 202 with the RUNNING run,
+# `Location` (the run's URL) and `Preference-Applied: respond-async`.
+PREFER_HEADER = "Prefer"
+PREFERENCE_APPLIED_HEADER = "Preference-Applied"
+RESPOND_ASYNC = "respond-async"
+
 # Audit actions (D-10, D-24 §4): the create and each of its refusals share one action.
 CREATE_SNAPSHOT = "dataset_snapshot.create"
 CREATE_RUN = "calculation_run.create"

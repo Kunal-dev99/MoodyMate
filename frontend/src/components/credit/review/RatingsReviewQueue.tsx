@@ -12,6 +12,8 @@ import { LoadingBlock } from '@/components/common/LoadingBlock'
 import { MaskedValue, isMasked } from '@/components/common/MaskedValue'
 import { PageSection } from '@/components/common/PageSection'
 import { createLoader, type Loaded } from '@/components/common/load'
+import { ListPager, cursorRefusedBody, useCursorPaging } from '@/components/common/ListPager'
+import { LIST_PAGING_UI_ENABLED } from '@/config/features'
 import { counterpartyHref, keyText } from '@/components/credit/credit'
 import { RatingStatusPill } from '@/components/credit/ratings/RatingStatusPill'
 import { RATING_STATUS_STYLE, isProposer, type ObligorRating } from '@/components/credit/ratings/ratings'
@@ -129,9 +131,15 @@ export function RatingsReviewQueue() {
   const status = statusFilterOf(params.get('status'))
   const [paging, setPaging] = useState<{ status: StatusFilter; offset: number }>({ status, offset: 0 })
   const offset = paging.status === status ? paging.offset : 0
+  // FE-33.1: the server's next_cursor, bound to the status filter (NEXT_PUBLIC_LIST_PAGING_UI=off: offsets).
+  const cursorPaging = useCursorPaging(status)
+  const cursor = LIST_PAGING_UI_ENABLED ? cursorPaging.cursor : null
   const [state, setState] = useState<Loaded<RatingPage>>({ kind: 'loading' })
   const [outcome, setOutcome] = useState<ObligorRating | null>(null)
-  const loader = useMemo(() => createLoader(fetchQueue(queueQuery(status, offset)), setState, 'Could not load the ratings queue'), [status, offset])
+  const loader = useMemo(
+    () => createLoader(fetchQueue(queueQuery(status, offset, cursor)), setState, 'Could not load the ratings queue'),
+    [status, offset, cursor],
+  )
   useEffect(() => {
     loader.load()
     return loader.abort
@@ -155,7 +163,7 @@ export function RatingsReviewQueue() {
   else if (state.kind === 'forbidden') body = <Forbidden permission="domain:read" correlationId={state.cid} />
   else if (state.kind === 'failed') body = <LoadFailed icon={ClipboardCheck} title="The ratings queue could not be loaded" cid={state.cid} onRetry={loader.load} />
   else if (state.kind === 'not_found')
-    body = <EmptyState icon={ClipboardCheck} title="The ratings queue could not be listed" description={`The request was refused.${state.cid ? ` Correlation ID: ${state.cid}` : ''}`} />
+    body = cursorRefusedBody(state, cursorPaging, 'review-list-pager') ?? <EmptyState icon={ClipboardCheck} title="The ratings queue could not be listed" description={`The request was refused.${state.cid ? ` Correlation ID: ${state.cid}` : ''}`} />
   else {
     const page = state.value
     body =
@@ -189,7 +197,8 @@ export function RatingsReviewQueue() {
               ))}
             </TableBody>
           </Table>
-          {page.total > PAGE_SIZE && (
+          {LIST_PAGING_UI_ENABLED && <ListPager page={page} paging={cursorPaging} testId="review-list-pager" />}
+          {!LIST_PAGING_UI_ENABLED && page.total > PAGE_SIZE && (
             <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
               <span data-testid="review-pager">
                 {offset + 1}–{offset + page.items.length} of {page.total}
