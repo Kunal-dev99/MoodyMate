@@ -1,5 +1,5 @@
 import { ShieldQuestion } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { StatusPill } from '@/components/common/StatusPill'
 import { validationStyle, type ValidationStatus } from './validation'
 
 /**
@@ -17,16 +17,15 @@ export function ValidationStatusBadge({
   className?: string
   testId?: string
 }) {
-  const style = validationStyle(status)
   return (
-    <span
-      className={cn('inline-flex items-center rounded-sm border px-2 py-0.5 text-xs font-medium', style.className, className)}
-      title={style.description}
-      data-testid={testId}
-      data-validation-status={status ?? 'UNKNOWN'}
-    >
-      <ShieldQuestion className="mr-1 h-3 w-3" aria-hidden="true" />
-      {style.label}
-    </span>
+    <StatusPill
+      value={status ?? 'UNKNOWN'}
+      variant={validationStyle(status)}
+      titled
+      testId={testId}
+      attr="validation-status"
+      icon={<ShieldQuestion className="mr-1 h-3 w-3" aria-hidden="true" />}
+      className={className}
+    />
   )
 }

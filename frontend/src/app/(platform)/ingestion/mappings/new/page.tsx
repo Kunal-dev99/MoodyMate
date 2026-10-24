@@ -17,7 +17,7 @@ import { startLoad, type LoadFailure } from '@/components/common/load'
 import { ContractStatusPill } from '@/components/ingestion/ContractStatusPill'
 import { MappingsPlanned } from '@/components/ingestion/MappingsPlanned'
 import { RefusalNotice } from '@/components/ingestion/RefusalNotice'
-import { mappingErrorTitle, refusalOf, suggestedRules, type MappingSummary, type Refusal } from '@/components/ingestion/mappings'
+import { mappingErrorTitle, mappingRefusal, suggestedRules, type MappingSummary, type Refusal } from '@/components/ingestion/mappings'
 import type { SourceDetail } from '@/components/ingestion/sources'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -117,7 +117,7 @@ function CreateForm({ ready, importId }: { ready: Ready; importId: string | null
       router.push(`/ingestion/mappings/${m.id}${importId ? `?import=${importId}` : ''}`)
     } catch (err) {
       toastApiError(err, mappingErrorTitle(err, 'Could not create the mapping'))
-      setRefusal(refusalOf(err, 'Could not create the mapping'))
+      setRefusal(mappingRefusal(err, 'Could not create the mapping'))
       setSaving(false)
     }
   }

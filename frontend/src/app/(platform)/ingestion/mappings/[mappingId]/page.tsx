@@ -31,7 +31,7 @@ import {
   draftFromVersion,
   isDirty,
   mappingErrorTitle,
-  refusalOf,
+  mappingRefusal,
   type DraftRule,
   type MappingDetail,
   type MappingValidation,
@@ -46,6 +46,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { MAPPING_UI_ENABLED } from '@/config/features'
 import { cn } from '@/lib/utils'
 import { formatTimestamp } from '@/lib/format'
+import { isAuthorOf } from '@/lib/maker-checker'
 import { ActorLabel } from '@/components/common/ActorLabel'
 
 type State = { kind: 'loading' } | { kind: 'ready'; m: MappingDetail } | LoadFailure
@@ -306,7 +307,7 @@ function Workbench({ mappingId }: { mappingId: string }) {
   if (!m || !version) return <LoadingBlock rows={6} />
 
   const active = activeVersion(m)
-  const mine = version.author_user_id === me.user_id
+  const mine = isAuthorOf(version.author_user_id, me)
   const pinnedFields = fields?.[version.schema_version_id] ?? null
   const profiledTypes = profile.kind === 'ready' ? Object.fromEntries(profile.profile.columns.map((c) => [c.name, c.suggested_type])) : null
   const suggestions = profile.kind === 'ready' ? Object.fromEntries(profile.profile.columns.map((c) => [c.name, c.suggested_target_field])) : null
@@ -325,7 +326,7 @@ function Workbench({ mappingId }: { mappingId: string }) {
       after(await run())
     } catch (err) {
       toastApiError(err, mappingErrorTitle(err, fallback))
-      setRefusal(refusalOf(err, fallback))
+      setRefusal(mappingRefusal(err, fallback))
       load()
     } finally {
       setBusy(null)
@@ -366,7 +367,7 @@ function Workbench({ mappingId }: { mappingId: string }) {
       },
       (err) => {
         toastApiError(err, mappingErrorTitle(err, 'The dry run failed'))
-        setRefusal(refusalOf(err, 'The dry run failed'))
+        setRefusal(mappingRefusal(err, 'The dry run failed'))
         setBusy(null)
       },
     )

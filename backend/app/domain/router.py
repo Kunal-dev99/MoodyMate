@@ -36,6 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import require_permission
 from app.core.classification import UNCLASSIFIED, MaskedValue, mask_mapping
+from app.core.idempotency import mark_replayed
 from app.core.principal import Principal
 from app.db.session import get_session
 from app.domain.constants import (
@@ -164,8 +165,7 @@ async def project_import(
         import_id, settings.DOMAIN_PROJECTION_ENABLED, settings.CREDIT_PROJECTION_ENABLED
     )
     if not created:
-        response.status_code = 200
-        response.headers["Idempotent-Replayed"] = "true"
+        mark_replayed(response)
     return _projection(view)
 
 
@@ -367,7 +367,9 @@ def _version(
         # A small payload's hash can be brute-forced to its masked values: shown only to a
         # caller cleared for every field the payload may hold.
         payload_sha256=(
-            v.payload_sha256 if pins.most_sensitive(v.schema_version_id) in clear else MASKED_HASH
+            v.payload_sha256
+            if pins.payload_classification(v.schema_version_id) in clear
+            else MASKED_HASH
         ),
         projected_at=v.created_at,
         instrument_type_known=v.instrument_type_id is not None,
@@ -423,7 +425,7 @@ def _hash(
 ) -> str:
     """A small payload's hash can be brute-forced to its masked values: shown only to a
     caller cleared for every field the payload may hold."""
-    return payload_sha256 if pins.most_sensitive(version_id) in clear else MASKED_HASH
+    return payload_sha256 if pins.payload_classification(version_id) in clear else MASKED_HASH
 
 
 def _known(

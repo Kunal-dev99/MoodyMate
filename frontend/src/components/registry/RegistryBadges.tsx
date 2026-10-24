@@ -1,3 +1,4 @@
+import { StatusPill } from '@/components/common/StatusPill'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { RULE_VERSION_STATUS_STYLE, type RuleVersionStatus } from './registry'
@@ -7,17 +8,7 @@ import { RULE_VERSION_STATUS_STYLE, type RuleVersionStatus } from './registry'
  * status set. The pill shows what the server says.
  */
 export function VersionStatusPill({ status, className, testId = 'version-status' }: { status: RuleVersionStatus; className?: string; testId?: string }) {
-  const style = RULE_VERSION_STATUS_STYLE[status]
-  return (
-    <span
-      className={cn('inline-flex items-center rounded-sm border px-2 py-0.5 text-xs font-medium', style.className, className)}
-      title={style.description}
-      data-testid={testId}
-      data-status={status}
-    >
-      {style.label}
-    </span>
-  )
+  return <StatusPill value={status} variant={RULE_VERSION_STATUS_STYLE[status]} titled testId={testId} className={className} />
 }
 
 /**

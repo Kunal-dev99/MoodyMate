@@ -11,14 +11,19 @@ Every refusal is a value-free `Problem` (shock index, structural field path, cod
 submitted value and never the name of an unknown key.
 """
 
-import hashlib
-import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 
+from app.core.canonical import HashKind, sha256_for
+from app.core.decimals import (
+    UNSIGNED,
+    DecimalTextError,
+    DecimalTextProblem,
+    parse_decimal_text,
+)
 from app.orchestration.constants import (
     FRACTION_SCALE,
     MAX_DELAY_DAYS,
@@ -40,7 +45,6 @@ K = ParameterKind
 P = ShockProblem
 # Always `fullmatch`: with `match`, `$` also accepts a trailing newline ("USD\n"), which the
 # typed response models (pydantic-core regex) then refuse, failing every later read.
-_PLAIN_DECIMAL = re.compile(r"[0-9]+(\.[0-9]+)?")
 _EXPONENT = re.compile(r"[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)[eE][+-]?[0-9]+")
 _CURRENCY = re.compile(r"[A-Z]{3}")
 _QUANTUM = Decimal(1).scaleb(-FRACTION_SCALE)  # 0.0001
@@ -224,8 +228,8 @@ class _Checker:
     directions: Mapping[str, str]
     problems: list[Problem] = field(default_factory=list)
 
-    def refuse(self, index: int | None, path: str, code: ShockProblem) -> Any:
-        """Record a problem; returns None, so a checker can `return self.refuse(...)`."""
+    def problem(self, index: int | None, path: str, code: ShockProblem) -> Any:
+        """Record a problem; returns None, so a checker can `return self.problem(...)`."""
         self.problems.append(Problem(index, path, code.value))
         return None
 
@@ -240,53 +244,53 @@ class _Checker:
             return self._decimal(index, path, spec, raw)
         if spec.kind == K.INTEGER:
             if isinstance(raw, float):
-                return self.refuse(index, path, P.INEXACT_NUMBER)
+                return self.problem(index, path, P.INEXACT_NUMBER)
             if not isinstance(raw, int) or isinstance(raw, bool):
-                return self.refuse(index, path, P.NOT_INTEGER)
+                return self.problem(index, path, P.NOT_INTEGER)
             if not int(spec.min or 0) <= raw <= int(spec.max or 0):
-                return self.refuse(index, path, P.OUT_OF_RANGE)
+                return self.problem(index, path, P.OUT_OF_RANGE)
             return raw
         if not isinstance(raw, str) and spec.kind != K.INSTRUMENT_KEYS:
-            return self.refuse(index, path, P.NOT_TEXT)
+            return self.problem(index, path, P.NOT_TEXT)
         if spec.kind == K.ENUM:
-            return raw if raw in spec.values else self.refuse(index, path, P.UNSUPPORTED_VALUE)
+            return raw if raw in spec.values else self.problem(index, path, P.UNSUPPORTED_VALUE)
         if spec.kind == K.CURRENCY:
             ok = _CURRENCY.fullmatch(raw) is not None
-            return raw if ok else self.refuse(index, path, P.UNSUPPORTED_VALUE)
+            return raw if ok else self.problem(index, path, P.UNSUPPORTED_VALUE)
         if spec.kind == K.TEXT:
             ok = 1 <= len(raw) <= int(spec.max or 0)
-            return raw if ok else self.refuse(index, path, P.OUT_OF_RANGE)
+            return raw if ok else self.problem(index, path, P.OUT_OF_RANGE)
         if spec.kind == K.INSTRUMENT_TYPE:
             if not 1 <= len(raw) <= MAX_INSTRUMENT_TYPE or raw not in self.directions:
-                return self.refuse(index, path, P.UNKNOWN_INSTRUMENT_TYPE)
+                return self.problem(index, path, P.UNKNOWN_INSTRUMENT_TYPE)
             if self.directions[raw] != spec.direction:
-                return self.refuse(index, path, P.DIRECTION_MISMATCH)
+                return self.problem(index, path, P.DIRECTION_MISMATCH)
             return raw
         return self._keys(index, path, spec, raw)  # INSTRUMENT_KEYS
 
     def _decimal(self, index: int, path: str, spec: FieldSpec, raw: Any) -> Any:
         if isinstance(raw, float) or (isinstance(raw, str) and _EXPONENT.fullmatch(raw.strip())):
-            return self.refuse(index, path, P.INEXACT_NUMBER)
-        if not isinstance(raw, str) or not _PLAIN_DECIMAL.fullmatch(raw):
-            return self.refuse(index, path, P.NOT_DECIMAL)
-        places = len(raw.partition(".")[2])
-        if places > (spec.scale or 0):
-            return self.refuse(index, path, P.TOO_MANY_PLACES)
-        value = Decimal(raw)
+            return self.problem(index, path, P.INEXACT_NUMBER)
+        try:
+            value = parse_decimal_text(raw, UNSIGNED, max_scale=spec.scale or 0)
+        except DecimalTextError as error:
+            if error.code is DecimalTextProblem.SCALE_EXCEEDED:
+                return self.problem(index, path, P.TOO_MANY_PLACES)
+            return self.problem(index, path, P.NOT_DECIMAL)
         low, high = Decimal(spec.min or "0"), Decimal(spec.max or "0")
         if (value <= low if spec.min_exclusive else value < low) or value > high:
-            return self.refuse(index, path, P.OUT_OF_RANGE)
+            return self.problem(index, path, P.OUT_OF_RANGE)
         return str(value.quantize(_QUANTUM))
 
     def _keys(self, index: int, path: str, spec: FieldSpec, raw: Any) -> Any:
         if not isinstance(raw, list):
-            return self.refuse(index, path, P.NOT_A_LIST)
+            return self.problem(index, path, P.NOT_A_LIST)
         if len(raw) > (spec.max_items or 0):
-            return self.refuse(index, path, P.TOO_MANY_ITEMS)
+            return self.problem(index, path, P.TOO_MANY_ITEMS)
         if not all(isinstance(k, str) and 1 <= len(k) <= MAX_TEXT_FIELD for k in raw):
-            return self.refuse(index, path, P.NOT_TEXT)
+            return self.problem(index, path, P.NOT_TEXT)
         if len(set(raw)) != len(raw):
-            return self.refuse(index, path, P.DUPLICATE_ITEM)
+            return self.problem(index, path, P.DUPLICATE_ITEM)
         return list(raw)
 
     def fields(
@@ -296,18 +300,18 @@ class _Checker:
         if raw is None:
             raw = {}
         if not isinstance(raw, Mapping):
-            self.refuse(index, part, P.NOT_AN_OBJECT)
+            self.problem(index, part, P.NOT_AN_OBJECT)
             return {}
         known = {s.name for s in specs}
         if any(k not in known for k in raw):
-            self.refuse(index, part, P.UNKNOWN_FIELD)  # never the unknown key's name
+            self.problem(index, part, P.UNKNOWN_FIELD)  # never the unknown key's name
         out: dict[str, Any] = {}
         for spec in specs:
             given = raw.get(spec.name)
             path = f"{part}.{spec.name}"
             if given is None:
                 if spec.required:
-                    self.refuse(index, path, P.REQUIRED)
+                    self.problem(index, path, P.REQUIRED)
                 elif keep_all or spec.default is not None:
                     out[spec.name] = spec.default
                 continue
@@ -316,20 +320,20 @@ class _Checker:
 
     def shock(self, index: int, raw: Any) -> dict[str, Any] | None:
         if not isinstance(raw, Mapping):
-            self.refuse(index, "shock", P.NOT_AN_OBJECT)
+            self.problem(index, "shock", P.NOT_AN_OBJECT)
             return None
         if any(k not in _SHOCK_KEYS for k in raw):
-            self.refuse(index, "shock", P.UNKNOWN_FIELD)
+            self.problem(index, "shock", P.UNKNOWN_FIELD)
         template = raw.get("template")
         if template is None:
-            self.refuse(index, "template", P.REQUIRED)
+            self.problem(index, "template", P.REQUIRED)
             return None
         if not isinstance(template, str) or template not in TEMPLATES:
-            self.refuse(index, "template", P.UNKNOWN_TEMPLATE)
+            self.problem(index, "template", P.UNKNOWN_TEMPLATE)
             return None
         spec = TEMPLATES[ScenarioTemplate(template)]
         if raw.get("parameters") is None:
-            self.refuse(index, "parameters", P.REQUIRED)
+            self.problem(index, "parameters", P.REQUIRED)
         parameters = self.fields(
             index, "parameters", spec.parameters, raw.get("parameters"), keep_all=True
         )
@@ -338,7 +342,7 @@ class _Checker:
         )
         low, high = selector.get("due_from_day"), selector.get("due_to_day")
         if isinstance(low, int) and isinstance(high, int) and low > high:
-            self.refuse(index, "selector.due_from_day", P.INVALID_WINDOW)
+            self.problem(index, "selector.due_from_day", P.INVALID_WINDOW)
         return {"template": spec.template.value, "parameters": parameters, "selector": selector}
 
 
@@ -350,12 +354,12 @@ def validate_shocks(
     meaningful when there is no problem. `directions` is the ACTIVE cashflow_direction map."""
     checker = _Checker(directions)
     if not isinstance(raw, list):
-        checker.refuse(None, "shocks", P.NOT_A_LIST)
+        checker.problem(None, "shocks", P.NOT_A_LIST)
         return [], checker.problems
     if len(raw) < MIN_SHOCKS:
-        checker.refuse(None, "shocks", P.TOO_FEW_SHOCKS)
+        checker.problem(None, "shocks", P.TOO_FEW_SHOCKS)
     if len(raw) > MAX_SHOCKS:
-        checker.refuse(None, "shocks", P.TOO_MANY_SHOCKS)
+        checker.problem(None, "shocks", P.TOO_MANY_SHOCKS)
     if checker.problems:
         return [], checker.problems
     shocks = [checker.shock(i, s) for i, s in enumerate(raw)]
@@ -364,10 +368,8 @@ def validate_shocks(
 
 
 def shocks_sha256(shocks: list[dict[str, Any]]) -> str:
-    """SHA-256 of the canonical JSON of normalised shocks (sorted keys, no spaces): the same
-    canonical form as `app.rules.service.canonical_sha256`."""
-    text = json.dumps(shocks, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(text.encode()).hexdigest()
+    """SHA-256 of the canonical JSON of normalised shocks (D-52, HashKind.SCENARIO_SHOCKS)."""
+    return sha256_for(HashKind.SCENARIO_SHOCKS, shocks)
 
 
 def instrument_types(directions: Mapping[str, str], direction: FlowDirection) -> list[str]:

@@ -7,6 +7,8 @@ The seed is PROVISIONAL (D-11) until the client approves the role model (Arch §
 import uuid
 from enum import StrEnum
 
+from app.core.classification import SENSITIVITY
+
 
 class Permission(StrEnum):
     SCHEMA_READ = "schema:read"
@@ -181,6 +183,11 @@ class ClassificationCode(StrEnum):
     INTERNAL = "internal"
     CONFIDENTIAL = "confidential"
     RESTRICTED = "restricted"
+
+
+# core.classification ranks the same codes (most_sensitive, LOG_CLEAR): one order (BE-29.3).
+if tuple(ClassificationCode) != SENSITIVITY:
+    raise RuntimeError("ClassificationCode and core.classification.SENSITIVITY disagree")
 
 
 # Highest classification each role sees in clear (frozen copy in migration 0005).

@@ -7,7 +7,7 @@ import { Forbidden } from '@/components/auth/Forbidden'
 import { EmptyState } from '@/components/common/EmptyState'
 import { LoadFailed } from '@/components/common/LoadFailed'
 import { LoadingBlock } from '@/components/common/LoadingBlock'
-import { MaskedValue, isMasked } from '@/components/common/MaskedValue'
+import { Masked, MaskedFlag, isMasked } from '@/components/common/Masked'
 import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
 import { createLoader, type Loaded } from '@/components/common/load'
@@ -103,9 +103,7 @@ export function DeltaCell({
           </Badge>
         )}
         {flag === 'unknown' && (
-          <span className="text-[10px] text-muted-foreground" data-testid="turns-negative-unknown" title="The flag reads a masked figure, so it is not shown.">
-            turns negative: masked
-          </span>
+          <MaskedFlag flag="turns negative" className="text-[10px] text-muted-foreground" testId="turns-negative-unknown" />
         )}
         {onDrill && cell.changed_flow_count > 0 && (
           <Button size="sm" variant={active ? 'secondary' : 'ghost'} className="h-6 px-1.5 text-[11px]" onClick={onDrill} data-testid="comparison-drill">
@@ -256,9 +254,13 @@ export function ComparisonTable({
                       </Badge>
                     )}
                     {unknown === 'masked' && (
-                      <div className="mt-1 text-[10px] text-muted-foreground" data-testid="combined-only-unknown" data-reason="masked" title="The flag reads a masked figure, so it is not shown.">
-                        combined-only: masked
-                      </div>
+                      <MaskedFlag
+                        flag="combined-only"
+                        as="div"
+                        className="mt-1 text-[10px] text-muted-foreground"
+                        testId="combined-only-unknown"
+                        attrs={{ 'data-reason': 'masked' }}
+                      />
                     )}
                     {unknown === 'not_assessable' && (
                       <div
@@ -304,16 +306,14 @@ export function ComparisonTable({
 
 /** A first-negative bucket: its code, "never negative", or masked. */
 function FirstNegativeCode({ code, testId }: { code: FirstNegativeCumulative['baseline_bucket_code']; testId: string }) {
-  if (isMasked(code))
-    return (
-      <span data-testid={testId} data-masked="true">
-        <MaskedValue value={code} />
-      </span>
-    )
   return (
-    <span className={cn('font-mono', code === null && 'text-muted-foreground')} data-testid={testId} data-value={code ?? 'null'}>
-      {firstNegativeText(code)}
-    </span>
+    <Masked value={code} cell testId={testId}>
+      {(c) => (
+        <span className={cn('font-mono', c === null && 'text-muted-foreground')} data-testid={testId} data-value={c ?? 'null'}>
+          {firstNegativeText(c)}
+        </span>
+      )}
+    </Masked>
   )
 }
 

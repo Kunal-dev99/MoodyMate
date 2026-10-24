@@ -45,6 +45,11 @@ from app.ingestion.service import (
     validate_rows,
 )
 from app.mapping.transforms import TargetField
+from app.tests.canonical_kit import (
+    check_canonical_policy,
+    check_decimal_properties,
+    check_stored_hashes,
+)
 from app.tests.conftest import alembic_config, dev_token, sql
 from app.tests.helpers import (
     IMPORTS,
@@ -401,6 +406,11 @@ def test_engine_fixtures_invariant_and_no_floats() -> None:
     for part in ingestion_service.VALIDATOR_PARTS:
         assert "float" not in inspect.getsource(getattr(ingestion_service, part)), part
 
+    # Phase 29 (BE-29.1, BE-29.2, BE-29.4): the D-52 grep fold, golden and legacy hashes,
+    # HASH_SITES, and the decimal and canonical properties (canonical_kit).
+    check_canonical_policy()
+    check_decimal_properties()
+
 
 # --- 3. The validate endpoint, statuses, issues and identical hashes (BE-11.3) --------------------
 
@@ -532,3 +542,7 @@ def test_validate_statuses_issues_and_identical_payloads(api: TestClient, db: st
     for value in ("2026-02-30", "510544.10001", "EURO", "INS-000001"):
         assert value in raw
         assert all(value not in i["message"] for i in everything["items"]), value
+
+    # Phase 29 (BE-29.1, BE-29.2): HASH_SITES names real columns, and every stored contract,
+    # fingerprint, manifest, profile, payload, row and business-key hash re-verifies.
+    check_stored_hashes(db)

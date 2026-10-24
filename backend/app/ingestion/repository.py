@@ -12,6 +12,7 @@ from typing import Any
 
 from sqlalchemy import Numeric, Row, Select, case, cast, exists, func, insert, or_, select, tuple_
 
+from app.core.decimals import SOURCE
 from app.db.base import Base
 from app.db.repository import ScopedRepository
 from app.ingestion.constants import ImportStatus
@@ -32,7 +33,7 @@ from app.ingestion.models import (
 
 # BE-12.2: a control-total value is "parseable" when, spaces trimmed, it is plain decimal
 # text (no exponent, grouping or currency), as the profiler reads numbers (BE-9.2).
-PLAIN_DECIMAL = r"^[+-]?[0-9]+(\.[0-9]+)?$"
+PLAIN_DECIMAL = SOURCE.pattern  # the SOURCE decimal text, as a PostgreSQL regex
 # Per control-total column: (source total, accepted total, held total, parseable,
 # unparseable, empty).
 ColumnTotals = tuple[Decimal, Decimal, Decimal, int, int, int]

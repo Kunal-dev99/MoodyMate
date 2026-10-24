@@ -43,6 +43,7 @@ import asyncpg
 import pytest
 from fastapi.testclient import TestClient
 
+from app.core.canonical import canonical_sha256
 from app.core.config import Settings
 from app.governance.constants import DEFAULT_TENANT_ID
 from app.main import create_app
@@ -58,7 +59,7 @@ from app.rules.constants import (
     ParameterKind,
     ParameterProblem,
 )
-from app.rules.service import canonical_sha256, check_schema
+from app.rules.service import check_schema
 from app.tests.conftest import dev_token, sql
 from app.tests.helpers import (
     MAPPINGS,

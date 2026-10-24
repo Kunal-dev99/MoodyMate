@@ -1,5 +1,6 @@
-import { ApiError, type Schemas } from '@/api/client'
-import type { Refusal } from './mappings'
+import type { Schemas } from '@/api/client'
+import { commentProblem as sharedCommentProblem } from '@/lib/forms'
+import { refusalOf, type Refusal } from '@/lib/refusal'
 import { proposalHref } from './profile'
 
 /*
@@ -65,14 +66,13 @@ export function reviewOutcomes(event: Pick<DriftEvent, 'status' | 'allowed_outco
 export const canReview = (event: Pick<DriftEvent, 'status' | 'allowed_outcomes'>): boolean => reviewOutcomes(event).length > 0
 
 /** DriftReviewIn.comment: required, 1 to 1000 characters after trimming (the server trims too). */
-export const COMMENT_MAX = 1000
+export { COMMENT_MAX } from '@/lib/forms'
 
-export function commentProblem(comment: string): string | null {
-  const trimmed = comment.trim()
-  if (trimmed.length === 0) return 'A comment is required.'
-  if (trimmed.length > COMMENT_MAX) return `At most ${COMMENT_MAX} characters.`
-  return null
-}
+/**
+ * The shared check (FE-29.1), bound to the drift dialog's short wording ("At most 1000
+ * characters."), which drift.test.ts asserts unchanged.
+ */
+export const commentProblem = (comment: string): string | null => sharedCommentProblem(comment, { style: 'short' })
 
 /** The request body, or null while the form is incomplete. */
 export function reviewBody(outcome: DriftReviewOutcome | null, comment: string): DriftReview | null {
@@ -110,14 +110,4 @@ const ERROR_TITLES: Record<string, string> = {
   validation_error: 'Some values were rejected',
 }
 
-export function driftRefusal(err: unknown, fallback: string): Refusal {
-  if (err instanceof ApiError)
-    return {
-      title: ERROR_TITLES[err.envelope.code] ?? fallback,
-      status: err.status,
-      code: err.envelope.code,
-      message: err.envelope.message,
-      cid: err.correlationId,
-    }
-  return { title: fallback, status: null, code: 'unexpected_error', message: 'Something went wrong.', cid: null }
-}
+export const driftRefusal = (err: unknown, fallback: string): Refusal => refusalOf(err, fallback, ERROR_TITLES)

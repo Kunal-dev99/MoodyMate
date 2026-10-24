@@ -1,4 +1,4 @@
-import { cn } from '@/lib/utils'
+import { StatusPill } from '@/components/common/StatusPill'
 import { SCENARIO_STATUS_STYLE, type ScenarioVersionStatus } from './scenarios'
 
 /**
@@ -6,15 +6,5 @@ import { SCENARIO_STATUS_STYLE, type ScenarioVersionStatus } from './scenarios'
  * a version confirmed for exploration is never shown as approved.
  */
 export function ScenarioStatusPill({ status, className, testId = 'scenario-status' }: { status: ScenarioVersionStatus; className?: string; testId?: string }) {
-  const style = SCENARIO_STATUS_STYLE[status]
-  return (
-    <span
-      className={cn('inline-flex items-center rounded-sm border px-2 py-0.5 text-xs font-medium', style.className, className)}
-      title={style.description}
-      data-testid={testId}
-      data-status={status}
-    >
-      {style.label}
-    </span>
-  )
+  return <StatusPill value={status} variant={SCENARIO_STATUS_STYLE[status]} titled testId={testId} className={className} />
 }

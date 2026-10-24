@@ -113,14 +113,17 @@ from app.calculations.modules.base import (
 )
 from app.calculations.modules.maturity_ladder import ParameterError, parse_buckets, parse_directions
 from app.calculations.repository import CalculationRepository, SnapshotRepository
+from app.core.canonical import HashKind, sha256_for
+from app.core.classification import most_sensitive, storable
 from app.core.correlation import get_correlation_id
 from app.core.decimals import DeclaredRounding, decimal_text, exact_context
 from app.core.errors import ApiError
 from app.core.principal import Principal
+from app.core.refusals import refuse
 from app.domain.models import CashflowEvent, DomainProjection, InstrumentVersion, PositionVersion
 from app.domain.service import DomainService, SchemaPins
 from app.governance.constants import AuditOutcome, ClassificationCode
-from app.governance.service import audit_by, record_denial
+from app.governance.service import audit_by
 from app.ingestion.models import ImportJob, ImportManifest
 from app.ingestion.service import ImportService
 from app.orchestration.constants import PartChange
@@ -140,14 +143,13 @@ from app.rules.constants import (
     validation_status_of,
 )
 from app.rules.models import AssumptionSet, MaturityBucketDefinition, RuleDefinition, RuleVersion
-from app.rules.service import ModuleView, RulesService, canonical_sha256, exact_json
+from app.rules.service import ModuleView, RulesService, exact_json
 
 logger = logging.getLogger("app.calculations")
 W = CalculationWarningCode
 SUCCEEDED = frozenset(
     {CalculationRunStatus.SUCCEEDED, CalculationRunStatus.SUCCEEDED_WITH_WARNINGS}
 )
-_CLASS_RANK = {c.value: i for i, c in enumerate(ClassificationCode)}
 PUBLIC = ClassificationCode.PUBLIC.value
 
 
@@ -165,15 +167,10 @@ def snapshot_sha256(members: Iterable[tuple[str, uuid.UUID, str]]) -> str:
         {"schema_code": code, "import_id": str(import_id), "manifest_sha256": sha}
         for code, import_id, sha in members
     ]
-    return canonical_sha256(sorted(entries, key=lambda e: (e["schema_code"], e["import_id"])))
-
-
-def most_sensitive(codes: Iterable[str]) -> str:
-    """The most sensitive classification of these codes. A code that is not a known one
-    counts as `restricted`, the most sensitive known code (fail closed: it is stored, so it
-    must be a real classification)."""
-    known = [c if c in _CLASS_RANK else ClassificationCode.RESTRICTED.value for c in codes]
-    return max(known, key=lambda c: _CLASS_RANK[c], default=ClassificationCode.RESTRICTED.value)
+    return sha256_for(
+        HashKind.DATASET_SNAPSHOT,
+        sorted(entries, key=lambda e: (e["schema_code"], e["import_id"])),
+    )
 
 
 def post_checks(
@@ -514,10 +511,11 @@ def reproduce(
     stressed = None
     if scenario is not None:
         stressed = scenario if keep else ScenarioOutputs()
-    sha = canonical_sha256(
+    sha = sha256_for(
+        HashKind.CALCULATION_RESULT,
         result_document(
             status, kept_gap, kept, found, *kept_lcr(status, lcr, assets), scenario=stressed
-        )
+        ),
     )
     if expected is None:
         return status, kept_gap, kept, found, dict(checks), sha
@@ -534,7 +532,9 @@ def reproduce(
         )
     )
     empty = ScenarioOutputs() if scenario is not None else None
-    sha = canonical_sha256(result_document(failed, [], [], found, scenario=empty))
+    sha = sha256_for(
+        HashKind.CALCULATION_RESULT, result_document(failed, [], [], found, scenario=empty)
+    )
     return failed, [], [], found, {**checks, PostCheck.RERUN_REPRODUCED: False}, sha
 
 
@@ -610,7 +610,7 @@ def ladder_classes(
     for row_id, direction, origin, code, n in parts:
         known = counts.get((row_id, direction, origin))
         if known is not None:
-            n, code = n + known[0], most_sensitive([code, known[1]])
+            n, code = n + known[0], storable(most_sensitive([code, known[1]]))
         counts[(row_id, direction, origin)] = (n, code)
     few = {
         (row_id, direction, origin): code
@@ -625,14 +625,18 @@ def ladder_classes(
             n, code = counts.get((row.id, direction, origin), (0, row.classification))
             mine[name] = code if 0 < n < minimum else row.classification
             if (row.id, direction, origin) in few:
-                mine[name] = most_sensitive([mine[name], few[(row.id, direction, origin)]])
-        mine["inflows"] = most_sensitive([mine["inflows_contractual"], mine["inflows_behavioural"]])
-        mine["outflows"] = most_sensitive(
-            [mine["outflows_contractual"], mine["outflows_behavioural"]]
+                mine[name] = storable(
+                    most_sensitive([mine[name], few[(row.id, direction, origin)]])
+                )
+        mine["inflows"] = storable(
+            most_sensitive([mine["inflows_contractual"], mine["inflows_behavioural"]])
         )
-        mine["net_gap"] = most_sensitive([mine["inflows"], mine["outflows"]])
-        carried[row.currency] = most_sensitive(
-            [carried.get(row.currency, row.classification), mine["net_gap"]]
+        mine["outflows"] = storable(
+            most_sensitive([mine["outflows_contractual"], mine["outflows_behavioural"]])
+        )
+        mine["net_gap"] = storable(most_sensitive([mine["inflows"], mine["outflows"]]))
+        carried[row.currency] = storable(
+            most_sensitive([carried.get(row.currency, row.classification), mine["net_gap"]])
         )
         mine["cumulative_gap"] = carried[row.currency]
         classes[row.id] = mine
@@ -670,15 +674,15 @@ def liquidity_classes(row: LcrResult, minimum: int) -> dict[str, str]:
         "inflows_gross": part(row.inflow_nonzero_count, row.inflows_gross),
         "inflows_before_cap": part(row.inflow_nonzero_count, row.inflows_before_cap),
     }
-    levels = most_sensitive([c["hqla_level1"], c["hqla_level2a"], c["hqla_level2b"]])
+    levels = storable(most_sensitive([c["hqla_level1"], c["hqla_level2a"], c["hqla_level2b"]]))
     c["hqla_total"] = _clear_if_zero(row.hqla_total, levels, agg)
     c["inflow_cap_amount"] = _clear_if_zero(row.inflow_cap_amount, c["outflows"], agg)
-    capped = most_sensitive([c["inflows_before_cap"], c["outflows"]])
+    capped = storable(most_sensitive([c["inflows_before_cap"], c["outflows"]]))
     c["inflow_cap_applied"] = capped
     c["inflows_after_cap"] = _clear_if_zero(row.inflows_after_cap, capped, agg)
-    net = most_sensitive([c["outflows"], c["inflows_after_cap"]])
+    net = storable(most_sensitive([c["outflows"], c["inflows_after_cap"]]))
     c["net_outflows"] = _clear_if_zero(row.net_outflows, net, agg)
-    ratio = most_sensitive([c["hqla_total"], c["net_outflows"]])
+    ratio = storable(most_sensitive([c["hqla_total"], c["net_outflows"]]))
     c["ratio"] = _clear_if_zero(row.ratio, ratio, agg)
     return c
 
@@ -721,12 +725,13 @@ class RunSpec:
 
     def sha256(self) -> str:
         """What a replay of the Idempotency-Key must repeat."""
-        return canonical_sha256(
+        return sha256_for(
+            HashKind.CALCULATION_RUN_REQUEST,
             {
                 "dataset_snapshot_id": str(self.dataset_snapshot_id),
                 "module_version_id": str(self.module_version_id),
                 "reporting_date": self.reporting_date.isoformat(),
-            }
+            },
         )
 
 
@@ -737,7 +742,7 @@ class RerunSpec:
     rerun_of: uuid.UUID
 
     def sha256(self) -> str:
-        return canonical_sha256({"rerun_of": str(self.rerun_of)})
+        return sha256_for(HashKind.CALCULATION_RUN_REQUEST, {"rerun_of": str(self.rerun_of)})
 
 
 @dataclass(frozen=True)
@@ -762,13 +767,14 @@ class ScenarioRunSpec:
         return len(self.shock_subset) == len(self.shocks)
 
     def sha256(self) -> str:
-        return canonical_sha256(
+        return sha256_for(
+            HashKind.CALCULATION_RUN_REQUEST,
             {
                 "baseline_run_id": str(self.baseline_run_id),
                 "scenario_version_id": str(self.scenario_version_id),
                 "shocks_sha256": self.shocks_sha256,
                 "shock_subset": list(self.shock_subset),
-            }
+            },
         )
 
     def manifest_section(self) -> dict[str, Any]:
@@ -969,15 +975,14 @@ class SnapshotService:
 
     async def _refuse(self, error: ApiError, resource_id: uuid.UUID | None = None) -> NoReturn:
         """Roll back, audit the refusal (DENIED, reason = the error code) and raise it."""
-        await record_denial(
+        await refuse(
             self.session,
             self.principal,
-            CREATE_SNAPSHOT,
-            "dataset_snapshot",
-            str(resource_id) if resource_id else None,
-            error.code,
+            error,
+            action=CREATE_SNAPSHOT,
+            resource_type="dataset_snapshot",
+            resource_id=resource_id,
         )
-        raise error
 
     async def create(
         self, import_ids: Sequence[uuid.UUID], enabled: bool
@@ -1170,15 +1175,14 @@ class CalculationService:
         self.domain = DomainService(session, principal)
 
     async def _refuse(self, error: ApiError, resource_id: uuid.UUID | None = None) -> NoReturn:
-        await record_denial(
+        await refuse(
             self.session,
             self.principal,
-            CREATE_RUN,
-            "calculation_run",
-            str(resource_id) if resource_id else None,
-            error.code,
+            error,
+            action=CREATE_RUN,
+            resource_type="calculation_run",
+            resource_id=resource_id,
         )
-        raise error
 
     def _unavailable(self, module_version_id: uuid.UUID, reason: str) -> ApiError:
         return ApiError(
@@ -1320,7 +1324,10 @@ class CalculationService:
             pinned.assumption_set,
             await self.domain.schema_pins(),
         )
-        if canonical_sha256(manifest) != run.manifest_sha256 or rule_set.id != run.rule_set_id:
+        if (
+            sha256_for(HashKind.CALCULATION_MANIFEST, manifest) != run.manifest_sha256
+            or rule_set.id != run.rule_set_id
+        ):
             return BaselineCheck(run, "baseline_not_reproducible")
         return BaselineCheck(run, None, pinned)
 
@@ -1422,7 +1429,7 @@ class CalculationService:
         )
         baseline = pinned.baseline
         if baseline is not None and (
-            canonical_sha256(manifest) != baseline.manifest_sha256
+            sha256_for(HashKind.CALCULATION_MANIFEST, manifest) != baseline.manifest_sha256
             or rule_set.id != baseline.rule_set_id
         ):  # the stressed run's manifest equals its baseline's but for `scenario` (D-45 §4)
             await self._refuse(
@@ -1436,7 +1443,7 @@ class CalculationService:
             )
         if pinned.scenario is not None:
             manifest["scenario"] = pinned.scenario.manifest_section()
-        manifest_sha256 = canonical_sha256(manifest)
+        manifest_sha256 = sha256_for(HashKind.CALCULATION_MANIFEST, manifest)
         original = pinned.rerun_of
         if original is not None and (
             manifest_sha256 != original.manifest_sha256 or rule_set.id != original.rule_set_id
@@ -2303,7 +2310,7 @@ class CalculationService:
                 continue
             classes = state.pins.classes(member.schema_version_id)
             codes += [classes.get(f, ClassificationCode.RESTRICTED.value) for f in fields]
-        return most_sensitive(codes)
+        return storable(most_sensitive(codes))
 
     # --- reads (BE-15.5) ------------------------------------------------------------------
 
@@ -2491,7 +2498,7 @@ class CalculationService:
             for unit, bucket, direction, origin, n, codes in found:
                 row_id = row_ids.get((unit, bucket))
                 if row_id is not None:
-                    changed.append((row_id, direction, origin, most_sensitive(codes), n))
+                    changed.append((row_id, direction, origin, storable(most_sensitive(codes)), n))
         else:
             parts = await self.repo.part_counts(run.id)
         return LadderView(

@@ -28,7 +28,7 @@ one. Every run is labelled with the D-35 statement.
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Header, Query, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.calculations.constants import (
@@ -82,8 +82,9 @@ from app.calculations.service import (
     SnapshotView,
 )
 from app.core.auth import require_permission
-from app.core.classification import UNCLASSIFIED, MaskedValue, mask_mapping
+from app.core.classification import UNCLASSIFIED, mask_mapping, mask_value
 from app.core.decimals import decimal_text
+from app.core.idempotency import idempotency_key_header, mark_replayed
 from app.core.principal import Principal
 from app.db.session import get_session
 from app.domain.constants import CashflowOrigin, DomainSchemaCode
@@ -97,7 +98,6 @@ CalcReader = Annotated[Principal, Depends(require_permission(Permission.CALC_REA
 CalcRunner = Annotated[Principal, Depends(require_permission(Permission.CALC_RUN))]
 
 router = APIRouter(tags=["calculations"])
-REPLAYED = "Idempotent-Replayed"
 
 # --- dataset snapshots (BE-15.3) --------------------------------------------------------------
 
@@ -162,8 +162,7 @@ async def create_dataset_snapshot(
     enabled = request.app.state.settings.CALCULATIONS_ENABLED
     view, created = await SnapshotService(session, principal).create(body.import_ids, enabled)
     if not created:
-        response.status_code = 200
-        response.headers[REPLAYED] = "true"
+        mark_replayed(response)
     return _snapshot(view)
 
 
@@ -311,14 +310,10 @@ async def create_calculation_run(
     session: SessionDep,
     idempotency_key: Annotated[
         str,
-        Header(
-            alias="Idempotency-Key",
-            min_length=1,
-            max_length=255,
-            pattern=r"^[!-~]+$",
-            description="Unique per run request (per user). A retry with the same key and the "
+        idempotency_key_header(
+            "Unique per run request (per user). A retry with the same key and the "
             "same body returns the original run; with a different body, 409 "
-            "idempotency_conflict (D-31 §5).",
+            "idempotency_conflict (D-31 §5)."
         ),
     ],
 ) -> RunDetail:
@@ -351,8 +346,7 @@ async def create_calculation_run(
         settings.SCENARIOS_ENABLED,
     )
     if not created:
-        response.status_code = 200
-        response.headers[REPLAYED] = "true"
+        mark_replayed(response)
     return _detail(row, await service.shown_manifest(row.run))
 
 
@@ -418,9 +412,7 @@ def _contribution(c: ContributionRow, clear: frozenset[str]) -> ResultItem:
     instrument_key: Value | None = None
     if c.instrument is not None:
         code = c.instrument_classes.get("instrument_id", UNCLASSIFIED)
-        instrument_key = (
-            c.instrument.business_key if code in clear else MaskedValue(classification=code)
-        )
+        instrument_key = mask_value(c.instrument.business_key, code, clear)
     return ResultItem(
         intermediate_value_id=v.id,
         sequence=v.sequence,

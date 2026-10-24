@@ -3,7 +3,7 @@ import { FileStack } from 'lucide-react'
 import { EmptyState } from '@/components/common/EmptyState'
 import { PageSection } from '@/components/common/PageSection'
 import { SchemaListGate, type SchemaList, type SchemaListState } from '@/components/schemas/SchemaListLoad'
-import { StatusPill } from '@/components/schemas/StatusPill'
+import { SchemaStatusPill } from '@/components/schemas/StatusPill'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 
@@ -46,7 +46,7 @@ export function SchemaCatalogue({ list }: { list: SchemaList }) {
               </TableCell>
               <TableCell className="text-sm text-muted-foreground">{s.owner}</TableCell>
               <TableCell>
-                <StatusPill status={s.status} />
+                <SchemaStatusPill status={s.status} />
               </TableCell>
               <TableCell className="font-mono text-sm">
                 {s.effective_version ? (
@@ -64,7 +64,7 @@ export function SchemaCatalogue({ list }: { list: SchemaList }) {
               </TableCell>
               <TableCell>
                 <span className="mr-2 font-mono text-sm">v{s.latest_version.version}</span>
-                <StatusPill status={s.latest_version.status} />
+                <SchemaStatusPill status={s.latest_version.status} />
               </TableCell>
               <TableCell>
                 {s.dependents.length === 0 ? (

@@ -13,7 +13,7 @@ import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
 import { toastApiError } from '@/components/common/api-error-toast'
 import { CompatibilityBadge } from '@/components/schemas/CompatibilityBadge'
-import { StatusPill } from '@/components/schemas/StatusPill'
+import { SchemaStatusPill } from '@/components/schemas/StatusPill'
 import {
   alignFields,
   defaultComparison,
@@ -133,7 +133,7 @@ export default function SchemaDetailPage() {
         actions={
           <div className="flex items-center gap-2">
             {schema.provisional && <Badge variant="warning">Provisional</Badge>}
-            <StatusPill status={schema.status} />
+            <SchemaStatusPill status={schema.status} />
             {has('schema:propose') && schema.effective_version && (
               <Button asChild size="sm">
                 <Link href={`/schemas/proposals/new?schema=${schema.id}`}>Propose change</Link>
@@ -165,7 +165,7 @@ export default function SchemaDetailPage() {
                 >
                   <TableCell className="font-mono">v{v.version}</TableCell>
                   <TableCell>
-                    <StatusPill status={v.status} />
+                    <SchemaStatusPill status={v.status} />
                   </TableCell>
                   <TableCell className="text-sm">{v.effective_from ?? '—'}</TableCell>
                   <TableCell>{v.compatibility ? <CompatibilityBadge value={v.compatibility} /> : '—'}</TableCell>
