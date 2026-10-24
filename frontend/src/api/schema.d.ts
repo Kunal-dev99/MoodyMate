@@ -8503,6 +8503,17 @@ export interface operations {
                     "application/json": components["schemas"]["RunDetail"];
                 };
             };
+            /** @description rate_limited: this principal's bucket for the route is empty (D-53); retryable, audited DENIED, nothing written. */
+            429: {
+                headers: {
+                    /** @description Whole seconds until a request can be served again. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
             /** @description Client error (standard envelope) */
             "4XX": {
                 headers: {
@@ -9344,6 +9355,17 @@ export interface operations {
                     "application/json": components["schemas"]["ImportDetail"];
                 };
             };
+            /** @description rate_limited: this principal's bucket for the route is empty (D-53); retryable, audited DENIED, nothing written. */
+            429: {
+                headers: {
+                    /** @description Whole seconds until a request can be served again. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
             /** @description Client error (standard envelope) */
             "4XX": {
                 headers: {
@@ -9722,6 +9744,17 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ImportDetail"];
+                };
+            };
+            /** @description rate_limited: this principal's bucket for the route is empty (D-53); retryable, audited DENIED, nothing written. */
+            429: {
+                headers: {
+                    /** @description Whole seconds until a request can be served again. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
             /** @description Client error (standard envelope) */
@@ -10933,6 +10966,17 @@ export interface operations {
                     "application/json": components["schemas"]["ScenarioRunOut"];
                 };
             };
+            /** @description rate_limited: this principal's bucket for the route is empty (D-53); retryable, audited DENIED, nothing written. */
+            429: {
+                headers: {
+                    /** @description Whole seconds until a request can be served again. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
             /** @description Client error (standard envelope) */
             "4XX": {
                 headers: {
@@ -11244,6 +11288,17 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ScenarioValidationOut"];
+                };
+            };
+            /** @description rate_limited: this principal's bucket for the route is empty (D-53); retryable, audited DENIED, nothing written. */
+            429: {
+                headers: {
+                    /** @description Whole seconds until a request can be served again. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
             /** @description Client error (standard envelope) */

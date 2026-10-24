@@ -98,3 +98,41 @@ switchable off).
 4. Phase IDs: the Architecture doc uses global P0–P6, while each WS plan uses its own
    P0–P6 meanings.
 5. Design bundle still carries fp_reporting route labels and status pills.
+
+## Security controls added in Feature 06 Phase 28 (D-53, D-54, D-55)
+
+**Rate limits (D-53, `app/core/ratelimit.py`).** An in-process token bucket
+per (tenant, principal, route template) guards the five expensive routes. Defaults (settings
+`RATE_LIMIT_<ROUTE>_BURST` / `_PER_MINUTE`, PROVISIONAL; production values are a client item):
+
+| Route | Setting prefix | Burst | Per minute |
+|---|---|---|---|
+| `POST /imports` | `RATE_LIMIT_CREATE_IMPORT` | 5 | 10 |
+| `POST /imports/{id}/validate` | `RATE_LIMIT_VALIDATE_IMPORT` | 5 | 10 |
+| `GET /scenarios/{id}/versions/{v}/validation` | `RATE_LIMIT_SCENARIO_VALIDATION` | 5 | 10 |
+| `POST /calculation-runs` | `RATE_LIMIT_CALCULATION_RUN` | 5 | 10 |
+| `POST /scenarios/{id}/run` | `RATE_LIMIT_SCENARIO_RUN` | 3 | 5 |
+
+Authentication and the route's permission run first; a refusal is 429 `rate_limited`
+(`retryable: true`) with `Retry-After` in whole seconds, audited DENIED with reason
+`rate_limited`, and nothing is written. `RATE_LIMIT_ENABLED=false` is allowed only in
+local/test. **Per process:** N API processes allow N times the rate; a shared store is required
+before more than one API instance runs (deferred, D-53 §5).
+
+**Security headers (D-54).** Backend middleware (`app/core/security_headers.py`) sets
+`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` and
+`Cross-Origin-Opener-Policy: same-origin` on every response, and
+`Strict-Transport-Security: max-age=31536000; includeSubDomains` only when ENV is
+staging/production (TLS terminates in front of the app). The frontend (`next.config.mjs`,
+`src/config/buildEnv.mjs`) serves the same frame and nosniff headers plus a CSP in
+**Report-Only** mode; enforcing it in production is a client decision (D-54 §5).
+
+**Route resolution (`app/core/routes.py`).** FastAPI 0.162 includes routers lazily, so
+`app.routes` no longer lists included routes and `scope["route"]` holds the unprefixed route.
+`served_routes(app)` and `route_template(request)` resolve the served path and dependencies; the
+D-04 declared-permission guard, the route registry check, denial audit strings and rate-limit
+keys all use them, and the guard fails closed (403) when a route cannot be resolved.
+
+**Dependency scanning (D-55).** CI fails on any high/critical npm advisory not listed (with an
+expiry) in `frontend/audit-allowlist.json` (`backend/scripts/check_audit_allowlist.py`) and runs
+`pip-audit` on the backend environment. Remaining advisories: `docs/security/ADVISORIES.md`.

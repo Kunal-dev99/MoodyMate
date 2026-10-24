@@ -15,6 +15,7 @@ from app.core.auth import authenticated, get_principal, require_permission
 from app.core.classification import mask_model
 from app.core.errors import ApiError
 from app.core.principal import Principal
+from app.core.routes import route_template
 from app.db.session import get_session
 from app.governance.constants import Permission, ProposalStatus
 from app.governance.models import (
@@ -336,8 +337,7 @@ async def schema_change_enabled(
     """Writes are off when SCHEMA_CHANGE_ENABLED is false: the registry is read-only. The
     refusal is audited like any other denied request (BE-3.2)."""
     if not request.app.state.settings.SCHEMA_CHANGE_ENABLED:
-        route = request.scope.get("route")
-        endpoint = getattr(route, "path", request.url.path)
+        endpoint = route_template(request)
         await record_denial(
             session,
             principal,

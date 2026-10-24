@@ -32,6 +32,7 @@ from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.calculations.constants import (
+    CREATE_RUN,
     CalculationRunStatus,
     CalculationWarningCode,
     HqlaExclusionReason,
@@ -85,6 +86,7 @@ from app.core.auth import require_permission
 from app.core.classification import UNCLASSIFIED, MaskedValue, mask_mapping
 from app.core.decimals import decimal_text
 from app.core.principal import Principal
+from app.core.ratelimit import RATE_LIMITED_RESPONSE, LimitedRoute, rate_limited
 from app.db.session import get_session
 from app.domain.constants import CashflowOrigin, DomainSchemaCode
 from app.governance.constants import Permission
@@ -95,6 +97,11 @@ from app.rules.constants import ILLUSTRATIVE_STATEMENT, CashflowDirection, HqlaL
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 CalcReader = Annotated[Principal, Depends(require_permission(Permission.CALC_READ))]
 CalcRunner = Annotated[Principal, Depends(require_permission(Permission.CALC_RUN))]
+# BE-28.3 (D-53): calc:run, then the route's rate-limit bucket.
+RateLimitedRunner = Annotated[
+    Principal,
+    Depends(rate_limited(LimitedRoute.CALCULATION_RUN, Permission.CALC_RUN, CREATE_RUN)),
+]
 
 router = APIRouter(tags=["calculations"])
 REPLAYED = "Idempotent-Replayed"
@@ -300,14 +307,15 @@ def _detail(row: RunRow, manifest: dict[str, Any]) -> RunDetail:
             "model": RunDetail,
             "description": "Idempotent replay: this key was used for the same request; the "
             "original run is returned (header Idempotent-Replayed: true).",
-        }
+        },
+        **RATE_LIMITED_RESPONSE,
     },
 )
 async def create_calculation_run(
     request: Request,
     response: Response,
     body: RunCreate | RunRerun,
-    principal: CalcRunner,
+    principal: RateLimitedRunner,
     session: SessionDep,
     idempotency_key: Annotated[
         str,

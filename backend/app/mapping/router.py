@@ -21,6 +21,7 @@ from app.core.auth import get_principal, require_permission
 from app.core.classification import mask_mapping
 from app.core.errors import ApiError
 from app.core.principal import Principal
+from app.core.routes import route_template
 from app.db.session import get_session
 from app.governance.constants import Permission
 from app.governance.service import record_denial
@@ -77,8 +78,7 @@ def _switch(setting: str, code: str, message: str) -> Callable[..., Awaitable[No
         session: SessionDep,
     ) -> None:
         if not getattr(request.app.state.settings, setting):
-            route = request.scope.get("route")
-            endpoint = getattr(route, "path", request.url.path)
+            endpoint = route_template(request)
             await record_denial(
                 session, principal, f"{request.method} {endpoint}", "endpoint", endpoint, code
             )

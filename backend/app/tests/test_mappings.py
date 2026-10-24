@@ -37,6 +37,7 @@ from app.tests.conftest import (
     dev_token,
     insert_tenant,
     insert_user,
+    response,
     script,
     sql,
 )
@@ -177,10 +178,12 @@ def create_mapping(
 def validate(
     api: TestClient, headers: dict[str, str], import_id: str, version_id: str, **kw: Any
 ) -> Response:
-    return api.post(
-        f"/api/v1/imports/{import_id}/mappings/validate",
-        json={"mapping_version_id": version_id},
-        headers={**headers, **kw},
+    return response(
+        api.post(
+            f"/api/v1/imports/{import_id}/mappings/validate",
+            json={"mapping_version_id": version_id},
+            headers={**headers, **kw},
+        )
     )
 
 

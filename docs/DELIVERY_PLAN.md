@@ -3706,24 +3706,28 @@ planning change). Phases 28–35. Migrations from 0030. Phases 28–35 below; de
 
 ### Phase 28 — Security and demo credibility (Workstream A, P0)
 
-- [ ] **FE-28.1** Upgrade `next` 14.2.35 → **15.5.28** (the first release fixing the critical
+- [x] **FE-28.1** Upgrade `next` 14.2.35 → **15.5.28** (the first release fixing the critical
   RCE advisories GHSA-2464-fhr4-w9xw, GHSA-2xp9-vwfh-vxw4, GHSA-p293-qw3h-jr36, all ≤15.5.27),
   `react`/`react-dom` → 19, matching `@types/*` and `eslint-config-next`. Migrate Next 15
   breaking changes (async `params`/`searchParams` in server pages and layouts; `useParams` in
   client components unchanged). Done when: `npm ci`, typecheck, lint, vitest, `next build` and
   the full Playwright suite pass; `npm audit --omit=dev` shows no critical.
-- [ ] **FE-28.2** `docs/security/ADVISORIES.md`: every remaining advisory after FE-28.1 with
+  - *Evidence (2026-10-24):* next 15.5.28 + React 19 (`frontend/package.json`); tsc and lint clean, vitest 647 passed, `next build` passes; `npm audit --omit=dev`: 0 critical, 0 high (`docs/evidence/phase-28/npm-audit-omit-dev.json`); full Playwright run in CI on the PR.
+- [x] **FE-28.2** `docs/security/ADVISORIES.md`: every remaining advisory after FE-28.1 with
   severity, package path, exposure (runtime vs build-time), mitigation, owner and review date.
   Done when the file matches `npm audit --omit=dev --json` exactly.
-- [ ] **BE-28.1** CI dependency scanning: a `frontend` step `npm audit --omit=dev
+  - *Evidence (2026-10-24):* `docs/security/ADVISORIES.md` generated from the saved audit JSON (4 moderate, build-time Tailwind/PostCSS); owners UNASSIGNED (client hard stop).
+- [x] **BE-28.1** CI dependency scanning: a `frontend` step `npm audit --omit=dev
   --audit-level=high` that fails unless every finding is listed in an allowlist
   (`frontend/audit-allowlist.json`, GHSA ids + expiry); a `backend` step running `pip-audit`
   (new dev dependency) against the installed environment. Done when both steps run in CI and a
   deliberately unlisted advisory id would fail (unit-tested allowlist checker script).
-- [ ] **FE-28.3** Production-build guard: `next build` with `NODE_ENV=production` fails with a
+  - *Evidence (2026-10-24):* `.github/workflows/ci.yml`: npm audit gate via `backend/scripts/check_audit_allowlist.py` + `frontend/audit-allowlist.json` (empty), checker unit-tested in `test_committed_artifacts.py`; `pip-audit` step; local pip-audit: no known vulnerabilities after fastapi 0.162 / starlette 1.9 / pytest 9 / certifi upgrades.
+- [x] **FE-28.3** Production-build guard: `next build` with `NODE_ENV=production` fails with a
   clear message when `NEXT_PUBLIC_API_BASE_URL` is unset (CI and e2e set it); dev keeps
   `http://localhost:8000`. Done when a vitest/unit check covers the guard function.
-- [ ] **FE-28.4** Demo credibility (D-02 unaffected; demo pages only):
+  - *Evidence (2026-10-24):* `src/config/buildEnv.mjs` guard + `src/config/__tests__/buildEnv.test.ts`; `npm run build` without the variable exits 1, with it passes; CI sets it.
+- [x] **FE-28.4** Demo credibility (D-02 unaffected; demo pages only):
   - Agent demo (`components/advanced/AgentDemo.tsx`, `agentDemo.ts`): remove "Exact decimal
     arithmetic" and every "verified"/"re-running reproduces it exactly" claim; call the hash an
     "illustrative checksum (not a SHA-256 result fingerprint)"; banner "Illustrative mock:
@@ -3735,15 +3739,18 @@ planning change). Phases 28–35. Migrations from 0030. Phases 28–35 below; de
     outflows ≤ 0 and the UI shows "not computable"; same banner.
   - Done when vitest covers: zero denominator → null/"not computable", no "verified"/"exact"
     strings remain in either page (grep test), derived movement text equals computed values.
-- [ ] **BE-28.2** Security headers middleware: `X-Content-Type-Options: nosniff`,
+  - *Evidence (2026-10-24):* Agent demo and Liquidity Intelligence: no 'exact'/'verified' claims, illustrative banners, derived movement text, run-off column 'not applied', zero denominator -> null / 'not computable' (`agentDemo.test.ts`, `liquidityIntel.test.ts`).
+- [x] **BE-28.2** Security headers middleware: `X-Content-Type-Options: nosniff`,
   `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Cross-Origin-Opener-Policy:
   same-origin`, `Strict-Transport-Security` only when ENV is staging/production. Done when a
   test asserts the headers on `/api/v1/health` and that HSTS is absent in ENV=test.
-- [ ] **FE-28.5** Next.js `headers()`: CSP in **Report-Only** (default-src 'self'; connect-src
+  - *Evidence (2026-10-24):* `app/core/security_headers.py`; `test_config.py` asserts the headers on `/api/v1/health` and no HSTS in ENV=test.
+- [x] **FE-28.5** Next.js `headers()`: CSP in **Report-Only** (default-src 'self'; connect-src
   'self' + the API origin; frame-ancestors 'none'; …), `X-Frame-Options: DENY`, nosniff,
   Referrer-Policy. Enforcing CSP in production is a client decision (hard stop). Done when the
   build serves the headers (Playwright header assertion on one page).
-- [ ] **BE-28.3** Rate limits: in-process per-principal, per-route token bucket on
+  - *Evidence (2026-10-24):* `next.config.mjs` headers with Report-Only CSP; `e2e/security-headers.spec.ts`.
+- [x] **BE-28.3** Rate limits: in-process per-principal, per-route token bucket on
   `POST /imports`, `POST /imports/{id}/validate`, `GET /scenarios/{id}/versions/{v}/validation`,
   `POST /calculation-runs`, `POST /scenarios/{id}/run`. Settings `RATE_LIMIT_ENABLED` (default on;
   off allowed only in local/test), per-route capacity/refill with conservative defaults; 429
@@ -3752,6 +3759,7 @@ planning change). Phases 28–35. Migrations from 0030. Phases 28–35 below; de
   row, and ARCHITECTURE.md documents the limits. Test budget: fold into existing test functions
   (D-26: suite stays at 49).
 
+  - *Evidence (2026-10-24):* `app/core/ratelimit.py`; 429 + `Retry-After` + DENIED audit asserted in `test_auth.py`; documented in ARCHITECTURE.md; full backend suite 49 passed.
 ### Feature 06 overview (planning change, 2026-10-24)
 
 Status: **PROPOSED.** Phase 28 is building from the brief above (copied verbatim from the

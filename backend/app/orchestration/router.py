@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import require_any_permission, require_permission
 from app.core.principal import Principal
+from app.core.ratelimit import RATE_LIMITED_RESPONSE, LimitedRoute, rate_limited
 from app.db.session import get_session
 from app.governance.constants import Permission
 from app.orchestration.constants import (
@@ -31,6 +32,7 @@ from app.orchestration.constants import (
     MAX_SHOCKS,
     ApprovalState,
     ScenarioOrigin,
+    ScenarioRunAction,
     ScenarioVersionStatus,
 )
 from app.orchestration.schemas import (
@@ -62,7 +64,15 @@ ScenarioCloser = Annotated[
     Principal,
     Depends(require_any_permission(Permission.SCENARIO_PROPOSE, Permission.SCENARIO_APPROVE)),
 ]
-ScenarioRunner = Annotated[Principal, Depends(require_permission(Permission.CALC_RUN))]
+# BE-28.3 (D-53): the permission, then the route's rate-limit bucket. The dry run has no
+# action constant of its own: it is audited in the endpoint form.
+RateLimitedValidationReader = Annotated[
+    Principal, Depends(rate_limited(LimitedRoute.SCENARIO_VALIDATION, Permission.CALC_READ))
+]
+RateLimitedScenarioRunner = Annotated[
+    Principal,
+    Depends(rate_limited(LimitedRoute.SCENARIO_RUN, Permission.CALC_RUN, ScenarioRunAction.RUN)),
+]
 VersionNumber = Annotated[int, Path(ge=1, le=1_000_000)]
 REPLAYED = "Idempotent-Replayed"
 
@@ -258,12 +268,13 @@ def _calculations_enabled(request: Request) -> bool:
     f"{VERSION}/validation",
     response_model=ScenarioValidationOut,
     operation_id="validateScenarioRun",
+    responses=RATE_LIMITED_RESPONSE,
 )
 async def validate_scenario_run(
     request: Request,
     scenario_id: uuid.UUID,
     version: VersionNumber,
-    principal: ScenarioReader,
+    principal: RateLimitedValidationReader,
     session: SessionDep,
     baseline_run_id: Annotated[uuid.UUID, Query(description="The baseline maturity_ladder run.")],
 ) -> ScenarioValidationOut:
@@ -289,7 +300,8 @@ async def validate_scenario_run(
             "model": ScenarioRunOut,
             "description": "Idempotent replay: this key was used for the same request; the "
             "original scenario_run is returned (header Idempotent-Replayed: true).",
-        }
+        },
+        **RATE_LIMITED_RESPONSE,
     },
 )
 async def run_scenario(
@@ -297,7 +309,7 @@ async def run_scenario(
     response: Response,
     scenario_id: uuid.UUID,
     body: ScenarioRunCreate,
-    principal: ScenarioRunner,
+    principal: RateLimitedScenarioRunner,
     session: SessionDep,
     idempotency_key: Annotated[
         str,

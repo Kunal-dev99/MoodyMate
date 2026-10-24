@@ -55,7 +55,9 @@ export default defineConfig({
       cwd: '../backend',
       url: `http://localhost:${API_PORT}/api/v1/health`,
       reuseExistingServer: !process.env.CI,
-      env: { ENV: 'test', ARTIFACT_STORE_DIR: artifactDir, ...(backendDb ? { DATABASE_URL: backendDb } : {}) },
+      // D-53: the suite drives many uploads and runs as one dev user per role, so the per-process
+      // rate limiter is off here (allowed only in local/test); backend tests cover the limiter itself.
+      env: { ENV: 'test', RATE_LIMIT_ENABLED: 'false', ARTIFACT_STORE_DIR: artifactDir, ...(backendDb ? { DATABASE_URL: backendDb } : {}) },
       timeout: 60_000,
     },
     {

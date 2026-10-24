@@ -5,7 +5,8 @@ import { signIn } from './support'
  * Feature 05 Phase 24 browser check against the real stack (backend ENV=test, synthetic).
  * FE-24.1: the sidebar's "Advanced" section sits below "AI Assistant" and above "Administration";
  * risk_analyst opens "Agentic Stress-Test Explorer" and sees the D-44 §8 banner.
- * Needs a frontend built with NEXT_PUBLIC_STRESS_EXPLORER_UI on (its default).
+ * FE-28.4 (Q19): both demo pages (agent demo, Liquidity Intelligence) show the illustrative-mock
+ * banner. Needs a frontend built with NEXT_PUBLIC_STRESS_EXPLORER_UI on (its default).
  */
 
 test('FE-24.1: risk_analyst opens the Agentic Stress-Test Explorer from the Advanced section and sees the banner', async ({ page }) => {
@@ -31,4 +32,12 @@ test('FE-24.1: risk_analyst opens the Agentic Stress-Test Explorer from the Adva
   await expect(banner).toBeVisible()
   await expect(banner).toContainText('Illustrative stress exploration, not a regulatory stress test')
   await expect(item).toHaveClass(/text-primary/)
+
+  // FE-28.4: both demo pages carry the illustrative-mock banner.
+  for (const path of ['/advanced/stress-explorer/agent-demo', '/advanced/liquidity-intelligence']) {
+    await page.goto(path)
+    const demoBanner = page.getByTestId('demo-banner')
+    await expect(demoBanner, path).toBeVisible()
+    await expect(demoBanner, path).toContainText('Illustrative mock: browser arithmetic on synthetic data, not the calculation engine')
+  }
 })

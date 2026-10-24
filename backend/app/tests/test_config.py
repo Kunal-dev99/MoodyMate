@@ -107,6 +107,20 @@ def test_settings_fail_closed(monkeypatch: pytest.MonkeyPatch) -> None:
             Settings.model_validate({"ENV": "test", name: ceiling + 1})
     assert Settings(ENV="local").AI_ENABLED is False
 
+    # BE-28.3: rate limits default on; off only in local/test, refused in deployments.
+    for env, extra in BASE.items():
+        assert Settings(ENV=env, DATA_CLASS="synthetic", **extra).RATE_LIMIT_ENABLED is True
+        if env in ("local", "test"):
+            assert Settings(ENV=env, RATE_LIMIT_ENABLED=False).RATE_LIMIT_ENABLED is False
+        else:
+            refused(
+                f"RATE_LIMIT_ENABLED=false is not allowed when ENV={env}",
+                ENV=env,
+                DATA_CLASS="synthetic",
+                RATE_LIMIT_ENABLED=False,
+                **extra,
+            )
+
 
 def test_responses_carry_the_envelope_correlation_id_and_data_class() -> None:
     app = create_app(Settings(ENV="test", DATABASE_URL="postgresql+asyncpg://x:y@127.0.0.1:1/none"))
@@ -152,6 +166,43 @@ def test_responses_carry_the_envelope_correlation_id_and_data_class() -> None:
         headers={"Origin": "http://localhost:3000", "Access-Control-Request-Method": "GET"},
     )
     assert preflight.status_code == 200 and preflight.headers["X-Data-Class"] == "synthetic"
+    secure(preflight, hsts=False)
+
+    # BE-28.2: security headers on every response; HSTS only in staging/production.
+    for path, _status, _code in cases:
+        secure(c.get(path), hsts=False)
+    local = create_app(Settings(ENV="local", DATABASE_URL="postgresql+asyncpg://x:y@127.0.0.1:1/n"))
+    secure(TestClient(local).get("/api/v1/health"), hsts=False)
+    for env in ("staging", "production"):
+        deployed = Settings(
+            ENV=env,
+            DATA_CLASS="synthetic",
+            DATABASE_URL="postgresql+asyncpg://x:y@127.0.0.1:1/none",
+            **DEPLOYED,
+        )
+        r = TestClient(create_app(deployed)).get("/api/v1/health")
+        assert r.status_code == 200, env
+        secure(r, hsts=True)
+
+
+SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Cross-Origin-Opener-Policy": "same-origin",
+}
+
+
+def secure(r: Any, *, hsts: bool) -> None:
+    """BE-28.2: the fixed security headers, and HSTS exactly when the ENV is deployed."""
+    for name, value in SECURITY_HEADERS.items():
+        assert r.headers.get(name) == value, (r.request.url.path, name, r.headers.get(name))
+    if hsts:
+        value = r.headers.get("Strict-Transport-Security", "")
+        max_age = value.split(";")[0].strip()
+        assert max_age.startswith("max-age=") and int(max_age[8:]) >= 31_536_000, value
+    else:
+        assert "Strict-Transport-Security" not in r.headers, r.request.url.path
 
 
 def test_logs_never_carry_tokens_or_secrets() -> None:
