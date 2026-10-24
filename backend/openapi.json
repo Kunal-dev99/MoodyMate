@@ -1530,6 +1530,120 @@
         "title": "ConstantTransform",
         "type": "object"
       },
+      "ContextCurrency": {
+        "properties": {
+          "basis": {
+            "const": "PER_CURRENCY_NO_FX",
+            "description": "Results are per currency; there is no FX and no cross-currency total.",
+            "title": "Basis",
+            "type": "string"
+          },
+          "codes": {
+            "description": "The ISO 4217 currencies of the run's outcome, sorted.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Codes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "basis",
+          "codes"
+        ],
+        "title": "ContextCurrency",
+        "type": "object"
+      },
+      "ContextMethodology": {
+        "properties": {
+          "engine_version": {
+            "title": "Engine Version",
+            "type": "string"
+          },
+          "module_code": {
+            "title": "Module Code",
+            "type": "string"
+          },
+          "module_version": {
+            "title": "Module Version",
+            "type": "integer"
+          },
+          "rule_versions": {
+            "description": "The pinned rule set's members, by rule code.",
+            "items": {
+              "$ref": "#/components/schemas/ContextRuleVersion"
+            },
+            "title": "Rule Versions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "module_code",
+          "module_version",
+          "engine_version",
+          "rule_versions"
+        ],
+        "title": "ContextMethodology",
+        "type": "object"
+      },
+      "ContextRuleVersion": {
+        "properties": {
+          "rule_code": {
+            "title": "Rule Code",
+            "type": "string"
+          },
+          "rule_version_id": {
+            "format": "uuid",
+            "title": "Rule Version Id",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "rule_code",
+          "rule_version_id",
+          "version"
+        ],
+        "title": "ContextRuleVersion",
+        "type": "object"
+      },
+      "ContextUnits": {
+        "description": "What the figures of a result read are measured in.",
+        "properties": {
+          "amount": {
+            "description": "Money: exact decimal text in the ISO 4217 currency of its row, never converted (no FX, D-35).",
+            "title": "Amount",
+            "type": "string"
+          },
+          "days": {
+            "description": "Calendar days after the reporting date.",
+            "title": "Days",
+            "type": "string"
+          },
+          "ratio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Ratios (lcr_hqla): a dimensionless fraction, 4 dp ROUND_HALF_EVEN; None when the module reports no ratio.",
+            "title": "Ratio"
+          }
+        },
+        "required": [
+          "amount",
+          "ratio",
+          "days"
+        ],
+        "title": "ContextUnits",
+        "type": "object"
+      },
       "ContractColumn": {
         "properties": {
           "name": {
@@ -6153,6 +6267,10 @@
       },
       "LiquidityOut": {
         "properties": {
+          "context": {
+            "$ref": "#/components/schemas/ResultContext",
+            "description": "D-56 \u00a75: units, currency, as-of date, methodology pins, validation status and the D-35 statement, from the run's pins."
+          },
           "currencies": {
             "description": "Per currency, no FX (D-35). Empty unless the run SUCCEEDED (with or without warnings).",
             "items": {
@@ -6214,6 +6332,10 @@
           },
           "status": {
             "$ref": "#/components/schemas/CalculationRunStatus"
+          },
+          "validation_status": {
+            "$ref": "#/components/schemas/ValidationStatus",
+            "description": "D-56: the run's module version's status (MODULE_VALIDATION). Response wrapper only: never in the manifest or the result document."
           }
         },
         "required": [
@@ -6227,7 +6349,9 @@
           "limitations",
           "prototype",
           "illustrative",
-          "statement"
+          "statement",
+          "validation_status",
+          "context"
         ],
         "title": "LiquidityOut",
         "type": "object"
@@ -7404,6 +7528,10 @@
             "title": "Buckets",
             "type": "array"
           },
+          "context": {
+            "$ref": "#/components/schemas/ResultContext",
+            "description": "D-56 \u00a75: units, currency, as-of date, methodology pins, validation status and the D-35 statement, from the run's pins."
+          },
           "currencies": {
             "description": "Per currency, no FX (D-35). Empty unless the run SUCCEEDED (with or without warnings).",
             "items": {
@@ -7440,6 +7568,10 @@
           },
           "status": {
             "$ref": "#/components/schemas/CalculationRunStatus"
+          },
+          "validation_status": {
+            "$ref": "#/components/schemas/ValidationStatus",
+            "description": "D-56: the run's module version's status (MODULE_VALIDATION). Response wrapper only: never in the manifest or the result document."
           }
         },
         "required": [
@@ -7452,7 +7584,9 @@
           "currencies",
           "min_aggregate_count",
           "illustrative",
-          "statement"
+          "statement",
+          "validation_status",
+          "context"
         ],
         "title": "MaturityLadderOut",
         "type": "object"
@@ -7754,6 +7888,10 @@
             "title": "Statement",
             "type": "string"
           },
+          "validation_status": {
+            "$ref": "#/components/schemas/ValidationStatus",
+            "description": "D-56: from the code constant MODULE_VALIDATION per (module code, version); ILLUSTRATIVE on every current version, PLANNED included. No API sets it."
+          },
           "version": {
             "title": "Version",
             "type": "integer"
@@ -7775,6 +7913,7 @@
           "assumption_set",
           "provisional",
           "illustrative",
+          "validation_status",
           "statement",
           "created_at"
         ],
@@ -9475,6 +9614,44 @@
         "title": "ReconciliationOutcome",
         "type": "string"
       },
+      "ResultContext": {
+        "description": "D-56 \u00a75: the context of a result read, built from the run's pins (manifest, module\nversion, outcome), never computed. Response wrapper only: not hashed.",
+        "properties": {
+          "as_of_date": {
+            "description": "The run's pinned reporting_date.",
+            "format": "date",
+            "title": "As Of Date",
+            "type": "string"
+          },
+          "currency": {
+            "$ref": "#/components/schemas/ContextCurrency"
+          },
+          "methodology": {
+            "$ref": "#/components/schemas/ContextMethodology"
+          },
+          "statement": {
+            "description": "The D-35 label: not regulatory, no vendor parity.",
+            "title": "Statement",
+            "type": "string"
+          },
+          "units": {
+            "$ref": "#/components/schemas/ContextUnits"
+          },
+          "validation_status": {
+            "$ref": "#/components/schemas/ValidationStatus"
+          }
+        },
+        "required": [
+          "units",
+          "currency",
+          "as_of_date",
+          "methodology",
+          "validation_status",
+          "statement"
+        ],
+        "title": "ResultContext",
+        "type": "object"
+      },
       "ResultItem": {
         "properties": {
           "bucket_code": {
@@ -9580,6 +9757,10 @@
       },
       "ResultPage": {
         "properties": {
+          "context": {
+            "$ref": "#/components/schemas/ResultContext",
+            "description": "D-56 \u00a75: units, currency, as-of date, methodology pins, validation status and the D-35 statement, from the run's pins."
+          },
           "items": {
             "description": "In run order.",
             "items": {
@@ -9611,6 +9792,10 @@
           "total": {
             "title": "Total",
             "type": "integer"
+          },
+          "validation_status": {
+            "$ref": "#/components/schemas/ValidationStatus",
+            "description": "D-56: the run's module version's status (MODULE_VALIDATION). Response wrapper only: never in the manifest or the result document."
           }
         },
         "required": [
@@ -9620,7 +9805,9 @@
           "total",
           "limit",
           "offset",
-          "statement"
+          "statement",
+          "validation_status",
+          "context"
         ],
         "title": "ResultPage",
         "type": "object"
@@ -10606,6 +10793,10 @@
             "title": "Assumption Set Id",
             "type": "string"
           },
+          "context": {
+            "$ref": "#/components/schemas/ResultContext",
+            "description": "D-56 \u00a75: units, currency, as-of date, methodology pins, validation status and the D-35 statement, from the run's pins."
+          },
           "correlation_id": {
             "anyOf": [
               {
@@ -10741,6 +10932,10 @@
           "status": {
             "$ref": "#/components/schemas/CalculationRunStatus"
           },
+          "validation_status": {
+            "$ref": "#/components/schemas/ValidationStatus",
+            "description": "D-56: the run's module version's status (MODULE_VALIDATION). Response wrapper only: never in the manifest or the result document."
+          },
           "warning_count": {
             "title": "Warning Count",
             "type": "integer"
@@ -10770,12 +10965,14 @@
           "ended_at",
           "created_by",
           "illustrative",
+          "validation_status",
           "manifest",
           "input_refs",
           "warnings",
           "outcome",
           "correlation_id",
-          "statement"
+          "statement",
+          "context"
         ],
         "title": "RunDetail",
         "type": "object"
@@ -11158,6 +11355,10 @@
           "status": {
             "$ref": "#/components/schemas/CalculationRunStatus"
           },
+          "validation_status": {
+            "$ref": "#/components/schemas/ValidationStatus",
+            "description": "D-56: the run's module version's status (MODULE_VALIDATION). Response wrapper only: never in the manifest or the result document."
+          },
           "warning_count": {
             "title": "Warning Count",
             "type": "integer"
@@ -11179,7 +11380,8 @@
           "started_at",
           "ended_at",
           "created_by",
-          "illustrative"
+          "illustrative",
+          "validation_status"
         ],
         "title": "RunSummary",
         "type": "object"
@@ -11281,6 +11483,15 @@
             "title": "Buckets",
             "type": "array"
           },
+          "context": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ResultContext"
+              }
+            ],
+            "description": "D-56 \u00a75: units, currency, as-of date, methodology pins, validation status and the D-35 statement, from the baseline run's pins (every member run pins the same module, engine and rule versions).",
+            "title": "Context"
+          },
           "currencies": {
             "items": {
               "$ref": "#/components/schemas/ComparisonCurrency"
@@ -11337,6 +11548,10 @@
           "summary": {
             "$ref": "#/components/schemas/ComparisonSummary"
           },
+          "validation_status": {
+            "$ref": "#/components/schemas/ValidationStatus",
+            "description": "D-56: the compared module version's status (MODULE_VALIDATION). Response wrapper only."
+          },
           "version": {
             "title": "Version",
             "type": "integer"
@@ -11358,7 +11573,9 @@
           "summary",
           "min_aggregate_count",
           "illustrative",
-          "labels"
+          "labels",
+          "validation_status",
+          "context"
         ],
         "title": "ScenarioComparisonOut",
         "type": "object"
@@ -14440,6 +14657,16 @@
           "BLOCKER"
         ],
         "title": "ValidationSeverity",
+        "type": "string"
+      },
+      "ValidationStatus": {
+        "description": "D-56 \u00a71: how far a module version's methodology has been validated. Every current module\nversion is ILLUSTRATIVE (consistent with `illustrative = true`). It is exposed in response\nwrappers only, never in a manifest or result document (D-56 \u00a74, hash stability).",
+        "enum": [
+          "ILLUSTRATIVE",
+          "INTERNAL_VALIDATED",
+          "REGULATORY_VALIDATED"
+        ],
+        "title": "ValidationStatus",
         "type": "string"
       },
       "ValueParams": {

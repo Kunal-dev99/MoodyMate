@@ -240,6 +240,26 @@ test('FE-15.2: the run shows its manifest, warnings and ladder; a bucket total e
   // Every result view carries the run ID and reporting date.
   await expect(page.getByTestId('maturity-ladder').getByTestId('identity-run-id')).toHaveText(runId)
   await expect(page.getByTestId('maturity-ladder').getByTestId('identity-reporting-date')).toHaveText(detail.reporting_date)
+  // FE-30.1 (D-56): the validation-status badge and the "Result context" panel, as the server built
+  // them from the run's pins: ILLUSTRATIVE ("Illustrative — not validated") and the as-of date.
+  expect(detail.validation_status).toBe('ILLUSTRATIVE')
+  expect(detail.context.as_of_date).toBe(detail.reporting_date)
+  expect(ladder.context.as_of_date).toBe(detail.reporting_date)
+  const badge = page.getByTestId('run-detail-validation-status')
+  await expect(badge).toHaveAttribute('data-validation-status', detail.validation_status)
+  await expect(badge).toHaveText('Illustrative — not validated')
+  const runContext = page.locator('[data-testid="result-context"][data-source="run"]')
+  await expect(runContext.getByTestId('context-as-of-date')).toHaveText(detail.context.as_of_date)
+  await expect(runContext.getByTestId('context-validation-status')).toHaveAttribute('data-validation-status', detail.context.validation_status)
+  await expect(runContext.getByTestId('context-module')).toHaveText(`${detail.context.methodology.module_code} v${detail.context.methodology.module_version}`)
+  await expect(runContext.getByTestId('context-rule-version')).toHaveCount(detail.context.methodology.rule_versions.length)
+  await expect(runContext.getByTestId('context-statement')).toHaveText(detail.context.statement)
+  const ladderContext = page.locator('[data-testid="result-context"][data-source="maturity-ladder"]')
+  await expect(ladderContext.getByTestId('context-as-of-date')).toHaveText(ladder.context.as_of_date)
+  await expect(ladderContext.getByTestId('context-validation-status')).toHaveAttribute('data-validation-status', ladder.context.validation_status)
+  await expect(page.getByTestId('maturity-ladder').getByTestId('identity-validation-status')).toHaveText('Illustrative — not validated')
+  // The blocks equal the run's pins, so no disagreement is flagged.
+  await expect(page.getByTestId('context-mismatch')).toHaveCount(0)
 
   // 2. The ladder per currency, exactly as the server aggregated it.
   expect(ladder.currencies.length).toBeGreaterThan(0)

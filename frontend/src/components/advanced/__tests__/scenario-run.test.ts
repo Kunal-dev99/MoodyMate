@@ -63,6 +63,7 @@ const summary = (run_id: string, over: Partial<RunSummary> = {}): RunSummary => 
   rerun_of_run_id: null,
   warning_count: 0,
   scenario: null,
+  validation_status: 'ILLUSTRATIVE',
   ...over,
 })
 

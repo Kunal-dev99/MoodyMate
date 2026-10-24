@@ -54,6 +54,17 @@ re-runs after CLOSED) and reads the comparison and drill-down (exact deltas, tur
 breaks only combined, largest changes, distinct-flow masking, the summary, lineage); part 5b
 refuses an LCR baseline; part 6 loops the output guards over the three new run-output tables,
 proves scenario_run append-only, intermediate_value unchanged and the 0027 downgrade refusal.
+
+Phase 30 (BE-30.2 - BE-30.4; D-56), folded in (+0, validation_kit): the `context` block of the
+run detail, the results page, the maturity ladder (part 4), the LCR read (5b) and the
+comparison (5c) equals the run's pins (units frozen per module), with validation_status
+ILLUSTRATIVE in the run list and every read; the Feature 03 run's stored manifest_sha256 and
+result_sha256 are recomputed from its stored rows, both documents keep the Feature 03 key sets
+and the re-run reproduces both hashes and its context; the boundary cases (ENGINEERING — awaiting
+domain-expert approval): LCR ratio ties on each side of ROUND_HALF_EVEN, inflows at the 75% cap
+and one minor unit above, zero net outflows (JSON ratio null, LCR_DENOMINATOR_ZERO) in 5b;
+999999999999999999.99 exact through the ladder, a 3-dp amount (1.235) held at validation and a
+trailing-zero 3-dp amount (1.230) accepted as 1.23 in 5c.
 """
 
 import dataclasses
@@ -171,6 +182,12 @@ from app.tests.scenario_run_kit import (
     check_scenario_runs,
     clear_scenario_runs,
     intermediate_value_shape,
+)
+from app.tests.validation_kit import (
+    check_context,
+    check_ladder_boundaries,
+    check_lcr_boundaries,
+    check_stored_hashes,
 )
 
 pytestmark = pytest.mark.db
@@ -874,6 +891,8 @@ def test_registry_snapshot_run_and_maturity_ladder(
             for row in cur["rows"]:
                 assert all(DECIMAL_TEXT.match(row[a]) for a in AMOUNTS), row
         assert ladder["statement"] == ILLUSTRATIVE_STATEMENT and ladder["illustrative"]
+        check_context(run, run, "run (POST)")  # Phase 30 (BE-30.3): the pins, never computed
+        check_context(ladder, run, "maturity-ladder")
         # D-33: risk_analyst (internal) sees exactly the expected figures masked, the rest as
         # the approver does.
         seen = no_float(api.get(f"{RUNS}/{run['run_id']}/maturity-ladder", headers=analyst).text)
@@ -1019,10 +1038,16 @@ def test_registry_snapshot_run_and_maturity_ladder(
     assert listed(module_code="lcr_hqla") == set()
     detail = no_float(api.get(f"{RUNS}/{run_id}", headers=dev_token(api, "auditor")).text)
     manifest = detail["manifest"]
+    check_context(detail, detail, "run detail")  # Phase 30 (BE-30.2, BE-30.3)
+    run_page = no_float(api.get(RUNS, params={"limit": "200"}, headers=analyst).text)
+    assert run_page["items"] and {i["validation_status"] for i in run_page["items"]} == {
+        "ILLUSTRATIVE"
+    }
     assert detail["statement"] == ILLUSTRATIVE_STATEMENT and manifest["labels"]["illustrative"]
     [stored] = sql(db, "SELECT manifest FROM calculation_run WHERE id = $1", uuid.UUID(run_id))
     assert canonical_sha256(json.loads(stored["manifest"])) == detail["manifest_sha256"]
     assert canonical_sha256(manifest) == detail["manifest_sha256"]
+    check_stored_hashes(db, run_id, detail)  # Phase 30 (BE-30.2): both hashes, recomputed
     assert (manifest["engine_version"], manifest["reporting_date"]) == (
         ENGINE_VERSION,
         case["reporting_date"].isoformat(),
@@ -1065,6 +1090,7 @@ def test_registry_snapshot_run_and_maturity_ladder(
     )
     bucketed = len(case["cash_flows"]) - len(case["excluded"])
     assert results["total"] == len(results["items"]) == bucketed
+    check_context(results, detail, "results")  # Phase 30 (BE-30.2, BE-30.3)
     ladder = api.get(f"{RUNS}/{run_id}/maturity-ladder", headers=steward).json()
     for cur in ladder["currencies"]:
         for row in cur["rows"]:
@@ -1172,6 +1198,27 @@ def test_registry_snapshot_run_and_maturity_ladder(
         calc_counts=calc_counts,
         feature03_run_id=run_id,
     )
+    # Phase 30 (BE-30.3): the comparison's context is its baseline run's pins.
+    r = api.get(
+        f"/api/v1/scenarios/{stressed_ids['scenario_id']}/comparison",
+        params={"scenario_run_id": stressed_ids["scenario_run_id"]},
+        headers=steward,
+    )
+    assert r.status_code == 200, r.text
+    comparison = no_float(r.text)
+    compared = no_float(api.get(f"{RUNS}/{comparison['baseline_run_id']}", headers=steward).text)
+    check_context(comparison, compared, "comparison")
+    # Phase 30 (BE-30.4): the ladder boundary cases (validation_kit), on the seeded buckets.
+    check_ladder_boundaries(
+        api,
+        db,
+        load=load,
+        instrument_source=instrument_source,
+        cash_source=cash_source,
+        instrument_csv=instrument_csv,
+        cashflow_csv=cashflow_csv,
+        module_id=module_id,
+    )
 
     # --- Phase 16 (BE-16.3): pinning across a rule change, and re-runs --------------------------
     def run_rows(run: str) -> str:
@@ -1239,6 +1286,17 @@ def test_registry_snapshot_run_and_maturity_ladder(
     assert {"check": "RERUN_REPRODUCED", "passed": True} in again["outcome"]["post_checks"]
     for key in ("manifest_sha256", "result_sha256", "rule_set_id", "assumption_set_id", "status"):
         assert again[key] == run[key], key
+    # Phase 30 (BE-30.2): the re-run of a run made before the response wrapper changed
+    # reproduces both hashes (above) and the same context; the hashed documents keep the
+    # Feature 03 key sets (check_context checks the manifest's).
+    assert again["context"] == run["context"] and again["validation_status"] == "ILLUSTRATIVE"
+    check_context(again, again, "re-run")
+    assert set(result_document(CalculationRunStatus.SUCCEEDED, [], [], [])) == {
+        "status",
+        "liquidity_gap",
+        "contributions",
+        "warnings",
+    }
     assert [(e["action"], e["outcome"]) for e in events(db, c)] == [
         ("calculation_run.create", "SUCCESS"),
         ("calculation_run.finish", "SUCCESS"),
@@ -1328,6 +1386,7 @@ def test_registry_snapshot_run_and_maturity_ladder(
     lcr_members = lcr_detail["manifest"]["rule_set"]["members"]
     assert {m["rule_code"]: m["rule_version_id"] for m in lcr_members} == lcr_versions
     liquidity = no_float(api.get(f"{RUNS}/{lcr_id}/liquidity", headers=approver).text)
+    check_context(liquidity, lcr_detail, "liquidity")  # Phase 30 (BE-30.3)
     assert (liquidity["run_id"], liquidity["status"]) == (lcr_id, lcr_run["status"])
     assert liquidity["prototype"] and liquidity["illustrative"] and liquidity["limitations"]
     assert liquidity["statement"] == ILLUSTRATIVE_STATEMENT
@@ -1402,6 +1461,18 @@ def test_registry_snapshot_run_and_maturity_ladder(
         assert lcr_again[key] == lcr_run[key], key
     assert listed(module_code=LCR_HQLA) == {lcr_id, lcr_again["run_id"]}
     check_lcr_baseline(api, db, stressed_ids["scenario_id"], lcr_id, calc_counts)  # BE-25.3
+    # Phase 30 (BE-30.4): the LCR boundary cases (validation_kit), on the 0020 seed.
+    check_lcr_boundaries(
+        api,
+        load=load,
+        instrument_source=instrument_source,
+        position_source=position_source,
+        cash_source=cash_source,
+        instrument_csv=instrument_csv,
+        cashflow_csv=cashflow_csv,
+        lcr_module_id=lcr_body["module_version_id"],
+        reporting=lcr_date,
+    )
     # Each read answers 404 for a run of the other module, and for no run at all.
     for url, refusal in (
         (f"{RUNS}/{run_id}/liquidity", "liquidity_not_found"),

@@ -62,6 +62,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.calculations import scenario_overlay
 from app.calculations.constants import (
     AGGREGATE_CLASSIFICATION,
+    CONTEXT_AMOUNT_UNIT,
+    CONTEXT_CURRENCY_BASIS,
+    CONTEXT_DAYS_UNIT,
+    CONTEXT_RATIO_UNITS,
     CREATE_RUN,
     CREATE_SNAPSHOT,
     ENGINE_VERSION,
@@ -132,6 +136,8 @@ from app.rules.constants import (
     MATURITY_LADDER,
     HqlaLevel,
     ImplementationStatus,
+    ValidationStatus,
+    validation_status_of,
 )
 from app.rules.models import AssumptionSet, MaturityBucketDefinition, RuleDefinition, RuleVersion
 from app.rules.service import ModuleView, RulesService, canonical_sha256, exact_json
@@ -2318,6 +2324,51 @@ class CalculationService:
         return RunModule(
             uuid.UUID(m["module_id"]), run.module_version_id, m["code"], m["code"], m["version"]
         )
+
+    @staticmethod
+    def validation_status(run: CalculationRun) -> ValidationStatus:
+        """D-56 §4: the status of the module version the run pinned (MODULE_VALIDATION), for
+        the response wrapper only; never written to the manifest or the result document."""
+        m = run.manifest["module"]
+        return validation_status_of(m["code"], m["version"])
+
+    @staticmethod
+    def result_context(run: CalculationRun) -> dict[str, Any]:
+        """D-56 §5 (BE-30.3): a result read's `context` block, JSON-ready. It is read from the
+        run's pins (the stored manifest and the written-once outcome), never computed: module,
+        engine and rule versions, the reporting date and the D-35 statement come from the
+        manifest, the currencies from the outcome (empty until the run ends). Response wrapper
+        only: not hashed, so manifest_sha256 and result_sha256 are unchanged."""
+        manifest = run.manifest
+        module = manifest["module"]
+        outcome = run.outcome or {}
+        return {
+            "units": {
+                "amount": CONTEXT_AMOUNT_UNIT,
+                "ratio": CONTEXT_RATIO_UNITS.get(module["code"]),
+                "days": CONTEXT_DAYS_UNIT,
+            },
+            "currency": {
+                "basis": CONTEXT_CURRENCY_BASIS,
+                "codes": sorted(outcome.get("currencies", [])),
+            },
+            "as_of_date": manifest["reporting_date"],
+            "methodology": {
+                "module_code": module["code"],
+                "module_version": module["version"],
+                "engine_version": manifest["engine_version"],
+                "rule_versions": [
+                    {
+                        "rule_code": r["rule_code"],
+                        "rule_version_id": r["rule_version_id"],
+                        "version": r["version"],
+                    }
+                    for r in manifest["rule_set"]["members"]
+                ],
+            },
+            "validation_status": validation_status_of(module["code"], module["version"]).value,
+            "statement": manifest["labels"]["statement"],
+        }
 
     async def _run(self, run_id: uuid.UUID) -> CalculationRun:
         run = await self.repo.fresh(run_id)

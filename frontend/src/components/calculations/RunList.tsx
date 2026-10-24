@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { RunStatusPill } from './RunStatusPill'
 import { StressedRunBadge } from './StressedRunBadge'
+import { ValidationStatusBadge } from './ValidationStatusBadge'
 import { NO_RUN_FILTERS, RUN_STATUSES, RUN_STATUS_STYLE, fetchModules, runHref, runQuery, type RunFilters, type RunPage } from './calculations'
 import { formatTimestamp } from '@/lib/format'
 import { ActorLabel } from '@/components/common/ActorLabel'
@@ -198,6 +199,10 @@ export function RunList() {
                         </Badge>
                       </div>
                     )}
+                    {/* FE-30.1: the module version's validation status (D-56), as the server reports it. */}
+                    <div>
+                      <ValidationStatusBadge status={r.validation_status} className="mt-1" testId="run-validation-status" />
+                    </div>
                     {/* FE-25.1: a stressed run's approval label and its baseline and scenario; nothing for other runs. */}
                     <StressedRunBadge scenario={r.scenario} compact className="mt-1" />
                   </TableCell>

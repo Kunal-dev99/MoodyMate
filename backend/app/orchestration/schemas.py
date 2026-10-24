@@ -45,6 +45,7 @@ from app.orchestration.constants import (
     ScenarioTemplate,
     ScenarioVersionStatus,
 )
+from app.rules.constants import ValidationStatus
 
 DecimalText = Annotated[
     str,
@@ -612,6 +613,22 @@ class ComparisonSummary(BaseModel):
     sentences: list[str]
 
 
+# Phase 30 (BE-30.3, D-56 §5): calculations' `ResultContext`, referenced by name so the module
+# imports no other module's schemas (as ManifestShocks does). Built by the calculations service
+# from the baseline run's pins and carried here as its JSON dump.
+ResultContextRef = Annotated[
+    dict[str, Any],
+    WithJsonSchema(
+        {
+            "allOf": [{"$ref": "#/components/schemas/ResultContext"}],
+            "description": "D-56 §5: units, currency, as-of date, methodology pins, validation "
+            "status and the D-35 statement, from the baseline run's pins (every member run pins "
+            "the same module, engine and rule versions).",
+        }
+    ),
+]
+
+
 class ScenarioComparisonOut(BaseModel):
     """GET scenarios/{scenario_id}/comparison?scenario_run_id= (D-46): computed on read from the
     immutable ladder rows of the baseline and of every member run. Per currency, no FX and no
@@ -636,6 +653,11 @@ class ScenarioComparisonOut(BaseModel):
     )
     illustrative: bool
     labels: ScenarioLabels
+    validation_status: ValidationStatus = Field(
+        description="D-56: the compared module version's status (MODULE_VALIDATION). Response "
+        "wrapper only."
+    )
+    context: ResultContextRef
 
 
 class ContributionSourceLineage(BaseModel):

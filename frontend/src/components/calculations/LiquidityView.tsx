@@ -17,6 +17,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { IllustrativeBanner } from './IllustrativeBanner'
+import { ResultContextPanel } from './ResultContextPanel'
 import { RunIdentity } from './RunIdentity'
 import {
   EXCLUSION_TEXT,
@@ -405,6 +406,8 @@ export function LiquidityView({ run }: { run: RunDetail }) {
       <div className="space-y-4" data-testid="liquidity" data-run-id={run.run_id}>
         <RunIdentity run={run} />
         <IllustrativeBanner statement={liquidity?.statement ?? run.statement} compact />
+        {/* FE-30.1: the LCR read's own context block (D-56 §5), checked against the run's pins. */}
+        {liquidity && <ResultContextPanel context={liquidity.context} pins={run} source="liquidity" compact />}
         <LcrPrototypeNotice limitations={liquidity?.limitations ?? []} />
         {body}
       </div>

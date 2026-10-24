@@ -19,6 +19,7 @@ import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
 import { IllustrativeBanner } from './IllustrativeBanner'
+import { ResultContextPanel } from './ResultContextPanel'
 import { RunIdentity } from './RunIdentity'
 import { LadderFigureValue } from './LadderFigure'
 import {
@@ -45,7 +46,11 @@ export const fetchLadder = (runId: string) => (signal: AbortSignal) =>
     throw err
   })
 
-/** GET …/results for one ladder cell (currency and bucket), one page. */
+/**
+ * GET …/results for one ladder cell (currency and bucket), one page. `ResultPage` carries no
+ * `context` block yet; once the contract adds one, show it here with `ResultContextPanel` and the
+ * same non-blocking mismatch check against the run's pins (FE-30.1 ruling).
+ */
 export const fetchContributions = (runId: string, currency: string, bucket: string, offset: number) => (signal: AbortSignal) =>
   call(() =>
     api.GET('/api/v1/calculation-runs/{run_id}/results', {
@@ -483,6 +488,8 @@ export function MaturityLadderView({ run }: { run: RunDetail }) {
         <div className="space-y-4" data-testid="maturity-ladder" data-run-id={run.run_id}>
           <RunIdentity run={run} />
           <IllustrativeBanner statement={ladder?.statement ?? run.statement} compact />
+          {/* FE-30.1: the ladder read's own context block (D-56 §5), checked against the run's pins. */}
+          {ladder && <ResultContextPanel context={ladder.context} pins={run} source="maturity-ladder" compact />}
           {body}
         </div>
       </PageSection>
