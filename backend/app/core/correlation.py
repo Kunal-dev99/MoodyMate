@@ -60,8 +60,12 @@ class CorrelationIdMiddleware:
 
         try:
             await self.app(scope, receive, send_with_header)
-        except Exception:
+        except Exception as exc:
             logger.exception("unhandled_exception", extra={"path": scope.get("path")})
+            # BE-34.6 (D-62 §4): the correlation id and the exception class only.
+            from app.core.error_tracker import report_exception
+
+            report_exception(exc, cid)
             if response_started:
                 raise
             # Imported here to avoid a cycle: errors uses get_correlation_id.

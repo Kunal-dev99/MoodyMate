@@ -48,6 +48,7 @@ documents keep exactly their Feature 03 key sets.
 
 import contextlib
 import logging
+import time
 import uuid
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
@@ -113,6 +114,7 @@ from app.calculations.modules.base import (
 )
 from app.calculations.modules.maturity_ladder import ParameterError, parse_buckets, parse_directions
 from app.calculations.repository import CalculationRepository, SnapshotRepository
+from app.core import metrics
 from app.core.canonical import HashKind, sha256_for
 from app.core.classification import most_sensitive, storable
 from app.core.correlation import get_correlation_id
@@ -1561,13 +1563,17 @@ class CalculationService:
             original.result_sha256 if original is not None else None,
             scenario=scenario,
         )
-        try:
-            await self._execute(state)
-        except BaseException as exc:  # the engine's own failure: recorded, never silent
-            await self._record_failure(state.run_id, state.counts, exc)
-            if not isinstance(exc, Exception):
-                raise  # cancellation and interpreter exits go on, once the run is ended
-        return await self.get(state.run_id), True
+        started = time.perf_counter()
+        with metrics.run_executing():  # BE-34.4: busy while it executes (inline)
+            try:
+                await self._execute(state)
+            except BaseException as exc:  # the engine's own failure: recorded, never silent
+                await self._record_failure(state.run_id, state.counts, exc)
+                if not isinstance(exc, Exception):
+                    raise  # cancellation and interpreter exits go on, once the run is ended
+        out = await self.get(state.run_id)
+        metrics.observe_run(out.run.status, time.perf_counter() - started)
+        return out, True
 
     async def _record_failure(
         self, run_id: uuid.UUID, counts: Mapping[str, int], exc: BaseException

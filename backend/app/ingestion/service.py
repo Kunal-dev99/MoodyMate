@@ -23,6 +23,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
+from app.core import metrics
 from app.core.artifacts import ArtifactStore
 from app.core.canonical import HashKind, sha256_for, sha256_hex
 from app.core.classification import most_sensitive
@@ -206,6 +207,8 @@ class SourceService:
         self, action: str, resource_id: uuid.UUID | None, error: ApiError
     ) -> NoReturn:
         """Roll back, audit the refusal (DENIED, reason = the error code) and raise it."""
+        if action == CREATE_IMPORT:  # BE-34.4: a refused upload, by its refusal code
+            metrics.count_import_failure("upload", [error.code])
         await refuse(
             self.session,
             self.principal,
@@ -616,6 +619,8 @@ class ImportService:
         action: str = CREATE_IMPORT,
     ) -> NoReturn:
         """Roll back, audit the refusal (DENIED, reason = the error code) and raise it."""
+        if action == CREATE_IMPORT:  # BE-34.4: a refused upload, by its refusal code
+            metrics.count_import_failure("upload", [error.code])
         await refuse(
             self.session,
             self.principal,
@@ -1058,6 +1063,8 @@ class ImportService:
                 await self.repo.insert_rows(model, values)
         final = validator.status()
         move(job, final)
+        if final == ImportStatus.FAILED:  # BE-34.4: by each file-level blocker code
+            metrics.count_import_failure("validation", validator.blocked)
         await self.repo.flush()
 
         artifact = job.artifact

@@ -64,6 +64,11 @@ class ArtifactStore(ABC):
     def get(self, ref: str) -> bytes:
         """The object's bytes, after re-verifying its hash."""
 
+    @abstractmethod
+    def ready(self) -> bool:
+        """Whether the store can take a `put` now (BE-34.5 readiness). Writes nothing, and
+        never raises: any failure is `False`."""
+
 
 class FilesystemArtifactStore(ArtifactStore):
     def __init__(self, root: Path) -> None:
@@ -87,6 +92,19 @@ class FilesystemArtifactStore(ArtifactStore):
 
     def get(self, ref: str) -> bytes:
         return self._verified(ref)
+
+    def ready(self) -> bool:
+        """The root is a writable directory, or (created on first upload) does not exist yet
+        under a writable directory."""
+        try:
+            path = self.root
+            while not path.exists():
+                if path.parent == path:
+                    return False
+                path = path.parent
+            return path.is_dir() and os.access(path, os.W_OK | os.X_OK)
+        except OSError:
+            return False
 
     def put(self, data: bytes) -> StoredArtifact:
         sha = hashlib.sha256(data).hexdigest()

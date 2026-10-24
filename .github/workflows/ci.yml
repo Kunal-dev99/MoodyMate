@@ -39,8 +39,40 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install
-        run: pip install -e ".[dev]"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.32"   # the uv backend/Dockerfile uses (UV_IMAGE)
+      - name: Install (BE-34.1, D-62 §5; locked, so a stale uv.lock fails here)
+        run: |
+          uv sync --locked --extra dev
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+        env:
+          UV_PYTHON_DOWNLOADS: never
+      - name: A pyproject/lock mismatch fails the locked install (BE-34.1; on a temp copy)
+        run: |
+          set -uo pipefail
+          tmp="$RUNNER_TEMP/lock-mismatch"
+          rm -rf "$tmp" && mkdir -p "$tmp"
+          sha256sum pyproject.toml uv.lock >"$RUNNER_TEMP/checkout.sha256"
+          cp pyproject.toml uv.lock "$tmp/"
+          (
+            cd "$tmp"
+            uv lock --check || { echo "::error::the copy does not match before the edit"; exit 1; }
+            # The deliberate mismatch: a dependency added to the copy's pyproject, not locked.
+            uv add --frozen "six>=1.16"
+            grep -n '"six>=1.16"' pyproject.toml
+            # `|| x=$?`: the run shell is `bash -e`, and these two are expected to fail.
+            lock=0; uv lock --check || lock=$?
+            sync=0; uv sync --locked --extra dev --no-install-project || sync=$?
+            echo "uv lock --check on the mismatch: exit ${lock}"
+            echo "uv sync --locked on the mismatch: exit ${sync}"
+            [ "$lock" -ne 0 ] && [ "$sync" -ne 0 ] \
+              || { echo "::error::a pyproject/lock mismatch was not refused"; exit 1; }
+          ) || exit 1
+          # The checkout's own pyproject.toml and uv.lock were never edited.
+          sha256sum -c "$RUNNER_TEMP/checkout.sha256"
+        env:
+          UV_PYTHON_DOWNLOADS: never
       - name: Lint
         run: ruff check . && ruff format --check .
       - name: Type check
@@ -57,8 +89,12 @@ jobs:
         run: pytest -m ws3 -v
       - name: OpenAPI drift check (D-05)
         run: python -m scripts.export_openapi --check
-      - name: Python dependency audit (BE-28.1, D-55 §4)
-        run: pip-audit --skip-editable --progress-spinner off
+      - name: Python dependency audit (BE-28.1, D-55 §4; reads the lock, BE-34.1)
+        # The exported lock with the dev extra: the same set the locked install above puts in
+        # place. The project itself (`-e .`) is not on PyPI, so pip-audit skips it.
+        run: |
+          uv export --locked --no-hashes --format requirements-txt --extra dev -o "$RUNNER_TEMP/req.txt"
+          pip-audit -r "$RUNNER_TEMP/req.txt" --no-deps --progress-spinner off
 
   frontend:
     runs-on: ubuntu-latest
@@ -117,9 +153,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install backend
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.32"   # the uv backend/Dockerfile uses (UV_IMAGE)
+      - name: Install backend (BE-34.1; locked)
         working-directory: backend
-        run: pip install -e ".[dev]"
+        run: |
+          uv sync --locked --extra dev
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+        env:
+          UV_PYTHON_DOWNLOADS: never
       - name: Migrate and seed
         working-directory: backend
         run: alembic upgrade head
@@ -150,3 +193,28 @@ jobs:
           name: playwright-report
           path: frontend/playwright-report
           retention-days: 14
+
+  images:
+    # BE-34.2 and FE-34.1 (D-62 §5): both images from a clean checkout; they run as non-root and
+    # carry no secret in `docker history`; the frontend image build fails without
+    # NEXT_PUBLIC_API_BASE_URL and succeeds with a placeholder; compose `prod` comes up migrated
+    # and ready, with metrics on the internal network only.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The checkout is clean (nothing untracked or ignored)
+        run: |
+          git status --porcelain --ignored
+          test -z "$(git status --porcelain --ignored)"
+      - name: Build the backend image (BE-34.2)
+        run: docker build --progress=plain -t moodymate-backend:ci backend
+      - name: Frontend image needs NEXT_PUBLIC_API_BASE_URL (FE-34.1; prints both exit codes)
+        run: bash frontend/scripts/check-image-build-arg.sh moodymate-frontend:ci https://api.example.test
+      - name: Compose prod profile (BE-34.2; one-shot migrate, ready 200, frontend / 200)
+        # Builds through compose (the `:ci` tags, from the build cache of the steps above).
+        run: bash scripts/check-compose-prod.sh
+        env:
+          MOODYMATE_IMAGE_TAG: ci
+      - name: Images run as non-root, no secret in their history or the env example (BE-34.2)
+        # The images compose just ran.
+        run: bash scripts/check-images.sh moodymate-backend:ci moodymate-frontend:ci

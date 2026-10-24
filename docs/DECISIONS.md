@@ -2414,6 +2414,41 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
      - `/api/v1` changes are additive only, gated by the OpenAPI drift check.
      - A deprecation gets `Deprecation`/`Sunset` headers and an entry here.
      - A breaking change needs a new version path.
+- **Amendment (2026-10-24, Phase 34 build, auto-resolved):** §1, §2 and §5 made precise. The
+  status stays **proposed**: no ruling here is user approval, and acceptance of D-62 (with the
+  two `PUBLIC_PATHS` entries in §1) goes to the user in the end-of-phase message, next to the
+  §4 hard stop.
+  - **§5 locked, not frozen, CI installs (Q1).** "Frozen CI installs" means the CI install
+    matches the lock exactly. The flag that does this is `uv sync --locked`, which fails when
+    `uv.lock` is out of date with `pyproject.toml`; `--frozen` skips that check and installs a
+    stale lock without complaint. So CI installs with `uv sync --locked --extra dev` (backend
+    and e2e jobs), and pip-audit reads the lock:
+    `uv export --locked --no-hashes --format requirements-txt -o "$RUNNER_TEMP/req.txt"`, then
+    `pip-audit -r "$RUNNER_TEMP/req.txt" --no-deps --progress-spinner off`. The backend image
+    uses `--locked` as well. BE-34.1 is reworded to match.
+  - **§1 and §2 sub-choices (Q3).**
+    - (a) A 503 from `/health/ready` returns `ReadinessResponse` (a probe result with
+      value-free check names), not the D-07 envelope. OpenAPI declares that model for the 503.
+    - (b) The counters record in memory whatever `METRICS_ENABLED` holds; nothing is exposed
+      while the listener is off. Every label is bounded: route template, method, status class,
+      run status or reason code. A path no route serves is the fixed label `unmatched`, never
+      the raw path. (As built, the HTTP series label the status code, not the class:
+      `metrics.py:174-180`. The codes come from the app, not the client, so the set is still
+      bounded; the Phase 34 report lists this for confirmation.)
+    - (c) A `METRICS_HOST:METRICS_PORT` that cannot be bound stops startup (fail-closed
+      configuration, as D-13).
+    - (d) Metrics are per process. The backend image runs one uvicorn process; a multi-process
+      setup needs one listener port per process. Prometheus multiprocess mode is out of scope,
+      and the ops docs record this.
+    - (e) The `workers` check is `ok` for inline execution. When D-59 pool mode lands (Phase
+      33), the pool sets `app.state.workers` with a `ready()` and calls
+      `metrics.set_worker_queue()`.
+  - **§2 token failures (Q6).** On the internal metrics listener a missing, wrong or
+    non-`Bearer` `METRICS_TOKEN` gets the same 401 with `WWW-Authenticate: Bearer` and a
+    value-free body, so a caller cannot tell which case failed. 401, not 403, because no role or
+    permission is involved (§2; D-53 §2 keeps the two apart). The compare is constant-time
+    (`hmac.compare_digest`) and the token is never logged (§3, D-50 §3). With `METRICS_TOKEN`
+    unset, the listener is guarded only by being internal.
 
 
 **Coordinator ruling (2026-10-24), D-57:** option B adopted (auto-resolved, safer default). The seeded instrument v2 DRAFT stays the Phase 4 diff fixture; Phase 31 proposes a code-frozen contract (v1 + `maturity_date` DATE + `interest_rate` 11,6) through the existing governed path, published per tenant at runtime, never by migration or default seed.

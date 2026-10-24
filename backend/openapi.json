@@ -6722,6 +6722,22 @@
         "title": "LiquidityOut",
         "type": "object"
       },
+      "LivenessResponse": {
+        "additionalProperties": false,
+        "description": "`/health/live`: no I/O, so it is `ok` whenever the process can answer.",
+        "properties": {
+          "status": {
+            "const": "ok",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "LivenessResponse",
+        "type": "object"
+      },
       "LowerTransform": {
         "properties": {
           "code": {
@@ -9781,6 +9797,75 @@
         ],
         "title": "QuarantineStatus",
         "type": "string"
+      },
+      "ReadinessChecks": {
+        "additionalProperties": false,
+        "description": "Value-free readiness checks: the names are fixed and each value is `ok` or `fail`.",
+        "properties": {
+          "artifact_store": {
+            "enum": [
+              "ok",
+              "fail"
+            ],
+            "title": "Artifact Store",
+            "type": "string"
+          },
+          "database": {
+            "enum": [
+              "ok",
+              "fail"
+            ],
+            "title": "Database",
+            "type": "string"
+          },
+          "migrations": {
+            "enum": [
+              "ok",
+              "fail"
+            ],
+            "title": "Migrations",
+            "type": "string"
+          },
+          "workers": {
+            "enum": [
+              "ok",
+              "fail"
+            ],
+            "title": "Workers",
+            "type": "string"
+          }
+        },
+        "required": [
+          "database",
+          "migrations",
+          "artifact_store",
+          "workers"
+        ],
+        "title": "ReadinessChecks",
+        "type": "object"
+      },
+      "ReadinessResponse": {
+        "additionalProperties": false,
+        "description": "`/health/ready`: `ok` (200) only when every check is `ok`, otherwise `fail` (503).",
+        "properties": {
+          "checks": {
+            "$ref": "#/components/schemas/ReadinessChecks"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "fail"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "checks"
+        ],
+        "title": "ReadinessResponse",
+        "type": "object"
       },
       "ReconciliationCheck": {
         "description": "What one `reconciliation_item` compares (BE-12.2). `variance = source - target`.\n\n- ROW_COUNT: source rows vs accepted rows; held = quarantined + rejected. Zero tolerance.\n- EXPECTED_ROW_COUNT: the upload's declared `expected_row_count` vs the source rows.\n  Zero tolerance.\n- CONTROL_TOTAL: per contract control-total column, the source total of the parseable\n  values vs the accepted rows' total; held = the held rows' total.\n- DECLARED_CONTROL_TOTAL: the upload's declared total vs that source total.",
@@ -17022,6 +17107,98 @@
           }
         },
         "summary": "Health",
+        "tags": [
+          "platform"
+        ]
+      }
+    },
+    "/api/v1/health/live": {
+      "get": {
+        "operationId": "getHealthLive",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LivenessResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "summary": "Liveness probe (no I/O)",
+        "tags": [
+          "platform"
+        ]
+      }
+    },
+    "/api/v1/health/ready": {
+      "get": {
+        "operationId": "getHealthReady",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadinessResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadinessResponse"
+                }
+              }
+            },
+            "description": "Not ready: at least one check is `fail` (value-free check names)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "summary": "Readiness probe: database, migration head, artifact store, workers",
         "tags": [
           "platform"
         ]

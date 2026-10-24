@@ -86,4 +86,4 @@ For audit events the evidence is written *before* the rows are removed, so the t
 4. Erasure versus audit readability for personal data (Data protection officer).
 5. The non-owner application database role that makes the triggers binding (Infrastructure).
 6. WS2 retention per class (D-20 §4): raw artifacts, source records, quarantine and issues, and whether a purged artifact keeps its `import_artifact` row as evidence (Compliance, Data protection officer).
-7. Artifact store backup and the hash-check tooling for restore step 4: a script is not built yet (Infrastructure).
+7. Artifact store backup scheduling and storage (Infrastructure). The hash check for restore step 4 exists since Phase 34: `scripts/verify-artifact-store.sh`, with the procedure in `ops/BACKUP_RESTORE.md`.

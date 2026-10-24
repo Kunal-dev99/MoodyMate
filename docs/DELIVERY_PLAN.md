@@ -4381,10 +4381,20 @@ supported size is measured.
 Goal: a locked, repeatable build from a clean checkout; structured logs; metrics; distinct
 liveness and readiness; and operating docs.
 
-- [ ] **BE-34.1** A `uv` lockfile (`backend/uv.lock`). CI runs `uv sync --frozen --extra dev`,
-  and pip-audit reads the lock.
-  - *Done-when:* the CI install is frozen, and a deliberate pyproject/lock mismatch fails
-    (evidence in the report).
+- [ ] **BE-34.1** A `uv` lockfile (`backend/uv.lock`). CI runs ~~`uv sync --frozen --extra dev`~~
+  `uv sync --locked --extra dev`, and pip-audit reads the lock (the `uv export --locked` output,
+  audited with `--no-deps`). Reworded 2026-10-24 (Q1, auto-resolved; D-62 amendment), because
+  `--frozen` installs a stale lock without complaint and so cannot meet the Done-when.
+  - *Done-when:* the CI install is ~~frozen~~ locked, and a deliberate pyproject/lock mismatch
+    fails (evidence in the report).
+  - *Not yet ticked (2026-10-24, architect):* evidenced locally: `prometheus-client` 0.26.0 is
+    in `uv.lock` (:880-881); `backend/Dockerfile:31` installs with `uv sync --locked --no-dev
+    --no-install-project`; on a scratch copy with `six>=1.16` added, `uv lock --check` and
+    `uv sync --locked` both exit 1 ("needs to be updated"), while `uv sync --frozen` exits 0 and
+    `import six` then fails; the worktree's `uv lock --check` exits 0. **Missing:**
+    `.github/workflows/ci.yml` still runs `pip install -e ".[dev]"` (:43, :122) and
+    `pip-audit --skip-editable` (:61) (grep, 2026-10-24); there is no CI step that breaks a
+    temp copy's pyproject and expects the locked install to fail (Q7); no CI log exists.
 - [ ] **BE-34.2** `backend/Dockerfile` (multi-stage, non-root, locked dependencies,
   `--proxy-headers` with `FORWARDED_ALLOW_IPS`) and `frontend/Dockerfile` (standalone,
   non-root, `NEXT_PUBLIC_API_BASE_URL` as a required build arg). `docker-compose.yml` gets a
@@ -4392,16 +4402,41 @@ liveness and readiness; and operating docs.
   placeholders only.
   - *Done-when:*
     - a CI job builds both images from a clean checkout;
-    - compose `prod` reaches `/health/ready` 200 and frontend `/` 200;
+    - compose `prod` reaches `/health/ready` 200 and frontend `/` ~~200~~ 200 after following
+      redirects (`curl -L`; `/` answers 307 to `/dashboard`). Reworded 2026-10-24 (Q11,
+      auto-resolved); the image HEALTHCHECK stays on `/login`;
     - `alembic current` is the head;
     - the images run as non-root;
     - no secret is in an image (grep of `docker history`).
-- [ ] **BE-34.3** A structured JSON access log (`ACCESS_LOG_ENABLED`): correlation id, method,
+  - *Not yet ticked (2026-10-24, architect):* evidenced in files only: `backend/Dockerfile`
+    (multi-stage :20-33, `uv sync --locked` :31, uid/gid 10001 :34-37 and `USER 10001:10001`
+    :50, `FORWARDED_ALLOW_IPS=127.0.0.1` :48, `--proxy-headers` :55, HEALTHCHECK on
+    `/health/live` :53-54); `backend/.dockerignore` excludes `.env`, `.env.*`, `.venv` and
+    `app/tests`; `frontend/Dockerfile` (FE-owned, Q9; required arg :23-29, `USER 1000:1000`
+    :53). Without Docker, a copy of the image layout gave `alembic current` `0030 (head)`, live
+    and ready 200 with every check `ok`. **Missing:** no image has been built (no Docker
+    daemon here); `ci.yml` has no image job, non-root check or `docker history` grep;
+    `docker-compose.yml` has no `prod` profile or one-shot migrate service (grep
+    `profiles|prod|migrate`: no match); `.env.production.example` does not exist, and the root
+    `.gitignore` would ignore it (Q10).
+- [x] **BE-34.3** A structured JSON access log (`ACCESS_LOG_ENABLED`): correlation id, method,
   route template, status and duration. It never carries a query, body, header or token.
   - *Done-when:* the log fold shows a request with a bearer token, a sentinel query and a
     sentinel body gives one line with those fields and no sentinel, and the correlation id
     equals the response header.
-- [ ] **BE-34.4** Prometheus metrics (D-62 §2; `prometheus-client`) on an internal listener
+  - *Evidence (2026-10-24, architect-verified):* `test_config.py:263`
+    (`test_logs_never_carry_tokens_or_secrets`) calls `check_access_log`
+    (`observability_kit.py:105-136`): a POST with a bearer token, a sentinel query, body and
+    header and a UUID in the path gives exactly one access line (:119) with the five fields
+    (:121), `correlation_id` equal to the `X-Correlation-ID` response header (:122), the full
+    template `/api/v1/imports/{import_id}/validate` (:123-127) and a numeric `duration_ms`
+    (:128); no sentinel, token, path id or header name appears in any captured line
+    (:129-131); `ACCESS_LOG_ENABLED=false` gives no access line (:133-136). Implementation:
+    `app/core/observability.py:44-90` (outermost, `main.py:89-92`; the id is read from the
+    response header :57-64), `config.py:162` (default true). Runs: backend-engineer targeted
+    `15 passed`; fix round `1 failed, 6 passed` (the one failure is BE-34.7's missing doc). The
+    first run's route without the `/api/v1` prefix was fixed before these runs.
+- [x] **BE-34.4** Prometheus metrics (D-62 §2; `prometheus-client`) on an internal listener
   (`METRICS_ENABLED`, default off; optional `METRICS_TOKEN`). The series cover request latency
   and errors, run duration and status, worker queue and busy, import failures by reason code,
   DB pool use and process memory. No tenant, principal or id label is used.
@@ -4410,7 +4445,25 @@ liveness and readiness; and operating docs.
     - the series appear after a run and a failed import;
     - no UUID appears in the output;
     - the token is enforced when set.
-- [ ] **BE-34.5** `GET health/live` (no I/O) and `GET health/ready` (DB within 2 s, migration
+  - *Evidence (2026-10-24, architect-verified):* `test_config.py:181`
+    (`test_responses_carry_the_envelope_correlation_id_and_data_class`) calls
+    `check_metrics_are_internal_and_token_gated` (`observability_kit.py:197-216`):
+    `METRICS_ENABLED` defaults to False (:202); the public app gives 404 for `/metrics`,
+    `/api/v1/metrics` and `/api/metrics` with metrics off and on (:203-206); with
+    `METRICS_TOKEN` set, no token, a wrong token and a token without `Bearer` each give 401
+    with no series and `WWW-Authenticate: Bearer` (:209-212), the right token 200 (:213-214).
+    `test_calculations.py:1542-1546` (`test_registry_snapshot_run_and_maturity_ladder`, step
+    5d): after its runs and a refused upload (422 `csv_malformed`),
+    `check_metrics_after_a_run_and_a_failed_import` (:219-238) finds all nine D-62 §2 families
+    (:228-229), no tenant, principal or id label (:230-232), the failure under
+    `reason_code="csv_malformed"` (:233-236), runs counted (:237) and no UUID (:238).
+    Implementation: `app/core/metrics.py` (internal listener only, :230-296; constant-time
+    `hmac.compare_digest` :211-216; 401 with `www-authenticate: Bearer` :244-246); hooks at
+    `calculations/service.py:1567`, :1575 and `ingestion/service.py:211`, :623, :1067. Runs:
+    the calculations test failed once at 07:13 (no import-failure sample while the hook was
+    being edited), then `1 passed` at 07:15; fix round `6 passed` with the WWW-Authenticate
+    assertion.
+- [x] **BE-34.5** `GET health/live` (no I/O) and `GET health/ready` (DB within 2 s, migration
   head, artifact store, workers) give 200 or 503 with value-free check names. Both are added to
   `PUBLIC_PATHS` (D-62 §1).
   - *Done-when:*
@@ -4418,10 +4471,35 @@ liveness and readiness; and operating docs.
     - a head mismatch gives 503;
     - no DSN, host or version string appears;
     - the auth test's public-path set equals D-62's.
-- [ ] **BE-34.6** Error-tracker hook: `report_exception(exc, correlation_id)` defaults to a
+  - *Evidence (2026-10-24, architect-verified):* `test_config.py:180` calls
+    `check_health_with_the_database_down` (`observability_kit.py:149-170`): with the DB
+    unreachable, ready gives 503 in under 5 s with exactly `status` and the four check names,
+    `database: fail` and values only `ok`/`fail` (:152-159); live gives 200 `{"status": "ok"}`
+    while `app.state.db` is a stub that fails on any use (:160-166); neither body contains the
+    DSN, host, `postgresql`, `asyncpg` or the version (:167-170).
+    `test_ws1_verification.py:1064` (below 0030: 503 `migrations: fail`, `database: ok`) and
+    :1071 (back at head: 200, every check `ok`), with no revision string in the body
+    (`observability_kit.py:173-186`). `test_auth.py:243-250` asserts `PUBLIC_PATHS` equals the
+    previous four plus `/api/v1/health/live` and `/api/v1/health/ready` (`core/auth.py:34-43`),
+    as D-62 §1 states; `/api/v1/health` is unchanged (`health.py:30-41`). Implementation:
+    `app/core/readiness.py` (2 s bound :30, :54; heads equal :91; value-free warning :98-100),
+    `app/api/v1/health.py:44-99` (503 declared with `ReadinessResponse`, :87-92). Runs:
+    targeted `15 passed`; fix round `6 passed` (test_config, test_auth, ws1 included).
+- [x] **BE-34.6** Error-tracker hook: `report_exception(exc, correlation_id)` defaults to a
   no-op behind `ERROR_TRACKER_DSN`. No vendor SDK is added (hard stop).
   - *Done-when:* a fake reporter receives only the correlation id and the exception class, and
     no vendor import exists (grep).
+  - *Evidence (2026-10-24, architect-verified):* `test_config.py:174-177`: an unhandled
+    `RuntimeError` on `/_test/boom` reaches a fake reporter exactly once with exactly two
+    values, the correlation id `corr-test-2` and the class (`observability_kit.py:244-264`);
+    `check_no_vendor_error_tracker` (:267-277) greps `app/` (tests excluded) and
+    `pyproject.toml` for ten vendor SDKs and asserts the default `report_exception` returns
+    None. Architect grep (2026-10-24): no vendor `import`/`from` under `backend/`, and
+    `pyproject.toml` adds only `prometheus-client` (:22-23). Implementation:
+    `app/core/error_tracker.py:21-49` (the reporter gets `(correlation_id, type(exc))`; a
+    failing reporter is swallowed), called from `correlation.py:63-68`; `ERROR_TRACKER_DSN` is
+    a `SecretStr` (`config.py:172`) and only logs a value-free warning at startup
+    (`error_tracker.py:39-42`). Runs: targeted `15 passed`; fix round `6 passed`.
 - [ ] **BE-34.7** `docs/ops/`: `BACKUP_RESTORE.md` (DB plus artifact store, with re-hash
   verification and RPO/RTO placeholders), `MIGRATIONS.md`, `INCIDENT_RESPONSE.md`,
   `TRIGGERS.md` (every trigger by migration) and `API_COMPATIBILITY.md` (D-62 §6). Retention
@@ -4430,9 +4508,28 @@ liveness and readiness; and operating docs.
     - the `TRIGGERS.md` list equals the parsed `CREATE TRIGGER` set (committed-artifacts fold);
     - a restore has been exercised on a scratch DB copy, with the commands and output in
       `docs/evidence/phase-34/REPORT.md`.
+  - *Not yet ticked (2026-10-24, architect):* the check exists: `test_committed_artifacts.py:35`
+    calls `check_triggers_doc` (`observability_kit.py:282-332`), which runs each migration's
+    `upgrade()` against a recording `op` and compares the (revision, trigger) set with the doc.
+    Engineer-reported: the parser finds 177 pairs in 17 migrations, the same set as
+    `pg_trigger` on a migrated scratch copy (diff SAME), and the draft table matches all 177
+    (with one row removed, False). **Missing:** `docs/ops/` does not exist (Glob, 2026-10-24),
+    so `test_committed_openapi_and_samples_are_current` fails with `FileNotFoundError` at
+    `observability_kit.py:313`; `BACKUP_RESTORE.md`, `MIGRATIONS.md`, `INCIDENT_RESPONSE.md`
+    and `API_COMPATIBILITY.md` are not written; no restore has been exercised.
 - [ ] **FE-34.1** `output: 'standalone'`, and a CI step proves that the image build fails without
   the API base-URL arg.
   - *Done-when:* the CI log shows the expected failure exit and a successful build with the arg.
+  - *Not yet ticked (2026-10-24, architect):* evidenced locally: `next.config.mjs:21-23`
+    (`output: 'standalone'` with `outputFileTracingRoot`; `NEXT_OUTPUT_STANDALONE=off` removes
+    both, D-02); `frontend/Dockerfile:23-29` (the arg has no default and the build stops with
+    exit 64 before `npm run build`); `frontend/scripts/check-image-build-arg.sh` (requires a
+    non-zero exit and the arg message, then exit 0 and a non-root user, and prints both exit
+    codes); `imageBuild.test.ts` `5 passed`; full vitest `741 passed`; a local `next build`
+    without the variable exits 1 and with it exits 0 with `standalone/server.js`. **Missing:**
+    `ci.yml` has no step that runs the script (grep `check-image-build-arg`: no match), and no
+    CI log shows `exit code without the arg: <non-zero>` and `exit code with the arg: 0` (no
+    Docker daemon here).
 
 *Test budget:* 49 → 49.
 *Reversibility:* metrics are off by default; the health routes are additive;

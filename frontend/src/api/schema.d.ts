@@ -488,6 +488,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/health/live": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Liveness probe (no I/O) */
+        get: operations["getHealthLive"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/health/ready": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Readiness probe: database, migration head, artifact store, workers */
+        get: operations["getHealthReady"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/identity-links": {
         parameters: {
             query?: never;
@@ -4781,6 +4815,17 @@ export interface components {
             /** @description D-56: the run's module version's status (MODULE_VALIDATION). Response wrapper only: never in the manifest or the result document. */
             validation_status: components["schemas"]["ValidationStatus"];
         };
+        /**
+         * LivenessResponse
+         * @description `/health/live`: no I/O, so it is `ok` whenever the process can answer.
+         */
+        LivenessResponse: {
+            /**
+             * Status
+             * @constant
+             */
+            status: "ok";
+        };
         /** LowerTransform */
         LowerTransform: {
             /**
@@ -6213,6 +6258,44 @@ export interface components {
          * @enum {string}
          */
         QuarantineStatus: "OPEN" | "UNDER_REVIEW" | "REJECTED" | "CORRECTED" | "RETRY_READY" | "RESOLVED";
+        /**
+         * ReadinessChecks
+         * @description Value-free readiness checks: the names are fixed and each value is `ok` or `fail`.
+         */
+        ReadinessChecks: {
+            /**
+             * Artifact Store
+             * @enum {string}
+             */
+            artifact_store: "ok" | "fail";
+            /**
+             * Database
+             * @enum {string}
+             */
+            database: "ok" | "fail";
+            /**
+             * Migrations
+             * @enum {string}
+             */
+            migrations: "ok" | "fail";
+            /**
+             * Workers
+             * @enum {string}
+             */
+            workers: "ok" | "fail";
+        };
+        /**
+         * ReadinessResponse
+         * @description `/health/ready`: `ok` (200) only when every check is `ok`, otherwise `fail` (503).
+         */
+        ReadinessResponse: {
+            checks: components["schemas"]["ReadinessChecks"];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "fail";
+        };
         /**
          * ReconciliationCheck
          * @description What one `reconciliation_item` compares (BE-12.2). `variance = source - target`.
@@ -9551,6 +9634,91 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    getHealthLive: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LivenessResponse"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    getHealthReady: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReadinessResponse"];
+                };
+            };
+            /** @description Not ready: at least one check is `fail` (value-free check names) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReadinessResponse"];
                 };
             };
             /** @description Client error (standard envelope) */

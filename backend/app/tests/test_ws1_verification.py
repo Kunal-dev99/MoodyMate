@@ -64,6 +64,7 @@ from app.tests.identity_kit import (
     identity_shape,
     projected_legal_entity,
 )
+from app.tests.observability_kit import check_ready_reports_the_migration_head
 from app.tests.scenario_kit import SCENARIOS, create_scenario
 
 # BE-18.3: every test here (matrix, isolation, audit, round trip) is in the WS3 suite too.
@@ -1060,12 +1061,14 @@ def test_migration_round_trip_and_downgrade_guards(api: TestClient, db: str) -> 
     try:
         command.downgrade(alembic_config(db), m0030.down_revision)
         assert revision() == m0030.down_revision
+        check_ready_reports_the_migration_head(api, at_head=False)  # BE-34.5: head mismatch
         for table in IDENTITY_TABLES:
             assert sql(db, "SELECT to_regclass($1) AS t", table)[0]["t"] is None, table
         assert identity_shape(db, existing) == frozen
     finally:
         command.upgrade(alembic_config(db), "head")
     assert revision() == head and identity_shape(db, existing) == frozen
+    check_ready_reports_the_migration_head(api, at_head=True)
 
     # BE-24.1: previous head -> 0026 -> previous head -> 0026. The downgrade refuses while a
     # scenario exists (in one transaction: nothing changes); the tagged seed

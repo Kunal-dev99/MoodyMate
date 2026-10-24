@@ -10,6 +10,7 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 from openapi_spec_validator import validate
 
+from app.tests.observability_kit import check_triggers_doc
 from scripts import check_audit_allowlist, export_openapi
 from scripts.make_synthetic_samples import OUT, build
 
@@ -30,6 +31,8 @@ def test_committed_openapi_and_samples_are_current() -> None:
         declared = spec["paths"][path][method]["responses"]["429"]
         assert "Retry-After" in declared["headers"], (method, path)
     _audit_allowlist_checker_gates()
+    # BE-34.7: docs/ops/TRIGGERS.md lists every trigger a migration creates, by migration.
+    check_triggers_doc()
 
 
 RATE_LIMITED_ROUTES = (
