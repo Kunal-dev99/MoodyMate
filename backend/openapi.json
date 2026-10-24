@@ -4321,6 +4321,220 @@
         "title": "HqlaLevelOut",
         "type": "object"
       },
+      "IdentityLinkKindCount": {
+        "description": "Value-free counts for one (source kind, target kind) pair.",
+        "properties": {
+          "ambiguous": {
+            "description": "LINK_AMBIGUOUS: several identities have the key (e.g. two source systems); no link written.",
+            "title": "Ambiguous",
+            "type": "integer"
+          },
+          "linked": {
+            "description": "Rows with a link after the reconcile (new or existing).",
+            "title": "Linked",
+            "type": "integer"
+          },
+          "linked_now_ambiguous": {
+            "description": "Of `linked`: rows whose key has since become ambiguous. The link is kept, never changed, and reported here (D-58 \u00a75). rows = linked + unresolved + ambiguous + no_key.",
+            "title": "Linked Now Ambiguous",
+            "type": "integer"
+          },
+          "links_written": {
+            "description": "Links written by this call (0 on a repeat).",
+            "title": "Links Written",
+            "type": "integer"
+          },
+          "no_key": {
+            "description": "Rows whose key field is empty; no link.",
+            "title": "No Key",
+            "type": "integer"
+          },
+          "rows": {
+            "description": "Source rows of the tenant examined.",
+            "title": "Rows",
+            "type": "integer"
+          },
+          "source_kind": {
+            "$ref": "#/components/schemas/IdentitySourceKind"
+          },
+          "target_kind": {
+            "$ref": "#/components/schemas/IdentityTargetKind"
+          },
+          "unresolved": {
+            "description": "LINK_UNRESOLVED: no identity has the key; no link.",
+            "title": "Unresolved",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "source_kind",
+          "target_kind",
+          "rows",
+          "linked",
+          "links_written",
+          "unresolved",
+          "ambiguous",
+          "no_key",
+          "linked_now_ambiguous"
+        ],
+        "title": "IdentityLinkKindCount",
+        "type": "object"
+      },
+      "IdentityLinkMethod": {
+        "description": "How a link was resolved: exactly one identity of the tenant has the row's text key\n(D-58 \u00a73). Deterministic; never a guess.",
+        "enum": [
+          "BUSINESS_KEY_UNIQUE"
+        ],
+        "title": "IdentityLinkMethod",
+        "type": "string"
+      },
+      "IdentityLinkOut": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "link_id": {
+            "format": "uuid",
+            "title": "Link Id",
+            "type": "string"
+          },
+          "method": {
+            "$ref": "#/components/schemas/IdentityLinkMethod"
+          },
+          "resolver_version": {
+            "title": "Resolver Version",
+            "type": "integer"
+          },
+          "source_kind": {
+            "$ref": "#/components/schemas/IdentitySourceKind"
+          },
+          "source_row_id": {
+            "description": "The position_version, cashflow_event or credit_exposure_version row.",
+            "format": "uuid",
+            "title": "Source Row Id",
+            "type": "string"
+          },
+          "target_id": {
+            "description": "The instrument, counterparty or legal entity id; read it through its own route, which applies its classification.",
+            "format": "uuid",
+            "title": "Target Id",
+            "type": "string"
+          },
+          "target_kind": {
+            "$ref": "#/components/schemas/IdentityTargetKind"
+          }
+        },
+        "required": [
+          "link_id",
+          "source_kind",
+          "source_row_id",
+          "target_kind",
+          "target_id",
+          "method",
+          "resolver_version",
+          "created_by",
+          "created_at"
+        ],
+        "title": "IdentityLinkOut",
+        "type": "object"
+      },
+      "IdentityLinkPage": {
+        "properties": {
+          "items": {
+            "description": "Oldest first (created_at, then link_id). An empty page for a source row means its text key is unresolved or ambiguous ('Unresolved (text key)').",
+            "items": {
+              "$ref": "#/components/schemas/IdentityLinkOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "IdentityLinkPage",
+        "type": "object"
+      },
+      "IdentityLinkReconcileOut": {
+        "description": "The result of POST /identity-links/reconcile (D-58 \u00a74, \u00a75). Idempotent: a repeat\nwrites nothing and returns the same counts except `links_written` (0).",
+        "properties": {
+          "counts": {
+            "description": "One entry per (source kind, target kind) pair, in a fixed order.",
+            "items": {
+              "$ref": "#/components/schemas/IdentityLinkKindCount"
+            },
+            "title": "Counts",
+            "type": "array"
+          },
+          "links_written": {
+            "title": "Links Written",
+            "type": "integer"
+          },
+          "reconciled_at": {
+            "format": "date-time",
+            "title": "Reconciled At",
+            "type": "string"
+          },
+          "reconciled_by": {
+            "title": "Reconciled By",
+            "type": "string"
+          },
+          "resolver_version": {
+            "title": "Resolver Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "resolver_version",
+          "links_written",
+          "counts",
+          "reconciled_at",
+          "reconciled_by"
+        ],
+        "title": "IdentityLinkReconcileOut",
+        "type": "object"
+      },
+      "IdentitySourceKind": {
+        "description": "The append-only row a link starts from (D-58 \u00a72).",
+        "enum": [
+          "POSITION_VERSION",
+          "CASHFLOW_EVENT",
+          "CREDIT_EXPOSURE"
+        ],
+        "title": "IdentitySourceKind",
+        "type": "string"
+      },
+      "IdentityTargetKind": {
+        "description": "The identity a link resolves to (D-58 \u00a72).",
+        "enum": [
+          "INSTRUMENT",
+          "COUNTERPARTY",
+          "LEGAL_ENTITY"
+        ],
+        "title": "IdentityTargetKind",
+        "type": "string"
+      },
       "ImpactAnalysis": {
         "properties": {
           "analysed_at": {
@@ -5540,6 +5754,11 @@
             "description": "ISO date; empty while the pinned field is free text (TYPE_NOT_PROJECTED).",
             "title": "Maturity Date"
           },
+          "maturity_typed": {
+            "description": "The pinned schema version types `maturity_date` as DATE (the typed contract, projector v2, D-57). False: schema v1 free text, so `maturity_date` is empty and the value stays in the canonical record ('Not stated').",
+            "title": "Maturity Typed",
+            "type": "boolean"
+          },
           "notional": {
             "anyOf": [
               {
@@ -5625,6 +5844,7 @@
           "interest_rate",
           "interest_rate_unit",
           "maturity_date",
+          "maturity_typed",
           "attributes",
           "cash_flows"
         ],
@@ -6058,6 +6278,152 @@
         ],
         "title": "LcrWarningCode",
         "type": "string"
+      },
+      "LegalEntityDetail": {
+        "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "description": "The source's legal entity code (positions' `legal_entity_ref`), masked by that schema field's classification (unknown: unclassified, fail closed).",
+            "title": "Code"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "legal_entity_id": {
+            "description": "Stable per (tenant, source system, code) (D-58 \u00a72).",
+            "format": "uuid",
+            "title": "Legal Entity Id",
+            "type": "string"
+          },
+          "link_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Links of the caller's tenant targeting this entity, per source kind.",
+            "propertyNames": {
+              "$ref": "#/components/schemas/IdentitySourceKind"
+            },
+            "title": "Link Counts",
+            "type": "object"
+          },
+          "provisional": {
+            "description": "Always true: attributes and the source-of-truth rule are deferred to the client (D-58 \u00a72, Data Model \u00a711).",
+            "title": "Provisional",
+            "type": "boolean"
+          },
+          "source_code": {
+            "title": "Source Code",
+            "type": "string"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "legal_entity_id",
+          "code",
+          "source_id",
+          "source_code",
+          "provisional",
+          "created_at",
+          "link_counts"
+        ],
+        "title": "LegalEntityDetail",
+        "type": "object"
+      },
+      "LegalEntityOut": {
+        "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/MaskedValue"
+              }
+            ],
+            "description": "The source's legal entity code (positions' `legal_entity_ref`), masked by that schema field's classification (unknown: unclassified, fail closed).",
+            "title": "Code"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "legal_entity_id": {
+            "description": "Stable per (tenant, source system, code) (D-58 \u00a72).",
+            "format": "uuid",
+            "title": "Legal Entity Id",
+            "type": "string"
+          },
+          "provisional": {
+            "description": "Always true: attributes and the source-of-truth rule are deferred to the client (D-58 \u00a72, Data Model \u00a711).",
+            "title": "Provisional",
+            "type": "boolean"
+          },
+          "source_code": {
+            "title": "Source Code",
+            "type": "string"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "legal_entity_id",
+          "code",
+          "source_id",
+          "source_code",
+          "provisional",
+          "created_at"
+        ],
+        "title": "LegalEntityOut",
+        "type": "object"
+      },
+      "LegalEntityPage": {
+        "properties": {
+          "items": {
+            "description": "By code, then source.",
+            "items": {
+              "$ref": "#/components/schemas/LegalEntityOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "LegalEntityPage",
+        "type": "object"
       },
       "LiquidityCurrency": {
         "description": "One currency's LCR, no FX (D-35 \u00a72). Every figure is exact decimal text or masked: a\nfigure built from fewer than `min_aggregate_count` contributions (but at least one), and\nevery figure derived from it, takes the contributions' classification (D-33). Zero\nfigures and a NULL ratio stay clear.",
@@ -8794,6 +9160,21 @@
             },
             "title": "Canonical Only Fields",
             "type": "array"
+          },
+          "missing_values": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Projector 2 only (the typed-maturity instrument contract, D-57): per counted field (`maturity_date`), the records without a value; the column is NULL. Absent for projector 1, whose summary is unchanged.",
+            "title": "Missing Values"
           },
           "new_identities": {
             "description": "Instruments or positions seen for the first time (0 for cash flows).",
@@ -16646,6 +17027,199 @@
         ]
       }
     },
+    "/api/v1/identity-links": {
+      "get": {
+        "description": "The identity links of the caller's tenant (D-58), ids only. A source row of another\ntenant gives an empty page, the same as an absent one (D-04). No link for a row means its\ntext key is unresolved or ambiguous.",
+        "operationId": "listIdentityLinks",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Only links from this kind of row.",
+            "in": "query",
+            "name": "source_kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/IdentitySourceKind"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only links from this kind of row.",
+              "title": "Source Kind"
+            }
+          },
+          {
+            "description": "Only links from this row (a position_version, cashflow_event or credit_exposure_version id).",
+            "in": "query",
+            "name": "source_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only links from this row (a position_version, cashflow_event or credit_exposure_version id).",
+              "title": "Source Id"
+            }
+          },
+          {
+            "description": "Only links to this kind of identity.",
+            "in": "query",
+            "name": "target_kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/IdentityTargetKind"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only links to this kind of identity.",
+              "title": "Target Kind"
+            }
+          },
+          {
+            "description": "Only links to this identity.",
+            "in": "query",
+            "name": "target_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only links to this identity.",
+              "title": "Target Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityLinkPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Identity Links",
+        "tags": [
+          "domain"
+        ]
+      }
+    },
+    "/api/v1/identity-links/reconcile": {
+      "post": {
+        "description": "Link the caller's tenant's historical position, cash-flow and credit-exposure rows\n(D-58 \u00a74, \u00a75). Exactly one identity of the tenant for a row's key gives a link; zero\n(LINK_UNRESOLVED) or several (LINK_AMBIGUOUS) are counted and write nothing. An existing\nlink is never changed. Idempotent: a repeat writes nothing and returns the same counts.\nAudited `identity_link.reconcile`. 409 `identity_links_disabled` while\nIDENTITY_LINKS_ENABLED is off (audited DENIED, nothing written).",
+        "operationId": "reconcileIdentityLinks",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityLinkReconcileOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reconcile Identity Links",
+        "tags": [
+          "domain"
+        ]
+      }
+    },
     "/api/v1/imports": {
       "get": {
         "description": "Newest first; filter by source, status, schema code and projection (the Phase 15\nnew-run panel lists projected imports per schema with one call).",
@@ -17361,7 +17935,7 @@
         ]
       },
       "post": {
-        "description": "Project a validated import's accepted rows into immutable domain versions (D-29):\none instrument version, position version or cash-flow event per canonical record, each\nkeeping lineage to it. 409 `projection_unsupported` for another schema (or schema\nversion), 409 `not_validated` before validation (or for a FAILED import), 409\n`domain_projection_disabled` while the switch is off; each refusal is audited DENIED.",
+        "description": "Project a validated import's accepted rows into immutable domain versions (D-29):\none instrument version, position version or cash-flow event per canonical record, each\nkeeping lineage to it. 409 `projection_unsupported` for another schema (or schema\nversion, or an instrument contract matching no projector by hash; also the typed-maturity\ncontract while INSTRUMENT_PROJECTOR_V2_ENABLED is off, D-57), 409 `not_validated` before\nvalidation (or for a FAILED import), 409 `domain_projection_disabled` while the switch is\noff; each refusal is audited DENIED. Position, cash-flow and credit-exposure rows are\nlinked to their identities in the same transaction while IDENTITY_LINKS_ENABLED is on\n(D-58 \u00a74).",
         "operationId": "projectImport",
         "parameters": [
           {
@@ -17765,6 +18339,154 @@
           }
         ],
         "summary": "Get Instrument",
+        "tags": [
+          "domain"
+        ]
+      }
+    },
+    "/api/v1/legal-entities": {
+      "get": {
+        "description": "The legal entity identities of the caller's tenant (D-58 \u00a72): a stable id per source\nsystem and code, `provisional`, append-only. Codes are masked by the classification of\nthe schema field they came from.",
+        "operationId": "listLegalEntities",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegalEntityPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Legal Entities",
+        "tags": [
+          "domain"
+        ]
+      }
+    },
+    "/api/v1/legal-entities/{legal_entity_id}": {
+      "get": {
+        "description": "One legal entity with its link counts. 404 `not_found` alike for an absent and another\ntenant's id (D-04).",
+        "operationId": "getLegalEntity",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "legal_entity_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Legal Entity Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegalEntityDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Client error (standard envelope)"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Server error (standard envelope)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Legal Entity",
         "tags": [
           "domain"
         ]

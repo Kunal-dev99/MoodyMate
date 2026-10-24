@@ -2255,6 +2255,21 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
      version. It is never a migration.
 - **Note:** the coordinator's brief said "publish v2". B delivers its intent; choosing A needs
   an amendment here first.
+- **Amendment (2026-10-24, Phase 31 build, auto-resolved):** §2 run equality made precise (Q2).
+  A typed import creates new `instrument_version` rows, and each contribution carries its
+  `instrument_version_id`, which `result_sha256` covers (D-31 §4). So a run over a
+  typed-instrument snapshot cannot have the same `result_sha256` as one over the v1 snapshot,
+  and `result_document` must not change to make it so (BE-25.3, D-56 §4; §3 "existing runs are
+  unchanged"). The check is:
+  - (a) a run over the v1 snapshot still gives the same `result_sha256` as its pre-phase
+    golden;
+  - (b) a typed-snapshot run and a v1-snapshot run give result documents that are equal once
+    only `instrument_version_id` is removed from each contribution, with the same number of
+    contributions;
+  - (c) repeating the run over the same typed snapshot gives an equal `result_sha256`.
+
+  Only `instrument_version_id` is stripped. Any other difference is a defect to raise again,
+  not something to strip. BE-31.3's Done-when is reworded to match.
 
 ## D-58 Identity links rather than FK columns on append-only rows
 
@@ -2286,6 +2301,13 @@ Each entry: ID, title, status, date, decision, reason, consequences. IDs are per
   6. **Runs ignore links,** so results and hashes are unchanged. Adopting links needs a new
      engine and manifest version (deferred).
   7. Links carry ids only. The target's classification governs reads.
+- **Amendment (2026-10-24, Phase 31 build, auto-resolved):** §2 pairs written in Phase 31 (Q5).
+  Resolver 1 writes `CREDIT_EXPOSURE` links to `COUNTERPARTY` only. The exposure's optional
+  `instrument_key` is not read by the v1 modules (D-37 §1, §4), and a link once written is never
+  changed (§5), so `CREDIT_EXPOSURE -> INSTRUMENT` links are deferred to a later phase. 0030's
+  insert check already allows that pair, and `UNIQUE (source_kind, source_row_id,
+  target_kind)` lets a later reconcile add them without touching existing links.
+  `docs/DOMAIN_IDENTITY.md` states the same.
 
 ## D-59 Background execution compatible with the existing run contract
 

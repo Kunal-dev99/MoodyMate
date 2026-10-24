@@ -4,6 +4,9 @@ The only code that touches the DB session for this module. Every query applies t
 principal's scope (D-04): every domain table carries `tenant_id`, and every query here
 filters on the caller's tenant. Nothing here deletes, and nothing updates except an obligor
 rating version's one status move (Phase 20); every other table is append-only.
+
+Phase 31 (D-58): legal entities and identity links are written set-based (INSERT ... SELECT,
+ON CONFLICT DO NOTHING), only while the service holds the tenant's projection lock.
 """
 
 import uuid
@@ -12,12 +15,23 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
-from sqlalchemy import Select, exists, func, insert, select, update
+from sqlalchemy import Select, and_, exists, func, insert, literal, or_, select, update
+from sqlalchemy.dialects.postgresql import ARRAY, UUID
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.locks import advisory_xact_lock
 from app.db.base import Base
 from app.db.repository import ScopedRepository
-from app.domain.constants import CreditVocabularyKind, DomainSchemaCode, ObligorRatingStatus
+from app.domain.constants import (
+    RESOLVER_VERSION,
+    CreditVocabularyKind,
+    DomainSchemaCode,
+    IdentityLinkMethod,
+    IdentitySourceKind,
+    IdentityTargetKind,
+    ObligorRatingStatus,
+)
 from app.domain.models import (
     CashflowEvent,
     Counterparty,
@@ -25,12 +39,14 @@ from app.domain.models import (
     CreditExposure,
     CreditExposureVersion,
     CreditVocabulary,
+    DomainIdentityLink,
     DomainProjection,
     Instrument,
     InstrumentAttributeDefinition,
     InstrumentAttributeValue,
     InstrumentType,
     InstrumentVersion,
+    LegalEntity,
     ObligorRating,
     Position,
     PositionVersion,
@@ -678,3 +694,303 @@ class DomainRepository(ScopedRepository[DomainProjection]):
             .order_by(ObligorRating.counterparty_id, ObligorRating.effective_from.desc())
         )
         return list(result.scalars())
+
+
+# --- Phase 31: legal entities and identity links (BE-31.4, BE-31.5, D-58) -------------------
+
+LinkSourceModel = type[PositionVersion] | type[CashflowEvent] | type[CreditExposureVersion]
+LINK_SOURCES: dict[IdentitySourceKind, LinkSourceModel] = {
+    IdentitySourceKind.POSITION_VERSION: PositionVersion,
+    IdentitySourceKind.CASHFLOW_EVENT: CashflowEvent,
+    IdentitySourceKind.CREDIT_EXPOSURE: CreditExposureVersion,
+}
+LinkTargetModel = type[Instrument] | type[Counterparty] | type[LegalEntity]
+LINK_TARGETS: dict[IdentityTargetKind, tuple[LinkTargetModel, str]] = {
+    IdentityTargetKind.INSTRUMENT: (Instrument, "business_key"),
+    IdentityTargetKind.COUNTERPARTY: (Counterparty, "business_key"),
+    IdentityTargetKind.LEGAL_ENTITY: (LegalEntity, "code"),
+}
+
+
+@dataclass(frozen=True)
+class LinkPair:
+    """One (source kind, target kind) a link joins, with the source row's key column."""
+
+    source_kind: IdentitySourceKind
+    target_kind: IdentityTargetKind
+    key_field: str
+
+
+@dataclass(frozen=True)
+class LinkCounts:
+    """Value-free counts of one pair over the rows examined (D-58 §3, §5)."""
+
+    rows: int
+    linked: int
+    unresolved: int
+    ambiguous: int
+    no_key: int
+    linked_now_ambiguous: int
+
+
+@dataclass(frozen=True)
+class LinkFilter:
+    source_kind: IdentitySourceKind | None = None
+    source_id: uuid.UUID | None = None
+    target_kind: IdentityTargetKind | None = None
+    target_id: uuid.UUID | None = None
+
+
+class IdentityRepository(ScopedRepository[LegalEntity]):
+    """Legal entities and identity links of the caller's tenant (D-04): every query filters
+    on the tenant, and every write is an INSERT of rows of that tenant."""
+
+    model = LegalEntity
+
+    def _tenant(self) -> ColumnElement[uuid.UUID]:
+        return literal(self.scope.tenant_id, UUID(as_uuid=True))
+
+    # --- writes (the service holds the tenant's projection lock) ---------------------------
+
+    async def register_legal_entities(self, projection_id: uuid.UUID | None, actor: str) -> int:
+        """A legal entity for every (position source, `legal_entity_ref`) of the tenant's
+        position versions (only this projection's, when given) that has none yet. Returns
+        the number written."""
+        pv, pos = PositionVersion, Position
+        conditions = [
+            pv.tenant_id == self.scope.tenant_id,
+            pos.tenant_id == self.scope.tenant_id,
+            pv.legal_entity_ref.is_not(None),
+            pv.legal_entity_ref != "",
+        ]
+        if projection_id is not None:
+            conditions.append(pv.domain_projection_id == projection_id)
+        rows = (
+            select(
+                func.gen_random_uuid(),
+                self._tenant(),
+                pos.source_system_id,
+                pv.legal_entity_ref,
+                literal(True),
+                literal(actor),
+            )
+            .join(pos, pos.id == pv.position_id)
+            .where(*conditions)
+            .group_by(pos.source_system_id, pv.legal_entity_ref)
+        )
+        e = LegalEntity
+        statement = (
+            pg_insert(e)
+            .from_select(
+                [e.id, e.tenant_id, e.source_system_id, e.code, e.provisional, e.created_by],
+                rows,
+            )
+            .on_conflict_do_nothing()
+        )
+        result = await self.session.execute(statement)
+        return int(getattr(result, "rowcount", 0) or 0)
+
+    def _candidates(self, pair: LinkPair, unique: bool) -> Any:
+        """The tenant's identities of the pair's target kind per key: with their count, or
+        (unique) only the keys exactly one identity has, with that identity's id."""
+        target, key_attr = LINK_TARGETS[pair.target_kind]
+        key = getattr(target, key_attr)
+        if unique:
+            return (
+                select(
+                    key.label("key"),
+                    func.array_agg(target.id, type_=ARRAY(UUID(as_uuid=True)))[1].label(
+                        "target_id"
+                    ),
+                )
+                .where(target.tenant_id == self.scope.tenant_id)
+                .group_by(key)
+                .having(func.count() == 1)
+                .subquery()
+            )
+        return (
+            select(key.label("key"), func.count().label("n"))
+            .where(target.tenant_id == self.scope.tenant_id)
+            .group_by(key)
+            .subquery()
+        )
+
+    def _linked(self, pair: LinkPair, source_id: Any) -> ColumnElement[bool]:
+        link = DomainIdentityLink
+        return and_(
+            link.tenant_id == self.scope.tenant_id,
+            link.source_kind == pair.source_kind.value,
+            link.source_row_id == source_id,
+            link.target_kind == pair.target_kind.value,
+        )
+
+    async def write_links(self, pair: LinkPair, projection_id: uuid.UUID | None, actor: str) -> int:
+        """A link for every source row of the tenant (only this projection's, when given)
+        with no link of the pair yet whose key exactly one identity of the tenant has (D-58
+        §3). Returns the number written; an existing link is never changed."""
+        source = LINK_SOURCES[pair.source_kind]
+        key = getattr(source, pair.key_field)
+        candidates = self._candidates(pair, unique=True)
+        conditions = [
+            source.tenant_id == self.scope.tenant_id,
+            key != "",
+            ~exists().where(self._linked(pair, source.id)),
+        ]
+        if projection_id is not None:
+            conditions.append(source.domain_projection_id == projection_id)
+        rows = (
+            select(
+                func.gen_random_uuid(),
+                self._tenant(),
+                literal(pair.source_kind.value),
+                source.id,
+                literal(pair.target_kind.value),
+                candidates.c.target_id,
+                literal(IdentityLinkMethod.BUSINESS_KEY_UNIQUE.value),
+                literal(RESOLVER_VERSION),
+                literal(actor),
+            )
+            .select_from(source)
+            .join(candidates, candidates.c.key == key)
+            .where(*conditions)
+        )
+        link = DomainIdentityLink
+        statement = (
+            pg_insert(link)
+            .from_select(
+                [
+                    link.id,
+                    link.tenant_id,
+                    link.source_kind,
+                    link.source_row_id,
+                    link.target_kind,
+                    link.target_id,
+                    link.method,
+                    link.resolver_version,
+                    link.created_by,
+                ],
+                rows,
+            )
+            .on_conflict_do_nothing()
+        )
+        result = await self.session.execute(statement)
+        return int(getattr(result, "rowcount", 0) or 0)
+
+    async def link_counts(self, pair: LinkPair, projection_id: uuid.UUID | None) -> LinkCounts:
+        """How the tenant's source rows of the pair (only this projection's, when given)
+        stand: linked, or why not (no key, no identity, several identities), and how many
+        linked rows' keys have since become ambiguous (D-58 §5)."""
+        source = LINK_SOURCES[pair.source_kind]
+        key = getattr(source, pair.key_field)
+        candidates = self._candidates(pair, unique=False)
+        link = DomainIdentityLink
+        linked, unlinked = link.id.is_not(None), link.id.is_(None)
+        has_key = and_(key.is_not(None), key != "")
+        n = func.coalesce(candidates.c.n, 0)
+        query = (
+            select(
+                func.count().label("rows"),
+                func.count().filter(linked).label("linked"),
+                func.count().filter(and_(unlinked, has_key, n == 0)).label("unresolved"),
+                func.count().filter(and_(unlinked, has_key, n > 1)).label("ambiguous"),
+                func.count().filter(and_(unlinked, or_(key.is_(None), key == ""))).label("no_key"),
+                func.count().filter(and_(linked, n > 1)).label("linked_now_ambiguous"),
+            )
+            .select_from(source)
+            .outerjoin(link, self._linked(pair, source.id))
+            .outerjoin(candidates, candidates.c.key == key)
+            .where(source.tenant_id == self.scope.tenant_id)
+        )
+        if projection_id is not None:
+            query = query.where(source.domain_projection_id == projection_id)
+        row = (await self.session.execute(query)).one()
+        return LinkCounts(
+            rows=int(row.rows),
+            linked=int(row.linked),
+            unresolved=int(row.unresolved),
+            ambiguous=int(row.ambiguous),
+            no_key=int(row.no_key),
+            linked_now_ambiguous=int(row.linked_now_ambiguous),
+        )
+
+    # --- reads ------------------------------------------------------------------------------
+
+    async def legal_entity_page(
+        self, source_id: uuid.UUID | None, limit: int, offset: int
+    ) -> tuple[list[LegalEntity], int]:
+        query = select(LegalEntity).where(LegalEntity.tenant_id == self.scope.tenant_id)
+        if source_id is not None:
+            query = query.where(LegalEntity.source_system_id == source_id)
+        total = await self.session.scalar(select(func.count()).select_from(query.subquery()))
+        result = await self.session.execute(
+            query.order_by(LegalEntity.code, LegalEntity.source_system_id, LegalEntity.id)
+            .limit(limit)
+            .offset(offset)
+        )
+        return list(result.scalars()), int(total or 0)
+
+    async def legal_entity(self, legal_entity_id: uuid.UUID) -> LegalEntity | None:
+        result = await self.session.execute(
+            select(LegalEntity).where(
+                LegalEntity.id == legal_entity_id, LegalEntity.tenant_id == self.scope.tenant_id
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def legal_entity_schema_versions(
+        self, ids: Sequence[uuid.UUID]
+    ) -> list[tuple[uuid.UUID, uuid.UUID]]:
+        """(legal entity id, schema version id) for every pinned position schema version
+        whose rows name the entity's code from the entity's source, in the tenant."""
+        if not ids:
+            return []
+        e, pv, pos = LegalEntity, PositionVersion, Position
+        result = await self.session.execute(
+            select(e.id, pv.schema_version_id)
+            .distinct()
+            .join(
+                pos, and_(pos.source_system_id == e.source_system_id, pos.tenant_id == e.tenant_id)
+            )
+            .join(pv, and_(pv.position_id == pos.id, pv.legal_entity_ref == e.code))
+            .where(
+                e.tenant_id == self.scope.tenant_id,
+                pv.tenant_id == self.scope.tenant_id,
+                e.id.in_(list(ids)),
+            )
+        )
+        return [(row[0], row[1]) for row in result]
+
+    async def target_link_counts(
+        self, target_kind: IdentityTargetKind, target_id: uuid.UUID
+    ) -> dict[str, int]:
+        """Links of the tenant to this identity, per source kind."""
+        link = DomainIdentityLink
+        result = await self.session.execute(
+            select(link.source_kind, func.count())
+            .where(
+                link.tenant_id == self.scope.tenant_id,
+                link.target_kind == target_kind.value,
+                link.target_id == target_id,
+            )
+            .group_by(link.source_kind)
+        )
+        return {row[0]: int(row[1]) for row in result}
+
+    async def link_page(
+        self, f: LinkFilter, limit: int, offset: int
+    ) -> tuple[list[DomainIdentityLink], int]:
+        link = DomainIdentityLink
+        query = select(link).where(link.tenant_id == self.scope.tenant_id)
+        if f.source_kind is not None:
+            query = query.where(link.source_kind == f.source_kind.value)
+        if f.source_id is not None:
+            query = query.where(link.source_row_id == f.source_id)
+        if f.target_kind is not None:
+            query = query.where(link.target_kind == f.target_kind.value)
+        if f.target_id is not None:
+            query = query.where(link.target_id == f.target_id)
+        total = await self.session.scalar(select(func.count()).select_from(query.subquery()))
+        result = await self.session.execute(
+            query.order_by(link.created_at, link.id).limit(limit).offset(offset)
+        )
+        return list(result.scalars()), int(total or 0)

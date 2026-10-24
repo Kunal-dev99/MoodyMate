@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ProposalFields } from '@/components/credit/ratings/ProposeRatingDialog'
 import { RatingHistory } from '@/components/credit/ratings/RatingsPanel'
 import { RatingStatusPill } from '@/components/credit/ratings/RatingStatusPill'
@@ -226,6 +226,8 @@ describe('the rating history (FE-20.1)', () => {
 })
 
 describe('ratings reversibility (FE-20.1, D-02)', () => {
+  // FE-31.1: these assert the Phase 30 tab strip and domain entry, which NEXT_PUBLIC_DOMAIN_LINKS_UI=off restores exactly.
+  beforeEach(() => vi.stubEnv('NEXT_PUBLIC_DOMAIN_LINKS_UI', 'off'))
   afterEach(() => {
     vi.unstubAllEnvs()
     vi.resetModules()

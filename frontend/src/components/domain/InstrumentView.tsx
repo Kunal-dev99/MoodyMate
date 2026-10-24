@@ -14,7 +14,10 @@ import { PageSection } from '@/components/common/PageSection'
 import { createLoader, type Loaded } from '@/components/common/load'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { DOMAIN_LINKS_UI_ENABLED } from '@/config/features'
 import { ProvisionalBadge } from './InstrumentCatalogue'
+import { LinkedIdentity, MaturityValue, useSourceLinks } from './IdentityParts'
+import { linkStateOf } from './identity'
 import { ShownValue } from './ShownValue'
 import {
   cashFlowsOf,
@@ -104,12 +107,17 @@ function Version({ version, types }: { version: InstrumentVersion; types: Instru
                 )}
               </Field>
               {/* Server code TYPE_NOT_PROJECTED: the pinned field is free text, so the value stays in the canonical record (P-3). */}
+              {/* FE-31.1: with NEXT_PUBLIC_DOMAIN_LINKS_UI on, a typed contract (D-57) shows its date; off, the Phase 30 field exactly. */}
               <Field label="Maturity date">
-                <ShownValue
-                  value={v.maturity_date}
-                  testId="version-maturity-date"
-                  empty="Not captured in instrument schema v1"
-                />
+                {DOMAIN_LINKS_UI_ENABLED ? (
+                  <MaturityValue version={v} testId="version-maturity-date" />
+                ) : (
+                  <ShownValue
+                    value={v.maturity_date}
+                    testId="version-maturity-date"
+                    empty="Not captured in instrument schema v1"
+                  />
+                )}
               </Field>
             </dl>
             <dl className="grid grid-cols-[160px_1fr] gap-y-1 text-sm" data-testid="version-lineage">
@@ -178,7 +186,15 @@ function Version({ version, types }: { version: InstrumentVersion; types: Instru
   )
 }
 
-function CashFlows({ flows }: { flows: CashFlow[] }) {
+function CashFlows({ flows, instrumentId }: { flows: CashFlow[]; instrumentId: string }) {
+  // FE-31.1 (D-58): each event's link to an instrument; none read while NEXT_PUBLIC_DOMAIN_LINKS_UI=off.
+  const links = useSourceLinks(
+    DOMAIN_LINKS_UI_ENABLED,
+    'CASHFLOW_EVENT',
+    'INSTRUMENT',
+    flows.map((c) => c.cashflow_event_id),
+    instrumentId,
+  )
   return (
     <PageSection
       icon={CalendarClock}
@@ -200,6 +216,7 @@ function CashFlows({ flows }: { flows: CashFlow[] }) {
               <TableHead>Type</TableHead>
               <TableHead>Origin</TableHead>
               <TableHead>Lineage</TableHead>
+              {DOMAIN_LINKS_UI_ENABLED && <TableHead>Linked identity</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -228,6 +245,11 @@ function CashFlows({ flows }: { flows: CashFlow[] }) {
                     {c.canonical_record_id}
                   </div>
                 </TableCell>
+                {DOMAIN_LINKS_UI_ENABLED && (
+                  <TableCell>
+                    <LinkedIdentity state={linkStateOf(links, c.cashflow_event_id)} testId="cash-flow-linked-identity" />
+                  </TableCell>
+                )}
               </TableRow>
             ))}
           </TableBody>
@@ -298,7 +320,7 @@ export function InstrumentView({ instrumentId }: { instrumentId: string }) {
         {detail.versions.map((v) => (
           <Version key={v.version_id} version={v} types={types} />
         ))}
-        <CashFlows flows={cashFlowsOf(detail)} />
+        <CashFlows flows={cashFlowsOf(detail)} instrumentId={detail.instrument_id} />
       </div>
     </>
   )

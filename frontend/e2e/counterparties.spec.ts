@@ -189,6 +189,38 @@ test('FE-19.1: the steward projects both credit imports and browses counterparty
   await expect(card.getByTestId('version-drawn')).toHaveAttribute('data-value', version!.drawn_amount as string)
   if (process.env.DOMAIN_SCREENSHOT) await page.screenshot({ path: `${process.env.DOMAIN_SCREENSHOT}/exposure.png`, fullPage: true })
 
+  // 4b. FE-31.1 (D-58, Q15): the exposure version's linked counterparty, as GET /identity-links
+  //     holds it. Projecting the exposures linked each row to the one counterparty of the tenant
+  //     its key names; on a fresh database (CI) that is this spec's CP-0001, so the link is
+  //     asserted. Only a reused database with an earlier run's CP-0001 (two identities, no link,
+  //     LINK_AMBIGUOUS) shows "Unresolved (text key)", and then the API must hold no link too.
+  const sameKey: Schemas['CounterpartySummary'][] = []
+  for (let offset = 0; ; offset += 200) {
+    const all: Schemas['CounterpartyPage'] = await (await request.get(`${API}/api/v1/counterparties?limit=200&offset=${offset}`, { headers: steward })).json()
+    sameKey.push(...all.items.filter((c) => c.business_key === 'CP-0001'))
+    if (offset + all.items.length >= all.total || all.items.length === 0) break
+  }
+  const linksRead = await request.get(
+    `${API}/api/v1/identity-links?source_kind=CREDIT_EXPOSURE&target_kind=COUNTERPARTY&source_id=${version!.version_id}`,
+    { headers: steward },
+  )
+  expect(linksRead.status()).toBe(200)
+  const links: Schemas['IdentityLinkPage'] = await linksRead.json()
+  const linked = card.getByTestId('version-linked-identity')
+  if (process.env.CI) expect(sameKey, 'a fresh database has one CP-0001, so the exposure is linked').toHaveLength(1)
+  if (sameKey.length === 1) {
+    expect(links.items).toHaveLength(1)
+    expect(links.items[0].target_id).toBe(target!.counterparty_id)
+    await expect(linked).toHaveAttribute('data-state', 'linked')
+    await expect(linked).toHaveAttribute('data-target-kind', 'COUNTERPARTY')
+    await expect(linked).toHaveAttribute('data-target-id', target!.counterparty_id)
+    await expect(linked.getByRole('link')).toHaveAttribute('href', `/domain/counterparties/${target!.counterparty_id}`)
+  } else {
+    expect(links.items).toHaveLength(0)
+    await expect(linked).toHaveAttribute('data-state', 'unresolved')
+    await expect(linked).toHaveText('Unresolved (text key)')
+  }
+
   // 5. Lineage: the version's import link (import and source row) opens that import.
   const importLink = card.getByTestId('version-import-link')
   await expect(importLink).toContainText(`row ${version!.source_ordinal}`)

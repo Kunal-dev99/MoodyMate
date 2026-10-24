@@ -18,6 +18,7 @@ import type { NavItem } from '@/components/layout/sidebar'
 import {
   CALCULATIONS_UI_ENABLED,
   CREDIT_DOMAIN_UI_ENABLED,
+  DOMAIN_LINKS_UI_ENABLED,
   DOMAIN_UI_ENABLED,
   RATINGS_UI_ENABLED,
   RULES_UI_ENABLED,
@@ -78,7 +79,9 @@ export const mainWorkspaces: Workspace[] = [
             : 'Instrument catalogue: projected versions, attributes, cash flows and their lineage to imports.') +
           (CREDIT_DOMAIN_UI_ENABLED ? ' Counterparties and credit exposures with their versions and lineage.' : '') +
           // FE-20.1: the ratings are named only while they are live (NEXT_PUBLIC_RATINGS_UI); off, the Phase 19 text.
-          (CREDIT_DOMAIN_UI_ENABLED && RATINGS_UI_ENABLED ? ' Obligor ratings with maker-checker approval.' : ''),
+          (CREDIT_DOMAIN_UI_ENABLED && RATINGS_UI_ENABLED ? ' Obligor ratings with maker-checker approval.' : '') +
+          // FE-31.1: legal entities are named only while they are live (NEXT_PUBLIC_DOMAIN_LINKS_UI); off, the Phase 30 text.
+          (DOMAIN_LINKS_UI_ENABLED ? ' Legal entities and the identity links of positions, cash flows and exposures.' : ''),
         permission: 'domain:read',
       }
     : {
@@ -212,6 +215,14 @@ const creditSections: WorkspaceSection[] = CREDIT_DOMAIN_UI_ENABLED
   ? [{ slug: 'counterparties', href: '/domain/counterparties', label: 'Counterparties', permission: 'domain:read' }, ...ratingSections]
   : []
 
+/**
+ * FE-31.1: the Legal entities tab (domain:read; D-58 identities, read-only), only while
+ * NEXT_PUBLIC_DOMAIN_LINKS_UI is on. Off, the Phase 30 tab strip exactly (D-02).
+ */
+const identitySections: WorkspaceSection[] = DOMAIN_LINKS_UI_ENABLED
+  ? [{ slug: 'legal-entities', href: '/domain/legal-entities', label: 'Legal entities', permission: 'domain:read' }]
+  : []
+
 /** FE-16.1: the read-only registry tabs, only while NEXT_PUBLIC_RULES_UI is on. */
 const registrySections: WorkspaceSection[] = RULES_UI_ENABLED
   ? [
@@ -223,14 +234,20 @@ const registrySections: WorkspaceSection[] = RULES_UI_ENABLED
 
 /**
  * FE-16.1: the Financial Domain's pages: the Phase 14 instrument catalogue (at /domain, as
- * before), FE-19.1's counterparties, FE-20's ratings queue and the read-only registry of rules, modules and assumption
- * sets. Empty while both NEXT_PUBLIC_RULES_UI and NEXT_PUBLIC_CREDIT_DOMAIN_UI are off or the
+ * before), FE-19.1's counterparties, FE-20's ratings queue, FE-31.1's legal entities and the read-only registry of rules, modules and assumption
+ * sets. Empty while NEXT_PUBLIC_RULES_UI, NEXT_PUBLIC_CREDIT_DOMAIN_UI and NEXT_PUBLIC_DOMAIN_LINKS_UI are off or the
  * workspace is planned, so /domain shows no tab strip, as in Phase 15 (D-02). With
- * NEXT_PUBLIC_CREDIT_DOMAIN_UI=off alone the list is the Phase 18 one exactly.
+ * NEXT_PUBLIC_CREDIT_DOMAIN_UI=off alone the list is the Phase 18 one plus Legal entities; with
+ * NEXT_PUBLIC_DOMAIN_LINKS_UI=off it is the Phase 30 one exactly.
  */
 export const domainSections: WorkspaceSection[] =
-  DOMAIN_UI_ENABLED && creditSections.length + registrySections.length > 0
-    ? [{ slug: 'instruments', href: '/domain', label: 'Instruments', permission: 'domain:read' }, ...creditSections, ...registrySections]
+  DOMAIN_UI_ENABLED && creditSections.length + identitySections.length + registrySections.length > 0
+    ? [
+        { slug: 'instruments', href: '/domain', label: 'Instruments', permission: 'domain:read' },
+        ...creditSections,
+        ...identitySections,
+        ...registrySections,
+      ]
     : []
 
 export function findWorkspace(slug: string): Workspace | undefined {

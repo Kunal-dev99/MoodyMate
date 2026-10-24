@@ -130,6 +130,14 @@ class Settings(BaseSettings):
     # DENIED, nothing written); reads keep working. Validated at startup (D-13): a
     # non-boolean stops the app.
     SCENARIOS_ENABLED: bool = True
+    # Phase 31 (FC-01, D-57 §2, D-02): projector v2 for the typed-maturity instrument contract
+    # (matched by contract hash). Off answers 409 projection_unsupported for typed imports
+    # (audited DENIED); v1 imports keep projector 1. Validated at startup (D-13).
+    INSTRUMENT_PROJECTOR_V2_ENABLED: bool = True
+    # Phase 31 (FC-02, D-58 §4, D-02): identity links, written by the projection step and by
+    # POST /identity-links/reconcile. Off: no new links, and the reconcile answers 409
+    # identity_links_disabled (audited DENIED); existing links stay readable.
+    IDENTITY_LINKS_ENABLED: bool = True
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
 
     # Phase 28 (BE-28.3, D-53): in-process token buckets per (tenant, principal, route) on the

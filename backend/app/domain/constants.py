@@ -209,6 +209,9 @@ class ProjectionSpec:
     - `schema_versions`: the schema versions this projector version was written for; any
       other version is `projection_unsupported` until a new projector version exists.
     - `attributes`: extension-eligible fields become `instrument_attribute_value` rows.
+
+    Phase 31: the `instrument` spec is picked by contract hash (`INSTRUMENT_SPECS_BY_HASH`),
+    not by `schema_versions`.
     """
 
     schema_code: DomainSchemaCode
@@ -217,6 +220,9 @@ class ProjectionSpec:
     columns: tuple[Column, ...]
     schema_versions: frozenset[int]
     attributes: bool = False
+    # Phase 31 (projector v2, D-57): fields whose absence is counted (`missing_values` in the
+    # summary). Empty for every projector 1 spec, whose summary is unchanged.
+    missing_counted: frozenset[str] = frozenset()
 
     @property
     def mapped_fields(self) -> frozenset[str]:
@@ -328,3 +334,178 @@ PROJECTION_SPECS[DomainSchemaCode.CREDIT_EXPOSURE] = ProjectionSpec(
     ),
     schema_versions=frozenset({1}),
 )
+
+
+# --- Phase 31: legal entities and identity links (D-58) -------------------------------------
+# Links carry ids only (D-58 §7); the target's classification governs reads. Runs never read
+# links (D-58 §6), so no result or hash changes. CHECK-constrained by migration 0030 (frozen
+# copies there).
+
+
+class IdentitySourceKind(StrEnum):
+    """The append-only row a link starts from (D-58 §2)."""
+
+    POSITION_VERSION = "POSITION_VERSION"
+    CASHFLOW_EVENT = "CASHFLOW_EVENT"
+    CREDIT_EXPOSURE = "CREDIT_EXPOSURE"  # a credit_exposure_version row
+
+
+class IdentityTargetKind(StrEnum):
+    """The identity a link resolves to (D-58 §2)."""
+
+    INSTRUMENT = "INSTRUMENT"
+    COUNTERPARTY = "COUNTERPARTY"
+    LEGAL_ENTITY = "LEGAL_ENTITY"
+
+
+class IdentityLinkMethod(StrEnum):
+    """How a link was resolved: exactly one identity of the tenant has the row's text key
+    (D-58 §3). Deterministic; never a guess."""
+
+    BUSINESS_KEY_UNIQUE = "BUSINESS_KEY_UNIQUE"
+
+
+class IdentityLinkNote(StrEnum):
+    """What resolution counts and does not link (D-58 §3)."""
+
+    LINK_UNRESOLVED = "LINK_UNRESOLVED"  # no identity of the tenant has the key
+    LINK_AMBIGUOUS = "LINK_AMBIGUOUS"  # several identities have it (e.g. two source systems)
+
+
+class IdentityLinkRefusal(StrEnum):
+    """409 refusals of POST /identity-links/reconcile, each audited DENIED."""
+
+    IDENTITY_LINKS_DISABLED = "identity_links_disabled"  # IDENTITY_LINKS_ENABLED=false
+
+
+# Bumped only when the resolution rule changes; recorded on every link.
+RESOLVER_VERSION = 1
+# Audit action of the reconcile and of each of its refusals.
+RECONCILE_IDENTITY_LINKS = "identity_link.reconcile"
+
+# Source kind -> the target kinds its text keys resolve to, with the key field:
+# position_version.instrument_key / legal_entity_ref, cashflow_event.instrument_key,
+# credit_exposure_version.counterparty_key.
+IDENTITY_LINK_TARGETS: dict[IdentitySourceKind, tuple[tuple[IdentityTargetKind, str], ...]] = {
+    IdentitySourceKind.POSITION_VERSION: (
+        (IdentityTargetKind.INSTRUMENT, "instrument_key"),
+        (IdentityTargetKind.LEGAL_ENTITY, "legal_entity_ref"),
+    ),
+    IdentitySourceKind.CASHFLOW_EVENT: ((IdentityTargetKind.INSTRUMENT, "instrument_key"),),
+    IdentitySourceKind.CREDIT_EXPOSURE: ((IdentityTargetKind.COUNTERPARTY, "counterparty_key"),),
+}
+
+
+# --- Phase 31: the typed-maturity instrument contract and projector v2 (D-57) ----------------
+# The `instrument` spec is matched by the pinned schema version's contract hash
+# (`content_sha256`, governance.service.contract_sha256), never by its version number: the
+# number is assigned by the registry (`max + 1`), and a later proposal may re-establish the v1
+# contract under a new number (D-57 §5), which projects with projector 1 again.
+
+PROJECTOR_V2 = 2
+
+# The seeded `instrument` v1 contract (migration 0007): projector 1, byte-identical to today.
+INSTRUMENT_V1_SHA256 = "388d9bc0c5ed866e56c254418dbfd2218b6b32e7d9e562ad8644b63d2ccfc7e9"
+
+
+def _typed_field(
+    name: str,
+    data_type: str,
+    required: bool,
+    classification: str,
+    *,
+    unit: str | None = None,
+    precision: int | None = None,
+    scale: int | None = None,
+    extension_eligible: bool = False,
+    description: str | None = None,
+) -> dict[str, object]:
+    return {
+        "name": name,
+        "data_type": data_type,
+        "required": required,
+        "unit": unit,
+        "precision": precision,
+        "scale": scale,
+        "classification": classification,
+        "extension_eligible": extension_eligible,
+        "description": description,
+    }
+
+
+# INSTRUMENT_TYPED_MATURITY (D-57 option B): the seeded v1 contract with exactly two changes,
+# `maturity_date` STRING -> DATE (BREAKING) and `interest_rate` DECIMAL(9,4) -> (11,6)
+# (COMPATIBLE). It is proposed through the governed path (POST /schema-change-proposals, impact
+# analysis, a second-person approval), never by a migration or the default seed. FROZEN: the
+# fields in order, as the proposal body's `fields`. Descriptions are not part of the hash.
+INSTRUMENT_TYPED_MATURITY: tuple[dict[str, object], ...] = (
+    _typed_field(
+        "instrument_id", "STRING", True, "internal", description="Stable canonical identity."
+    ),
+    _typed_field(
+        "instrument_type", "STRING", True, "internal", description="Deposit, loan, bond, ..."
+    ),
+    _typed_field("currency", "STRING", True, "public", unit="ISO 4217"),
+    _typed_field("counterparty_id", "STRING", False, "confidential"),
+    _typed_field("product_family", "STRING", False, "internal", extension_eligible=True),
+    _typed_field(
+        "notional", "DECIMAL", True, "confidential", unit="currency", precision=20, scale=2
+    ),
+    _typed_field(
+        "interest_rate", "DECIMAL", False, "internal", unit="percent", precision=11, scale=6
+    ),
+    _typed_field(
+        "maturity_date",
+        "DATE",
+        False,
+        "internal",
+        description="Typed ISO date (typed-maturity contract, D-57).",
+    ),
+    _typed_field("legacy_book_code", "STRING", False, "internal", description="Kept as in v1."),
+)
+# contract_sha256(INSTRUMENT_TYPED_MATURITY), frozen (a test recomputes it).
+INSTRUMENT_TYPED_MATURITY_SHA256 = (
+    "20f272b42f1151ff2fc84c626bf5c474c23d10af6b1368a23b3fd74e3b88ceed"
+)
+INSTRUMENT_TYPED_MATURITY_TITLE = "Typed maturity date (INSTRUMENT_TYPED_MATURITY, D-57)"
+
+# Projector v2 (D-57 §2): the v1 instrument columns unchanged. With the typed contract
+# `maturity_date` is DATE, so it projects as a DATE (and a missing one is NULL, counted in
+# `missing_values`); `interest_rate` keeps every one of its 6 decimal places.
+INSTRUMENT_SPEC_V2 = ProjectionSpec(
+    DomainSchemaCode.INSTRUMENT,
+    business_key="instrument_id",
+    instrument_key=None,
+    columns=PROJECTION_SPECS[DomainSchemaCode.INSTRUMENT].columns,
+    schema_versions=frozenset(),  # matched by contract hash only
+    attributes=True,
+    missing_counted=frozenset({"maturity_date"}),
+)
+
+# Contract hash -> (projector version, spec). Any other instrument contract is
+# `projection_unsupported` until a new projector version exists.
+INSTRUMENT_SPECS_BY_HASH: dict[str, tuple[int, ProjectionSpec]] = {
+    INSTRUMENT_V1_SHA256: (PROJECTOR_VERSION, PROJECTION_SPECS[DomainSchemaCode.INSTRUMENT]),
+    INSTRUMENT_TYPED_MATURITY_SHA256: (PROJECTOR_V2, INSTRUMENT_SPEC_V2),
+}
+
+# The position schema field `legal_entity_ref` is projected from: a legal entity's code is
+# masked by this field's classification in the position versions naming it (D-58 §7).
+LEGAL_ENTITY_FIELD = "legal_entity_id"
+# The source and target tables of a link, for its frozen copy in migration 0030.
+IDENTITY_SOURCE_TABLES: dict[IdentitySourceKind, str] = {
+    IdentitySourceKind.POSITION_VERSION: "position_version",
+    IdentitySourceKind.CASHFLOW_EVENT: "cashflow_event",
+    IdentitySourceKind.CREDIT_EXPOSURE: "credit_exposure_version",
+}
+IDENTITY_TARGET_TABLES: dict[IdentityTargetKind, str] = {
+    IdentityTargetKind.INSTRUMENT: "instrument",
+    IdentityTargetKind.COUNTERPARTY: "counterparty",
+    IdentityTargetKind.LEGAL_ENTITY: "legal_entity",
+}
+# The projected schemas whose rows the projection step links (D-58 §4), by source kind.
+IDENTITY_SOURCE_SCHEMAS: dict[DomainSchemaCode, IdentitySourceKind] = {
+    DomainSchemaCode.POSITION: IdentitySourceKind.POSITION_VERSION,
+    DomainSchemaCode.CASHFLOW_EVENT: IdentitySourceKind.CASHFLOW_EVENT,
+    DomainSchemaCode.CREDIT_EXPOSURE: IdentitySourceKind.CREDIT_EXPOSURE,
+}

@@ -21,6 +21,12 @@ The WS3 domain endpoints of Phase 14 (the Feature 03 endpoint table, D-34):
   rating_change_disabled to both writes (audited); the rationale and decision comment are
   confidential (D-43 §2).
 
+- Phase 31 (D-58): GET /legal-entities, GET /legal-entities/{legal_entity_id} and GET
+  /identity-links (`domain:read`); POST /identity-links/reconcile (`domain:project`,
+  idempotent, audited `identity_link.reconcile`). IDENTITY_LINKS_ENABLED=false answers 409
+  identity_links_disabled to the reconcile (audited DENIED, nothing written). Links carry ids
+  only; runs never read them.
+
 Tenant scope comes from the principal (D-04): another tenant's id is the same 404 as a
 random one.
 """
@@ -41,8 +47,12 @@ from app.core.principal import Principal
 from app.db.session import get_session
 from app.domain.constants import (
     RATING_CLASSIFICATIONS,
+    RESOLVER_VERSION,
     CreditVocabularyKind,
     DomainSchemaCode,
+    IdentityLinkMethod,
+    IdentitySourceKind,
+    IdentityTargetKind,
     ObligorRatingStatus,
 )
 from app.domain.models import (
@@ -65,11 +75,18 @@ from app.domain.schemas import (
     CreditExposureVersionOut,
     CreditVocabularyEntryOut,
     CreditVocabularyList,
+    IdentityLinkKindCount,
+    IdentityLinkOut,
+    IdentityLinkPage,
+    IdentityLinkReconcileOut,
     InstrumentDetail,
     InstrumentPage,
     InstrumentSummary,
     InstrumentTypeOut,
     InstrumentVersionOut,
+    LegalEntityDetail,
+    LegalEntityOut,
+    LegalEntityPage,
     ObligorRatingCreate,
     ObligorRatingDecision,
     ObligorRatingOut,
@@ -84,6 +101,7 @@ from app.domain.service import (
     DomainService,
     ExposureRow,
     InstrumentRow,
+    LegalEntityRow,
     ProjectionView,
     RatingRow,
     SchemaPins,
@@ -140,6 +158,8 @@ def _shown(
     response_model=ProjectionOut,
     status_code=201,
     operation_id="projectImport",
+    # `summary.missing_values` is projector 2's only: a projector 1 body stays byte-identical.
+    response_model_exclude_none=True,
     responses={
         200: {
             "model": ProjectionOut,
@@ -158,11 +178,19 @@ async def project_import(
     """Project a validated import's accepted rows into immutable domain versions (D-29):
     one instrument version, position version or cash-flow event per canonical record, each
     keeping lineage to it. 409 `projection_unsupported` for another schema (or schema
-    version), 409 `not_validated` before validation (or for a FAILED import), 409
-    `domain_projection_disabled` while the switch is off; each refusal is audited DENIED."""
+    version, or an instrument contract matching no projector by hash; also the typed-maturity
+    contract while INSTRUMENT_PROJECTOR_V2_ENABLED is off, D-57), 409 `not_validated` before
+    validation (or for a FAILED import), 409 `domain_projection_disabled` while the switch is
+    off; each refusal is audited DENIED. Position, cash-flow and credit-exposure rows are
+    linked to their identities in the same transaction while IDENTITY_LINKS_ENABLED is on
+    (D-58 §4)."""
     settings = request.app.state.settings
     view, created = await DomainService(session, principal).project(
-        import_id, settings.DOMAIN_PROJECTION_ENABLED, settings.CREDIT_PROJECTION_ENABLED
+        import_id,
+        settings.DOMAIN_PROJECTION_ENABLED,
+        settings.CREDIT_PROJECTION_ENABLED,
+        settings.INSTRUMENT_PROJECTOR_V2_ENABLED,
+        settings.IDENTITY_LINKS_ENABLED,
     )
     if not created:
         mark_replayed(response)
@@ -191,6 +219,7 @@ def _projection(view: ProjectionView) -> ProjectionOut:
     "/imports/{import_id}/projection",
     response_model=ProjectionOut,
     operation_id="getImportProjection",
+    response_model_exclude_none=True,
 )
 async def get_import_projection(
     import_id: uuid.UUID, principal: DomainReader, session: SessionDep
@@ -374,10 +403,17 @@ def _version(
         projected_at=v.created_at,
         instrument_type_known=v.instrument_type_id is not None,
         interest_rate_unit=rate.unit if rate else None,
+        maturity_typed=_maturity_typed(pins, v.schema_version_id),
         attributes=attribute_out,
         cash_flows=cash_flows,
         **shown,
     )
+
+
+def _maturity_typed(pins: SchemaPins, schema_version_id: uuid.UUID) -> bool:
+    """The pinned version types `maturity_date` as DATE (D-57): else v1 free text."""
+    field = pins.fields.get(schema_version_id, {}).get("maturity_date")
+    return field is not None and field.data_type == FieldType.DATE
 
 
 @router.get(
@@ -902,3 +938,149 @@ async def get_obligor_rating(
     (D-04)."""
     view = await DomainService(session, principal).rating(rating_id)
     return _rating(view.row, view.pins, principal.clear_classifications)
+
+
+# --- Phase 31: legal entities and identity links (BE-31.4, BE-31.5, D-58) ------------------
+
+
+@router.get("/legal-entities", response_model=LegalEntityPage, operation_id="listLegalEntities")
+async def list_legal_entities(
+    principal: DomainReader,
+    session: SessionDep,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    source_id: uuid.UUID | None = None,
+) -> LegalEntityPage:
+    """The legal entity identities of the caller's tenant (D-58 §2): a stable id per source
+    system and code, `provisional`, append-only. Codes are masked by the classification of
+    the schema field they came from."""
+    view = await DomainService(session, principal).legal_entities(source_id, limit, offset)
+    clear = principal.clear_classifications
+    return LegalEntityPage(
+        items=[_legal_entity(r, clear) for r in view.rows],
+        total=view.total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+def _legal_entity_fields(row: LegalEntityRow, clear: frozenset[str]) -> dict[str, Any]:
+    e = row.entity
+    return {
+        "legal_entity_id": e.id,
+        "code": mask_mapping({"code": e.code}, {"code": row.classification}, clear)["code"],
+        "source_id": e.source_system_id,
+        "source_code": row.source_code,
+        "provisional": e.provisional,
+        "created_at": e.created_at,
+    }
+
+
+def _legal_entity(row: LegalEntityRow, clear: frozenset[str]) -> LegalEntityOut:
+    return LegalEntityOut(**_legal_entity_fields(row, clear))
+
+
+@router.get(
+    "/legal-entities/{legal_entity_id}",
+    response_model=LegalEntityDetail,
+    operation_id="getLegalEntity",
+)
+async def get_legal_entity(
+    legal_entity_id: uuid.UUID, principal: DomainReader, session: SessionDep
+) -> LegalEntityDetail:
+    """One legal entity with its link counts. 404 `not_found` alike for an absent and another
+    tenant's id (D-04)."""
+    view = await DomainService(session, principal).legal_entity(legal_entity_id)
+    return LegalEntityDetail(
+        **_legal_entity_fields(view.row, principal.clear_classifications),
+        link_counts=view.link_counts,
+    )
+
+
+@router.get("/identity-links", response_model=IdentityLinkPage, operation_id="listIdentityLinks")
+async def list_identity_links(
+    principal: DomainReader,
+    session: SessionDep,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    source_kind: Annotated[
+        IdentitySourceKind | None, Query(description="Only links from this kind of row.")
+    ] = None,
+    source_id: Annotated[
+        uuid.UUID | None,
+        Query(
+            description="Only links from this row (a position_version, cashflow_event or "
+            "credit_exposure_version id)."
+        ),
+    ] = None,
+    target_kind: Annotated[
+        IdentityTargetKind | None, Query(description="Only links to this kind of identity.")
+    ] = None,
+    target_id: Annotated[
+        uuid.UUID | None, Query(description="Only links to this identity.")
+    ] = None,
+) -> IdentityLinkPage:
+    """The identity links of the caller's tenant (D-58), ids only. A source row of another
+    tenant gives an empty page, the same as an absent one (D-04). No link for a row means its
+    text key is unresolved or ambiguous."""
+    view = await DomainService(session, principal).identity_links(
+        source_kind, source_id, target_kind, target_id, limit, offset
+    )
+    return IdentityLinkPage(
+        items=[
+            IdentityLinkOut(
+                link_id=link.id,
+                source_kind=IdentitySourceKind(link.source_kind),
+                source_row_id=link.source_row_id,
+                target_kind=IdentityTargetKind(link.target_kind),
+                target_id=link.target_id,
+                method=IdentityLinkMethod(link.method),
+                resolver_version=link.resolver_version,
+                created_by=link.created_by,
+                created_at=link.created_at,
+            )
+            for link in view.links
+        ],
+        total=view.total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.post(
+    "/identity-links/reconcile",
+    response_model=IdentityLinkReconcileOut,
+    operation_id="reconcileIdentityLinks",
+)
+async def reconcile_identity_links(
+    request: Request, principal: DomainProjector, session: SessionDep
+) -> IdentityLinkReconcileOut:
+    """Link the caller's tenant's historical position, cash-flow and credit-exposure rows
+    (D-58 §4, §5). Exactly one identity of the tenant for a row's key gives a link; zero
+    (LINK_UNRESOLVED) or several (LINK_AMBIGUOUS) are counted and write nothing. An existing
+    link is never changed. Idempotent: a repeat writes nothing and returns the same counts.
+    Audited `identity_link.reconcile`. 409 `identity_links_disabled` while
+    IDENTITY_LINKS_ENABLED is off (audited DENIED, nothing written)."""
+    view = await DomainService(session, principal).reconcile_identity_links(
+        request.app.state.settings.IDENTITY_LINKS_ENABLED
+    )
+    return IdentityLinkReconcileOut(
+        resolver_version=RESOLVER_VERSION,
+        links_written=view.links_written,
+        counts=[
+            IdentityLinkKindCount(
+                source_kind=r.pair.source_kind,
+                target_kind=r.pair.target_kind,
+                rows=r.counts.rows,
+                linked=r.counts.linked,
+                links_written=r.links_written,
+                unresolved=r.counts.unresolved,
+                ambiguous=r.counts.ambiguous,
+                no_key=r.counts.no_key,
+                linked_now_ambiguous=r.counts.linked_now_ambiguous,
+            )
+            for r in view.results
+        ],
+        reconciled_at=view.reconciled_at,
+        reconciled_by=view.reconciled_by,
+    )

@@ -120,6 +120,19 @@ export const DASHBOARD_TILES_ENABLED = process.env.NEXT_PUBLIC_DASHBOARD_TILES !
  */
 export const STRESS_COMPARE_UI_ENABLED = STRESS_EXPLORER_UI_ENABLED && process.env.NEXT_PUBLIC_STRESS_COMPARE_UI !== 'off'
 
+/**
+ * NEXT_PUBLIC_DOMAIN_LINKS_UI=off (FE-31.1): the Financial Domain loses its Legal entities tab and
+ * every /domain/legal-entities route is a 404 again; the instrument detail shows its Phase 30
+ * maturity text ("Not captured in instrument schema v1") whatever the pinned schema types, and
+ * the cash-flow and exposure details lose their "Linked identity" column and field, restoring the
+ * Phase 30 UI and nav exactly. Only meaningful while NEXT_PUBLIC_DOMAIN_UI is on (the workspace
+ * itself), so off there means off here. The backend's own switches are
+ * INSTRUMENT_PROJECTOR_V2_ENABLED (typed imports refused, 409 `projection_unsupported`) and
+ * IDENTITY_LINKS_ENABLED (no new links; the reconcile answers 409 `identity_links_disabled`,
+ * audited). Links are read-only here: the UI never writes one (D-58).
+ */
+export const DOMAIN_LINKS_UI_ENABLED = DOMAIN_UI_ENABLED && process.env.NEXT_PUBLIC_DOMAIN_LINKS_UI !== 'off'
+
 /*
  * Build-time server switch (FE-28.5), listed here for discoverability; no NEXT_PUBLIC_ value,
  * nothing reaches the browser: NEXT_SECURITY_HEADERS=off at `next build` drops the security

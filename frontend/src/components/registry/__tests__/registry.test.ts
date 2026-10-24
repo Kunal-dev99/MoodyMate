@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ModuleCard } from '@/components/registry/ModuleRegistry'
 import { ParameterValues } from '@/components/registry/ParameterView'
 import { activeSection } from '@/components/registry/RegistryTabs'
@@ -218,6 +218,8 @@ describe('the /domain tabs (FE-16.1)', () => {
 })
 
 describe('registry reversibility (FE-16.1, D-02)', () => {
+  // FE-31.1: these assert the Phase 30 tab strip and domain entry, which NEXT_PUBLIC_DOMAIN_LINKS_UI=off restores exactly.
+  beforeEach(() => vi.stubEnv('NEXT_PUBLIC_DOMAIN_LINKS_UI', 'off'))
   afterEach(() => {
     vi.unstubAllEnvs()
     vi.resetModules()

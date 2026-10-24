@@ -76,7 +76,15 @@ from app.governance.constants import (
     Role,
 )
 from app.main import create_app
-from app.tests.conftest import alembic_config, clean, dev_token, insert_tenant, script, sql
+from app.tests.conftest import (
+    alembic_config,
+    clean,
+    clear_identity_links,
+    dev_token,
+    insert_tenant,
+    script,
+    sql,
+)
 from app.tests.credit_kit import (
     COUNTERPARTIES,
     CREDIT_SAMPLES,
@@ -94,6 +102,7 @@ from app.tests.helpers import (
     sample,
     token_for,
 )
+from app.tests.identity_kit import counts_by_pair, links_of, reconcile, without_written
 
 pytestmark = [pytest.mark.db, pytest.mark.ws3]
 
@@ -488,6 +497,31 @@ def test_credit_domain_projection_snapshots_reads_and_guards(
     )
     assert all(isinstance(t["maturity_date"], date) for t in typed)
     assert {t["days_past_due"] for t in typed} >= {0, 35, 95}
+    # BE-31.4 (D-58): the exposure projection linked its own rows. Each exposure whose
+    # counterparty is in the counterparty sample resolves to that counterparty; the others
+    # are LINK_UNRESOLVED (counted, no link). The reconcile then writes nothing, twice.
+    sample_keys = {r["counterparty_id"] for r in counterparties}
+    resolvable = sum(1 for r in exposures if r["counterparty_id"] in sample_keys)
+    assert 0 < resolvable < len(exposures)
+    expected_links = sql(
+        db,
+        "SELECT v.id, c.id AS target FROM credit_exposure_version v"
+        " JOIN counterparty c ON c.business_key = v.counterparty_key",
+    )
+    assert len(expected_links) == resolvable
+    assert links_of(db, "CREDIT_EXPOSURE") == {
+        (r["id"], "COUNTERPARTY"): r["target"] for r in expected_links
+    }
+    first = reconcile(api, steward)
+    pair = counts_by_pair(first)[("CREDIT_EXPOSURE", "COUNTERPARTY")]
+    assert (pair["rows"], pair["linked"], pair["links_written"]) == (len(exposures), resolvable, 0)
+    assert (pair["unresolved"], pair["ambiguous"], pair["no_key"]) == (
+        len(exposures) - resolvable,
+        0,
+        0,
+    )
+    second = reconcile(api, steward)
+    assert second["links_written"] == 0 and without_written(second) == without_written(first)
 
     # --- 3. Snapshots (BE-19.4) ----------------------------------------------------------------
     cp_id, ce_id = imports["counterparty"]["id"], imports["credit_exposure"]["id"]
@@ -910,8 +944,9 @@ def test_credit_domain_projection_snapshots_reads_and_guards(
     head = str(ScriptDirectory.from_config(Config("alembic.ini")).get_current_head())
     assert revision(db) == head
     before = credit_counts(db)
+    clear_identity_links(db)  # Phase 31: 0030 refuses its downgrade while links exist
     try:
-        with pytest.raises(Exception, match="(?i)refus"):
+        with pytest.raises(Exception, match="obligor ratings exist"):
             command.downgrade(alembic_config(db), "0022")
         assert revision(db) == head and credit_counts(db) == before
         assert ratings_state(db) == rows_before

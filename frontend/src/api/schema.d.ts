@@ -488,6 +488,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/identity-links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Identity Links
+         * @description The identity links of the caller's tenant (D-58), ids only. A source row of another
+         *     tenant gives an empty page, the same as an absent one (D-04). No link for a row means its
+         *     text key is unresolved or ambiguous.
+         */
+        get: operations["listIdentityLinks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/identity-links/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reconcile Identity Links
+         * @description Link the caller's tenant's historical position, cash-flow and credit-exposure rows
+         *     (D-58 §4, §5). Exactly one identity of the tenant for a row's key gives a link; zero
+         *     (LINK_UNRESOLVED) or several (LINK_AMBIGUOUS) are counted and write nothing. An existing
+         *     link is never changed. Idempotent: a repeat writes nothing and returns the same counts.
+         *     Audited `identity_link.reconcile`. 409 `identity_links_disabled` while
+         *     IDENTITY_LINKS_ENABLED is off (audited DENIED, nothing written).
+         */
+        post: operations["reconcileIdentityLinks"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/imports": {
         parameters: {
             query?: never;
@@ -638,8 +685,12 @@ export interface paths {
          * @description Project a validated import's accepted rows into immutable domain versions (D-29):
          *     one instrument version, position version or cash-flow event per canonical record, each
          *     keeping lineage to it. 409 `projection_unsupported` for another schema (or schema
-         *     version), 409 `not_validated` before validation (or for a FAILED import), 409
-         *     `domain_projection_disabled` while the switch is off; each refusal is audited DENIED.
+         *     version, or an instrument contract matching no projector by hash; also the typed-maturity
+         *     contract while INSTRUMENT_PROJECTOR_V2_ENABLED is off, D-57), 409 `not_validated` before
+         *     validation (or for a FAILED import), 409 `domain_projection_disabled` while the switch is
+         *     off; each refusal is audited DENIED. Position, cash-flow and credit-exposure rows are
+         *     linked to their identities in the same transaction while IDENTITY_LINKS_ENABLED is on
+         *     (D-58 §4).
          */
         post: operations["projectImport"];
         delete?: never;
@@ -729,6 +780,49 @@ export interface paths {
          *     ordinal, canonical record and the cash flows naming its business key.
          */
         get: operations["getInstrument"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/legal-entities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Legal Entities
+         * @description The legal entity identities of the caller's tenant (D-58 §2): a stable id per source
+         *     system and code, `provisional`, append-only. Codes are masked by the classification of
+         *     the schema field they came from.
+         */
+        get: operations["listLegalEntities"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/legal-entities/{legal_entity_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Legal Entity
+         * @description One legal entity with its link counts. 404 `not_found` alike for an absent and another
+         *     tenant's id (D-04).
+         */
+        get: operations["getLegalEntity"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3534,6 +3628,137 @@ export interface components {
              */
             total: string | components["schemas"]["MaskedValue"];
         };
+        /**
+         * IdentityLinkKindCount
+         * @description Value-free counts for one (source kind, target kind) pair.
+         */
+        IdentityLinkKindCount: {
+            /**
+             * Ambiguous
+             * @description LINK_AMBIGUOUS: several identities have the key (e.g. two source systems); no link written.
+             */
+            ambiguous: number;
+            /**
+             * Linked
+             * @description Rows with a link after the reconcile (new or existing).
+             */
+            linked: number;
+            /**
+             * Linked Now Ambiguous
+             * @description Of `linked`: rows whose key has since become ambiguous. The link is kept, never changed, and reported here (D-58 §5). rows = linked + unresolved + ambiguous + no_key.
+             */
+            linked_now_ambiguous: number;
+            /**
+             * Links Written
+             * @description Links written by this call (0 on a repeat).
+             */
+            links_written: number;
+            /**
+             * No Key
+             * @description Rows whose key field is empty; no link.
+             */
+            no_key: number;
+            /**
+             * Rows
+             * @description Source rows of the tenant examined.
+             */
+            rows: number;
+            source_kind: components["schemas"]["IdentitySourceKind"];
+            target_kind: components["schemas"]["IdentityTargetKind"];
+            /**
+             * Unresolved
+             * @description LINK_UNRESOLVED: no identity has the key; no link.
+             */
+            unresolved: number;
+        };
+        /**
+         * IdentityLinkMethod
+         * @description How a link was resolved: exactly one identity of the tenant has the row's text key
+         *     (D-58 §3). Deterministic; never a guess.
+         * @enum {string}
+         */
+        IdentityLinkMethod: "BUSINESS_KEY_UNIQUE";
+        /** IdentityLinkOut */
+        IdentityLinkOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by: string;
+            /**
+             * Link Id
+             * Format: uuid
+             */
+            link_id: string;
+            method: components["schemas"]["IdentityLinkMethod"];
+            /** Resolver Version */
+            resolver_version: number;
+            source_kind: components["schemas"]["IdentitySourceKind"];
+            /**
+             * Source Row Id
+             * Format: uuid
+             * @description The position_version, cashflow_event or credit_exposure_version row.
+             */
+            source_row_id: string;
+            /**
+             * Target Id
+             * Format: uuid
+             * @description The instrument, counterparty or legal entity id; read it through its own route, which applies its classification.
+             */
+            target_id: string;
+            target_kind: components["schemas"]["IdentityTargetKind"];
+        };
+        /** IdentityLinkPage */
+        IdentityLinkPage: {
+            /**
+             * Items
+             * @description Oldest first (created_at, then link_id). An empty page for a source row means its text key is unresolved or ambiguous ('Unresolved (text key)').
+             */
+            items: components["schemas"]["IdentityLinkOut"][];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /** Total */
+            total: number;
+        };
+        /**
+         * IdentityLinkReconcileOut
+         * @description The result of POST /identity-links/reconcile (D-58 §4, §5). Idempotent: a repeat
+         *     writes nothing and returns the same counts except `links_written` (0).
+         */
+        IdentityLinkReconcileOut: {
+            /**
+             * Counts
+             * @description One entry per (source kind, target kind) pair, in a fixed order.
+             */
+            counts: components["schemas"]["IdentityLinkKindCount"][];
+            /** Links Written */
+            links_written: number;
+            /**
+             * Reconciled At
+             * Format: date-time
+             */
+            reconciled_at: string;
+            /** Reconciled By */
+            reconciled_by: string;
+            /** Resolver Version */
+            resolver_version: number;
+        };
+        /**
+         * IdentitySourceKind
+         * @description The append-only row a link starts from (D-58 §2).
+         * @enum {string}
+         */
+        IdentitySourceKind: "POSITION_VERSION" | "CASHFLOW_EVENT" | "CREDIT_EXPOSURE";
+        /**
+         * IdentityTargetKind
+         * @description The identity a link resolves to (D-58 §2).
+         * @enum {string}
+         */
+        IdentityTargetKind: "INSTRUMENT" | "COUNTERPARTY" | "LEGAL_ENTITY";
         /** ImpactAnalysis */
         ImpactAnalysis: {
             /**
@@ -4090,6 +4315,11 @@ export interface components {
              */
             maturity_date: string | components["schemas"]["MaskedValue"] | null;
             /**
+             * Maturity Typed
+             * @description The pinned schema version types `maturity_date` as DATE (the typed contract, projector v2, D-57). False: schema v1 free text, so `maturity_date` is empty and the value stays in the canonical record ('Not stated').
+             */
+            maturity_typed: boolean;
+            /**
              * Notional
              * @description Exact decimal text, in `currency`.
              */
@@ -4326,6 +4556,89 @@ export interface components {
          * @enum {string}
          */
         LcrWarningCode: "LCR_DENOMINATOR_ZERO" | "LCR_LEVEL_CAPS_NOT_APPLIED";
+        /** LegalEntityDetail */
+        LegalEntityDetail: {
+            /**
+             * Code
+             * @description The source's legal entity code (positions' `legal_entity_ref`), masked by that schema field's classification (unknown: unclassified, fail closed).
+             */
+            code: string | components["schemas"]["MaskedValue"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Legal Entity Id
+             * Format: uuid
+             * @description Stable per (tenant, source system, code) (D-58 §2).
+             */
+            legal_entity_id: string;
+            /**
+             * Link Counts
+             * @description Links of the caller's tenant targeting this entity, per source kind.
+             */
+            link_counts: {
+                [key: string]: number;
+            };
+            /**
+             * Provisional
+             * @description Always true: attributes and the source-of-truth rule are deferred to the client (D-58 §2, Data Model §11).
+             */
+            provisional: boolean;
+            /** Source Code */
+            source_code: string;
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+        };
+        /** LegalEntityOut */
+        LegalEntityOut: {
+            /**
+             * Code
+             * @description The source's legal entity code (positions' `legal_entity_ref`), masked by that schema field's classification (unknown: unclassified, fail closed).
+             */
+            code: string | components["schemas"]["MaskedValue"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Legal Entity Id
+             * Format: uuid
+             * @description Stable per (tenant, source system, code) (D-58 §2).
+             */
+            legal_entity_id: string;
+            /**
+             * Provisional
+             * @description Always true: attributes and the source-of-truth rule are deferred to the client (D-58 §2, Data Model §11).
+             */
+            provisional: boolean;
+            /** Source Code */
+            source_code: string;
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+        };
+        /** LegalEntityPage */
+        LegalEntityPage: {
+            /**
+             * Items
+             * @description By code, then source.
+             */
+            items: components["schemas"]["LegalEntityOut"][];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /** Total */
+            total: number;
+        };
         /**
          * LiquidityCurrency
          * @description One currency's LCR, no FX (D-35 §2). Every figure is exact decimal text or masked: a
@@ -5616,6 +5929,13 @@ export interface components {
              * @description Schema fields with no typed column: they stay in the canonical record, reached through the row's canonical_record_id (lineage).
              */
             canonical_only_fields: string[];
+            /**
+             * Missing Values
+             * @description Projector 2 only (the typed-maturity instrument contract, D-57): per counted field (`maturity_date`), the records without a value; the column is NULL. Absent for projector 1, whose summary is unchanged.
+             */
+            missing_values?: {
+                [key: string]: number;
+            } | null;
             /**
              * New Identities
              * @description Instruments or positions seen for the first time (0 for cash flows).
@@ -9253,6 +9573,93 @@ export interface operations {
             };
         };
     };
+    listIdentityLinks: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                /** @description Only links from this kind of row. */
+                source_kind?: components["schemas"]["IdentitySourceKind"] | null;
+                /** @description Only links from this row (a position_version, cashflow_event or credit_exposure_version id). */
+                source_id?: string | null;
+                /** @description Only links to this kind of identity. */
+                target_kind?: components["schemas"]["IdentityTargetKind"] | null;
+                /** @description Only links to this identity. */
+                target_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentityLinkPage"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    reconcileIdentityLinks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentityLinkReconcileOut"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     listImports: {
         parameters: {
             query?: {
@@ -9843,6 +10250,88 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InstrumentDetail"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    listLegalEntities: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                source_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegalEntityPage"];
+                };
+            };
+            /** @description Client error (standard envelope) */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Server error (standard envelope) */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    getLegalEntity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                legal_entity_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegalEntityDetail"];
                 };
             };
             /** @description Client error (standard envelope) */
