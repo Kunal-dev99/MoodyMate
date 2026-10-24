@@ -20,10 +20,10 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from app.core.auth import AUTHENTICATED, PUBLIC_PATHS, declared_permission, permission_alternatives
+from app.core.routes import served_routes
 from app.governance.constants import ROLE_PERMISSIONS, Role
 from app.tests.conftest import WS1_MATRIX, alembic_config, clean, dev_token, insert_tenant, sql
 from app.tests.credit_kit import COUNTERPARTIES, EXPOSURES, VOCABULARIES, projected_credit
@@ -52,6 +52,7 @@ from app.tests.helpers import (
     token_for,
     upload,
     validated_sample,
+    without_rate_limits,
 )
 from app.tests.scenario_kit import SCENARIOS, create_scenario
 
@@ -79,8 +80,8 @@ def proposed_rating(api: TestClient, headers: dict[str, str], counterparty_id: s
 def protected_routes(api: TestClient) -> list[tuple[str, str, str]]:
     """(method, path template, declared permission) for every protected /api/v1 route."""
     found = []
-    for route in api.app.routes:  # type: ignore[attr-defined]
-        if not isinstance(route, APIRoute) or not route.path.startswith("/api/v1"):
+    for route in served_routes(api.app):
+        if not route.is_api_route or not route.path.startswith("/api/v1"):
             continue
         if route.path in PUBLIC_PATHS:
             continue
@@ -745,10 +746,11 @@ AUDITED = {
 
 
 def test_every_mutating_route_is_listed_and_emits_an_audit_event(api: TestClient, db: str) -> None:
+    without_rate_limits(api)
     mutating = {
         f"{m} {route.path}"
-        for route in api.app.routes  # type: ignore[attr-defined]
-        if isinstance(route, APIRoute) and route.path.startswith("/api/v1")
+        for route in served_routes(api.app)
+        if route.is_api_route and route.path.startswith("/api/v1")
         for m in route.methods
         if m in MUTATING
     }

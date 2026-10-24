@@ -1,0 +1,2 @@
+# Per-agent build folders (NEXT_DIST_DIR, CLAUDE.md step 3); `.next/` is ignored at the repo root.
+.next-*/

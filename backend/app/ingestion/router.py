@@ -31,6 +31,8 @@ from app.core.classification import MaskedValue, mask_mapping
 from app.core.config import Settings
 from app.core.errors import ApiError
 from app.core.principal import Principal
+from app.core.ratelimit import RATE_LIMITED_RESPONSE, LimitedRoute, rate_limited
+from app.core.routes import route_template
 from app.db.session import get_session
 from app.domain.service import DomainService
 from app.governance.constants import Permission
@@ -82,6 +84,8 @@ from app.ingestion.schemas import (
     ImportManifest as ImportManifestOut,
 )
 from app.ingestion.service import (
+    CREATE_IMPORT,
+    VALIDATE_IMPORT,
     ContractSpec,
     DriftThresholds,
     ImportLabels,
@@ -105,6 +109,15 @@ ImportReader = Annotated[Principal, Depends(require_permission(Permission.IMPORT
 ImportWriter = Annotated[Principal, Depends(require_permission(Permission.IMPORT_WRITE))]
 QuarantineReader = Annotated[Principal, Depends(require_permission(Permission.QUARANTINE_READ))]
 QualityReviewer = Annotated[Principal, Depends(require_permission(Permission.QUALITY_REVIEW))]
+# BE-28.3 (D-53): import:write, then the route's rate-limit bucket.
+ImportCreator = Annotated[
+    Principal,
+    Depends(rate_limited(LimitedRoute.CREATE_IMPORT, Permission.IMPORT_WRITE, CREATE_IMPORT)),
+]
+ImportValidator = Annotated[
+    Principal,
+    Depends(rate_limited(LimitedRoute.VALIDATE_IMPORT, Permission.IMPORT_WRITE, VALIDATE_IMPORT)),
+]
 
 router = APIRouter(tags=["ingestion"])
 
@@ -118,8 +131,7 @@ async def ingestion_enabled(
     other denied request (BE-3.2). Declared after the permission, so a caller without it
     still gets 403."""
     if not request.app.state.settings.INGESTION_ENABLED:
-        route = request.scope.get("route")
-        endpoint = getattr(route, "path", request.url.path)
+        endpoint = route_template(request)
         await record_denial(
             session,
             principal,
@@ -499,13 +511,14 @@ def _import_detail(
             "model": ImportDetail,
             "description": "Idempotent replay: this key was used for the same upload; the "
             "original import is returned (header Idempotent-Replayed: true).",
-        }
+        },
+        **RATE_LIMITED_RESPONSE,
     },
 )
 async def create_import(
     request: Request,
     response: Response,
-    principal: ImportWriter,
+    principal: ImportCreator,
     session: SessionDep,
     _: IngestionEnabled,
     idempotency_key: Annotated[
@@ -693,12 +706,15 @@ async def get_import_profile(
 
 
 @router.post(
-    "/imports/{import_id}/validate", response_model=ImportDetail, operation_id="validateImport"
+    "/imports/{import_id}/validate",
+    response_model=ImportDetail,
+    operation_id="validateImport",
+    responses=RATE_LIMITED_RESPONSE,
 )
 async def validate_import(
     request: Request,
     import_id: uuid.UUID,
-    principal: ImportWriter,
+    principal: ImportValidator,
     session: SessionDep,
     _: IngestionEnabled,
 ) -> ImportDetail:

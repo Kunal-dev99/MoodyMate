@@ -15128,6 +15128,25 @@
             },
             "description": "Successful Response"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "rate_limited: this principal's bucket for the route is empty (D-53); retryable, audited DENIED, nothing written.",
+            "headers": {
+              "Retry-After": {
+                "description": "Whole seconds until a request can be served again.",
+                "schema": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              }
+            }
+          },
           "4XX": {
             "content": {
               "application/json": {
@@ -16625,6 +16644,25 @@
             },
             "description": "Successful Response"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "rate_limited: this principal's bucket for the route is empty (D-53); retryable, audited DENIED, nothing written.",
+            "headers": {
+              "Retry-After": {
+                "description": "Whole seconds until a request can be served again.",
+                "schema": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              }
+            }
+          },
           "4XX": {
             "content": {
               "application/json": {
@@ -17248,6 +17286,25 @@
               }
             },
             "description": "Successful Response"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "rate_limited: this principal's bucket for the route is empty (D-53); retryable, audited DENIED, nothing written.",
+            "headers": {
+              "Retry-After": {
+                "description": "Whole seconds until a request can be served again.",
+                "schema": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              }
+            }
           },
           "4XX": {
             "content": {
@@ -19459,6 +19516,25 @@
             },
             "description": "Successful Response"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "rate_limited: this principal's bucket for the route is empty (D-53); retryable, audited DENIED, nothing written.",
+            "headers": {
+              "Retry-After": {
+                "description": "Whole seconds until a request can be served again.",
+                "schema": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              }
+            }
+          },
           "4XX": {
             "content": {
               "application/json": {
@@ -20009,6 +20085,25 @@
               }
             },
             "description": "Successful Response"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "rate_limited: this principal's bucket for the route is empty (D-53); retryable, audited DENIED, nothing written.",
+            "headers": {
+              "Retry-After": {
+                "description": "Whole seconds until a request can be served again.",
+                "schema": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              }
+            }
           },
           "4XX": {
             "content": {

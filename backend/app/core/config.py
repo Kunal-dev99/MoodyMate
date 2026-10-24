@@ -23,6 +23,8 @@ AuthMode = Literal["oidc", "dev"]
 DataClass = Literal["synthetic", "client"]
 
 LOCAL_ENVS = ("local", "test")
+# D-53: the per-route bucket settings are RATE_LIMIT_<ROUTE>_BURST and _PER_MINUTE.
+RATE_LIMIT_SUFFIXES = ("_BURST", "_PER_MINUTE")
 
 # Signing secret for AUTH_MODE=dev, which itself only runs in local/test (D-13).
 DEV_SECRET_DEFAULT = "local-dev-only-secret-change-me-0123456789"  # noqa: S105
@@ -130,6 +132,22 @@ class Settings(BaseSettings):
     SCENARIOS_ENABLED: bool = True
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
 
+    # Phase 28 (BE-28.3, D-53): in-process token buckets per (tenant, principal, route) on the
+    # expensive endpoints. Off is allowed only in local/test (D-13). Each route has a burst
+    # (bucket capacity) and a refill rate per minute; the defaults are PROVISIONAL. The limit
+    # is per process: N API processes allow N times these values (ARCHITECTURE.md).
+    RATE_LIMIT_ENABLED: bool = True
+    RATE_LIMIT_CREATE_IMPORT_BURST: int = 5
+    RATE_LIMIT_CREATE_IMPORT_PER_MINUTE: int = 10
+    RATE_LIMIT_VALIDATE_IMPORT_BURST: int = 5
+    RATE_LIMIT_VALIDATE_IMPORT_PER_MINUTE: int = 10
+    RATE_LIMIT_SCENARIO_VALIDATION_BURST: int = 5
+    RATE_LIMIT_SCENARIO_VALIDATION_PER_MINUTE: int = 10
+    RATE_LIMIT_CALCULATION_RUN_BURST: int = 5
+    RATE_LIMIT_CALCULATION_RUN_PER_MINUTE: int = 10
+    RATE_LIMIT_SCENARIO_RUN_BURST: int = 3
+    RATE_LIMIT_SCENARIO_RUN_PER_MINUTE: int = 5
+
     # D-15: root of the write-once raw artifact store. Required outside local/test (D-13);
     # must be absolute and outside the repository. Pair one directory with each DB copy.
     ARTIFACT_STORE_DIR: Path | None = None
@@ -160,6 +178,8 @@ class Settings(BaseSettings):
         local = self.ENV in LOCAL_ENVS
         if not self.MASKING_ENABLED and self.ENV != "local":
             raise ValueError(f"MASKING_ENABLED=false is not allowed when ENV={self.ENV}")
+        if not self.RATE_LIMIT_ENABLED and not local:  # D-53 §4
+            raise ValueError(f"RATE_LIMIT_ENABLED=false is not allowed when ENV={self.ENV}")
         if self.AUTH_MODE == "dev":
             # D-09/D-13: the dev token issuer exists only on developer machines and CI.
             if not local:
@@ -222,7 +242,9 @@ class Settings(BaseSettings):
                 raise ValueError(f"{name} must be a finite decimal of at least 0")
         if self.DRIFT_NULL_RATE_THRESHOLD > 1:
             raise ValueError("DRIFT_NULL_RATE_THRESHOLD must be at most 1")
-        for name in ("CALC_MIN_AGGREGATE_COUNT", "CALC_RUN_STALE_SECONDS"):
+        # D-53 §1: every bucket holds at least one request and refills.
+        rate_limits = [n for n in type(self).model_fields if n.endswith(RATE_LIMIT_SUFFIXES)]
+        for name in ("CALC_MIN_AGGREGATE_COUNT", "CALC_RUN_STALE_SECONDS", *rate_limits):
             if getattr(self, name) < 1:
                 raise ValueError(f"{name} must be at least 1")
 
