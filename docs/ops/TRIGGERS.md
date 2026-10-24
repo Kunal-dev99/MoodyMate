@@ -18,7 +18,7 @@ Operational notes:
   should return no rows.
 - Retention enforcement is described in `../RETENTION.md` (PROVISIONAL).
 
-177 triggers in 17 migrations.
+186 triggers in 18 migrations.
 
 | Migration | Trigger | Table | Fires | Function |
 | --- | --- | --- | --- | --- |
@@ -199,3 +199,12 @@ Operational notes:
 | `0030_identity_links` | `legal_entity_append_only` | legal_entity | BEFORE UPDATE OR DELETE | domain_append_only() |
 | `0030_identity_links` | `legal_entity_checks` | legal_entity | BEFORE INSERT | domain_identity_checks() |
 | `0030_identity_links` | `legal_entity_no_truncate` | legal_entity | BEFORE TRUNCATE | domain_append_only() |
+| `0031_rate_terms_currency_fx` | `currency_append_only` | currency | BEFORE UPDATE OR DELETE | domain_append_only() |
+| `0031_rate_terms_currency_fx` | `currency_no_truncate` | currency | BEFORE TRUNCATE | domain_append_only() |
+| `0031_rate_terms_currency_fx` | `fx_rate_observation_append_only` | fx_rate_observation | BEFORE UPDATE OR DELETE | domain_append_only() |
+| `0031_rate_terms_currency_fx` | `fx_rate_observation_no_truncate` | fx_rate_observation | BEFORE TRUNCATE | domain_append_only() |
+| `0031_rate_terms_currency_fx` | `instrument_term_version_append_only` | instrument_term_version | BEFORE UPDATE OR DELETE | domain_append_only() |
+| `0031_rate_terms_currency_fx` | `instrument_term_version_checks` | instrument_term_version | BEFORE INSERT | instrument_term_version_checks() |
+| `0031_rate_terms_currency_fx` | `instrument_term_version_no_truncate` | instrument_term_version | BEFORE TRUNCATE | domain_append_only() |
+| `0031_rate_terms_currency_fx` | `instrument_term_vocabulary_append_only` | instrument_term_vocabulary | BEFORE UPDATE OR DELETE | domain_append_only() |
+| `0031_rate_terms_currency_fx` | `instrument_term_vocabulary_no_truncate` | instrument_term_vocabulary | BEFORE TRUNCATE | domain_append_only() |
